@@ -1,18 +1,25 @@
 import { render, screen } from "@testing-library/react";
 import Footer from "@/components/layout/Footer";
 import sitemap from "@/app/sitemap";
-import { createClient } from "@/lib/supabase/server";
+import { createAnonClient } from "@/lib/supabase/anon";
 import { comparisonList } from "@/lib/compare/comparisons";
 
-jest.mock("@/lib/supabase/server", () => ({
-  createClient: jest.fn(),
+// s88: the sitemap reads published posts as `anon` (cookie-less), not through
+// the cookie client this suite used to mock.
+jest.mock("@/lib/supabase/anon", () => ({
+  createAnonClient: jest.fn(),
 }));
 
-const mockedCreateClient = jest.mocked(createClient);
+const mockedCreateClient = jest.mocked(createAnonClient);
 
 describe("comparison page discovery", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it("links the comparison hub from the shared landing footer", () => {
@@ -24,7 +31,9 @@ describe("comparison page discovery", () => {
   });
 
   it("keeps every comparison URL in the sitemap when blog lookup fails", async () => {
-    mockedCreateClient.mockRejectedValue(new Error("database unavailable"));
+    mockedCreateClient.mockImplementation(() => {
+      throw new Error("database unavailable");
+    });
 
     const entries = await sitemap();
     const urls = entries.map((entry) => new URL(entry.url).pathname);
@@ -40,8 +49,6 @@ describe("comparison page discovery", () => {
         "/demo",
         "/try",
         "/blog",
-        "/login",
-        "/signup",
         "/privacy",
         "/terms",
         "/compare",
@@ -67,7 +74,7 @@ describe("comparison page discovery", () => {
     const eq = jest.fn().mockReturnValue({ order });
     const select = jest.fn().mockReturnValue({ eq });
     const from = jest.fn().mockReturnValue({ select });
-    mockedCreateClient.mockResolvedValue({ from } as never);
+    mockedCreateClient.mockReturnValue({ from } as never);
 
     const entries = await sitemap();
     const paths = entries.map((entry) => new URL(entry.url).pathname);

@@ -6,6 +6,12 @@ import {
 } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_OPEN_GRAPH,
+  SITE_TITLE,
+} from "@/lib/seo/site-identity";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 /**
@@ -38,15 +44,21 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
-const SITE_NAME = "ReCopyFast";
-// Until s50 these said "Universal CMS Layer" and "Transform any website into
-// an editable platform". Neither is true: a site whose Content Security Policy
-// blocks the script cannot run it, and there is no content model. manifest.ts
-// and opengraph-image.tsx carry the same two lines.
-const SITE_TITLE = "ReCopyFast - Edit your website copy in place";
-const SITE_DESCRIPTION =
-  "Make the copy on the site you already built editable, with one script tag.";
-
+/**
+ * Site-wide defaults. Every key set here is inherited by every page that does
+ * not set the same key itself — Next merges metadata per top-level key, and a
+ * page that omits `alternates` gets its parent's whole `alternates`.
+ *
+ * So nothing page-specific belongs here. Until s88 this object carried
+ * `alternates: { canonical: "/" }` and `openGraph.url: "/"`, and every page
+ * without its own — /blog, each blog post, /privacy, /terms, /demo, and /edit
+ * on top of its noindex — told search engines it was a duplicate of the
+ * homepage and pointed shared links at it. A page names its own canonical;
+ * one that does not gets none, which search engines resolve themselves, rather
+ * than a wrong one. The homepage sets its own in `src/app/page.tsx`.
+ * src/__tests__/app/seo-canonicals.test.ts resolves every public route through
+ * Next's own merge and fails if a page inherits the homepage again.
+ */
 export const metadata: Metadata = {
   // Without this, every relative OG/Twitter image URL resolves against
   // localhost in production.
@@ -65,17 +77,7 @@ export const metadata: Metadata = {
     "script tag",
     "live editing",
   ],
-  alternates: {
-    canonical: "/",
-  },
-  openGraph: {
-    type: "website",
-    url: "/",
-    siteName: SITE_NAME,
-    title: SITE_TITLE,
-    description: SITE_DESCRIPTION,
-    locale: "en_US",
-  },
+  openGraph: SITE_OPEN_GRAPH,
   twitter: {
     card: "summary_large_image",
     title: SITE_TITLE,

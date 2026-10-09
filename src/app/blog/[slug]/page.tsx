@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,21 @@ async function getBlogPost(slug: string): Promise<BlogPost | null> {
   }
 
   return data;
+}
+
+/**
+ * Each post is its own canonical. Until s88 every post inherited the root
+ * layout's canonical — the homepage — so search engines were told each article
+ * was a duplicate of it. The slug alone names the URL, so this reads nothing;
+ * an unknown slug still ends in `notFound()` below, whose response is noindex.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  return { alternates: { canonical: `/blog/${slug}` } };
 }
 
 export default async function BlogPostPage({

@@ -75,6 +75,17 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // s88. Every dashboard page is client-rendered — its layout is a client
+        // component — so none of them can export a noindex in `metadata`; a
+        // response header is the only place one can come from. The auth
+        // redirect and robots.txt already keep crawlers out; this is for the
+        // one that ignores robots.txt and reaches a rendered page anyway.
+        // `:path*` also matches the bare `/dashboard`
+        // (src/__tests__/next-config-robots-headers.test.ts).
+        source: "/dashboard/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+      {
         // Apply to all routes
         source: '/(.*)',
         headers: [

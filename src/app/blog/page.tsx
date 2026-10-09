@@ -1,8 +1,15 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { BlogPostList } from "@/components/blog/BlogPostList";
+
+// Until s88 /blog inherited the root layout's canonical, which named the
+// homepage. Every indexable page names itself.
+export const metadata: Metadata = {
+  alternates: { canonical: "/blog" },
+};
 
 // This would typically come from a database
 const blogPosts = [

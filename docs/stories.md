@@ -3895,30 +3895,30 @@ Cause (verified on `c0c40bf`):
 - No `SoftwareApplication` JSON-LD anywhere; no `/llms.txt` (PRD § Technical SEO; s17 AC).
 
 Acceptance criteria:
-- [ ] The root layout declares no canonical and no `og:url`. Through Next's own metadata resolver,
+- [x] The root layout declares no canonical and no `og:url`. Through Next's own metadata resolver,
   `/`, `/demo`, `/try`, `/compare`, every `/compare/<slug>`, `/blog`, `/blog/<slug>`, `/privacy`,
   `/terms` and `/docs/install` each resolve a canonical equal to their own URL, and no page other
   than `/` resolves the homepage as canonical or `og:url`.
-- [ ] `/login`, `/signup`, `/edit` and `/auth/error` resolve `noindex` with no canonical; every
+- [x] `/login`, `/signup`, `/edit` and `/auth/error` resolve `noindex` with no canonical; every
   `/dashboard` response carries `X-Robots-Tag: noindex, nofollow` (the segment is client-rendered
   and cannot export metadata).
-- [ ] The sitemap reads published posts with a cookie-less anon client (RLS on, the policy
+- [x] The sitemap reads published posts with a cookie-less anon client (RLS on, the policy
   `/blog/<slug>` already relies on) — never the cookie client, never the service role — and is
   regenerated hourly instead of per request. It lists every indexable page including
   `/docs/install`, no noindex page and nothing under `/dashboard`, `/api` or `/auth`. A post's
   `lastModified` is `updated_at ?? published_at` and is omitted when both are null; static pages
   carry none. A database failure is logged and degrades to the static entries.
-- [ ] `robots.txt` disallows `/api/`, `/dashboard` (bare and nested) and `/auth/`, blocks no URL the
+- [x] `robots.txt` disallows `/api/`, `/dashboard` (bare and nested) and `/auth/`, blocks no URL the
   sitemap lists and no noindex page (so the noindex can be read), and names the sitemap.
-- [ ] The homepage carries one `SoftwareApplication` JSON-LD whose offers are exactly the
+- [x] The homepage carries one `SoftwareApplication` JSON-LD whose offers are exactly the
   catalogue's sellable monthly subscription plans (`plans`, the same rule as `/api/pricing`: not
   `free`, Agency only while its checkout switch is on), in USD, with no rating or review; offers
   are omitted when the catalogue cannot be read. No visible change to the homepage.
-- [ ] `/llms.txt` is served as text, without a session lookup, and lists the product summary (only
+- [x] `/llms.txt` is served as text, without a session lookup, and lists the product summary (only
   claims the homepage-truth tests allow), the install guide and its Markdown brief, the comparison
   hub and every comparison page (from the same data the routes use), the demo, the try page and
   the legal pages, all as absolute URLs on the configured origin.
-- [ ] Tests for each criterion; required gates pass; one story commit (after this docs commit).
+- [x] Tests for each criterion; required gates pass; one story commit (after this docs commit).
 
 Complexity: 3. Dependencies: none (s37 comparison pages and s59 install guide are on `main`).
 

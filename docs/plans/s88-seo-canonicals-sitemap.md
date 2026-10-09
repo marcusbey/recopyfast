@@ -72,7 +72,7 @@ body); `app/demo/layout.tsx` (new, metadata only); `app/blog/page.tsx` metadata;
 `app/privacy/page.tsx`, `app/terms/page.tsx` metadata. `landing-founding-offer.test.tsx` imports
 the moved body (declared test move).
 
-- [ ] Task 1
+- [x] Task 1
 
 ## Task 2 — pages that must not be indexed say so
 
@@ -86,7 +86,7 @@ Failing tests first:
 Change: `app/login/layout.tsx`, `app/signup/layout.tsx` (new, metadata only); `app/auth/error/page.tsx`
 metadata; `next.config.ts` header rule.
 
-- [ ] Task 2
+- [x] Task 2
 
 ## Task 3 — the sitemap lists what is really published, read as `anon`
 
@@ -108,7 +108,7 @@ removed from the expected list (declared).
 
 Change: `src/lib/supabase/anon.ts` (new); `src/app/sitemap.ts`.
 
-- [ ] Task 3
+- [x] Task 3
 
 ## Task 4 — robots.txt agrees with the sitemap and the noindex pages
 
@@ -119,7 +119,7 @@ Failing tests first, `src/__tests__/app/robots.test.ts` (prefix semantics of rob
 
 Change: `src/app/robots.ts` (`/dashboard/` → `/dashboard`, comment).
 
-- [ ] Task 4
+- [x] Task 4
 
 ## Task 5 — SoftwareApplication JSON-LD on the homepage
 
@@ -137,7 +137,7 @@ Failing tests first:
 
 Change: `src/lib/seo/json-ld.ts`, `src/lib/seo/catalogue-offers.ts` (new); `app/page.tsx`.
 
-- [ ] Task 5
+- [x] Task 5
 
 ## Task 6 — `/llms.txt`
 
@@ -153,7 +153,7 @@ Failing tests first:
 Change: `src/lib/seo/llms-txt.ts`, `src/app/llms.txt/route.ts` (new); `src/middleware.ts`
 (`isSessionlessPath` + comment).
 
-- [ ] Task 6
+- [x] Task 6
 
 ## Task 7 — gates, build check, mutations
 
@@ -162,4 +162,18 @@ Change: `src/lib/seo/llms-txt.ts`, `src/app/llms.txt/route.ts` (new); `src/middl
 - Mutation per guard (neutralize → red → restore with `git checkout --`).
 - Full jest, type-check, type-check:build, lint, format:check, build:embed --check, Playwright list.
 
-- [ ] Task 7
+- [x] Task 7
+
+## Execution notes
+
+- Offline `next build` (Supabase URL on a closed port, `NEXT_PUBLIC_APP_URL=https://recopyfa.st`):
+  `/` ISR 5 m, `/sitemap.xml` ISR 1 h (was `ƒ` on `main`), `/llms.txt` static. Prerendered HTML:
+  `/privacy`, `/terms`, `/demo`, `/blog`, `/docs/install` each carry their own
+  `<link rel="canonical">`; `/login`, `/signup` `noindex, follow`; `/edit`, `/auth/error`
+  `noindex, nofollow` with no canonical; the homepage JSON-LD has no `offers` (catalogue unreachable,
+  logged) and the sitemap lists the 12 static URLs (post read failed, logged). `.next` deleted.
+- 35 mutations, each red, each restored (`git checkout --` from the index).
+- Beyond the plan's letter: `site-identity.ts` also exports `SITE_OPEN_GRAPH` (the layout default
+  and the homepage's restatement share it); the moved body's export is renamed `Home` →
+  `HomePage` to match its file (AGENTS.md naming); the llms.txt suite also pins the crawler
+  caveat.
