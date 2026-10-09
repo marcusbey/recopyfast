@@ -1,7 +1,11 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SiteSettingsPage from "../page";
-import { renderWithSite } from "@/components/dashboard/site/__tests__/site-context-fixture";
+import {
+  buildSite,
+  buildSiteContext,
+  renderWithSite,
+} from "@/components/dashboard/site/__tests__/site-context-fixture";
 import { expectNoEmptyBodyBand } from "@/__tests__/helpers/dialog-body";
 
 /**
@@ -113,6 +117,70 @@ describe("the Settings page", () => {
         `/api/bulk/export?siteId=${SITE_ID}`,
       );
     });
+  });
+
+  // s66c2 AC 5: API keys are issued per site, so they have a home on the
+  // site's own Settings, between Domain ownership and Webhooks. The panel
+  // takes this site: it neither offers a site select nor reloads the site
+  // list (`GET /api/sites`, which the provider already holds).
+  it("holds this site's API keys, between domain ownership and webhooks", async () => {
+    renderWithSite(<SiteSettingsPage />);
+
+    const apiKeys = await screen.findByText("API Keys");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(`/api/api-keys?siteId=${SITE_ID}`),
+    );
+    expect(screen.queryByRole("combobox", { name: "Site" })).toBeNull();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).not.toContain(
+      "/api/sites",
+    );
+    const domain = screen.getByText("Domain ownership");
+    const webhooks = screen.getByText("Webhooks");
+    expect(
+      domain.compareDocumentPosition(apiKeys) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      apiKeys.compareDocumentPosition(webhooks) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /*
+   * s66c2 review m-3. `POST /api/api-keys` requires an admin row on the site,
+   * and the panel used to show its Generate Key form to every member: a
+   * member with edit or view filled it in and always got a 403. The admin
+   * test is the provider's (`isAdmin`, install credentials present).
+   */
+  it("offers API keys to an admin only", async () => {
+    const admin = renderWithSite(<SiteSettingsPage />);
+    expect(
+      await screen.findByRole("button", { name: "Generate Key" }),
+    ).toBeInTheDocument();
+    admin.unmount();
+    fetchMock.mockClear();
+
+    renderWithSite(
+      <SiteSettingsPage />,
+      buildSiteContext({
+        site: buildSite({
+          permission: "edit",
+          siteToken: undefined,
+          embedScript: undefined,
+        }),
+      }),
+    );
+
+    expect(await screen.findByText("Webhooks")).toBeInTheDocument();
+    expect(screen.queryByText("API Keys")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Generate Key" }),
+    ).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).startsWith("/api/api-keys"),
+      ),
+    ).toBe(false);
   });
 
   // "History" meant two things: version history (the header action) and the

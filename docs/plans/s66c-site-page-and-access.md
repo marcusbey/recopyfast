@@ -339,13 +339,13 @@ take the site as a prop.
 
 ## Part 2 — s66c2-quick-setup (6 tasks)
 
-1. [ ] **Extract `InstallStep`.**
+1. [x] **Extract `InstallStep`.**
    - RED: the new `src/components/dashboard/__tests__/InstallStep.test.tsx` covers the marker
      states `done` (✓, success tone), `current` (number, accent border) and `next` (number,
      muted). `SiteRegistrationModal.test.tsx` passes unchanged.
    - GREEN: `src/components/dashboard/InstallStep.tsx`, extracted from `SiteRegistrationModal`,
      which imports it back.
-2. [ ] **QuickSetup replaces ActivationChecklist.**
+2. [x] **QuickSetup replaces ActivationChecklist.**
    - RED: `QuickSetup.test.tsx` replaces `ActivationChecklist.test.tsx` (`git mv`). Its loading,
      error with retry, dismissal persistence, copy-only-the-emitted-snippet, Add editor preset
      and Edit-website open-tab assertions carry over with their names changed. New:
@@ -355,7 +355,7 @@ take the site as a prop.
      - progress derived from props and activation only. Re-mounting with the same server state
        lands on the same step; no `localStorage` is involved.
    - GREEN: `QuickSetup.tsx`; delete `ActivationChecklist.tsx`.
-3. [ ] **Live install status, and done means Live.**
+3. [x] **Live install status, and done means Live.**
    - RED, in `QuickSetup.test.tsx`:
      - with the provider stub flipping `site.status` from `awaiting-install` to `live`, step 2's
        status row changes from "Waiting for the first page view…" to "Installed…" without an
@@ -363,9 +363,10 @@ take the site as a prop.
      - live gives the header "Setup complete — <name> is live", with step 3 current;
      - `invited` or `published` (with live) hides the panel;
      - "Hide quick setup" calls the dismissal endpoint;
-     - "Edit website" is disabled until step 2 is done.
+     - Edit website and Add editor appear when step 3 becomes current, once step 2 is done.
+       Before that, step 3 shows only its title and one line.
    - GREEN: in `QuickSetup.tsx`.
-4. [ ] **Overview and the dashboard summary rows.**
+4. [x] **Overview and the dashboard summary rows.**
    - RED:
      - `overview.test.tsx`: `QuickSetup` replaces the checklist;
      - `src/app/dashboard/__tests__/page.activation.test.tsx`: its mock moves to `QuickSetup`, and
@@ -373,13 +374,13 @@ take the site as a prop.
        summary row per unfinished admin site, each with "Continue setup" →
        `/dashboard/sites/<id>`.
    - GREEN: `QuickSetup variant="summary"` on `/dashboard`; `variant="full"` on the Overview.
-5. [ ] **Per-site API keys.**
+5. [x] **Per-site API keys.**
    - RED: the new `src/components/settings/__tests__/ApiKeysPanel.test.tsx`. With `siteId`: no
      site select, and keys fetched for that id. Without it: today's selector, and the existing
      behaviour is unchanged.
    - GREEN: an optional `siteId` prop on `ApiKeysPanel`; the "API keys" section on
      `settings/page.tsx`.
-6. [ ] **e2e and gates.**
+6. [x] **e2e and gates.**
    - Extend `e2e/site-pages.spec.ts` at 375 and 1280, with register, sites and activation
      fulfilled by `page.route`: registration → "Open site page" → Overview with step 2 current;
      the status flips when the next poll answers `live`; no overflow.

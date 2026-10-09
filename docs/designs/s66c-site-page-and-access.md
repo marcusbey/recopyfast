@@ -124,9 +124,10 @@ and the same confirmation, in sentence case: "Delete site?" / Cancel / "Delete s
       - Complete when activation says `installed`, or the site's status is no longer
         `awaiting-install`.
    3. **Start editing.** "Edit the copy yourself, or add the person who will."
-      - [Edit website]: default; disabled with the hint "Available once the snippet is
-        installed" until step 2 is done.
+      - [Edit website]: default.
       - [Add editor]: outline; opens the Add editor dialog with View+Edit+Publish preset.
+      - Edit website and Add editor appear when step 3 becomes current, once step 2 is done.
+        Before that, step 3 shows only its title and one line.
       - Complete when `invited` or `published`.
 
    The current step is expanded. Done steps are collapsed to one line with ✓, and future steps to
@@ -134,8 +135,8 @@ and the same confirmation, in sentence case: "Delete site?" / Cancel / "Delete s
    setup" (the existing dismissal).
 
    **Done means Live.** Once the site is live, the panel header becomes "Setup complete — <name>
-   is live" in the success tone. Step 3 stays offered until it is done or hidden, then the panel
-   leaves the page.
+   is live" in the success tone ("… is installed" for a stale site, as its Stale badge says).
+   Step 3 stays offered until it is done or hidden, then the panel leaves the page.
 
    **Resumable**: every step's state comes from the server (site status plus `/activation`), so
    leaving and coming back lands on the first incomplete step.
@@ -364,7 +365,7 @@ Every token is `•••` and every address ends in `example`.
 | Install | (layout) | No credentials: info Alert "Only this site's admins can see its install snippet." | Regenerate failure inside its dialog (unchanged) | "Snippet regenerated" Alert |
 | People: editors | skeleton rows | "No editors yet" | Alert + Try again; forbidden note | Delivery notice (in the dialog), removal notice |
 | People: preview links | skeleton rows | One line, "No preview links…" | Alert + Try again; 403 note | The new link appears in the list; dialog success Alert |
-| Quick setup (s66c2) | skeleton steps | — (hidden when done or dismissed) | Alert "Could not load setup progress" + Try again | "Setup complete — … is live" |
+| Quick setup (s66c2) | skeleton steps | — (hidden when done or dismissed) | Alert "Could not load setup progress" + Try again | "Setup complete — … is live" ("… is installed" when stale) |
 | Edit website | `Loader2` in the button | — | Destructive Alert outside the button row (see above) | The new tab opens |
 | Delete site | "Deleting…" in the confirm button | — | Error inside the dialog (incl. creator-only 403) | Row removed / `replace` to Sites |
 

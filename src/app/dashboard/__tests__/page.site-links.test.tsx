@@ -16,8 +16,8 @@ jest.mock("@/components/dashboard/TrialStatusBadge", () => ({
 jest.mock("@/components/dashboard/SiteRegistrationModal", () => ({
   SiteRegistrationModal: () => null,
 }));
-jest.mock("@/components/dashboard/ActivationChecklist", () => ({
-  ActivationChecklist: () => null,
+jest.mock("@/components/dashboard/QuickSetup", () => ({
+  QuickSetup: () => null,
 }));
 
 const sites = [

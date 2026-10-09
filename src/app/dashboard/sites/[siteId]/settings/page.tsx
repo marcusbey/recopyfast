@@ -9,6 +9,7 @@ import { BulkOperations } from "@/components/dashboard/BulkOperations";
 import { DeleteSiteDialog } from "@/components/dashboard/DeleteSiteDialog";
 import { DomainVerification } from "@/components/dashboard/DomainVerification";
 import { WebhooksPanel } from "@/components/dashboard/WebhooksPanel";
+import { ApiKeysPanel } from "@/components/settings/ApiKeysPanel";
 import { useSiteContext } from "@/components/dashboard/site/SiteProvider";
 import { useSitePageShell } from "@/components/dashboard/site/useSitePageShell";
 
@@ -19,7 +20,7 @@ import { useSitePageShell } from "@/components/dashboard/site/useSitePageShell";
  */
 export default function SiteSettingsPage() {
   const { shell, editWebsiteAlert } = useSitePageShell();
-  const { site } = useSiteContext();
+  const { site, isAdmin } = useSiteContext();
   const router = useRouter();
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const generalId = useId();
@@ -70,6 +71,13 @@ export default function SiteSettingsPage() {
           <DomainVerification siteId={site.id} siteDomain={site.domain} />
         </CardContent>
       </Card>
+
+      {/* API keys are issued per site, so this is their home (s66c2 AC 5).
+          The panel takes this site: no site select, and no second request
+          for the site list the provider already holds. Admins only:
+          `POST /api/api-keys` refuses anyone else, and a member was shown a
+          Generate Key form that always ended in a 403 (s66c2 review m-3). */}
+      {isAdmin && <ApiKeysPanel siteId={site.id} />}
 
       <WebhooksPanel siteId={site.id} />
 

@@ -19,10 +19,18 @@ import { useSites } from "@/hooks/useSites";
 /**
  * API key management.
  *
- * Keys are issued per site (see /api/api-keys), so the panel is scoped by a
- * site selector rather than showing a single global key. The plaintext secret
- * exists only in the creation response — it is rendered once and never
- * refetched, because the server stores a SHA-256 hash.
+ * Keys are issued per site (see /api/api-keys), so the panel is scoped to one
+ * site rather than showing a single global key. The plaintext secret exists
+ * only in the creation response — it is rendered once and never refetched,
+ * because the server stores a SHA-256 hash.
+ *
+ * Two homes (s66c2 AC 5):
+ * - a site's advanced Settings passes `siteId`. That page already knows its
+ *   site, so the panel shows no site select and never loads the site list:
+ *   `GET /api/sites` mints credentials and aggregates stats per site, and the
+ *   site's provider already holds its answer;
+ * - the account Settings › API Keys tab passes nothing and keeps the site
+ *   selector it has always had (s66b decides that tab's fate).
  */
 
 interface ApiKeySummary {
@@ -46,13 +54,42 @@ async function readError(response: Response, fallback: string) {
   return `${fallback} (${response.status})`;
 }
 
-export function ApiKeysPanel() {
-  const {
-    sites,
-    selectedSiteId,
-    setSelectedSiteId,
-    loading: sitesLoading,
-  } = useSites();
+interface ApiKeysPanelProps {
+  /** The site whose keys to manage. Absent: the account's site selector. */
+  siteId?: string;
+}
+
+export function ApiKeysPanel({ siteId }: ApiKeysPanelProps) {
+  return siteId ? <ApiKeysCard siteId={siteId} /> : <AccountApiKeysPanel />;
+}
+
+/** The account tab: the sites list, and a select to choose among them. */
+function AccountApiKeysPanel() {
+  const { sites, selectedSiteId, setSelectedSiteId, loading } = useSites();
+
+  return (
+    <ApiKeysCard
+      siteId={selectedSiteId}
+      sitePicker={{ sites, loading, onSelect: setSelectedSiteId }}
+    />
+  );
+}
+
+interface SitePicker {
+  sites: Array<{ id: string; name: string; domain: string }>;
+  loading: boolean;
+  onSelect: (siteId: string) => void;
+}
+
+function ApiKeysCard({
+  siteId: selectedSiteId,
+  sitePicker,
+}: {
+  siteId: string;
+  sitePicker?: SitePicker;
+}) {
+  const sitesLoading = sitePicker?.loading ?? false;
+  const sites = sitePicker?.sites;
   const siteSelectId = useId();
   const keyNameId = useId();
 
@@ -157,29 +194,31 @@ export function ApiKeysPanel() {
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading sites...
           </div>
-        ) : sites.length === 0 ? (
+        ) : sites && sites.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Register a site before creating API keys.
           </p>
         ) : (
           <>
-            <div className="space-y-2">
-              <Label htmlFor={siteSelectId}>Site</Label>
-              <NativeSelect
-                id={siteSelectId}
-                value={selectedSiteId}
-                onChange={(e) => {
-                  setSelectedSiteId(e.target.value);
-                  setRevealedKey(null);
-                }}
-              >
-                {sites.map((site) => (
-                  <option key={site.id} value={site.id}>
-                    {site.name || site.domain}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
+            {sitePicker && sites && (
+              <div className="space-y-2">
+                <Label htmlFor={siteSelectId}>Site</Label>
+                <NativeSelect
+                  id={siteSelectId}
+                  value={selectedSiteId}
+                  onChange={(e) => {
+                    sitePicker.onSelect(e.target.value);
+                    setRevealedKey(null);
+                  }}
+                >
+                  {sites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name || site.domain}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+            )}
 
             {/* Shown exactly once: the server keeps only a hash, so there is no
                 way to display this again after the panel re-renders. */}
@@ -262,7 +301,8 @@ export function ApiKeysPanel() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Requires admin permission on the selected site.
+                Requires admin permission on{" "}
+                {sitePicker ? "the selected site" : "this site"}.
               </p>
             </div>
           </>
