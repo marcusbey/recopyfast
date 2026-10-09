@@ -199,9 +199,13 @@ only, beside the draft it publishes.
   `POST /api/staging/publish` `{ siteId, elementIds: [elementId] }`.
 - Pending: buttons disabled with a spinner in the pressed one; the dialog stays open on failure
   with the server's message in a destructive `Alert` (402 "plan ended" included).
-- Success: the dialog closes; the row updates in place (Pending, or Published with "Text is the
-  same as the original."), and the result line announces "Reverted. Saved as a draft." /
-  "Reverted and published." politely. No toast (gap 1).
+- Success: the buttons keep their spinner until the page has read the element again (every
+  language and variant row of it: Publish promotes them all) and the counts; then the dialog
+  closes, the rows update in place as the server now holds them (Pending, or Published with "Text
+  is the same as the original."), and the result line announces "Reverted. Saved as a draft." /
+  "Reverted and published." politely. No toast (gap 1). If that read fails, the row says "This
+  went through, but the row could not be read again and may be out of date. Reload the page to see
+  it as it is now." (s70b fix pass)
 - Below 640: the bottom sheet (design system, Dialogs and sheets), buttons full width, primary on
   top.
 
@@ -214,6 +218,10 @@ offered and the expanded row says "This draft changes a link or image attribute,
 discarded here. Change it on the page."; when the staged attributes could not be read, it says
 "This draft could not be read in full, so it can't be discarded here. Reload the page to try
 again."
+Just before the PUT, Discard reads its row again and builds the PUT from that read (s70b fix pass):
+if the draft was published, replaced or gone meanwhile (another tab, an editor on the live page),
+nothing is sent, the dialog closes on the row as it now is, and the row says "This change was
+updated elsewhere — review it again."
 "Publish" (Pending, publish/admin) asks nothing more: the draft is visible right above it; the
 request is `POST /api/staging/publish` with the one element id.
 
@@ -258,7 +266,7 @@ caller's grant) when the caller may edit; "Show all text" otherwise.
 | No matches | Inside the panel area: "Nothing matches “pricng”." · ghost "Clear search" | same |
 | Error (list) | `Alert variant="destructive"`: "Changes could not be loaded." + the reason + **Try again**. Never the empty state | same |
 | Error (row action) | Inside the dialog, or under the panel's action row for Publish: destructive `Alert`, `role="alert"` | same |
-| Success | Row updates in place; polite announcement in the result line | same |
+| Success | Once the element is read again: its rows update in place; polite announcement in the result line | same |
 
 ## Accessibility
 

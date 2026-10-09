@@ -180,12 +180,55 @@ export interface FixtureCounts {
  * when the filter row was rebuilt from nothing.
  */
 export function countsFor(site: string | null): FixtureCounts {
-  const listed = rows().filter((row) => site === null || row.siteId === site);
+  return countsOf(rows(), site);
+}
+
+type FixtureRow = ReturnType<typeof rows>[number];
+
+function countsOf(
+  fixtureRows: FixtureRow[],
+  site: string | null,
+): FixtureCounts {
+  const listed = fixtureRows.filter(
+    (row) => site === null || row.siteId === site,
+  );
   const sites = site === null ? Object.keys(ORIGINAL_ROWS) : [site];
   return {
     pending: listed.filter((row) => row.state === "pending").length,
     published: listed.filter((row) => row.state === "published").length,
     original: sites.reduce((sum, id) => sum + (ORIGINAL_ROWS[id] ?? 0), 0),
+  };
+}
+
+/**
+ * A draft saved through the staging PUT, as the view then reads the row:
+ * pending while the draft differs from the live text (s70b fix pass: the page
+ * reads the row again after every write, so the fixture must remember it).
+ */
+function withDraft(row: FixtureRow, content: string): FixtureRow {
+  const state =
+    content !== row.live
+      ? "pending"
+      : row.live !== row.original
+        ? "published"
+        : "original";
+  return {
+    ...row,
+    draft: content,
+    state,
+    changedAt: new Date().toISOString(),
+  };
+}
+
+/** A publish, as the RPC does it: every pending row of the element ids. */
+function published(row: FixtureRow): FixtureRow {
+  return {
+    ...row,
+    live: row.draft ?? row.live,
+    draft: null,
+    draftAttributes: [],
+    state: "published",
+    changedAt: new Date().toISOString(),
   };
 }
 
@@ -227,9 +270,11 @@ function json(body: unknown) {
 /**
  * Answers the Changes page's reads and writes from the fixture: the list,
  * each row's history, the staging draft PUT and the publish POST. Nothing
- * reaches the real routes. The list answers as the route does for its `site`:
- * that site's rows and counts, or every site's. Returns a log the spec
- * asserts on, and a hold on the next list read.
+ * reaches the real routes. The list answers as the route does for its `site`
+ * (and `element`, the page's re-read after a write): that site's rows and
+ * counts, or every site's. Writes change the fixture, so a read after a
+ * write sees them, as on the real routes. Returns a log the spec asserts on,
+ * and a hold on the next list read.
  */
 export async function routeChangesFixtures(
   page: Page,
@@ -248,26 +293,30 @@ export async function routeChangesFixtures(
       return () => release();
     },
   };
-  const fixtureRows = rows();
+  let fixtureRows = rows();
 
   await page.route(
     (url) => url.pathname === "/api/content/changes",
     async (route) => {
       if (route.request().method() !== "GET") return route.continue();
-      const site = new URL(route.request().url()).searchParams.get("site");
+      const params = new URL(route.request().url()).searchParams;
+      const site = params.get("site");
+      const element = params.get("element");
       log.listSites.push(site);
       const gate = held;
       held = null;
       if (gate) await gate;
       const listed = fixtureRows.filter(
-        (row) => site === null || row.siteId === site,
+        (row) =>
+          (site === null || row.siteId === site) &&
+          (element === null || row.elementId === element),
       );
       await route.fulfill(
         json({
           sites: SITES,
           rows: listed,
           total: listed.length,
-          counts: countsFor(site),
+          counts: countsOf(fixtureRows, site),
           nextOffset: null,
         }),
       );
@@ -322,11 +371,26 @@ export async function routeChangesFixtures(
     async (route) => {
       const request: Request = route.request();
       if (request.method() !== "PUT") return route.continue();
-      log.draftBodies.push(request.postDataJSON());
+      const body = request.postDataJSON() as {
+        elementId: string;
+        content: string;
+        language: string;
+        variant: string;
+      };
+      log.draftBodies.push(body);
+      const siteId = new URL(request.url()).pathname.split("/").pop();
+      fixtureRows = fixtureRows.map((row) =>
+        row.siteId === siteId &&
+        row.elementId === body.elementId &&
+        row.language === body.language &&
+        row.variant === body.variant
+          ? withDraft(row, body.content)
+          : row,
+      );
       await route.fulfill(
         json({
           success: true,
-          elementId: HERO.elementId,
+          elementId: body.elementId,
           updatedAt: new Date().toISOString(),
         }),
       );
@@ -337,7 +401,18 @@ export async function routeChangesFixtures(
     (url) => url.pathname === "/api/staging/publish",
     async (route) => {
       if (route.request().method() !== "POST") return route.continue();
-      log.publishBodies.push(route.request().postDataJSON());
+      const body = route.request().postDataJSON() as {
+        siteId: string;
+        elementIds: string[];
+      };
+      log.publishBodies.push(body);
+      fixtureRows = fixtureRows.map((row) =>
+        row.siteId === body.siteId &&
+        body.elementIds.includes(row.elementId) &&
+        row.state === "pending"
+          ? published(row)
+          : row,
+      );
       await route.fulfill(json({ success: true }));
     },
   );

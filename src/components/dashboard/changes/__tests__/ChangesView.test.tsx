@@ -25,9 +25,18 @@
  * the pending draft it is, with Publish to retry; Revert is not offered when
  * the live text is already the original; past the offset ceiling the list
  * says it is capped instead of offering a page the route refuses.
+ *
+ * s70b fix pass (C1, M1, m1): after a write the page reads the server again
+ * instead of drawing what the write meant to do, so the routes are answered
+ * by an in-memory server that remembers writes (`changes-server-fake.ts`,
+ * the save and publish RPCs' rules). Pinned: Publish and Revert and publish
+ * on one language row show its sibling rows as the server left them; a
+ * Discard whose row changed in another tab sends nothing; a filter changed
+ * while Publish is in flight never draws the row as it was before it.
  */
 
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -36,6 +45,10 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChangesView } from "../ChangesView";
+import {
+  createFakeChangesServer,
+  type FakeChangesServer,
+} from "./changes-server-fake";
 
 const ACME = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const NORTHWIND = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -185,11 +198,14 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+type Answer = Response | Promise<Response>;
+type Body = Record<string, unknown>;
+
 interface Api {
-  list: (url: URL) => Response | Promise<Response>;
+  list: (url: URL) => Answer;
   history: (rowId: string) => Response;
-  put: () => Response;
-  publish: () => Response;
+  put: (url: URL, body: Body) => Answer;
+  publish: (body: Body) => Answer;
 }
 
 const ADMIN_HISTORY = {
@@ -216,10 +232,34 @@ const ADMIN_HISTORY = {
 };
 
 let api: Api;
+/** The routes' state: every write lands here, every read is answered from it. */
+let server: FakeChangesServer;
 
-function mockApi(overrides: Partial<Api> = {}) {
+/** What the routes answer when a test does not say otherwise. */
+const served = {
+  list: (url: URL) => {
+    const body = server.list(url);
+    return body ? json(body) : json({ error: "Site not found" }, 404);
+  },
+  put: (url: URL, body: Body) =>
+    server.put(url.pathname.split("/").pop() ?? "", body)
+      ? json({ success: true })
+      : json({ error: "Content element not found" }, 404),
+  publish: (body: Body) => {
+    server.publish(body);
+    return json({ success: true });
+  },
+};
+
+function mockApi(overrides: Partial<Api> & { rows?: Row[] } = {}) {
+  const { rows = ALL_ROWS, ...handlers } = overrides;
+  server = createFakeChangesServer(rows, {
+    sites: SITES,
+    // Untouched rows: counted under "All text", never listed by default.
+    unlistedOriginals: 1238,
+  });
   api = {
-    list: () => json(listBody()),
+    list: served.list,
     history: (rowId) =>
       json(
         [NW_STEP.id, NW_TITLE.id, VIEWER_ROW.id].includes(rowId)
@@ -230,14 +270,15 @@ function mockApi(overrides: Partial<Api> = {}) {
             }
           : ADMIN_HISTORY,
       ),
-    put: () => json({ success: true }),
-    publish: () => json({ success: true }),
-    ...overrides,
+    put: served.put,
+    publish: served.publish,
+    ...handlers,
   };
   global.fetch = jest.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost");
       const method = init?.method ?? "GET";
+      const body = (): Body => JSON.parse(String(init?.body ?? "{}")) as Body;
       const history = /^\/api\/content\/changes\/([^/]+)\/history$/.exec(
         url.pathname,
       );
@@ -247,10 +288,10 @@ function mockApi(overrides: Partial<Api> = {}) {
         method === "PUT" &&
         url.pathname.startsWith("/api/staging/content/")
       ) {
-        return api.put();
+        return api.put(url, body());
       }
       if (method === "POST" && url.pathname === "/api/staging/publish") {
-        return api.publish();
+        return api.publish(body());
       }
       throw new Error(`unexpected request: ${method} ${url.pathname}`);
     },
@@ -856,16 +897,13 @@ describe("ChangesView — actions by state and grant", () => {
 
   it("discards a draft and the link it stages: the live link goes back in the same PUT", async () => {
     mockApi({
-      list: () =>
-        json(
-          listBody([
-            HERO,
-            {
-              ...HERO_BUTTON,
-              draftAttributes: [{ name: "href", live: "/signup" }],
-            },
-          ]),
-        ),
+      rows: [
+        HERO,
+        {
+          ...HERO_BUTTON,
+          draftAttributes: [{ name: "href", live: "/signup" }],
+        },
+      ],
     });
     const user = await renderLoaded();
     const region = await expand(user, "Start your 14-day trial");
@@ -967,7 +1005,7 @@ describe("ChangesView — actions by state and grant", () => {
   };
 
   it("never sends back a link it has published: Publish, Revert → Save as draft, then Discard carries no href", async () => {
-    mockApi({ list: () => json(listBody([HERO, STAGED_LINK_ROW])) });
+    mockApi({ rows: [HERO, STAGED_LINK_ROW] });
     const user = await renderLoaded();
     const item = rowOf("Start your 14-day trial");
     await expand(user, "Start your 14-day trial");
@@ -1014,10 +1052,10 @@ describe("ChangesView — actions by state and grant", () => {
   it("never sends back a link it has published after a revert whose publish failed", async () => {
     let publishes = 0;
     mockApi({
-      list: () => json(listBody([HERO, STAGED_LINK_ROW])),
-      publish: () =>
+      rows: [HERO, STAGED_LINK_ROW],
+      publish: (body) =>
         (publishes += 1) === 1
-          ? json({ success: true })
+          ? served.publish(body)
           : json({ error: "Publish rate limit exceeded for this site." }, 429),
     });
     const user = await renderLoaded();
@@ -1067,10 +1105,10 @@ describe("ChangesView — actions by state and grant", () => {
   it("shows a revert whose publish failed as the pending draft it is, with the reason and Publish to retry", async () => {
     let publishes = 0;
     mockApi({
-      publish: () =>
+      publish: (body) =>
         (publishes += 1) === 1
           ? json({ error: "Publish rate limit exceeded for this site." }, 429)
-          : json({ success: true }),
+          : served.publish(body),
     });
     const user = await renderLoaded();
 
@@ -1166,6 +1204,294 @@ describe("ChangesView — actions by state and grant", () => {
     );
     expect(requests("/api/staging/publish", "POST")).toHaveLength(1);
     expect(requests(/^\/api\/staging\/content\//, "PUT")).toHaveLength(0);
+  });
+});
+
+describe("ChangesView — after a write, the server is read again (s70b fix pass)", () => {
+  // One element in two languages: translation upserts the same element_id
+  // with another language (src/app/api/ai/translate/route.ts), and the
+  // publish RPC promotes every language and variant row of the element ids
+  // it is given (20260924060000).
+  const CTA_EN = row("cta-en", {
+    elementId: "rcf-cta",
+    elementType: "button",
+    selector: "#root > main > a.cta",
+    original: "Start free trial",
+    live: "Start free trial",
+    draft: "Start your 14-day trial",
+    state: "pending",
+  });
+  const CTA_FR = row("cta-fr", {
+    elementId: "rcf-cta",
+    elementType: "button",
+    selector: "#root > main > a.cta",
+    language: "fr",
+    original: "Essai gratuit",
+    live: "Essai gratuit",
+    draft: "Essai gratuit de 14 jours",
+    state: "pending",
+  });
+  const HERO_FR = row("hero-fr", {
+    elementId: HERO.elementId,
+    elementType: "h1",
+    selector: HERO.selector,
+    language: "fr",
+    original: "Modifiez vos textes sans développeur",
+    live: "Modifiez vos textes sans développeur",
+    draft: "Livrez vos textes en quelques minutes",
+    state: "pending",
+  });
+  const UPDATED_ELSEWHERE =
+    "This change was updated elsewhere — review it again.";
+
+  async function expandRow(
+    user: ReturnType<typeof userEvent.setup>,
+    text: string,
+  ) {
+    const item = rowOf(text);
+    const toggle = within(item).getByRole("button", {
+      name: /^Compare and history: /,
+    });
+    await user.click(toggle);
+    return { item, toggle, region: () => within(item).getByRole("region") };
+  }
+
+  const actionsOf = (region: HTMLElement) =>
+    within(region)
+      .queryAllByRole("button")
+      .map((button) => button.textContent?.trim())
+      .filter((name) =>
+        [
+          "Publish",
+          "Discard draft",
+          "Revert to original",
+          "Edit on page",
+        ].includes(name ?? ""),
+      );
+
+  const statusOptions = () =>
+    within(screen.getByRole("combobox", { name: "Filter by status" }))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
+  const elementReads = (elementId: string) =>
+    requests("/api/content/changes").filter(
+      ([input]) =>
+        new URL(String(input), "http://localhost").searchParams.get(
+          "element",
+        ) === elementId,
+    );
+
+  // C1 (critical): Publish sent this element id, the server published the fr
+  // row too, and the page redrew the en row alone. The fr row kept its old
+  // draft and Discard; Discard re-staged the old text, and the next Publish
+  // silently put it back live.
+  it("Publish on one language row shows its sibling as the server left it: published, no Discard", async () => {
+    mockApi({ rows: [HERO, CTA_EN, CTA_FR] });
+    const user = await renderLoaded();
+    const en = await expandRow(user, "Start your 14-day trial");
+
+    await user.click(
+      within(en.region()).getByRole("button", { name: "Publish" }),
+    );
+
+    expect(await screen.findByText("Published.")).toBeInTheDocument();
+    expect(
+      within(rowLine("Essai gratuit de 14 jours")).getByText("Published"),
+    ).toBeInTheDocument();
+    expect(elementReads("rcf-cta").length).toBeGreaterThan(0);
+    const fr = await expandRow(user, "Essai gratuit de 14 jours");
+    expect(actionsOf(fr.region())).toEqual([
+      "Revert to original",
+      "Edit on page",
+    ]);
+    // The counts are the server's after the write, not a guess.
+    expect(statusOptions()).toEqual([
+      "Changes (3)",
+      "Pending (0)",
+      "Published (3)",
+      "All text (1,241)",
+    ]);
+  });
+
+  it("Revert and publish on one language row shows its pending sibling published too", async () => {
+    mockApi({ rows: [HERO, HERO_FR] });
+    const user = await renderLoaded();
+    const en = await expandRow(
+      user,
+      "Ship copy changes in minutes, not sprints",
+    );
+
+    await user.click(
+      within(en.region()).getByRole("button", { name: "Revert to original" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Revert and publish" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Reverted and published.")).toBeInTheDocument();
+    expect(
+      within(rowLine("Copy changes without a developer")).getByText(
+        "Published",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(rowLine("Livrez vos textes en quelques minutes")).getByText(
+        "Published",
+      ),
+    ).toBeInTheDocument();
+    const fr = await expandRow(user, "Livrez vos textes en quelques minutes");
+    expect(actionsOf(fr.region())).toEqual([
+      "Revert to original",
+      "Edit on page",
+    ]);
+  });
+
+  // M1: Discard sent the live text and links as this page had loaded them.
+  // Another tab (or an editor on the live page) changed the row since: the
+  // PUT then staged copy the server no longer had as live.
+  it.each([
+    [
+      "saved another draft",
+      () =>
+        server.put(ACME, {
+          elementId: HERO_BUTTON.elementId,
+          content: "Start your free trial",
+          language: "en",
+          variant: "default",
+        }),
+      "Start your free trial",
+      "Pending",
+    ],
+    [
+      "published it",
+      () =>
+        server.publish({ siteId: ACME, elementIds: [HERO_BUTTON.elementId] }),
+      "Start your 14-day trial",
+      "Published",
+    ],
+  ])(
+    "sends no Discard when another tab %s, says so, and shows the row as it is now",
+    async (_label, elsewhere, textNow, statusNow) => {
+      mockApi({ rows: [HERO, HERO_BUTTON] });
+      const user = await renderLoaded();
+      const button = await expandRow(user, "Start your 14-day trial");
+      elsewhere();
+
+      await user.click(
+        within(button.region()).getByRole("button", { name: "Discard draft" }),
+      );
+      const dialog = await screen.findByRole("dialog", {
+        name: "Discard this draft?",
+      });
+      await user.click(
+        within(dialog).getByRole("button", { name: "Discard draft" }),
+      );
+
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+      );
+      expect(requests(/^\/api\/staging\/content\//, "PUT")).toHaveLength(0);
+      expect(within(button.region()).getByRole("alert")).toHaveTextContent(
+        UPDATED_ELSEWHERE,
+      );
+      expect(within(rowLine(textNow)).getByText(statusNow)).toBeInTheDocument();
+      expect(screen.queryByText("Draft discarded.")).not.toBeInTheDocument();
+    },
+  );
+
+  // m1: the status filter changed while Publish was in flight. The reload,
+  // read before the publish committed, landed after it and drew the row as
+  // Pending, Discard offered, because the in-place patch had found no list.
+  it("never draws a row as it was before a Publish when the filter changed while it was in flight", async () => {
+    let releasePublish: (() => void) | null = null;
+    let releaseOldList: (() => void) | null = null;
+    mockApi({
+      rows: [HERO, HERO_BUTTON, NW_STEP],
+      // The publish commits when it is released.
+      publish: (body) =>
+        new Promise<Response>((resolve) => {
+          releasePublish = () => resolve(served.publish(body));
+        }),
+      // Each read is answered with what the server held when it arrived.
+      list: (url) => {
+        const answer = served.list(url);
+        if (url.searchParams.get("state") === "pending" && !releaseOldList) {
+          return new Promise<Response>((resolve) => {
+            releaseOldList = () => resolve(answer);
+          });
+        }
+        return answer;
+      },
+    });
+    const user = await renderLoaded();
+    const button = await expandRow(user, "Start your 14-day trial");
+    await user.click(
+      within(button.region()).getByRole("button", { name: "Publish" }),
+    );
+    await waitFor(() => expect(releasePublish).not.toBeNull());
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Filter by status" }),
+      "pending",
+    );
+    await waitFor(() => expect(releaseOldList).not.toBeNull());
+    await act(async () => {
+      releasePublish!();
+    });
+    expect(await screen.findByText("Published.")).toBeInTheDocument();
+    await act(async () => {
+      releaseOldList!();
+    });
+
+    expect(
+      await screen.findByText(
+        "Paste the snippet just before the closing body tag",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Start your 14-day trial"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps a published row open, with focus on its expand button once Publish has gone", async () => {
+    mockApi({ rows: [HERO, HERO_BUTTON] });
+    const user = await renderLoaded();
+    const button = await expandRow(user, "Start your 14-day trial");
+
+    await user.click(
+      within(button.region()).getByRole("button", { name: "Publish" }),
+    );
+
+    expect(await screen.findByText("Published.")).toBeInTheDocument();
+    expect(button.toggle).toHaveAttribute("aria-expanded", "true");
+    expect(button.region()).toBeInTheDocument();
+    expect(document.activeElement).toBe(button.toggle);
+  });
+
+  it("says a published row may be out of date when it cannot be read again", async () => {
+    mockApi({
+      rows: [HERO, HERO_BUTTON],
+      list: (url) =>
+        url.searchParams.has("element")
+          ? json({ error: "Failed to load changes" }, 500)
+          : served.list(url),
+    });
+    const user = await renderLoaded();
+    const button = await expandRow(user, "Start your 14-day trial");
+
+    await user.click(
+      within(button.region()).getByRole("button", { name: "Publish" }),
+    );
+
+    expect(await within(button.region()).findByRole("alert")).toHaveTextContent(
+      "This went through, but the row could not be read again and may be out of date. Reload the page to see it as it is now.",
+    );
+    expect(screen.queryByText("Published.")).not.toBeInTheDocument();
   });
 });
 

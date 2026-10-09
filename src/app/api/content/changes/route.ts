@@ -25,6 +25,11 @@
  * href/alt is already on the customer's public page. The state is not derived
  * here; the view still decides what is pending. See useChangeActions.ts,
  * `discardAttributes`, for why Discard needs them (Devin review, PR #77).
+ *
+ * `?site=<id>&element=<element id>` narrows every read to one element's rows,
+ * every language and variant. The page re-reads them after each write, and
+ * Discard re-reads its row just before it writes (s70b fix pass, C1/M1):
+ * the client never derives what a write left on the server.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -34,6 +39,7 @@ import {
   CHANGES_PAGE_SIZE as PAGE_SIZE,
 } from "@/lib/content/changes-paging";
 import { escapeRegex } from "@/lib/content/search-pattern";
+import { MAX_ELEMENT_ID_LENGTH } from "@/lib/security/discovered-text";
 import { createClient } from "@/lib/supabase/server";
 
 const MAX_QUERY_LENGTH = 200;
@@ -91,6 +97,8 @@ interface FilterChain {
 
 interface ChangesQuery {
   site: string | null;
+  /** One element id of `site`: every language and variant row of it. */
+  element: string | null;
   state: StateFilter;
   /** `q` as a regex matching only its own text; null when there is no search. */
   pattern: string | null;
@@ -115,10 +123,28 @@ function parseQuery(params: URLSearchParams): Parsed {
   if (q.length > MAX_QUERY_LENGTH) {
     return { ok: false, error: "Search is too long" };
   }
+
+  // `element` narrows the read to one element of one site: the rows a write
+  // to that element could have touched (s70b fix pass, C1: Publish promotes
+  // every language and variant row of an element_id, so the page re-reads
+  // them all after any write). An element id is unique only within a site,
+  // so it is refused without one; the site is still checked against the
+  // caller's own below, like any other.
+  const site = params.get("site");
+  const element = params.get("element");
+  if (
+    element !== null &&
+    (site === null ||
+      element.length === 0 ||
+      element.length > MAX_ELEMENT_ID_LENGTH)
+  ) {
+    return { ok: false, error: "Invalid element" };
+  }
   return {
     ok: true,
     value: {
-      site: params.get("site"),
+      site,
+      element,
       state: rawState as StateFilter,
       // Any text is a valid search, `*` included (search-pattern.ts: the
       // 400 it once got was shown as a page failure).
@@ -210,7 +236,7 @@ export async function GET(request: NextRequest) {
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
-    const { site, state, pattern, offset } = parsed.value;
+    const { site, element, state, pattern, offset } = parsed.value;
 
     // The caller's sites, read here rather than from GET /api/sites (the
     // ~4 s route). Only safe columns of `sites` are named (ADR 033).
@@ -263,6 +289,7 @@ export async function GET(request: NextRequest) {
       const bySite = site
         ? chain.eq("site_id", site)
         : chain.in("site_id", siteIds);
+      const byElement = element ? bySite.eq("element_id", element) : bySite;
       // The pattern (search-pattern.ts: every regex metacharacter escaped)
       // reaches PostgREST as `imatch`, never `.ilike()`, whose `*` PostgREST
       // turns into `%`. `.filter()` appends one `search_text=imatch.<value>`
@@ -272,8 +299,8 @@ export async function GET(request: NextRequest) {
       // spliced into one is filter injection (the s27 page-path read refused
       // the same thing, see paged-elements.ts).
       return (pattern
-        ? bySite.filter("search_text", "imatch", pattern)
-        : bySite) as unknown as T;
+        ? byElement.filter("search_text", "imatch", pattern)
+        : byElement) as unknown as T;
     };
 
     let list = scoped(

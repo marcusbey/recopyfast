@@ -332,30 +332,241 @@ describe("useContentChanges", () => {
     expect(requestedUrl(0).searchParams.get("site")).toBe(SITE_A);
   });
 
-  it("updates one row in place and moves its count with it", async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValue(
-        response(page([change("a", { state: "published" }), change("b")])),
-      ) as typeof fetch;
-    const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
-    await waitFor(() => expect(result.current.data).not.toBeNull());
+  // s70b fix pass (C1, CTO decision): the page no longer derives what a write
+  // left on the server. Publish promotes every language and variant row of
+  // an element_id, and the row drawn "in place" left its fr sibling showing
+  // its old draft, with a Discard that re-staged it. After any write, every
+  // row of the element is read again, and the counts with them.
+  describe("refreshAfterWrite", () => {
+    const EN_BEFORE = change("e-en", {
+      elementId: "rcf-e",
+      state: "pending",
+      draft: "Hello",
+      live: "Hi",
+    });
+    const FR_BEFORE = change("e-fr", {
+      elementId: "rcf-e",
+      language: "fr",
+      state: "pending",
+      draft: "Bonjour",
+      live: "Salut",
+    });
+    const EN_AFTER = change("e-en", {
+      elementId: "rcf-e",
+      state: "published",
+      live: "Hello",
+    });
+    const FR_AFTER = change("e-fr", {
+      elementId: "rcf-e",
+      language: "fr",
+      state: "published",
+      live: "Bonjour",
+    });
+    const OTHER = change("x", { state: "published" });
+    const COUNTS_AFTER = { pending: 0, published: 3, original: 3 };
 
-    act(() => {
-      result.current.updateRow("a", { state: "pending", draft: "Original" });
+    function route(answer: (url: URL) => Response | Promise<Response>) {
+      global.fetch = jest.fn(async (input: RequestInfo | URL) =>
+        answer(new URL(String(input), "http://localhost")),
+      ) as unknown as typeof fetch;
+    }
+    const requests = () =>
+      (global.fetch as jest.Mock).mock.calls.map(
+        ([input]) => new URL(String(input), "http://localhost"),
+      );
+    const isElementRead = (url: URL) => url.searchParams.has("element");
+    const shown = (rows: ContentChange[] | undefined) =>
+      rows?.map((row) => [row.id, row.state, row.live]);
+
+    it("re-reads every loaded row of the element, siblings included, and takes the counts and total from a fresh read", async () => {
+      let written = false;
+      route((url) => {
+        if (isElementRead(url)) return response(page([EN_AFTER, FR_AFTER]));
+        return written
+          ? response({ ...page([OTHER], { total: 3 }), counts: COUNTS_AFTER })
+          : response(page([EN_BEFORE, OTHER, FR_BEFORE], { total: 3 }));
+      });
+      const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
+      await waitFor(() => expect(result.current.data).not.toBeNull());
+
+      written = true;
+      let isFresh: boolean | undefined;
+      await act(async () => {
+        isFresh = await result.current.refreshAfterWrite(SITE_A, "rcf-e");
+      });
+
+      expect(isFresh).toBe(true);
+      const elementRead = requests().find(isElementRead);
+      expect(Object.fromEntries(elementRead!.searchParams)).toEqual({
+        site: SITE_A,
+        element: "rcf-e",
+        state: "all",
+        offset: "0",
+      });
+      expect(shown(result.current.data?.rows)).toEqual([
+        ["e-en", "published", "Hello"],
+        ["x", "published", "Live"],
+        ["e-fr", "published", "Bonjour"],
+      ]);
+      expect(result.current.data?.counts).toEqual(COUNTS_AFTER);
+      expect(result.current.counts).toEqual(COUNTS_AFTER);
     });
 
-    expect(result.current.data?.rows.map((row) => [row.id, row.state])).toEqual(
-      [
-        ["a", "pending"],
-        ["b", "published"],
-      ],
-    );
-    expect(result.current.data?.rows[0].draft).toBe("Original");
-    expect(result.current.data?.counts).toEqual({
-      pending: 2,
-      published: 1,
-      original: 3,
+    it("resolves false when the element cannot be read again, and leaves the rows as they were", async () => {
+      let written = false;
+      route((url) =>
+        written && isElementRead(url)
+          ? response({ error: "Failed to load changes" }, 500)
+          : response(page([EN_BEFORE, FR_BEFORE])),
+      );
+      const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
+      await waitFor(() => expect(result.current.data).not.toBeNull());
+
+      written = true;
+      let isFresh: boolean | undefined;
+      await act(async () => {
+        isFresh = await result.current.refreshAfterWrite(SITE_A, "rcf-e");
+      });
+
+      expect(isFresh).toBe(false);
+      expect(shown(result.current.data?.rows)).toEqual([
+        ["e-en", "pending", "Hi"],
+        ["e-fr", "pending", "Salut"],
+      ]);
+    });
+
+    // Review m1: a filter changed while Publish was in flight emptied the
+    // list, so the in-place patch found no row and was dropped; the reload,
+    // read before the publish committed, then drew the row as Pending with
+    // Discard offered. A first page still in flight when the write lands is
+    // asked for again, and its older answer is dropped.
+    it("asks again for a filter reload in flight when the write landed, and drops its older answer", async () => {
+      let written = false;
+      let answerOld: (() => void) | null = null;
+      route((url) => {
+        // Each answer is what the server held when the read reached it.
+        const body = page([written ? EN_AFTER : EN_BEFORE]);
+        if (url.searchParams.get("state") === "pending" && !answerOld) {
+          return new Promise<Response>((resolve) => {
+            answerOld = () => resolve(response(body));
+          });
+        }
+        return response(body);
+      });
+      const { result, rerender } = renderHook(
+        (filters: ChangesFilters) => useContentChanges(filters),
+        { initialProps: DEFAULT_FILTERS },
+      );
+      await waitFor(() => expect(result.current.data).not.toBeNull());
+      rerender({ ...DEFAULT_FILTERS, state: "pending" });
+      await waitFor(() => expect(answerOld).not.toBeNull());
+
+      written = true;
+      await act(async () => {
+        await result.current.refreshAfterWrite(SITE_A, "rcf-e");
+      });
+      await waitFor(() =>
+        expect(shown(result.current.data?.rows)).toEqual([
+          ["e-en", "published", "Hello"],
+        ]),
+      );
+      await act(async () => {
+        answerOld!();
+      });
+
+      expect(
+        requests().filter(
+          (url) =>
+            url.searchParams.get("state") === "pending" && !isElementRead(url),
+        ),
+      ).toHaveLength(2);
+      expect(shown(result.current.data?.rows)).toEqual([
+        ["e-en", "published", "Hello"],
+      ]);
+    });
+
+    it("never draws a re-read row as it was when an older Show 50 more lands after it, nor takes its older counts", async () => {
+      let written = false;
+      let answerMore: (() => void) | null = null;
+      route((url) => {
+        if (isElementRead(url)) return response(page([EN_AFTER, FR_AFTER]));
+        if (url.searchParams.get("offset") === "1") {
+          // Read before the write: the fr sibling still pending.
+          const body = page([FR_BEFORE], { total: 2 });
+          return new Promise<Response>((resolve) => {
+            answerMore = () => resolve(response(body));
+          });
+        }
+        return written
+          ? response({ ...page([OTHER], { total: 2 }), counts: COUNTS_AFTER })
+          : response(page([OTHER], { nextOffset: 1, total: 2 }));
+      });
+      const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
+      await waitFor(() => expect(result.current.data).not.toBeNull());
+      let more!: Promise<void>;
+      act(() => {
+        more = result.current.loadMore();
+      });
+      await waitFor(() => expect(answerMore).not.toBeNull());
+
+      written = true;
+      await act(async () => {
+        await result.current.refreshAfterWrite(SITE_A, "rcf-e");
+      });
+      await act(async () => {
+        answerMore!();
+        await more;
+      });
+
+      expect(shown(result.current.data?.rows)).toEqual([
+        ["x", "published", "Live"],
+        ["e-fr", "published", "Bonjour"],
+      ]);
+      expect(result.current.data?.counts).toEqual(COUNTS_AFTER);
+    });
+
+    it("keeps the row a newer read drew when an older re-read lands after it", async () => {
+      const EN_NEWER = change("e-en", {
+        elementId: "rcf-e",
+        state: "published",
+        live: "Hello again",
+      });
+      let answerReread: (() => void) | null = null;
+      route((url) => {
+        if (isElementRead(url)) {
+          return new Promise<Response>((resolve) => {
+            answerReread = () => resolve(response(page([EN_AFTER])));
+          });
+        }
+        return url.searchParams.get("state") === "published"
+          ? response(page([EN_NEWER]))
+          : response(page([EN_BEFORE]));
+      });
+      const { result, rerender } = renderHook(
+        (filters: ChangesFilters) => useContentChanges(filters),
+        { initialProps: DEFAULT_FILTERS },
+      );
+      await waitFor(() => expect(result.current.data).not.toBeNull());
+      let reread!: Promise<boolean>;
+      act(() => {
+        reread = result.current.refreshAfterWrite(SITE_A, "rcf-e");
+      });
+      await waitFor(() => expect(answerReread).not.toBeNull());
+
+      rerender({ ...DEFAULT_FILTERS, state: "published" });
+      await waitFor(() =>
+        expect(shown(result.current.data?.rows)).toEqual([
+          ["e-en", "published", "Hello again"],
+        ]),
+      );
+      await act(async () => {
+        answerReread!();
+        await reread;
+      });
+
+      expect(shown(result.current.data?.rows)).toEqual([
+        ["e-en", "published", "Hello again"],
+      ]);
     });
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { format, formatDistanceToNow } from "date-fns";
 import {
   ChevronDown,
@@ -190,13 +190,14 @@ export function ChangeRow({
   };
 
   // Nothing landed: the dialog stays open with the reason. Something landed
-  // but not all of it (a revert saved, its publish refused): the dialog
-  // closes on the row as it now is, opened, with the reason under its
-  // actions — where Publish is, to try again.
+  // but not all of it (a revert saved, its publish refused), or nothing was
+  // sent because the row changed elsewhere (Discard's re-read): the dialog
+  // closes on the row as the server now holds it, opened, with the reason
+  // under its actions — where they can be reviewed and tried again.
   const runConfirmed = async (action: ChangeAction) => {
     setConfirmError(null);
     const outcome = await onAction(row, action);
-    if (outcome.error && !outcome.applied) {
+    if (outcome.error && !outcome.applied && !outcome.isStale) {
       setConfirmError(outcome.error);
       return;
     }
@@ -207,10 +208,29 @@ export function ChangeRow({
     }
   };
 
+  // A published row has no Publish button: once it is gone, focus stays in
+  // the row, on its expand button (design, Accessibility), instead of
+  // falling to the page. The button leaves with the re-read row, which may
+  // be drawn before or after this action settles: if focus has not fallen
+  // yet, the row's next commit looks again.
+  const isRestoringFocus = useRef(false);
+  const hasFocusFallen = () => {
+    const focused = document.activeElement;
+    return !focused || focused === document.body;
+  };
+  useEffect(() => {
+    if (!isRestoringFocus.current) return;
+    isRestoringFocus.current = false;
+    if (hasFocusFallen()) expandRef.current?.focus();
+  }, [row]);
+
   const publish = async () => {
     setActionError(null);
     const outcome = await onAction(row, "publish");
     if (outcome.error) setActionError(outcome.error);
+    if (!outcome.applied) return;
+    if (hasFocusFallen()) expandRef.current?.focus();
+    else isRestoringFocus.current = true;
   };
 
   // Inside the click itself: the tab must open on the user's activation.

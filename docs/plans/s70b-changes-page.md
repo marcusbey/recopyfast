@@ -253,13 +253,14 @@ the choices the plan left open.
 ### Choices the plan left open
 
 - `useContentChanges` returns more than `{ data, loading, error, refetch }`: `loadMore`,
-  `isLoadingMore`, `updateRow`, `appliedQuery`, and (review M1) `sites` and `counts`, which keep
-  the last answer's values while the list reloads, so the filter row never unmounts.
+  `isLoadingMore`, `appliedQuery`, and (review M1) `sites` and `counts`, which keep
+  the last answer's values while the list reloads, so the filter row never unmounts. `updateRow`
+  was replaced by `refreshAfterWrite` in the fix pass below.
 - History is cached per row and per change: the key is the row id plus its `changedAt`, so a row
   reverted or published from this page reads its trail again.
-- "Success in place" mirrors the view's rules for one row. After Discard draft, a row that was
-  published back to its original text reads Original until the next read, because the client
-  cannot know `published_at`.
+- ~~"Success in place" mirrors the view's rules for one row.~~ Superseded by the fix pass below:
+  after a write the rows are read again from the server, so a row published back to its original
+  text reads Published as soon as the re-read lands.
 - The list route sorts the caller's sites by name, with the domain standing in for a blank name.
   `changedBy` goes through the same `@`-only filter as the history route's `by`.
 - Captures are opt-in: `e2e/changes.spec.ts` writes `docs/designs/s70-content-changes/after/` only
@@ -320,7 +321,8 @@ no existing route changed.
 One critical and four minors, fixed without a new route, RPC, migration or change to an existing
 route.
 
-- **N1 (critical): Discard sent back a link Publish had made live.** The row a write left on screen
+- **N1 (critical): Discard sent back a link Publish had made live.** (Superseded by the fix pass
+  below: `rowAfter` and its file are deleted; the rows are read again after every write.) The row a write left on screen
   never updated `draftAttributes`. After Publish made a staged `href` live, the row still held the
   link's old live value; Revert → Save as draft, then Discard, sent it back, and the save RPC
   staged it (it now differed from the live link), so the next Publish silently restored the old
@@ -361,6 +363,96 @@ route.
   link and Publish then pushes nothing; a save carrying an old live value stages it and Publish puts
   it back live (the N1 effect); a text-only save stages nothing on a row with nothing staged; a
   text-only save keeps a pending row's staged link.
+
+### Fix pass (verification of `403066e`)
+
+One critical, one major and two minors, fixed without a migration, an RPC or a change to an
+existing route. The only route change is an optional read-only filter on this story's own new
+`GET /api/content/changes`.
+
+> CTO decision under the owner's 2026-10-09 directive: stop deriving post-write state on the
+> client; use the standard refetch-after-mutate pattern.
+
+- **C1 (critical): Publish left the element's other language and variant rows stale.** Publish
+  sends `elementIds: [elementId]`, and the publish RPC (`20260924060000:43-44`) promotes every
+  pending row of that `element_id`, whatever its language or variant (translation creates such
+  rows: `src/app/api/ai/translate/route.ts:313-335`). `ChangesView.tsx:194` redrew the one row
+  acted on, so an fr sibling kept its old draft and its Discard; that Discard re-staged the old
+  text and link, and the next Publish silently put them back live. Same with Revert and publish.
+  Now every write that lands (publish, discard, revert to draft, revert and publish, and the
+  partial revert whose publish was refused) is followed, inside the action, by
+  `refreshAfterWrite(siteId, elementId)` (`useContentChanges.ts`): one read of every row of the
+  element (`?site=<id>&element=<element id>&state=all`) and one read of the current filters' first
+  page for the counts and total. Loaded rows are patched where they stand (place, open detail and
+  focus kept; a row that no longer matches the filter stays, as before); a sibling the list does
+  not hold is not added. The action stays busy (spinner, buttons disabled) until the re-read
+  lands, and the announcement is set after it.
+- **CTO decision: `rowAfter` is deleted, not kept as a placeholder** (`row-after.ts` and
+  `row-after.test.ts` removed). A placeholder that can be wrong is what produced C1 and, before
+  it, Devin's N1; the row's busy state already covers the one round trip.
+- **CTO decision: the counts and total are read again too**, from the current filters' first page
+  (its rows are not used). The old `moveCount` arithmetic was client-derived post-write state, and
+  it could not see a sibling the list does not hold.
+- **CTO decision: `element` is an optional filter on this story's own list route**, which could
+  not narrow by element before. It needs `site` (an element id is unique only within a site),
+  is capped at `MAX_ELEMENT_ID_LENGTH` (255, `src/lib/security/discovered-text.ts`), gives 400
+  "Invalid element" otherwise, and applies to the list and the three counts alike (one filter
+  set). The site is still checked against the caller's own (404). Read-only, RLS client, no
+  service role.
+- **M1 (major): Discard had no precondition.** It sent `row.live` and the live attribute values as
+  loaded, so a stale view (second tab, an editor publishing from the live page) re-staged old copy.
+  Discard now reads its row again (the same narrowing read) just before the PUT and builds the
+  PUT from that read: its live text and its `draftAttributes` live values. If the row is gone, no
+  longer pending, holds another draft text, or stages another set of attributes, nothing is sent:
+  the dialog closes, the row is read again and opened, and its actions say "This change was
+  updated elsewhere — review it again." A failed pre-read sends nothing either ("Could not check
+  this draft before discarding it. Try again.", the dialog stays open). CTO decision: the live
+  text and live attribute values are not part of the comparison, because they are not what the
+  owner is discarding; when they moved (a bulk update writes the live text under a pending
+  draft), the PUT sends the current ones, which is exactly what discarding means.
+  **Residual:** a write landing between that read and the PUT (milliseconds) is not seen. Closing
+  it needs a server-side compare-and-set in the staging PUT, an existing route this story does not
+  change. **Follow-up: s81-version-restore-integrity** (the version/concurrency story).
+- **m1 (minor): a filter changed while Publish was in flight dropped the row patch**, and the
+  reload, read before the publish committed, drew the row Pending with Discard. Every read is now
+  numbered as it starts, and a row is only replaced by a copy from a later-started read: a first
+  page still in flight when a write lands is asked for again (its older answer dropped by the
+  generation rule); a "Show 50 more" that left before the write and lands after the re-read draws
+  the re-read row, and never takes its older counts; an older re-read never overwrites a row a
+  newer read drew.
+- **m3 (minor):** `describe-location.test.ts` no longer says its tables differ from the design
+  "except deep paths"; the design was updated by N5.
+- **A re-read that fails after a write that landed** (not in the findings): the row keeps what it
+  last showed and its actions say "This went through, but the row could not be read again and may
+  be out of date. Reload the page to see it as it is now." No announcement is made.
+- **Focus after Publish** (CTO: keep focus): the Publish button leaves with the re-read row; focus
+  goes to the row's expand button instead of the page (design, Accessibility).
+- **Design** (`docs/designs/s70-content-changes.md`): the Success state and the Discard paragraph
+  describe the re-read and the "updated elsewhere" refusal.
+- **Tests changed** (AGENTS.md § Tests):
+  - `ChangesView.test.tsx`: the API mock is now backed by an in-memory server that remembers writes
+    (`__tests__/changes-server-fake.ts`, new, test support only: the save and publish RPCs' rules and
+    the view's state), because a static list answers every re-read with the pre-write rows. Three
+    write tests that seeded rows through a static `list` override now seed the fake
+    ("discards a draft and the link it stages", both "never sends back a link it has published"
+    tests); two `publish` overrides ("…after a revert whose publish failed", "shows a revert whose
+    publish failed…") call the fake on success. Tests on the default mock run on the fake with
+    their code unchanged. No assertion changed; every existing test also passes on the fake against
+    `403066e`.
+  - `useContentChanges.test.ts`: "updates one row in place and moves its count with it" removed with
+    `updateRow`; replaced by five `refreshAfterWrite` cases.
+  - `useChangeActions.test.ts`: the two "discards…" cases now answer Discard's re-read and expect it
+    before the PUT (one renamed "…after reading its row again"); `fetchCalls` reads a plain GET.
+  - `row-after.test.ts` deleted with `row-after.ts`.
+  - `e2e/support/changes-fixtures.ts`: the list honours `element`, and the PUT and POST change the
+    fixture, so the Save as draft spec reads the row back Pending. No spec changed; the contract count
+    is unchanged.
+- **New tests:** route (element narrowing, 3 × 400, 404); hook (siblings and counts re-read, failed
+  re-read, the in-flight reload, the older "Show 50 more", the older re-read); actions (Discard built
+  from the fresh row, four stale cases, unreadable attributes, failed pre-read, five re-read cases);
+  view (Publish en → fr Published without Discard, Revert and publish → sibling published, two
+  stale-tab Discards, the filter race, focus after Publish, failed re-read). Each new view test was
+  run against `403066e` and failed there for the reason it names.
 
 ## Run interdicts
 

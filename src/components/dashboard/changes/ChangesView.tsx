@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, FileText, Globe, Loader2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -24,7 +24,6 @@ import { CHANGES_LIST_CEILING } from "@/lib/content/changes-paging";
 import { describePage } from "@/lib/content/describe-location";
 import { ChangeSiteGroup, type PageGroup } from "./ChangeSiteGroup";
 import { ChangesFilterBar } from "./ChangesFilterBar";
-import { rowAfter } from "./row-after";
 
 interface ChangesViewProps {
   /** Fixes the view to one site (s70c's tab): no site select, no site header. */
@@ -171,10 +170,17 @@ export function ChangesView({ siteId }: ChangesViewProps) {
     refetch,
     loadMore,
     isLoadingMore,
-    updateRow,
+    refreshAfterWrite,
     appliedQuery,
   } = useContentChanges({ site, state, q: query });
-  const actions = useChangeActions();
+  // Every write that lands is followed by a re-read of its element, inside
+  // the action, so the row stays busy until the server has said what it now
+  // holds (useContentChanges.ts, `refreshAfterWrite`).
+  const reread = useCallback(
+    (row: ContentChange) => refreshAfterWrite(row.siteId, row.elementId),
+    [refreshAfterWrite],
+  );
+  const actions = useChangeActions({ reread });
 
   const filtersChanged =
     <T,>(set: (value: T) => void) =>
@@ -183,15 +189,18 @@ export function ChangesView({ siteId }: ChangesViewProps) {
       set(value);
     };
 
-  // The row is redrawn from what landed, not from what was asked: a revert
-  // whose publish failed is a pending draft, and is drawn as one.
+  // The rows are drawn from the server's answer after the write, never from
+  // what the write meant to do. Tombstone (s70b fix pass, C1): `rowAfter`
+  // redrew the one row acted on, but Publish promotes every language and
+  // variant row of the element, so a sibling kept its old draft and Discard,
+  // and that Discard re-staged copy the next Publish silently put back live.
+  // The announcement waits for the re-read, so it describes what is shown.
   const runAction = async (
     row: ContentChange,
     action: ChangeAction,
   ): Promise<ActionOutcome> => {
     const outcome = await actions[action](row);
     if (outcome.applied) {
-      updateRow(row.id, rowAfter(row, outcome.applied));
       setAnnouncement(outcome.error ? "" : ANNOUNCEMENTS[action]);
     }
     return outcome;

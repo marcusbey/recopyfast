@@ -372,6 +372,55 @@ describe("GET /api/content/changes", () => {
     expect(contentQueries()).toEqual([]);
   });
 
+  // s70b fix pass (C1): Publish promotes every language and variant row of an
+  // element_id, so after any write the page re-reads all of that element's
+  // rows. `element` narrows this route to them: one site, one element id,
+  // on the list and on every count alike (one filter set).
+  it("narrows every content read to one element of one of the caller's sites", async () => {
+    const response = await get(`?site=${SITE_A}&element=rcf-1&state=all`);
+
+    expect(response.status).toBe(200);
+    expect(contentQueries()).toHaveLength(4);
+    for (const query of contentQueries()) {
+      expect(callsOf(query, "eq")).toContainEqual(["site_id", SITE_A]);
+      expect(callsOf(query, "eq")).toContainEqual(["element_id", "rcf-1"]);
+    }
+  });
+
+  it("adds no element filter when none is named", async () => {
+    await get(`?site=${SITE_A}`);
+
+    for (const query of contentQueries()) {
+      expect(
+        callsOf(query, "eq").filter(([column]) => column === "element_id"),
+      ).toEqual([]);
+    }
+  });
+
+  it.each([
+    ["an element without a site", "element=rcf-1"],
+    ["an empty element", `site=${SITE_A}&element=`],
+    [
+      "an element id over 255 characters",
+      `site=${SITE_A}&element=${"e".repeat(256)}`,
+    ],
+  ])("answers 400 to %s, with no content query", async (_label, query) => {
+    const response = await get(`?${query}`);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid element",
+    });
+    expect(contentQueries()).toEqual([]);
+  });
+
+  it("answers 404 for an element of a site that is not the caller's", async () => {
+    const response = await get(`?site=${STRANGER_SITE}&element=rcf-1`);
+
+    expect(response.status).toBe(404);
+    expect(contentQueries()).toEqual([]);
+  });
+
   it("counts pending, published and original with head queries carrying the same filters", async () => {
     const response = await get(`?site=${SITE_A}&q=hero`);
     const body = await response.json();

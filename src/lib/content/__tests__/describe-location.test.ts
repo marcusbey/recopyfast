@@ -10,10 +10,11 @@
  * "Hero · Main heading" under a "Homepage" band, from signals the row already
  * holds — no new embed bytes. The tables below are the design's
  * (docs/designs/s70-content-changes.md, "Human-readable location"), row for
- * row, except deep paths: Devin review (PR #77) found that keeping only the
- * last two segments gave /products/alpha/setup and /services/alpha/setup the
- * same band ("… › Alpha › Setup"), and the full path beside it truncates on a
- * phone. A band keeps the first segment as well.
+ * row. Deep paths keep their first segment as well as the last two: Devin
+ * review (PR #77) found that keeping only the last two gave
+ * /products/alpha/setup and /services/alpha/setup the same band
+ * ("… › Alpha › Setup"), and the full path beside it truncates on a phone.
+ * The design's table was updated to match (Devin re-review N5).
  */
 
 import { describeElement, describePage } from "../describe-location";

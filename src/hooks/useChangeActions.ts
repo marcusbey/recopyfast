@@ -5,7 +5,11 @@ import {
   validateContentAttributePatch,
   type ContentAttributePatch,
 } from "@/lib/api/validation";
-import type { ContentChange } from "./useContentChanges";
+import {
+  readElementChanges,
+  type ContentChange,
+  type DraftAttribute,
+} from "./useContentChanges";
 
 /**
  * A row's writes from the Changes page (s70b), through the two routes the
@@ -20,8 +24,14 @@ import type { ContentChange } from "./useContentChanges";
  *
  * Each action resolves an `ActionOutcome`: the message to show, if any — the
  * server's own words when it gave any (402 "plan ended" included), so the
- * dialog can say why without inventing a reason — and what landed, so the
- * row can be drawn as it now is.
+ * dialog can say why without inventing a reason — and what landed.
+ *
+ * What the row looks like afterwards is never derived here: once a write has
+ * landed, `reread` (the list's `refreshAfterWrite`) reads the element again,
+ * inside the action, so the row stays busy until the server has said what it
+ * holds. Tombstone (s70b fix pass, C1): the row was redrawn from what the
+ * action meant to do, and Publish promotes every language and variant row of
+ * the element, so a sibling kept a draft the server no longer had.
  */
 
 export type ChangeAction =
@@ -38,6 +48,19 @@ export interface ActionOutcome {
    * when a revert saved but its publish failed, null when nothing changed.
    */
   applied: ChangeAction | null;
+  /**
+   * Nothing was written because the server's row is not the one on screen
+   * (Discard's re-read): the row is read again so the owner can review it.
+   */
+  isStale?: boolean;
+}
+
+interface ChangeActionsOptions {
+  /**
+   * Reads the row's element again after a write (and after a stale Discard);
+   * resolves false when it could not. The action stays in flight until then.
+   */
+  reread?: (row: ContentChange) => Promise<boolean>;
 }
 
 const DRAFT_FAILED = "Could not save the draft. Try again.";
@@ -52,6 +75,12 @@ export const ATTRIBUTE_DRAFT_NOTE =
 /** Said when what the draft stages is not known: it may change no attribute. */
 export const UNREAD_DRAFT_NOTE =
   "This draft could not be read in full, so it can't be discarded here. Reload the page to try again.";
+export const UPDATED_ELSEWHERE =
+  "This change was updated elsewhere — review it again.";
+const NOT_CHECKED =
+  "Could not check this draft before discarding it. Try again.";
+const NOT_REREAD =
+  "This went through, but the row could not be read again and may be out of date. Reload the page to see it as it is now.";
 
 const refusal = (error: string): ActionOutcome => ({ error, applied: null });
 const outcomeOf = (
@@ -96,6 +125,27 @@ export function discardAttributes(
 /** Why a pending draft is not offered a discard (`discardAttributes` null). */
 export const discardRefusal = (row: ContentChange): string =>
   Array.isArray(row.draftAttributes) ? ATTRIBUTE_DRAFT_NOTE : UNREAD_DRAFT_NOTE;
+
+const stagedNames = (attributes: DraftAttribute[]): string =>
+  attributes
+    .map(({ name }) => name)
+    .sort()
+    .join("\u0000");
+
+/**
+ * Whether the server still holds the draft the owner was shown: still
+ * pending, the same draft text, the same staged attributes. The live text
+ * and live attribute values may have moved (a bulk update writes the live
+ * text under a pending draft); the discard sends the current ones.
+ */
+function isSameDraft(seen: ContentChange, fresh: ContentChange): boolean {
+  if (fresh.state !== "pending" || fresh.draft !== seen.draft) return false;
+  if (!Array.isArray(fresh.draftAttributes)) return true;
+  return (
+    Array.isArray(seen.draftAttributes) &&
+    stagedNames(seen.draftAttributes) === stagedNames(fresh.draftAttributes)
+  );
+}
 
 async function refusalMessage(
   response: Response,
@@ -157,7 +207,7 @@ async function publishElement(row: ContentChange): Promise<string | null> {
   }
 }
 
-export function useChangeActions() {
+export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
   const [pendingAction, setPendingAction] = useState<{
     rowId: string;
     action: ChangeAction;
@@ -171,12 +221,19 @@ export function useChangeActions() {
     ): Promise<ActionOutcome> => {
       setPendingAction({ rowId: row.id, action });
       try {
-        return await write();
+        const outcome = await write();
+        if (!reread || (!outcome.applied && !outcome.isStale)) return outcome;
+        const isFresh = await reread(row);
+        if (isFresh || !outcome.applied) return outcome;
+        return {
+          ...outcome,
+          error: outcome.error ? `${outcome.error} ${NOT_REREAD}` : NOT_REREAD,
+        };
       } finally {
         setPendingAction(null);
       }
     },
-    [],
+    [reread],
   );
 
   // Nothing to revert when the live text is the original. Tombstone (Devin
@@ -219,15 +276,38 @@ export function useChangeActions() {
     [track],
   );
 
+  // The row is read again just before the PUT, and the PUT is built from
+  // that read. Tombstone (s70b fix pass, M1): it sent the live text and links
+  // as the page had loaded them, so a view gone stale (a second tab, an
+  // editor publishing from the live page) staged the old copy again, and the
+  // next Publish put it back live. When the draft is no longer the one the
+  // owner was shown, nothing is sent. Residual: a write landing between this
+  // read and the PUT (milliseconds) is not seen; closing it needs a
+  // compare-and-set in the staging PUT, an existing route this story does not
+  // change (follow-up: s81-version-restore-integrity).
   const discardDraft = useCallback(
     (row: ContentChange) =>
       track(row, "discardDraft", async () => {
         if (row.live === null) return refusal(NO_LIVE_TEXT);
-        const attributes = discardAttributes(row);
-        if (!attributes) return refusal(discardRefusal(row));
+        if (!discardAttributes(row)) return refusal(discardRefusal(row));
+        let fresh: ContentChange | undefined;
+        try {
+          const rows = await readElementChanges(row.siteId, row.elementId);
+          fresh = rows.find((candidate) => candidate.id === row.id);
+        } catch {
+          return refusal(NOT_CHECKED);
+        }
+        if (!fresh || !isSameDraft(row, fresh)) {
+          return { error: UPDATED_ELSEWHERE, applied: null, isStale: true };
+        }
+        const attributes = discardAttributes(fresh);
+        if (!attributes) {
+          return { error: discardRefusal(fresh), applied: null, isStale: true };
+        }
+        if (fresh.live === null) return refusal(NO_LIVE_TEXT);
         return outcomeOf(
           "discardDraft",
-          await saveDraft(row, row.live, attributes),
+          await saveDraft(fresh, fresh.live, attributes),
         );
       }),
     [track],
