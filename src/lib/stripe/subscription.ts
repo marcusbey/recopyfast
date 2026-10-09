@@ -273,6 +273,33 @@ export async function getRecoverableSubscriptionCheckout(
   );
 }
 
+/** PostgREST's answer when `.single()` finds no row. */
+const NO_ROWS_CODE = "PGRST116";
+
+/**
+ * The row a subscription read returned, or the right failure for its absence.
+ *
+ * s82 review, finding 3: these reads used to answer `error || !row` with the
+ * customer-facing 404 refusal, so a database outage told the customer "No
+ * active subscription found" — and `billingErrorResponse` does not log a
+ * refusal, so the outage left no trace. Only "no row" (PGRST116 from
+ * `.single()`, or no data) is a refusal; any other read error is a plain
+ * `Error`, which the route logs and answers 500.
+ */
+function requireSubscriptionRow(
+  row: SubscriptionRow | null,
+  error: { code?: string; message: string } | null,
+  refusalMessage: string,
+): SubscriptionRow {
+  if (error && error.code !== NO_ROWS_CODE) {
+    throw new Error(`Failed to read the subscription: ${error.message}`);
+  }
+  if (!row) {
+    throw new BillingRefusal(refusalMessage, 404);
+  }
+  return row;
+}
+
 function toSubscription(row: SubscriptionRow): Subscription {
   return {
     ...row,
@@ -284,6 +311,10 @@ function toSubscription(row: SubscriptionRow): Subscription {
     trial_end: row.trial_end ?? undefined,
   };
 }
+
+/** s82: said when a permanent grant already includes the plan switched to. */
+const LIFETIME_PLAN_CHANGE_REFUSAL =
+  "Your lifetime plan already includes this one. Cancel your subscription instead of switching to it.";
 
 export interface SubscriptionChangeRequest {
   planId: PaidPlanId;
@@ -319,7 +350,7 @@ export async function updateSubscription(
 ): Promise<SubscriptionChangeResult> {
   const supabase = await createClient();
 
-  const { data: currentSubscription, error: fetchError } = await supabase
+  const { data, error: fetchError } = await supabase
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
@@ -328,8 +359,22 @@ export async function updateSubscription(
     .limit(1)
     .single<SubscriptionRow>();
 
-  if (fetchError || !currentSubscription) {
-    throw new BillingRefusal("No active subscription found", 404);
+  const currentSubscription = requireSubscriptionRow(
+    data,
+    fetchError,
+    "No active subscription found",
+  );
+
+  // s82 review, finding 1: switching INTO a plan a permanent grant already
+  // includes would bill every month for something owned — a Lifetime Pro owner
+  // still paying for Agency could move the subscription to Pro or Starter. Same
+  // reader, rank rule and RLS client as reactivation below; a subscription
+  // above every grant stays on sale, as the webhook keeps it. Decided before
+  // the price lookup and the first Stripe call; a read failure throws rather
+  // than guessing that nothing is held.
+  const grantedPlanIds = await readGrantedPlanIds(supabase, userId);
+  if (isPlanCoveredByGrants(updates.planId, grantedPlanIds)) {
+    throw new BillingRefusal(LIFETIME_PLAN_CHANGE_REFUSAL, 409);
   }
 
   const billingPeriod = updates.billingPeriod ?? "monthly";
@@ -422,7 +467,7 @@ export async function cancelSubscription(
   const supabase = await createClient();
 
   // Get current subscription
-  const { data: currentSubscription, error: fetchError } = await supabase
+  const { data, error: fetchError } = await supabase
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
@@ -431,9 +476,11 @@ export async function cancelSubscription(
     .limit(1)
     .single<SubscriptionRow>();
 
-  if (fetchError || !currentSubscription) {
-    throw new BillingRefusal("No active subscription found", 404);
-  }
+  const currentSubscription = requireSubscriptionRow(
+    data,
+    fetchError,
+    "No active subscription found",
+  );
 
   // Cancel subscription in Stripe
   const stripeSubscription = immediate
@@ -494,7 +541,7 @@ export async function reactivateSubscription(
   const supabase = await createClient();
 
   // Get current subscription
-  const { data: currentSubscription, error: fetchError } = await supabase
+  const { data, error: fetchError } = await supabase
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
@@ -502,9 +549,11 @@ export async function reactivateSubscription(
     .limit(1)
     .single<SubscriptionRow>();
 
-  if (fetchError || !currentSubscription) {
-    throw new BillingRefusal("No subscription found", 404);
-  }
+  const currentSubscription = requireSubscriptionRow(
+    data,
+    fetchError,
+    "No subscription found",
+  );
 
   if (!currentSubscription.cancel_at) {
     throw new BillingRefusal(
@@ -513,14 +562,14 @@ export async function reactivateSubscription(
     );
   }
 
-  // The same grant read the billing page and the lifetime checkout guard use
-  // (non-trial, non-revoked), through the caller's own RLS client, so the page,
-  // checkout and this endpoint cannot disagree about who holds what. A
-  // Founding Agency owner's Agency subscription is refused too, although it
-  // lifts their allowance while it runs (ADR 038): the product never sells
-  // that pairing, and restarting it is the invisible $49 a month the webhook
-  // exists to stop (s82 plan, decision 1). A read failure throws — before
-  // Stripe — rather than guessing that nothing is held.
+  // The same grant read the billing page and the checkout guards use
+  // (non-trial, non-revoked, not expired), through the caller's own RLS
+  // client, so the page, checkout and this endpoint cannot disagree about who
+  // holds what. A Founding Agency owner's Agency subscription is refused too,
+  // although it lifts their allowance while it runs (ADR 038): the product
+  // never sells that pairing, and restarting it is the invisible $49 a month
+  // the webhook exists to stop (s82 plan, decision 1). A read failure throws —
+  // before Stripe — rather than guessing that nothing is held.
   const grantedPlanIds = await readGrantedPlanIds(supabase, userId);
   if (isPlanCoveredByGrants(currentSubscription.plan, grantedPlanIds)) {
     throw new BillingRefusal(LIFETIME_REACTIVATION_REFUSAL, 409);

@@ -16,7 +16,10 @@ import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import {
   featuresWithMonthlyCredits,
+  findSubscriptionPlan,
   isPaidPlanId,
+  isPlanCoveredByGrants,
+  PAID_PLAN_IDS,
   planCyclePrice,
   planDisplayPrice,
   sellablePlans,
@@ -62,6 +65,14 @@ interface UpgradeDialogProps {
    * cannot be bought. Absent for every account without one.
    */
   heldForLife?: { planId: string; monthlyCredits: number | null };
+  /**
+   * Every plan the account holds through a live, non-revoked, non-trial grant
+   * (the page's `readGrantedPlanIds`). A plan one of them includes — the same
+   * plan or a lower one, `isPlanCoveredByGrants` — reads "Included" and cannot
+   * be bought: Checkout and the plan change refuse it too (s82 review,
+   * finding 1). Absent or empty for every account without one.
+   */
+  grantedPlanIds?: readonly string[];
   onSuccess: () => void;
 }
 
@@ -80,6 +91,7 @@ export function UpgradeDialog({
   foundingAgencyAvailability,
   agencyCheckoutEnabled = true,
   heldForLife,
+  grantedPlanIds = [],
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
@@ -106,6 +118,16 @@ export function UpgradeDialog({
   const error = planChangeError ?? checkoutError;
   const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);
   const isSelectedHeldForLife = heldForLife?.planId === selectedPlan;
+  const isSelectedIncluded = isPlanCoveredByGrants(
+    selectedPlan,
+    grantedPlanIds,
+  );
+  // The highest plan held for life includes every lower one, so it is the one
+  // the submit names when it refuses an included plan.
+  const highestGrantedPlanName = findSubscriptionPlan(
+    catalogue,
+    PAID_PLAN_IDS.filter((planId) => grantedPlanIds.includes(planId)).at(-1),
+  )?.name;
 
   /**
    * No subscription yet → hand off to Stripe Checkout.
@@ -170,6 +192,10 @@ export function UpgradeDialog({
     if (!selectedPlanData) return "Select a plan";
     if (isSelectedHeldForLife)
       return `You hold ${selectedPlanData.name} for life`;
+    if (isSelectedIncluded)
+      return highestGrantedPlanName
+        ? `Included in your lifetime ${highestGrantedPlanName}`
+        : "Included in your lifetime plan";
     return hasSubscription
       ? `Switch to ${selectedPlanData.name}`
       : `Continue to payment — $${planCyclePrice(selectedPlanData, billingPeriod)}`;
@@ -253,6 +279,13 @@ export function UpgradeDialog({
               // way the card does: Lifetime, no price, the account's own
               // allowance.
               const isHeldForLife = heldForLife?.planId === plan.id;
+              // s82 review, finding 1: a plan below the one held for life —
+              // or below a lifetime grant while a higher subscription runs —
+              // was still priced and buyable here; the server refuses it now.
+              // Its tile says it is included instead of what it would cost.
+              const isIncluded =
+                !isHeldForLife &&
+                isPlanCoveredByGrants(plan.id, grantedPlanIds);
               const features = isHeldForLife
                 ? featuresWithMonthlyCredits(plan, heldForLife.monthlyCredits)
                 : plan.features;
@@ -284,6 +317,8 @@ export function UpgradeDialog({
                     </div>
                     {isHeldForLife ? (
                       <Badge variant="secondary">Lifetime</Badge>
+                    ) : isIncluded ? (
+                      <Badge variant="secondary">Included</Badge>
                     ) : isCurrent ? (
                       <Badge variant="secondary">Current</Badge>
                     ) : (
@@ -300,6 +335,12 @@ export function UpgradeDialog({
                     <div className="mb-4">
                       <span className="text-xl font-semibold">
                         Lifetime access
+                      </span>
+                    </div>
+                  ) : isIncluded ? (
+                    <div className="mb-4">
+                      <span className="text-xl font-semibold">
+                        Included for life
                       </span>
                     </div>
                   ) : (
@@ -415,7 +456,10 @@ export function UpgradeDialog({
           <Button
             onClick={handleSubmit}
             disabled={
-              isBusy || currentPlan === selectedPlan || isSelectedHeldForLife
+              isBusy ||
+              currentPlan === selectedPlan ||
+              isSelectedHeldForLife ||
+              isSelectedIncluded
             }
           >
             {submitLabel()}

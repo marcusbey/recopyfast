@@ -3952,6 +3952,13 @@ Cause (verified on `origin/main` `72f4cff`):
   subscription the Stripe webhook set to cancel (`stopBillingForLifetimeOwner`,
   `webhooks/stripe/route.ts:941-1000`) can restart monthly billing for a plan the grant replaced.
   The card hides the button since s71 (`SubscriptionCard.tsx:221-227`); the endpoint does not.
+- (Found by the review, fix pass.) Reactivation is not the only door: Checkout's subscription
+  intent (`checkout/route.ts:209-237`) and the plan change (`updateSubscription`,
+  `subscription.ts:313-410`) never read grants, so a lifetime owner can buy or switch into a plan
+  the grant already includes, billed monthly; the webhook stops billing only when a lifetime is
+  bought. The grant reader the guards share (`readGrantedPlanIds`) ignores `expires_at`, while the
+  entitlement resolver honours it — production holds one dated non-trial grant
+  (`qa_recovery_20260919`).
 - A Founding Agency owner still running out an Agency subscription reads "1,000 AI credits /
   month" with nothing saying it drops to 250 when the subscription ends (s71 review N-1;
   `SubscriptionCard.tsx:102-128`, ADR 038).
@@ -3978,6 +3985,14 @@ Acceptance criteria:
   cannot restart an Agency subscription either (CTO decision, plan). A subscription above every
   grant (Lifetime Pro + Agency subscription), a trial-only account and an account with no grant
   reactivate exactly as before.
+- [ ] Starting a subscription through Checkout, or switching a subscription (plan change), to a
+  plan a live grant covers answers 409 with a clear message before any Stripe call, and fails
+  closed when grants cannot be read; an Agency subscription beside Lifetime Pro stays on sale. The
+  plan dialog marks such a plan "Included" and refuses it, naming the lifetime plan that includes
+  it (fix pass).
+- [ ] A grant whose `expires_at` has passed is not held, for every reader (billing page, dashboard,
+  entitlement badge, checkout, plan change, reactivation), exactly as the entitlement resolver
+  already says; an unexpired dated grant is held (fix pass).
 - [ ] Under a plan held for life, the running-out row and the cancel confirmation say what the
   monthly AI-credit allowance becomes without the subscription, when the subscription is what
   raises it (resolved server-side). Every other state's copy is unchanged.
@@ -3992,8 +4007,10 @@ Acceptance criteria:
 - [ ] `ai/translate` charges the site owner's wallet through the service client (ADR 035), for the
   owner and for a non-owner editor alike; a non-owner editor's refusal tells them to ask the owner.
 - [ ] Subscription, reactivate and payment-method routes answer a generic message for anything
-  that is not a deliberate billing refusal and log the detail; a missing and a foreign payment
-  method answer the same 404; `payment-methods` is rate limited per IP before authorisation.
+  that is not a deliberate billing refusal and log the detail — a failed subscription read
+  included, which is never told as "No active subscription found" (fix pass); a missing and a
+  foreign payment method answer the same 404; `payment-methods` is rate limited per IP before
+  authorisation, and the card shows the limiter's sentence and when to try again (fix pass).
 - [ ] Every non-lifetime billing behaviour is unchanged, pinned by regression tests.
 
 Complexity: 3. Dependencies: s71 (merged, #74). Branch `feature/s82-billing-lifetime-guards`.

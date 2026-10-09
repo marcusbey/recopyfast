@@ -12,19 +12,23 @@ no embed change (0 bytes), nothing under `server/`, no new dependency, no Stripe
 
 ## CTO decisions
 
-1. **A lifetime grant refuses reactivation of any subscription on its plan or a lower one —
-   Founding Agency + Agency subscription included.** CTO decision: the Agency subscription does
-   lift a Founding Agency owner to 1,000 credits while it runs (ADR 038), but the product never
-   sells that pairing: the webhook sets it to cancel when the lifetime lands
-   (`stopBillingForLifetimeOwner`), the card never offers Reactivate under lifetime (s71), and the
-   plan dialog refuses Agency to an Agency holder. Reactivation would be the one back door to a
-   recurring $49 for a plan already owned — the invisible-billing failure the webhook exists to
-   prevent. An owner who wants more AI credits buys a credit pack. A subscription above every
-   grant (Lifetime Pro + Agency) stays reactivatable, exactly as the webhook keeps it.
+1. **A lifetime grant refuses any subscription on its plan or a lower one — reactivated,
+   bought through Checkout, or switched to — Founding Agency + Agency subscription included.**
+   CTO decision: the Agency subscription does lift a Founding Agency owner to 1,000 credits while
+   it runs (ADR 038), but the product never sells that pairing: the webhook sets it to cancel when
+   the lifetime lands (`stopBillingForLifetimeOwner`) and the card never offers Reactivate under
+   lifetime (s71). Restarting or starting it would be a recurring $49 for a plan already owned —
+   the invisible-billing failure the webhook exists to prevent, and the webhook only acts when a
+   lifetime is *bought*, never when a subscription starts beside one. Reactivation was not the only
+   way in (this plan called it "the one back door" until the review): Checkout's subscription
+   intent and the plan change (`PUT /api/billing/subscription`) never read grants either (review
+   finding 1, fix pass below). An owner who wants more AI credits buys a credit pack. A
+   subscription above every grant (Lifetime Pro + Agency) stays on sale and reactivatable, exactly
+   as the webhook keeps it.
 2. **"Covers" is a rank rule over `PAID_PLAN_IDS`, read through `readGrantedPlanIds`.** CTO
-   decision: the same grant read the billing page and checkout use (non-trial, non-revoked), and
-   the same order the webhook's one exception (`route.ts:971`) encodes; a pure helper in
-   `plan-types.ts` beside the order it relies on.
+   decision: the same grant read the billing page and checkout use (non-trial, non-revoked, and —
+   since the fix pass — not expired), and the same order the webhook's one exception
+   (`route.ts:971`) encodes; a pure helper in `plan-types.ts` beside the order it relies on.
 3. **Deliberate refusals are a typed error; everything else is generic.** CTO decision: returning
    only generic messages would lose "You are already on this plan" and "No active subscription
    found", which the dialog and card show today. `BillingRefusal` (message + 404/409) marks the
@@ -47,8 +51,11 @@ no embed change (0 bytes), nothing under `server/`, no new dependency, no Stripe
    limiter is a flood guard, and a Redis blip must not stop a customer replacing a failing card.
 7. **The post-subscription allowance is resolved only for an account with a live subscription and
    a permanent grant, and sent only when lower than the allowance in force.** CTO decision: the
-   running-out row exists only in that state; plain subscribers pay no extra read and every other
-   payload keeps its keys.
+   running-out row exists only in that state. Corrected in the fix pass (review finding 6): a plain
+   subscriber does pay one extra read — the grant read that finds no grant; what is spared is the
+   resolution's own reads. An account without a live subscription pays nothing, and that grant read
+   and `isTrialling`'s are mutually exclusive, so a request makes at most one. Every other payload
+   keeps its keys.
 8. **Commits: the protocol's docs commit, then one story commit.** (The orchestrator's binding
    protocol asks for the docs first.)
 
@@ -191,11 +198,121 @@ Playwright `--list`. Mutations: neutralise each guard (reactivate check, rank ru
 typing, payment-method 404 mapping, limiter, refund-success check, owner payer, structural
 matcher, post-subscription sentence, held-for-life tile), see its test red, restore.
 
+## Fix pass — review findings (2026-10-09)
+
+The review of `c02df19` found one major and six minors. Each fix is pinned by a test seen red for
+the right reason before the change, or — for the two pins of behaviour already in place (findings
+4 and 5) — by the mutation the review saw survive, now red.
+
+### CTO decisions (fix pass)
+
+9. **Checkout's subscription intent and the plan change refuse a plan a live grant covers, 409,
+   before any Stripe call, and fail closed on a grant read error.** Same reader
+   (`getGrantedPlanIds` → `readGrantedPlanIds`) and rank rule (`isPlanCoveredByGrants`) as
+   reactivation. Checkout decides before `getRecoverableSubscriptionCheckout`, its first Stripe
+   call; the plan change decides in `updateSubscription` — after the subscription read, before the
+   price lookup and `stripe.subscriptions.retrieve` — through the caller's RLS client, where
+   reactivation already decides. Messages: Checkout "Your lifetime plan already includes this one.
+   There is nothing further to buy." (the lifetime intent's wording); plan change "Your lifetime
+   plan already includes this one. Cancel your subscription instead of switching to it." (the
+   plan stays held for life; cancelling is what stops the bill).
+10. **A grant is held while it is not revoked and its `expires_at` is null or ahead — one rule for
+    every reader.** `readGrantedPlanIds` sends the entitlement resolver's own
+    `.or(spendableFilter())` predicate. Every caller (billing page, dashboard route, entitlement
+    badge, checkout, reactivation, plan change) reads through it, so none can disagree with the
+    plan in force.
+11. **The dialog refuses every plan the account's grants include and says why.** It receives the
+    page's `lifetimeGrant.planIds` as `grantedPlanIds`; an included tile (not the one held for
+    life) reads badge "Included" and price slot "Included for life", and its submit is disabled,
+    labelled "Included in your lifetime <highest granted plan>". The held-for-life tile is
+    unchanged.
+12. **Only "no row" is a refusal on the subscription reads.** PGRST116 or no data → the 404
+    `BillingRefusal`; any other read error → a plain `Error` the route logs and answers 500.
+13. **A rate-limited card action reads like checkout's.** The card shows the limiter's `message`
+    then checkout's "Try again at HH:MM." (from `X-RateLimit-Reset`). The retry helpers move out of
+    `useCheckout` into `src/components/billing/rate-limit-retry.ts` with `useCheckout`'s output
+    unchanged; the route's message drops its own "Please try again shortly." so the sentence and
+    the time do not repeat each other.
+
+### Task 9 — Checkout never sells a subscription a grant covers (finding 1)
+
+New `src/__tests__/api/billing/checkout-lifetime-covered.test.ts`: the real
+`getGrantedPlanIds`/`readGrantedPlanIds` over a filtering fake. Refused (409, no recovery lookup,
+no session): Lifetime Pro → Pro and Starter; Founding Agency → Agency and Pro; comped grant;
+unexpired dated grant. Read failure → 500, nothing sold. Sold (200): Lifetime Pro → Agency; trial
+only; revoked; expired dated grant; another account's grant; no grant.
+
+- [x] Task 9
+
+### Task 10 — the plan change never switches into a covered plan (finding 1)
+
+`reactivate-lifetime.test.ts`, the real `updateSubscription`: refused before Stripe (Lifetime Pro +
+Agency subscription → Pro and Starter; Founding Agency + Agency subscription → Pro; unexpired dated
+grant); read failure → plain `Error` before Stripe; switched (Lifetime Pro + Pro subscription →
+Agency; trial only; expired dated grant; no grant).
+
+- [x] Task 10
+
+### Task 11 — the dialog refuses included plans and says why (findings 1 and 5)
+
+`UpgradeDialog.agency.test.tsx`: included tile and disabled submit for a Lifetime Pro owner paying
+for Agency (Pro, Starter) and a Founding Agency owner (Pro); Agency still sold to a Lifetime Pro
+owner; the held-for-life submit stays disabled when the held plan is not `currentPlan` (finding 5).
+`BillingDashboard.plan-card.test.tsx`: the page passes the grants (Lifetime Pro + Agency
+subscription → Pro refused).
+
+- [x] Task 11
+
+### Task 12 — expired grants are not held (finding 2)
+
+`entitlements.test.ts`: an expired dated non-trial grant is not held, and agrees with the plan in
+force; an unexpired one is held. The checkout, reactivation and plan-change cases cover both sides.
+
+- [x] Task 12
+
+### Task 13 — a failed subscription read is an error, not "no subscription" (finding 3)
+
+`subscription-rls.test.ts`: a non-PGRST116 read error makes change, cancel and reactivate throw a
+plain `Error` before Stripe; the existing PGRST116 case stays a 404 refusal.
+
+- [x] Task 13
+
+### Task 14 — pins and comments (findings 4 and 6)
+
+`features-with-monthly-credits.test.ts`: a bullet carrying the allowance's number but not about
+credits is neither rewritten nor dropped (mutation M14). The dashboard route comment and decision
+7 are corrected; the `isPlanCoveredByGrants` and reactivation comments name every path and the
+expiry rule.
+
+- [x] Task 14
+
+### Task 15 — the card shows the limiter's sentence (finding 7)
+
+New `PaymentMethodsCard.rate-limit.test.tsx`: set-default and remove 429s read "Too many payment
+method requests. Try again at HH:MM."; a 404 keeps its own error. `payment-methods.test.ts` pins
+the limiter's message.
+
+- [x] Task 15
+
+### Fix pass — existing tests changed (declared)
+
+- `subscription-rls.test.ts`: the `plan_entitlements` stub answers `.or()` (the reader now sends
+  it) and its comment names `updateSubscription` too; a `readFails` switch is added. No existing
+  assertion changed.
+- `reactivate-lifetime.test.ts`: the grant fake applies `.or()` and rows carry `expires_at`; the
+  Stripe mock gains `retrieve` and the plans mock resolves a price, for the plan-change cases; the
+  header and the Founding Agency comment no longer call reactivation "the one back door". No
+  existing assertion changed.
+- `payment-methods.test.ts`: the limiter expectation also pins `message` (stricter, not looser).
+
 ## Follow-ups (not this story)
 
 - Translate and A/B generate refunds report failures to `console.error` only (decision 5).
 - `reactivateSubscription` reads the newest row whatever its status (research, Traps).
-- The plan dialog still lets a lifetime owner select a lower plan than the one held for life.
+- Checkout's catch still answers `error.message` (pre-existing): a grant or subscription read
+  failure reaches the client as PostgREST's text. Same hygiene as decision 3, not done here.
+- `useCheckout` shows checkout's 429 as `error` ("Rate limit exceeded") plus the time; checkout's
+  own limiter sentence is never shown either (decision 13 keeps its output unchanged).
 
 ## Execution notes (deviations, declared)
 

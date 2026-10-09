@@ -376,6 +376,14 @@ export function BillingDashboard({
                   }
                 : undefined
             }
+            // s82 review, finding 1: every plan a grant includes is refused
+            // in the dialog as Checkout and the plan change refuse it —
+            // including under a higher subscription (Lifetime Pro + Agency),
+            // where nothing on the card is held for life. Same read as the
+            // offer card's (`lifetimeGrant`), so the two cannot disagree.
+            grantedPlanIds={
+              lifetimeGrant.kind === "granted" ? lifetimeGrant.planIds : []
+            }
             onSuccess={handleSubscriptionUpdate}
           />
         </>

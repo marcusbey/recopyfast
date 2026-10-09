@@ -45,12 +45,16 @@ export const PAID_PLAN_IDS: readonly PaidPlanId[] = [
  * (`stopBillingForLifetimeOwner`): every subscription on the grant's plan or a
  * lower one is set to cancel, and the one exception — a Lifetime Pro grant
  * beside an Agency subscription — is exactly a subscription ranked above the
- * grant. s82 refuses to reactivate what this answers true for, so the endpoint
- * cannot restart what the webhook stopped.
+ * grant. s82 refuses to reactivate, sell through Checkout, or switch a
+ * subscription into what this answers true for, and the plan dialog refuses
+ * it too — so no path can start or restart what the webhook stops. (The
+ * review found Checkout and the plan change open after reactivation was
+ * closed; all four read this one rule.)
  *
  * Retired and unknown ids rank nowhere: they cover nothing and nothing covers
- * them. Pass only non-trial grants (`readGrantedPlanIds`): a trial is not
- * something the account holds for life.
+ * them. Pass only live non-trial grants (`readGrantedPlanIds`): a trial is not
+ * something the account holds for life, and neither is a grant whose
+ * `expires_at` has passed.
  */
 export function isPlanCoveredByGrants(
   planId: string,

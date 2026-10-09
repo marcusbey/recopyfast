@@ -234,3 +234,159 @@ describe("UpgradeDialog, a plan held for life", () => {
     expect(tile).toHaveTextContent("1,000 AI credits / month");
   });
 });
+
+/**
+ * s82 review, finding 5: the held-for-life submit guard was only ever tested
+ * with `currentPlan` equal to the held plan, where `currentPlan ===
+ * selectedPlan` disables the button on its own. Here the two differ, so only
+ * the held-for-life clause stands between the click and a checkout.
+ */
+describe("UpgradeDialog, a plan held for life that is not the current plan", () => {
+  it("still cannot be bought", async () => {
+    const user = userEvent.setup();
+    render(
+      <UpgradeDialog
+        open
+        onOpenChange={jest.fn()}
+        currentPlan={null}
+        hasSubscription={false}
+        catalogue={CATALOGUE}
+        lifetimeOffers={[]}
+        foundingAgencyAvailability={null}
+        agencyCheckoutEnabled
+        heldForLife={{ planId: "agency", monthlyCredits: 250 }}
+        onSuccess={jest.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /^Agency/ }));
+    const submit = screen.getByRole("button", {
+      name: "You hold Agency for life",
+    });
+    await user.click(submit);
+
+    expect(submit).toBeDisabled();
+    expect(startCheckout).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * s82 review, finding 1: the dialog refused only the plan held for life. A
+ * lower plan — Starter or Pro under Founding Agency, Starter under Lifetime
+ * Pro, or Pro under Lifetime Pro while an Agency subscription runs — stayed
+ * buyable at its monthly price, and the server now refuses it (409). The
+ * dialog says the same thing first: the tile reads "Included", and the submit
+ * names the lifetime plan that includes it.
+ */
+describe("UpgradeDialog, plans a lifetime grant already includes", () => {
+  const fetchMock = jest.fn();
+
+  beforeEach(() => {
+    startCheckout.mockClear();
+    fetchMock.mockReset();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  function renderFor(props: {
+    currentPlan: string | null;
+    hasSubscription: boolean;
+    grantedPlanIds: readonly string[];
+    heldForLife?: { planId: string; monthlyCredits: number | null };
+  }) {
+    render(
+      <UpgradeDialog
+        open
+        onOpenChange={jest.fn()}
+        catalogue={CATALOGUE}
+        lifetimeOffers={[]}
+        foundingAgencyAvailability={null}
+        agencyCheckoutEnabled
+        onSuccess={jest.fn()}
+        {...props}
+      />,
+    );
+  }
+
+  it("marks a lower plan Included, without a price, for a Lifetime Pro owner paying for Agency", async () => {
+    const user = userEvent.setup();
+    renderFor({
+      currentPlan: "agency",
+      hasSubscription: true,
+      grantedPlanIds: ["pro"],
+    });
+
+    const pro = screen.getByRole("radio", { name: /^Pro/ });
+    expect(pro).toHaveTextContent("Included");
+    expect(pro).toHaveTextContent("Included for life");
+    expect(pro).not.toHaveTextContent("$19");
+    expect(pro).not.toHaveTextContent("/month");
+
+    await user.click(pro);
+    const submit = screen.getByRole("button", {
+      name: "Included in your lifetime Pro",
+    });
+    await user.click(submit);
+
+    expect(submit).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses Starter to the same owner, naming the lifetime plan that includes it", async () => {
+    const user = userEvent.setup();
+    renderFor({
+      currentPlan: "agency",
+      hasSubscription: true,
+      grantedPlanIds: ["pro"],
+    });
+
+    await user.click(screen.getByRole("radio", { name: /^Starter/ }));
+
+    expect(
+      screen.getByRole("button", { name: "Included in your lifetime Pro" }),
+    ).toBeDisabled();
+  });
+
+  it("refuses Pro to a Founding Agency owner with nothing billing", async () => {
+    const user = userEvent.setup();
+    renderFor({
+      currentPlan: "agency",
+      hasSubscription: false,
+      grantedPlanIds: ["agency"],
+      heldForLife: { planId: "agency", monthlyCredits: 250 },
+    });
+
+    await user.click(screen.getByRole("radio", { name: /^Pro/ }));
+    const submit = screen.getByRole("button", {
+      name: "Included in your lifetime Agency",
+    });
+    await user.click(submit);
+
+    expect(submit).toBeDisabled();
+    expect(startCheckout).not.toHaveBeenCalled();
+  });
+
+  it("still sells Agency to a Lifetime Pro owner: a higher plan is not included", async () => {
+    const user = userEvent.setup();
+    renderFor({
+      currentPlan: "pro",
+      hasSubscription: false,
+      grantedPlanIds: ["pro"],
+      heldForLife: { planId: "pro", monthlyCredits: 500 },
+    });
+
+    const agency = screen.getByRole("radio", { name: /^Agency/ });
+    expect(agency).toHaveTextContent("$49");
+    expect(agency).not.toHaveTextContent("Included");
+
+    await user.click(agency);
+    await user.click(
+      screen.getByRole("button", { name: "Continue to payment — $49" }),
+    );
+
+    expect(startCheckout).toHaveBeenCalledWith({
+      intent: "subscription",
+      planId: "agency",
+      billingPeriod: "monthly",
+    });
+  });
+});

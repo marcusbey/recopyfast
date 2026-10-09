@@ -109,6 +109,24 @@ describe("featuresWithMonthlyCredits", () => {
     );
   });
 
+  // s82 review (mutation M14 survived): the number alone does not make a
+  // bullet the allowance. One carrying the same number about something else
+  // keeps its words, whatever the account's allowance resolves to.
+  it("leaves a bullet with the allowance's number alone when it is not about credits", () => {
+    const features = [
+      "Up to 500 pages tracked",
+      "AI rewrite suggestions, 500 credits a month",
+    ];
+
+    expect(featuresWithMonthlyCredits(planWith(features, 500), 100)).toEqual([
+      "Up to 500 pages tracked",
+      "AI rewrite suggestions, 100 credits a month",
+    ]);
+    expect(featuresWithMonthlyCredits(planWith(features, 500), null)).toEqual([
+      "Up to 500 pages tracked",
+    ]);
+  });
+
   it("drops the allowance bullet when no resolved allowance is known", () => {
     expect(
       featuresWithMonthlyCredits(planWith(AGENCY_FEATURES, 1000), null),

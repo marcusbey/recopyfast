@@ -10,7 +10,9 @@ mockup, as for s71: nothing moves on either surface, so the state matrices below
 ## Components
 
 - No new component, no new token. `Badge variant="secondary"` (the dialog's existing "Current"
-  badge variant) carries "Lifetime" in the dialog; the card's header badge is unchanged from s71.
+  badge variant) carries "Lifetime" in the dialog — and, since the fix pass, "Included" on a plan
+  a lifetime grant includes; the card's header badge is unchanged from s71. "Included for life"
+  takes the price slot at the same `text-xl font-semibold` as "Lifetime access".
 - The dialog's price slot for a plan held for life prints "Lifetime access" at `text-xl
   font-semibold` — a phrase, not a number, so not `.tabular`, and one step below the tile's
   `text-3xl` number so it fits a third-width tile at `md` without wrapping.
@@ -56,6 +58,7 @@ catalogue's wording stays.
 | Tile's plan | Badge | Price slot | Bullets | Submit when selected |
 |---|---|---|---|---|
 | Held for life (grant covers the plan in force) | **Lifetime** | **Lifetime access** (no "/month", no annual line) | allowance restated to the account's own | disabled, labelled "You hold Agency for life" (added at build: the default label "Continue to payment — $49" would have put the removed price back on the button) |
+| Included by a lifetime grant (same plan or lower, not the one held for life — fix pass, review finding 1) | **Included** | **Included for life** (no "/month", no annual line) | catalogue (unchanged) | disabled, labelled "Included in your lifetime Pro" (the highest plan held for life) |
 | The plan in force, billed monthly | Current (unchanged) | $49/month (unchanged) | catalogue (unchanged) | disabled (unchanged) |
 | Any other | Selected when selected (unchanged) | $price/month, annual line (unchanged) | catalogue (unchanged) | enabled (unchanged) |
 
@@ -64,19 +67,24 @@ catalogue's wording stays.
 | Situation | Status | Message |
 |---|---|---|
 | Reactivate a subscription a lifetime grant covers | 409 | "Your lifetime plan already includes this one, so this subscription can't be restarted." |
+| Start (Checkout) a subscription a lifetime grant covers (fix pass) | 409 | "Your lifetime plan already includes this one. There is nothing further to buy." |
+| Switch a subscription to a plan a lifetime grant covers (fix pass) | 409 | "Your lifetime plan already includes this one. Cancel your subscription instead of switching to it." |
+| The subscription or grant read fails in plan change / cancel / reactivate (fix pass) | 500 | the route's generic message below (no longer "No active subscription found") |
 | No active subscription to change or cancel | 404 | "No active subscription found" (text unchanged; was 500) |
 | No subscription to reactivate | 404 | "No subscription found" (text unchanged; was 500) |
 | Change to the price already billed | 409 | "You are already on this plan" (text unchanged; was 500) |
 | Reactivate a subscription not set to cancel | 409 | "Subscription is not scheduled for cancellation" (text unchanged; was 500) |
 | Anything else in plan change / cancel / reactivate | 500 | "Failed to update subscription" / "Failed to cancel subscription" / "Failed to reactivate subscription" |
 | Unknown or foreign payment method | 404 | "Payment method not found" |
+| Set-default / remove card rate limited (fix pass, review finding 7) | 429 | the card shows "Too many payment method requests. Try again at HH:MM." — the limiter's `message` and checkout's retry sentence, never its `error` "Rate limit exceeded" |
 | Anything else in set-default / remove card | 500 | "Failed to update payment method" / "Failed to remove payment method" |
 | AI suggestion failed, refund succeeded | 502 | "AI suggestions are unavailable right now. You were not charged." (unchanged) |
 | AI suggestion failed, refund failed | 502 | "AI suggestions are unavailable right now. We could not refund the credit for this request automatically, and we have been notified." |
 | Translate refused by the owner's plan or wallet, caller is not the owner | 403 | "AI translation isn't available on this site's plan right now. Ask the site owner to add AI credits." |
 
 The card and the dialog already print `error` from any non-ok response, so no client change is
-needed for these.
+needed for these — except the payment-methods card's 429, whose human sentence is in `message`
+(fix pass).
 
 ## Responsive and accessibility
 

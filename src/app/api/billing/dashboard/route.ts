@@ -162,10 +162,15 @@ export async function GET() {
     // s82 (s71 review N-1): what the allowance becomes once the live
     // subscription ends, for the card's running-out row. A Founding Agency
     // owner running out an Agency subscription holds 1,000 credits now and 250
-    // after (ADR 038), and nothing on the page said so. Asked only with a live
-    // subscription AND a permanent grant — the one state whose card has that
-    // row — so a plain subscriber pays no extra read; sent only when lower
-    // than the allowance in force, so every other payload keeps its keys.
+    // after (ADR 038), and nothing on the page said so. Resolved only with a
+    // live subscription AND a permanent grant — the one state whose card has
+    // that row. What that saves is the resolution's own reads: every live
+    // subscriber still pays the one grant read that finds out whether a grant
+    // exists (a plain subscriber learns there is none); an account without a
+    // live subscription pays nothing here. That grant read and `isTrialling`'s
+    // above are mutually exclusive (one needs a live subscription, the other
+    // none), so a request makes at most one of them. Sent only when lower than
+    // the allowance in force, so every other payload keeps its keys.
     const includedAfterSubscription =
       subscription && (await readGrantedPlanIds(supabase, user.id)).length > 0
         ? await resolveMonthlyCreditsWithoutSubscription(supabase, user.id)

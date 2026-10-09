@@ -83,6 +83,13 @@ let allWritesBlocked = false;
  */
 let rowMissing = false;
 
+/**
+ * When true, the SELECT itself fails — the database is down, not the row
+ * missing (s82 review, finding 3: that is an `Error`, logged and answered 500,
+ * never the customer-facing "No active subscription found").
+ */
+let readFails = false;
+
 type SupabaseError = { code?: string; message: string; details?: string };
 
 /**
@@ -97,16 +104,16 @@ function createPolicyScopedClient(role: "authenticated" | "service_role") {
   const canWrite = role === "service_role" && !allWritesBlocked;
 
   const from = (table: string) => {
-    // s82: `reactivateSubscription` asks whether a lifetime grant covers the
-    // subscription before it touches Stripe. This account holds none, so the
-    // read answers no rows and every case below behaves as before; the grant
-    // cases live in reactivate-lifetime.test.ts.
+    // s82: `reactivateSubscription` and `updateSubscription` ask whether a
+    // lifetime grant covers the plan before they touch Stripe. This account
+    // holds none, so the read answers no rows and every case below behaves as
+    // before; the grant cases live in reactivate-lifetime.test.ts.
     if (table === "plan_entitlements") {
       const grants: Record<string, unknown> = {
         then: (resolve: (value: unknown) => unknown) =>
           Promise.resolve({ data: [], error: null }).then(resolve),
       };
-      for (const method of ["select", "eq", "is", "neq", "returns"]) {
+      for (const method of ["select", "eq", "is", "neq", "or", "returns"]) {
         grants[method] = () => grants;
       }
       return grants;
@@ -131,6 +138,15 @@ function createPolicyScopedClient(role: "authenticated" | "service_role") {
         error: SupabaseError | null;
       }> => {
         if (!isWrite) {
+          if (readFails) {
+            return {
+              data: null,
+              error: {
+                code: "08006",
+                message: "connection to server was lost",
+              },
+            };
+          }
           if (rowMissing) {
             return {
               data: null,
@@ -259,6 +275,7 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
     effects = [];
     allWritesBlocked = false;
     rowMissing = false;
+    readFails = false;
 
     armStripeDefaults();
   });
@@ -404,6 +421,7 @@ describe("s82: deliberate refusals are BillingRefusals", () => {
     effects = [];
     allWritesBlocked = false;
     rowMissing = false;
+    readFails = false;
     armStripeDefaults();
   });
 
@@ -459,6 +477,31 @@ describe("s82: deliberate refusals are BillingRefusals", () => {
       "Subscription is not scheduled for cancellation",
     );
     expect(mockStripeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a failed subscription read is not a refusal: it is an error, before Stripe", async () => {
+    readFails = true;
+
+    const outcomes = await Promise.all(
+      [
+        updateSubscription("user-1", { planId: "starter" }),
+        cancelSubscription("user-1"),
+        reactivateSubscription("user-1"),
+      ].map((promise) =>
+        promise.then(
+          () => null,
+          (reason: unknown) => reason,
+        ),
+      ),
+    );
+
+    for (const error of outcomes) {
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(BillingRefusal);
+    }
+    expect(mockStripeRetrieve).not.toHaveBeenCalled();
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+    expect(mockStripeCancel).not.toHaveBeenCalled();
   });
 
   it("a failed database write is not a refusal: its text stays server-side", async () => {
