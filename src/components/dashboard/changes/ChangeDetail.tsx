@@ -13,7 +13,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ContentValue } from "@/components/ui/content-value";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ChangeAction } from "@/hooks/useChangeActions";
+import {
+  ATTRIBUTE_DRAFT_NOTE,
+  type ChangeAction,
+} from "@/hooks/useChangeActions";
 import {
   useChangeHistory,
   type ChangeHistoryEvent,
@@ -26,6 +29,10 @@ interface ChangeDetailProps {
   location: string;
   canEdit: boolean;
   canPublish: boolean;
+  /** False for a draft whose staged attributes this page cannot discard. */
+  canDiscard: boolean;
+  /** False when the live text is already the original. */
+  canRevert: boolean;
   busyAction: ChangeAction | null;
   /** A refused Publish or Edit on page, shown under the actions. */
   actionError: string | null;
@@ -172,6 +179,8 @@ export function ChangeDetail({
   location,
   canEdit,
   canPublish,
+  canDiscard,
+  canRevert,
   busyAction,
   actionError,
   onPublish,
@@ -180,7 +189,6 @@ export function ChangeDetail({
 }: ChangeDetailProps) {
   const isBusy = busyAction !== null;
   const isPending = row.state === "pending";
-  const isPublished = row.state === "published";
   const showLanguage = row.language !== "en" || row.variant !== "default";
 
   return (
@@ -205,7 +213,7 @@ export function ChangeDetail({
                 Publish
               </Button>
             )}
-            {isPending && (
+            {canDiscard && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -216,7 +224,7 @@ export function ChangeDetail({
                 Discard draft
               </Button>
             )}
-            {isPublished && (
+            {canRevert && (
               <Button
                 variant="outline"
                 size="sm"
@@ -237,6 +245,11 @@ export function ChangeDetail({
               </span>
             )}
           </div>
+          {isPending && !canDiscard && (
+            <p className="text-xs text-muted-foreground">
+              {ATTRIBUTE_DRAFT_NOTE}
+            </p>
+          )}
           {actionError && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" aria-hidden="true" />

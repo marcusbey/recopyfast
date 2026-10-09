@@ -270,6 +270,51 @@ the choices the plan left open.
   own span and the time never shrinks (`ChangeRow.tsx`, test "truncates a long address, never the
   time"); the design's full address is kept wherever it fits.
 
+### Devin review (PR #77)
+
+Five findings, fixed without a new route, RPC or migration. The view SQL is byte-identical, and
+no existing route changed.
+
+- **Discard sends staged attributes back** (Task 6). The plan's discard is "PUT with the live
+  text". The save RPC (`20260924030000`, `save_staging_content_atomic`) *merges* the request's
+  attribute patch into `staging_attributes`, so a staged `href`/`alt` survived the discard and
+  Publish still pushed it. No existing route discards (the embed has none; `revert_staging_content`
+  has no caller). The same RPC drops a staged key whose value equals the live one, so the discard
+  PUT now also carries each staged attribute with its live value (`{ elementId, content, language,
+  variant, href?, alt? }`). When one cannot go back that way (no live value: the RPC compares a JSON
+  string with SQL NULL; a key the PUT does not know; a value its validation would trim or refuse),
+  Discard draft is not offered, and the expanded row says "This draft changes a link or image
+  attribute, which can't be discarded here. Change it on the page." The orchestrator's suggested
+  wording was "This draft changes attributes — discard it on the page". It was changed because the
+  page has no discard either (the embed's editor can only set a new value), and "attribute" alone
+  means nothing to an owner. **Follow-up:** a draft staging an attribute with no live value can
+  only be published or overwritten; truly discarding it needs a discard operation (a route over
+  `revert_staging_content`, or a new RPC), which this story may not add.
+- **The list route's rows carry `draftAttributes`** (Task 3 contract): `[{ name, live }]` for a
+  pending row, `[]` otherwise. Read by one RLS select of `content_elements (id, metadata)` for the
+  page's pending ids, as the history route already reads that table. Only names and live values
+  leave, never a staged value. The state is still derived by the view alone.
+- **Revert and publish, publish refused** (Tasks 6–7). The hook's actions now resolve
+  `{ error, applied }` instead of `string | null` (the "returns the publish refusal" test became
+  "says the revert landed as a draft"). When the PUT saved and the POST failed, the dialog closes,
+  the row is drawn Pending with the original as its draft, and the row opens with "The revert was
+  saved as a draft but not published. <reason>" under its actions, where Publish retries it.
+- **No Revert when the live text is the original** (Task 7's actions table offered Revert on every
+  published row). A row published back to its original stays Published (`published_at`); saving
+  the same text "succeeded" with nothing pending. Revert is not offered there, the existing
+  "Text is the same as the original." line explains, and the hook refuses it without a request.
+- **`nextOffset` stops at the offset ceiling** (Task 3). From the last offset the route accepts
+  (10,000) it offered 10,050, which it refuses with a 400. It is now null when the next offset would
+  pass `MAX_OFFSET`, and the page says "Showing the first N of M — use the filters or search to see
+  more." The limits moved to `src/lib/content/changes-paging.ts` (new file, outside "Files
+  touched"), so the route and the page share one value.
+- **Deep page labels keep their first segment** (Task 2 and the design's location table).
+  `/products/alpha/setup` and `/services/alpha/setup` both read "… › Alpha › Setup". Paths of up to
+  three segments are now shown whole ("Products › Alpha › Setup"); deeper ones keep the first and
+  the last two ("Docs › … › B › C", was "… › B › C"; the 300-character case is now first + last
+  two). First-and-last alone was rejected: it would merge `/blog/2024/launch` and
+  `/blog/2025/launch`, which the old label told apart.
+
 ## Run interdicts
 
 - **Ceilings only go down.** `MAX_BUNDLE_GZ`/`MAX_WIDGET_GZ` and the seeded pair never rise;

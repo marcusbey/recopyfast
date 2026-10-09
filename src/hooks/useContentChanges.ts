@@ -35,6 +35,13 @@ export interface ChangesSite {
   permission: SiteGrant | string;
 }
 
+/** An attribute a draft stages (a link's `href`, an image's `alt`). */
+export interface DraftAttribute {
+  name: string;
+  /** Its value live now; null when the live element has none. */
+  live: string | null;
+}
+
 export interface ContentChange {
   id: string;
   siteId: string;
@@ -47,6 +54,8 @@ export interface ContentChange {
   original: string | null;
   live: string | null;
   draft: string | null;
+  /** The attributes a pending row's draft stages; empty for any other row. */
+  draftAttributes: DraftAttribute[];
   state: ChangeState;
   changedAt: string | null;
   changedBy: string | null;

@@ -19,6 +19,12 @@
  *   error is never the empty state (the content-load-states cases this
  *   replaces: a refused read or a malformed body is a failure, not an empty
  *   account).
+ *
+ * Devin review (PR #77): Discard sends a staged link back to its live value,
+ * or is not offered when it cannot; a revert whose publish failed shows as
+ * the pending draft it is, with Publish to retry; Revert is not offered when
+ * the live text is already the original; past the offset ceiling the list
+ * says it is capped instead of offering a page the route refuses.
  */
 
 import {
@@ -77,6 +83,7 @@ function row(id: string, overrides: Record<string, unknown>): Row {
     original: `Original ${id}`,
     live: `Live ${id}`,
     draft: null,
+    draftAttributes: [],
     state: "published",
     changedAt: ago(2),
     changedBy: null,
@@ -847,6 +854,166 @@ describe("ChangesView — actions by state and grant", () => {
     expect(screen.getByText("Draft discarded.")).toBeInTheDocument();
   });
 
+  it("discards a draft and the link it stages: the live link goes back in the same PUT", async () => {
+    mockApi({
+      list: () =>
+        json(
+          listBody([
+            HERO,
+            {
+              ...HERO_BUTTON,
+              draftAttributes: [{ name: "href", live: "/signup" }],
+            },
+          ]),
+        ),
+    });
+    const user = await renderLoaded();
+    const region = await expand(user, "Start your 14-day trial");
+
+    await user.click(
+      within(region).getByRole("button", { name: "Discard draft" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Discard draft" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    const [[, init]] = requests(`/api/staging/content/${ACME}`, "PUT");
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      elementId: "rcf-v6di4rh42g",
+      content: "Start free trial",
+      language: "en",
+      variant: "default",
+      href: "/signup",
+    });
+    expect(screen.getByText("Draft discarded.")).toBeInTheDocument();
+  });
+
+  it("offers no Discard for a draft whose link change can't be sent back, and says why", async () => {
+    mockApi({
+      list: () =>
+        json(
+          listBody([
+            HERO,
+            {
+              ...HERO_BUTTON,
+              draftAttributes: [{ name: "href", live: null }],
+            },
+          ]),
+        ),
+    });
+    const user = await renderLoaded();
+    const region = await expand(user, "Start your 14-day trial");
+
+    expect(actionNames(region)).toEqual(["Publish", "Edit on page"]);
+    expect(
+      within(region).getByText(
+        "This draft changes a link or image attribute, which can't be discarded here. Change it on the page.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(
+      within(rowOf("Start your 14-day trial")).getByRole("button", {
+        name: /^More actions for /,
+      }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Compare and history" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "Discard draft" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a revert whose publish failed as the pending draft it is, with the reason and Publish to retry", async () => {
+    let publishes = 0;
+    mockApi({
+      publish: () =>
+        (publishes += 1) === 1
+          ? json({ error: "Publish rate limit exceeded for this site." }, 429)
+          : json({ success: true }),
+    });
+    const user = await renderLoaded();
+
+    // From ⋮ on a collapsed row: the outcome has to open the row to be seen.
+    await user.click(
+      within(rowOf("Ship copy changes in minutes, not sprints")).getByRole(
+        "button",
+        { name: /^More actions for / },
+      ),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Revert to original" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Revert and publish" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    const reverted = rowOf("Copy changes without a developer");
+    expect(
+      within(rowLine("Copy changes without a developer")).getByText("Pending"),
+    ).toBeInTheDocument();
+    const region = within(reverted).getByRole("region");
+    expect(within(region).getByRole("alert")).toHaveTextContent(
+      "The revert was saved as a draft but not published. Publish rate limit exceeded for this site.",
+    );
+    expect(
+      screen.queryByText("Reverted and published."),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(region).getByRole("button", { name: "Publish" }));
+
+    expect(await screen.findByText("Published.")).toBeInTheDocument();
+    expect(
+      within(rowLine("Copy changes without a developer")).getByText(
+        "Published",
+      ),
+    ).toBeInTheDocument();
+    expect(within(region).queryByRole("alert")).not.toBeInTheDocument();
+    expect(requests(`/api/staging/content/${ACME}`, "PUT")).toHaveLength(1);
+    expect(requests("/api/staging/publish", "POST")).toHaveLength(2);
+  });
+
+  it("offers no Revert on a published row whose text is already the original", async () => {
+    mockApi({
+      list: () =>
+        json(
+          listBody([
+            HERO,
+            row("r9", {
+              state: "published",
+              original: "Hello",
+              live: "Hello",
+            }),
+          ]),
+        ),
+    });
+    const user = await renderLoaded();
+    const region = await expand(user, "Hello");
+
+    expect(actionNames(region)).toEqual(["Edit on page"]);
+    expect(
+      within(region).getByText("Text is the same as the original."),
+    ).toBeInTheDocument();
+    await user.click(
+      within(rowOf("Hello")).getByRole("button", {
+        name: /^More actions for /,
+      }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Compare and history" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "Revert to original" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("publishes a pending row with the POST alone and shows a refusal under the actions", async () => {
     mockApi({
       publish: () =>
@@ -1029,6 +1196,31 @@ describe("ChangesView — states", () => {
     expect(
       screen.queryByRole("button", { name: "Show 50 more" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ChangesView — the list ceiling", () => {
+  it("says the list is capped when more match than the route pages to, and offers no next page", async () => {
+    mockApi({
+      list: () =>
+        json(listBody([HERO, PRICING], { total: 12_000, nextOffset: null })),
+    });
+    await renderLoaded();
+
+    expect(
+      screen.getByText(
+        "Showing the first 2 of 12,000 — use the filters or search to see more.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show 50 more" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says nothing about a ceiling when every row is shown", async () => {
+    await renderLoaded();
+
+    expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
   });
 });
 

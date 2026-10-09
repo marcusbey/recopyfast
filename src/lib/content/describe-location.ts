@@ -19,8 +19,18 @@
 
 const SEPARATOR = " › ";
 const PLACE_SEPARATOR = " · ";
-/** Paths deeper than this keep their last two segments behind an ellipsis. */
-const MAX_PAGE_SEGMENTS = 2;
+/**
+ * Paths deeper than this keep their first segment and their last two, the
+ * middle behind an ellipsis: "Products › … › Alpha › Setup".
+ *
+ * Tombstone (Devin review, PR #77): the last two alone ("… › Alpha › Setup")
+ * gave /products/alpha/setup and /services/alpha/setup one label, and the
+ * full path beside the band truncates on a phone. The first segment names the
+ * section; the last two still tell /blog/2024/launch from /blog/2025/launch,
+ * which a first-and-last label would not.
+ */
+const MAX_PAGE_SEGMENTS = 3;
+const TAIL_PAGE_SEGMENTS = 2;
 
 const ELEMENT_LABELS: Readonly<Record<string, string>> = {
   h1: "Main heading",
@@ -115,7 +125,7 @@ export function describePage(pagePath: string | null | undefined): string {
       : "Page";
   }
   if (labels.length <= MAX_PAGE_SEGMENTS) return labels.join(SEPARATOR);
-  return ["…", ...labels.slice(-MAX_PAGE_SEGMENTS)].join(SEPARATOR);
+  return [labels[0], "…", ...labels.slice(-TAIL_PAGE_SEGMENTS)].join(SEPARATOR);
 }
 
 interface SelectorSegment {

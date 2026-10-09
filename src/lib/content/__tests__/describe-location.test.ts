@@ -10,7 +10,10 @@
  * "Hero · Main heading" under a "Homepage" band, from signals the row already
  * holds — no new embed bytes. The tables below are the design's
  * (docs/designs/s70-content-changes.md, "Human-readable location"), row for
- * row.
+ * row, except deep paths: Devin review (PR #77) found that keeping only the
+ * last two segments gave /products/alpha/setup and /services/alpha/setup the
+ * same band ("… › Alpha › Setup"), and the full path beside it truncates on a
+ * phone. A band keeps the first segment as well.
  */
 
 import { describeElement, describePage } from "../describe-location";
@@ -20,21 +23,30 @@ describe("describePage", () => {
     ["/", "Homepage"],
     ["/pricing", "Pricing"],
     ["/blog/how-we-ship", "Blog › How we ship"],
-    ["/docs/a/b/c", "… › B › C"],
+    ["/products/alpha/setup", "Products › Alpha › Setup"],
+    ["/docs/a/b/c", "Docs › … › B › C"],
     [null, "Every page"],
   ])("labels %p as %p", (pagePath, label) => {
     expect(describePage(pagePath)).toBe(label);
   });
 
-  it("shortens a 300-character path to its last two segments", () => {
+  it("shortens a 300-character path to its first segment and its last two", () => {
     const segments = Array.from({ length: 30 }, (_, index) => `part-${index}`);
     const longPath = `/${segments.join("/")}`.padEnd(300, "x");
     expect(longPath).toHaveLength(300);
 
     const label = describePage(longPath);
 
-    expect(label.startsWith("… › Part 28 › ")).toBe(true);
-    expect(label.split(" › ")).toHaveLength(3);
+    expect(label.startsWith("Part 0 › … › Part 28 › ")).toBe(true);
+    expect(label.split(" › ")).toHaveLength(4);
+  });
+
+  it.each([
+    ["/products/alpha/setup", "/services/alpha/setup"],
+    ["/products/alpha/x/setup", "/services/alpha/x/setup"],
+    ["/blog/2024/launch", "/blog/2025/launch"],
+  ])("tells %p from %p", (left, right) => {
+    expect(describePage(left)).not.toBe(describePage(right));
   });
 });
 

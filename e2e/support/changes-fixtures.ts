@@ -53,6 +53,9 @@ function rows() {
     language: "en",
     variant: "default",
     draft: null as string | null,
+    // The list route's contract: the attributes a pending draft stages. None
+    // here, so Discard is offered as for any text draft.
+    draftAttributes: [] as Array<{ name: string; live: string | null }>,
     changedBy: null as string | null,
     createdAt: "2026-09-28T09:00:00.000Z",
   };

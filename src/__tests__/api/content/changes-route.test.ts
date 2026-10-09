@@ -15,6 +15,11 @@
  * to, `q` regex-escaped and reaching one `imatch` filter only (never an
  * `.or()` string built from input), bounded offsets, and counts that share
  * the list's filters.
+ *
+ * Devin review (PR #77): a pending row carries the attributes its draft
+ * stages with their live values (one RLS read of those rows' metadata), so
+ * Discard can send them back; and no next offset is offered past the offset
+ * ceiling, where "Show 50 more" was refused with a 400 on every click.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -128,10 +133,17 @@ const countQueries = () => contentQueries().filter(isHead);
 const callsOf = (query: RecordedQuery, method: string) =>
   query.calls.filter(([name]) => name === method).map(([, ...args]) => args);
 
+let mockMetadata: Array<{ id: string; metadata: unknown }> = [];
+const metadataQueries = () =>
+  mockRecorded.filter((query) => query.table === "content_elements");
+
 function defaultResponder(rows: unknown[], total: number) {
   return (query: RecordedQuery): QueryResult => {
     if (query.table === "site_permissions") {
       return { data: MEMBERSHIPS, error: null, count: null };
+    }
+    if (query.table === "content_elements") {
+      return { data: mockMetadata, error: null, count: null };
     }
     if (isHead(query)) {
       const state = callsOf(query, "eq").find(
@@ -161,6 +173,7 @@ describe("GET /api/content/changes", () => {
     (enforceRateLimit as jest.Mock).mockResolvedValue(null);
     mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
     mockRespond = defaultResponder([viewRow(1)], 1);
+    mockMetadata = [];
   });
 
   it("runs an IP limiter, failing open, before it asks who the caller is", async () => {
@@ -410,11 +423,58 @@ describe("GET /api/content/changes", () => {
       original: "Original",
       live: "Live",
       draft: null,
+      draftAttributes: [],
       state: "published",
       changedAt: "2026-10-08T10:00:00+00:00",
       changedBy: "ana@example.com",
       createdAt: "2026-09-28T09:00:00+00:00",
     });
+  });
+
+  it("lists the attributes a pending draft stages, with their live values, from one RLS read of the pending rows", async () => {
+    mockRespond = defaultResponder(
+      [
+        viewRow(1, { change_state: "pending", staging_content: "Live" }),
+        viewRow(2),
+        viewRow(3, { change_state: "pending", staging_content: "Draft" }),
+      ],
+      3,
+    );
+    mockMetadata = [
+      {
+        id: "row-1",
+        metadata: {
+          type: "a",
+          href: "/old",
+          staging_attributes: { href: "/new", alt: "A new picture" },
+        },
+      },
+      { id: "row-3", metadata: { type: "h1" } },
+    ];
+
+    const body = await (await get()).json();
+
+    expect(metadataQueries()).toHaveLength(1);
+    const [metadata] = metadataQueries();
+    expect(callsOf(metadata, "select")).toEqual([["id, metadata"]]);
+    expect(callsOf(metadata, "in")).toEqual([["id", ["row-1", "row-3"]]]);
+    expect(
+      body.rows.map((row: { draftAttributes: unknown }) => row.draftAttributes),
+    ).toEqual([
+      [
+        { name: "href", live: "/old" },
+        { name: "alt", live: null },
+      ],
+      [],
+      [],
+    ]);
+    expect(JSON.stringify(body)).not.toContain("/new");
+  });
+
+  it("reads no metadata when the page holds no pending row", async () => {
+    await get();
+
+    expect(metadataQueries()).toEqual([]);
   });
 
   it("reads Live now as the original when the row was never published, and hides a writer that is not an address", async () => {
@@ -437,6 +497,23 @@ describe("GET /api/content/changes", () => {
     expect(body.nextOffset).toBeNull();
   });
 
+  it("offers no next offset past the offset ceiling, where it would be refused", async () => {
+    mockRespond = defaultResponder(
+      Array.from({ length: 50 }, (_, index) => viewRow(index)),
+      12_000,
+    );
+
+    const beforeCeiling = await (await get("?offset=9950")).json();
+    const atCeiling = await (await get("?offset=10000")).json();
+
+    expect(beforeCeiling.nextOffset).toBe(10_000);
+    expect(atCeiling.rows).toHaveLength(50);
+    expect(atCeiling.total).toBe(12_000);
+    expect(atCeiling.nextOffset).toBeNull();
+    // The offset it would have offered is one the route refuses.
+    expect((await get("?offset=10050")).status).toBe(400);
+  });
+
   it("answers an empty account without querying content", async () => {
     mockRespond = (query) =>
       query.table === "site_permissions"
@@ -457,14 +534,17 @@ describe("GET /api/content/changes", () => {
     expect(contentQueries()).toEqual([]);
   });
 
-  it.each(["site_permissions", "list", "count"])(
+  it.each(["site_permissions", "list", "count", "metadata"])(
     "answers a generic 500 when the %s read fails, with no detail",
     async (which) => {
       const failure = {
         code: "42P01",
         message: 'relation "public.content_changes" does not exist',
       };
-      const base = defaultResponder([viewRow(1)], 1);
+      const base = defaultResponder(
+        [viewRow(1, { change_state: "pending", staging_content: "Draft" })],
+        1,
+      );
       mockRespond = (query) => {
         const failing =
           (which === "site_permissions" &&
@@ -472,7 +552,8 @@ describe("GET /api/content/changes", () => {
           (which === "list" &&
             query.table === "content_changes" &&
             !isHead(query)) ||
-          (which === "count" && isHead(query));
+          (which === "count" && isHead(query)) ||
+          (which === "metadata" && query.table === "content_elements");
         return failing
           ? { data: null, error: failure, count: null }
           : base(query);

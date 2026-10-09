@@ -23,7 +23,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge, contentStatuses } from "@/components/ui/status-badge";
-import type { ChangeAction } from "@/hooks/useChangeActions";
+import {
+  discardAttributes,
+  type ActionOutcome,
+  type ChangeAction,
+} from "@/hooks/useChangeActions";
 import type { ChangesSite, ContentChange } from "@/hooks/useContentChanges";
 import {
   editPermissionsForGrant,
@@ -128,7 +132,7 @@ interface ChangeRowProps {
   onAction: (
     row: ContentChange,
     action: ChangeAction,
-  ) => Promise<string | null>;
+  ) => Promise<ActionOutcome>;
 }
 
 export function ChangeRow({
@@ -170,6 +174,14 @@ export function ChangeRow({
     classifyContent(text, row.elementType === "img" ? "image" : undefined) ===
     "image";
   const who = isAdmin && row.changedBy ? row.changedBy : null;
+  // A draft whose staged link or alt cannot be sent back through the PUT is
+  // not offered a discard that would leave it pending (useChangeActions.ts,
+  // `discardAttributes`). A published row whose text is the original has
+  // nothing to revert (the publish RPC would skip that draft).
+  const canDiscard =
+    canEdit && row.state === "pending" && discardAttributes(row) !== null;
+  const canRevert =
+    canEdit && row.state === "published" && row.live !== row.original;
 
   const openConfirm = (kind: ConfirmKind, opener: HTMLElement | null) => {
     openerRef.current = opener;
@@ -177,20 +189,28 @@ export function ChangeRow({
     setConfirm(kind);
   };
 
+  // Nothing landed: the dialog stays open with the reason. Something landed
+  // but not all of it (a revert saved, its publish refused): the dialog
+  // closes on the row as it now is, opened, with the reason under its
+  // actions — where Publish is, to try again.
   const runConfirmed = async (action: ChangeAction) => {
     setConfirmError(null);
-    const refused = await onAction(row, action);
-    if (refused) {
-      setConfirmError(refused);
+    const outcome = await onAction(row, action);
+    if (outcome.error && !outcome.applied) {
+      setConfirmError(outcome.error);
       return;
     }
     setConfirm(null);
+    if (outcome.error) {
+      setActionError(outcome.error);
+      setIsExpanded(true);
+    }
   };
 
   const publish = async () => {
     setActionError(null);
-    const refused = await onAction(row, "publish");
-    if (refused) setActionError(refused);
+    const outcome = await onAction(row, "publish");
+    if (outcome.error) setActionError(outcome.error);
   };
 
   // Inside the click itself: the tab must open on the user's activation.
@@ -348,8 +368,8 @@ export function ChangeRow({
               <HistoryIcon className="h-4 w-4" aria-hidden="true" />
               Compare and history
             </DropdownMenuItem>
-            {canEdit && row.state !== "original" && <DropdownMenuSeparator />}
-            {canEdit && row.state === "published" && (
+            {(canRevert || canDiscard) && <DropdownMenuSeparator />}
+            {canRevert && (
               <DropdownMenuItem
                 className="gap-2"
                 onSelect={() => openConfirm("revert", menuRef.current)}
@@ -358,7 +378,7 @@ export function ChangeRow({
                 Revert to original
               </DropdownMenuItem>
             )}
-            {canEdit && row.state === "pending" && (
+            {canDiscard && (
               <DropdownMenuItem
                 className="gap-2 text-tone-danger-text focus:text-tone-danger-text"
                 onSelect={() => openConfirm("discard", menuRef.current)}
@@ -378,6 +398,8 @@ export function ChangeRow({
           location={location}
           canEdit={canEdit}
           canPublish={canPublish}
+          canDiscard={canDiscard}
+          canRevert={canRevert}
           busyAction={busyAction}
           actionError={actionError}
           onPublish={() => void publish()}

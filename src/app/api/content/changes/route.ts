@@ -15,19 +15,27 @@
  * explicit site filter is a second fence, not the first. No write path lives
  * here; reverts and publishes go through PUT /api/staging/content/<site> and
  * POST /api/staging/publish, which carry the plan gate and the audit row.
+ *
+ * One more RLS read, for pending rows only: the attributes their drafts stage
+ * (`metadata.staging_attributes`), each with its live value. The view does
+ * not carry metadata, by design (ADR 054: a widened view is a widened read
+ * for every member), so the base table is read for those ids, as the history
+ * route reads it, under the same content_elements policy the view already
+ * applies. Only names and LIVE values leave, never a staged value: the live
+ * href/alt is already on the customer's public page. The state is not derived
+ * here; the view still decides what is pending. See useChangeActions.ts,
+ * `discardAttributes`, for why Discard needs them (Devin review, PR #77).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import {
+  CHANGES_MAX_OFFSET as MAX_OFFSET,
+  CHANGES_PAGE_SIZE as PAGE_SIZE,
+} from "@/lib/content/changes-paging";
 import { escapeRegex } from "@/lib/content/search-pattern";
 import { createClient } from "@/lib/supabase/server";
 
-const PAGE_SIZE = 50;
-/**
- * Beyond this an owner is not paging, something is crawling. "Show 50 more"
- * two hundred times is 10,000 rows; the view's CASE runs per row skipped.
- */
-const MAX_OFFSET = 10_000;
 const MAX_QUERY_LENGTH = 200;
 const FAILURE = "Failed to load changes";
 
@@ -54,6 +62,16 @@ interface ViewRow {
   changed_at: string | null;
   changed_by: string | null;
   created_at: string;
+}
+
+interface DraftAttribute {
+  name: string;
+  live: string | null;
+}
+
+interface MetadataRow {
+  id: string;
+  metadata: unknown;
 }
 
 interface Membership {
@@ -119,7 +137,25 @@ function emailOrNull(value: string | null): string | null {
   return value && value.includes("@") ? value : null;
 }
 
-function toRow(row: ViewRow) {
+const objectOrEmpty = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+/**
+ * Every key the draft stages, with the live value of that key (null when the
+ * live metadata has no string there). The live metadata is the column minus
+ * `staging_attributes`, as the save and publish RPCs read it.
+ */
+function draftAttributesOf(metadata: unknown): DraftAttribute[] {
+  const live = objectOrEmpty(metadata);
+  return Object.keys(objectOrEmpty(live.staging_attributes)).map((name) => ({
+    name,
+    live: typeof live[name] === "string" ? (live[name] as string) : null,
+  }));
+}
+
+function toRow(row: ViewRow, draftAttributes: DraftAttribute[]) {
   return {
     id: row.id,
     siteId: row.site_id,
@@ -134,6 +170,7 @@ function toRow(row: ViewRow) {
     // widget's read serves it (`published ?? original`).
     live: row.published_content ?? row.original_content,
     draft: row.staging_content,
+    draftAttributes,
     state: row.change_state,
     changedAt: row.changed_at,
     changedBy: emailOrNull(row.changed_by),
@@ -270,9 +307,31 @@ export async function GET(request: NextRequest) {
       if (count.error) return failure("count read failed", count.error);
     }
 
-    const rows = ((listResult.data ?? []) as ViewRow[]).map(toRow);
+    const viewRows = (listResult.data ?? []) as ViewRow[];
+    const pendingIds = viewRows
+      .filter((row) => row.change_state === "pending")
+      .map((row) => row.id);
+    const attributesById = new Map<string, DraftAttribute[]>();
+    if (pendingIds.length > 0) {
+      const { data: metadataRows, error: metadataError } = await supabase
+        .from("content_elements")
+        .select("id, metadata")
+        .in("id", pendingIds);
+      if (metadataError) return failure("metadata read failed", metadataError);
+      for (const row of (metadataRows ?? []) as MetadataRow[]) {
+        attributesById.set(row.id, draftAttributesOf(row.metadata));
+      }
+    }
+
+    const rows = viewRows.map((row) =>
+      toRow(row, attributesById.get(row.id) ?? []),
+    );
     const total = listResult.count ?? rows.length;
     const reached = offset + rows.length;
+    // Never offer an offset this route refuses (changes-paging.ts): past the
+    // ceiling the page says the list is capped instead.
+    const hasNextPage =
+      rows.length > 0 && reached < total && reached <= MAX_OFFSET;
 
     return NextResponse.json({
       sites,
@@ -283,7 +342,7 @@ export async function GET(request: NextRequest) {
         published: published.count ?? 0,
         original: original.count ?? 0,
       },
-      nextOffset: rows.length > 0 && reached < total ? reached : null,
+      nextOffset: hasNextPage ? reached : null,
     });
   } catch (error) {
     return failure("unexpected error", error);

@@ -6,7 +6,7 @@ import { ChevronRight } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusBadge, contentStatuses } from "@/components/ui/status-badge";
-import type { ChangeAction } from "@/hooks/useChangeActions";
+import type { ActionOutcome, ChangeAction } from "@/hooks/useChangeActions";
 import type { ChangesSite, ContentChange } from "@/hooks/useContentChanges";
 import { cn } from "@/lib/utils/cn";
 import { ChangeRow } from "./ChangeRow";
@@ -27,7 +27,7 @@ interface ChangeSiteGroupProps {
   onAction: (
     row: ContentChange,
     action: ChangeAction,
-  ) => Promise<string | null>;
+  ) => Promise<ActionOutcome>;
 }
 
 const plural = (count: number, one: string, many: string) =>

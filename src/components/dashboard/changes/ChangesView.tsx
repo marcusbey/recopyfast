@@ -8,7 +8,11 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useChangeActions, type ChangeAction } from "@/hooks/useChangeActions";
+import {
+  useChangeActions,
+  type ActionOutcome,
+  type ChangeAction,
+} from "@/hooks/useChangeActions";
 import {
   useContentChanges,
   type ChangesPage,
@@ -16,6 +20,7 @@ import {
   type ChangesStateFilter,
   type ContentChange,
 } from "@/hooks/useContentChanges";
+import { CHANGES_LIST_CEILING } from "@/lib/content/changes-paging";
 import { describePage } from "@/lib/content/describe-location";
 import { ChangeSiteGroup, type PageGroup } from "./ChangeSiteGroup";
 import { ChangesFilterBar } from "./ChangesFilterBar";
@@ -214,15 +219,18 @@ export function ChangesView({ siteId }: ChangesViewProps) {
       set(value);
     };
 
+  // The row is redrawn from what landed, not from what was asked: a revert
+  // whose publish failed is a pending draft, and is drawn as one.
   const runAction = async (
     row: ContentChange,
     action: ChangeAction,
-  ): Promise<string | null> => {
-    const refused = await actions[action](row);
-    if (refused) return refused;
-    updateRow(row.id, rowAfter(row, action));
-    setAnnouncement(ANNOUNCEMENTS[action]);
-    return null;
+  ): Promise<ActionOutcome> => {
+    const outcome = await actions[action](row);
+    if (outcome.applied) {
+      updateRow(row.id, rowAfter(row, outcome.applied));
+      setAnnouncement(outcome.error ? "" : ANNOUNCEMENTS[action]);
+    }
+    return outcome;
   };
 
   const clearSearch = () => {
@@ -236,6 +244,12 @@ export function ChangesView({ siteId }: ChangesViewProps) {
   const siteName = site
     ? (sites?.find((candidate) => candidate.id === site)?.name ?? null)
     : null;
+  // More rows match than "Show 50 more" can reach (changes-paging.ts): say so
+  // rather than end the list as if it were complete.
+  const isCapped =
+    data !== null &&
+    data.nextOffset === null &&
+    data.total > CHANGES_LIST_CEILING;
 
   const renderBody = () => {
     if (!data && error) {
@@ -350,7 +364,7 @@ export function ChangesView({ siteId }: ChangesViewProps) {
 
       {renderBody()}
 
-      {data && (data.nextOffset !== null || error) && (
+      {data && (data.nextOffset !== null || isCapped || error) && (
         <div className="flex flex-wrap items-center gap-3">
           {data.nextOffset !== null && (
             <>
@@ -369,6 +383,12 @@ export function ChangesView({ siteId }: ChangesViewProps) {
                 Showing {count(data.rows.length)} of {count(data.total)}
               </span>
             </>
+          )}
+          {isCapped && (
+            <span className="tabular text-xs text-muted-foreground">
+              Showing the first {count(data.rows.length)} of {count(data.total)}{" "}
+              — use the filters or search to see more.
+            </span>
           )}
           {error && (
             <Alert variant="destructive">
