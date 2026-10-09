@@ -1,0 +1,42 @@
+/**
+ * Whether this browser draws WebGL2 on a GPU, as opposed to in software or not
+ * at all. The landing sky's shaders are only worth running when it does.
+ *
+ * WHY THIS EXISTS — a software renderer turned the landing page into a slideshow.
+ *
+ * A browser with no usable GPU (blocklisted driver, hardware acceleration off,
+ * a VM or remote desktop, and every CI runner) can still hand out a WebGL
+ * context: it shades on the CPU through SwiftShader, llvmpipe or WARP. The sky
+ * is a full-screen raymarcher plus a six-layer noise field on a free-running
+ * frame loop, and on that path a frame took 1–2 s and kept the main thread busy
+ * for 1.2–4.8 s of every 3 s, on a 10-core laptop. Hydration, the pricing fetch
+ * and every click queued behind it. That is how `main` went red on 2026-10-09:
+ * CI's Chromium (Playwright launches it with `--enable-unsafe-swiftshader`)
+ * waited more than 10 s for the Starter card. See
+ * docs/research/s74-deflake-landing-pricing.md.
+ *
+ * `failIfMajorPerformanceCaveat` is the WebGL spec's own signal for exactly
+ * this: the browser refuses the context when it would perform dramatically
+ * worse than a native GPU application. Prefer it to matching renderer names —
+ * the browser maintains its list; a regex here would go stale.
+ *
+ * `webgl2`, not `webgl`: three dropped WebGL 1 in r163, so a browser offering
+ * only WebGL 1 cannot draw the sky either. The probe gets its own canvas (one
+ * canvas holds one context type) and gives the context back at once, because
+ * browsers cap how many live WebGL contexts a page may hold. Any failure means
+ * "no": the static sky is always a correct answer, a stalled page never is.
+ */
+export function hasHardwareWebGL(): boolean {
+  try {
+    const context = document
+      .createElement("canvas")
+      .getContext("webgl2", { failIfMajorPerformanceCaveat: true });
+    if (!context) {
+      return false;
+    }
+    context.getExtension("WEBGL_lose_context")?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * Suite 3B: Landing Page E2E Tests - E2E-010 to E2E-018
+ * Suite 3B: Landing Page E2E Tests - E2E-010 to E2E-019
  * Tests homepage rendering, pricing section, and CTAs.
  *
  * The landing page is served by the main Next.js app at the root URL.
@@ -351,5 +351,43 @@ test.describe("Landing Page", () => {
       "recopyfast.com",
     );
     expect(await page.title()).not.toContain("Universal CMS");
+  });
+
+  // E2E-019 (s74): the sky's shaders run only on a GPU. This browser has none:
+  // Playwright launches Chromium with --enable-unsafe-swiftshader, so WebGL is
+  // shaded on the CPU. When the sky drew its shaders here anyway, a frame took
+  // 1–2 s and the main thread was busy most of every second; E2E-012 waited
+  // over 10 s for a Starter card that had not rendered (main, run
+  // 37902163949) and E2E-017's reload never reached `load`. A visitor whose
+  // browser draws WebGL in software gets the same page, so it gets the static
+  // sky. See docs/research/s74-deflake-landing-pricing.md.
+  test("E2E-019: a software WebGL renderer gets the static sky, not the shader", async ({
+    page,
+  }) => {
+    await page.goto("/", { waitUntil: "load", timeout: 45000 });
+
+    // The sky is a dynamic import: wait for it to mount, or "no canvas" would
+    // also be true of a shader sky whose chunk has not arrived yet.
+    const sky = page.locator("[data-sky]");
+    await expect(sky).toBeAttached({ timeout: 15000 });
+
+    // What this test is about: WebGL2 exists, but only with a major
+    // performance caveat. If this fails, the browser running the suite has a
+    // GPU and the assertions below test nothing.
+    const webgl = await page.evaluate(() => ({
+      hasWebGL2: Boolean(document.createElement("canvas").getContext("webgl2")),
+      hasWebGL2WithoutCaveat: Boolean(
+        document
+          .createElement("canvas")
+          .getContext("webgl2", { failIfMajorPerformanceCaveat: true }),
+      ),
+    }));
+    expect(
+      webgl,
+      "E2E-019 needs a browser that draws WebGL2 in software (headless Chromium with SwiftShader)",
+    ).toEqual({ hasWebGL2: true, hasWebGL2WithoutCaveat: false });
+
+    await expect(sky).toHaveAttribute("data-sky", "static");
+    await expect(page.locator("canvas")).toHaveCount(0);
   });
 });

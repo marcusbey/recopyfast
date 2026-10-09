@@ -43,7 +43,7 @@ Change: create a canvas, ask for `webgl2` with `failIfMajorPerformanceCaveat: tr
 context if one came back, return whether it did. `try/catch` around the whole probe. No module
 cache: it runs once per `SkyBackground` mount.
 
-- [ ] Task 1
+- [x] Task 1
 
 ## Task 2 — the sky draws its shader only on hardware WebGL
 
@@ -59,7 +59,14 @@ render exactly as today. Comment the why: the CI incident, the measured frame co
 visitor class. The existing layer keeps its classes, so all three static renderings stay
 identical.
 
-- [ ] Task 2
+As built: the `Canvas` is rendered under `{canDrawShaderSky && (…)}` inside the existing wrapper
+rather than through an early return, so the gradient layer stays one element and the hook order
+is untouched. The rendered output is the one planned: the wrapper and the gradient, no canvas. The
+three small effects (media queries, hero observer, mouse listener) still run in that state; they
+cost nothing measurable (0 ms of long tasks below the fold) and gating them would add three
+conditions for no gain. A third test covers "no WebGL at all".
+
+- [x] Task 2
 
 ## Task 3 — the CI browser proves it (E2E-019)
 
@@ -75,7 +82,15 @@ job comment, the placeholder summary JSON, the step name, `report.expected/total
 error string), and `src/__tests__/e2e/playwright-ci-contract.test.ts`, with its history comment.
 `CI=1 RUN_RECOPYFAST_CORE_E2E=1 npx playwright test --list | tail -1` reports 81.
 
-- [ ] Task 3
+Deviation, decided while building: waiting for the Starter card does not prove the sky has
+mounted (the sky is a separate dynamic import, so "no canvas yet" is also true of a shader sky
+whose chunk has not arrived) and would let the test pass vacuously on main. `SkyBackground`'s
+wrapper now carries `data-sky="shader" | "static"`, pinned by the unit tests, and E2E-019 waits
+for `[data-sky]` instead. Consequence for the red: on main the test fails at "no `[data-sky]`";
+the red for the real reason, `canvas` count 1 instead of 0, is shown on a build with the gate
+forced open (Task 4).
+
+- [x] Task 3
 
 ## Task 4 — stability evidence
 
@@ -84,4 +99,9 @@ Against a production build with the E2E job's env and the local stack from the r
 the frame/long-task probe. Record before/after in the research. Mutation: remove the gate (always
 draw the shader), rebuild, and E2E-019 and the unit tests go red; restore.
 
-- [ ] Task 4
+As built: fixed build 60/60 at `--repeat-each=5`, and 36/36 at `--repeat-each=3` under a
+six-core CPU load that leaves about a runner's four cores. The gate-open build under the same
+load: 20/24, with E2E-019 red on "1 canvas, expected 0" and the stall reproducing E2E-017's
+`page.reload` timeout. Numbers in the research, "After the fix".
+
+- [x] Task 4

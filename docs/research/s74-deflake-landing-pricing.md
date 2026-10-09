@@ -123,6 +123,38 @@ as slowly.
 - `jest.setup.js:177-182` mocks `IntersectionObserver` with a no-op `observe`, so the component
   test sees the hero as visible and never observes it leave.
 
+## After the fix (Task 4)
+
+Same stack, same env, production builds of this branch. "Gate open" is the mutation
+`{(true || canDrawShaderSky) && (` in `SkyBackground.tsx`, which is main's behaviour with the new
+`data-sky` attribute. "Six-core load" runs six `yes > /dev/null` processes during the run, leaving
+the browser, `next start` and PostgREST about four of the ten cores, roughly a GitHub runner.
+
+Probe, 1280×720, Playwright's Chromium:
+
+| Build | Renderer | Canvases | Frames in 3 s | Long tasks (hero window / below fold) |
+|---|---|---|---|---|
+| Fixed | SwiftShader | 0 | 360–361, p50 8.3 ms | 59–88 ms (load) / 0 ms |
+| Fixed | Metal GPU (`--use-angle=metal`) | 1 (shader sky kept) | 362, p50 8.3 ms | 70 ms / 0 ms |
+
+`e2e/landing.spec.ts` + `e2e/hero-demo-mobile.spec.ts`, `--retries=0`, seconds (min–max):
+
+| Test | Main, ×3, idle | Fixed, ×5, idle | Fixed, ×3, six-core load | Gate open, ×2, six-core load |
+|---|---|---|---|---|
+| E2E-012 pricing | 1.9–2.1 | 0.9–1.2 | 1.1–1.4 | 2.5–23.8 |
+| E2E-013 yearly | 4.2–12.7 | 2.7–3.3 | 2.8–3.2 | 31.2–60.0 |
+| E2E-014 monthly | 4.3–4.4 | 2.3–2.9 | 2.3–2.9 | 29.0–31.1 |
+| E2E-017 trust row | 22.9–78.0, **1 failed** | 2.0–2.7 | 2.2–4.5 | 32.9–78.0, **1 failed** |
+| E2E-018 claims | 0.4–2.2 | 0.4–0.8 | 0.4–2.3 | 1.2–7.2 |
+| E2E-019 (new) | red: no `[data-sky]` | 0.4–1.1 | 0.5–1.3 | **red: 1 canvas, expected 0** |
+| hero viewport | — | 1.6–4.0 | 1.6–7.8 | 1.8–96.0, **1 failed** |
+| hero two swipes | — | 3.4–4.2 | 3.5–5.0 | 14.6–24.3 |
+| Result | 26/27 | **60/60** | **36/36** | 20/24 |
+
+Both incidental failures with the gate open are the stall itself: E2E-017's `page.reload` never
+reached `load` in 45 s (the failure seen on main), and the hero test's `locator.evaluate` could not
+run inside the 90 s test timeout.
+
 ## Follow-ups (not in this story)
 
 - `/api/pricing` reads Stripe with the SDK defaults (80 s timeout, 2 retries) in three serial
