@@ -4097,8 +4097,10 @@ Acceptance criteria:
   measurement. No migration, nothing under `server/`, no new dependency. Required gates pass; e2e
   specs that landed with `?rcf_edit_token=` use the new link; Playwright count unchanged.
   (Local: measured 45818 / 33059 after review fix pass 2 — `window.` restored on every name a
-  host page can shadow, `src/__tests__/embed/host-page-globals.test.ts` — below main's
-  45828 / 33062; gates green, `--list` 80. Open until CI runs the two e2e specs.)
+  host page can shadow, `src/__tests__/embed/host-page-globals.test.ts`, with the census by scope
+  analysis in `host-page-globals-census.test.ts` (verification fix pass) — below main's
+  45828 / 33062; gates green, `--list` 81 after the rebase on s74/s75 (unchanged by s76). Open until
+  CI runs the two e2e specs.)
 
 Complexity: 4. Dependencies: none (s72 merged). Branch `feature/s76-grant-and-edit-token-hardening`.
 Follow-ups (not s76): the widget's own API reads still carry `?rcf_edit_token=` to RecopyFast's API

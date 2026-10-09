@@ -291,10 +291,14 @@ export async function validateDeviceGrant(params: {
     return { valid: false, reason: "malformed" };
   }
 
-  // Written "not unexpired", not "expired" (s76 review fix pass 2): an `x`
-  // that is no number makes the comparison NaN, and NaN must refuse. The
-  // truthiness check above lets any non-empty string or object through to
-  // here; `<=` answered false for them and the grant was never expired.
+  // Written "not unexpired", not "expired" (s76 review fix pass 2). The
+  // truthiness check above lets an `x` that is no number through to here. A
+  // numeric string coerces (`"1700000000" * 1000`) and is judged like the
+  // number it spells; anything that does not coerce — a non-numeric string,
+  // an object — makes the product NaN, which `<=` answered false for: that
+  // grant never expired. NaN must refuse. `x` is inside the signed payload,
+  // so only a token this application minted can carry one — forging it needs
+  // the signing key. This guards against our own minting bug, not a forger.
   if (!(payload.x * 1000 > Date.now())) {
     return { valid: false, reason: "expired" };
   }

@@ -164,8 +164,10 @@ The re-review found one major and three minors; all four fixed, test-first. CTO 
    `let open = false` made the widget's `open(…)` throw into the host window (non-negotiable #4).
    `window` itself is unforgeable, so `window.open` cannot be shadowed. Restored on all fifteen
    uses, five of which were bare on main too (the parse-time strip's `history` ×2, the edit link's
-   `sessionStorage` ×3 — "every name", not only the ones fix pass 1 touched). `location` ×11 stays
-   bare: measured with Playwright in Chromium 145 and WebKit 26, a page's top-level
+   `sessionStorage` ×3 — "every name", not only the ones fix pass 1 touched). `location` stays bare
+   on all 13 references, on 11 lines (the 11 fix pass 1 un-prefixed and the story's two
+   `location.hash` reads; counted with the census's ESLint rule, see decision 19): measured with
+   Playwright in Chromium 145 and WebKit 26, a page's top-level
    `let` / `const` / `class location` is a SyntaxError, `function location(){}` throws, and
    `var location` leaves `location === window.location` (it is [LegacyUnforgeable]). jsdom does not
    model this (its `let location` succeeds), so the new suite never declares it.
@@ -205,6 +207,53 @@ The re-review found one major and three minors; all four fixed, test-first. CTO 
     `signedExpiry` and `rowExpiresAt` overrides (declared). GREEN `editor-grants.ts`.
 23. [x] **Minor — handoff/redeem comment.**
 24. [x] **Gates, mutations, one commit.**
+
+## Verification fix pass (2026-10-09)
+
+Verification of `bc0c6bb` found no critical or major (ship allowed); three minors, all fixed. Rebased
+on `origin/main` `122ad2e` — s74 (the Playwright strict contract is now 81) and s75 (CI enforces
+the coverage ratchet; `engines: node 24.x` in the lockfile, `npm ci` rerun); neither changes an
+embed byte. `docs/stories.md` keeps s74, s75 and s76 in id order. s77 is not on main, so
+`staging-outage.test.ts` keeps its `site-123`. CTO decisions:
+
+17. **The census asks the scope analysis, not a regex** (minor 1). The regex census cut comments
+   with `/\/\*[\s\S]*?\*\//`, which read the `/*` in `// … /api/editor/*` (src.js 187 and 996) as a
+   block comment and deleted src.js 188–216 and 997–1199 — 232 lines never checked; its object-key
+   and member-access guards also hid `a ? open : b` and `...history`, and it flagged a parameter
+   that shadows the name. Replaced by ESLint's `Linter` (eslint is a direct dependency) running
+   `no-restricted-globals` on the six names over the source, as a classic browser script
+   (`FlatCompat.env({ browser: true })` from `@eslint/eslintrc`, already a direct dependency;
+   `sourceType: "script"`, `ecmaVersion: "latest"`); a parse error is reported, never passed.
+   `location` stays out of the list, with the reason in a comment: it is [LegacyUnforgeable]
+   (decision 13), so its 13 bare references defend against nothing and would cost bytes. The census
+   moves to its own `@jest-environment node` file, `host-page-globals-census.test.ts`, as the repo's
+   other source guards do (`radius-guard`, `native-select-guard`): ESLint needs `structuredClone`,
+   which jest's jsdom environment lacks. Rejected: polyfilling `structuredClone` into the jsdom
+   suite (a test-only shim that would hide the next missing global), the `globals` package (only a
+   transitive dependency).
+18. **The skew boundary is pinned from both sides** (minor 2): a lineage start 59 s ahead validates,
+   61 s ahead is refused as `expired`, with `Date.now` frozen on a whole second so the signed `l`
+   (epoch seconds) carries the probe exactly.
+19. **Exact ledgers and comments** (minor 3): `location` is 13 bare references on 11 lines, counted
+   with `no-restricted-globals` on `location` alone — the census's rule, run once by hand since the
+   census excludes the name (the 11 fix pass 1 un-prefixed, the story's two `location.hash` reads;
+   the review's "10 lines" is 11: src.js 74, 93, 121 ×2, 618, 1094 ×2, 1587, 2367, 2515, 2518,
+   3216, 6662); `build-embed.mjs` and decision 13 say so. The `x` comment in `editor-grants.ts` says
+   what is true: a numeric string coerces, only a non-coercible `x` is NaN, and only a token this
+   application signed can carry one. The jsdom suite's `unhandledrejection` listener is removed —
+   jsdom 26 never dispatches that event — with a comment saying what the escape record covers.
+
+25. [x] **Minor 1 — census.** RED: the census's own fixtures (`host-page-globals-census.test.ts`)
+    against the regex — a use after `// … /api/editor/*`, a ternary operand and a spread were
+    missed, a shadowing parameter was flagged; each of the six names, and a parse error reported
+    as such. GREEN: `bareUses` on ESLint. Probes on the real source: a bare `open('x')` inserted at
+    src.js:190 and :1000, `this.editorAuth ? open : null` and `[...history]` at :1000 — all four
+    missed by the regex, all four red; source restored.
+26. [x] **Minor 2 — skew boundary.** `editor-grants-ttl.test.ts`: +59 s valid, +61 s `expired`.
+    Mutations 60→90 (+61 s red) and 60→30 (+59 s red).
+27. [x] **Minor 3 — wording.** `build-embed.mjs`, decision 13, `editor-grants.ts`, the jsdom
+    suite's escape record.
+28. [x] **Rebase, gates, mutations, one commit.**
 
 Follow-ups (not s76): **the same shadowing class predates s76** — names bare on main before this
 story: `fetch` ×17, `setTimeout` ×15, `clearTimeout` ×4, `alert` ×4, `confirm` ×3, `crypto` ×3,

@@ -683,4 +683,31 @@ describe("s76 review fix pass 2 — a date that cannot be believed is refused", 
     });
     expect(result.valid).toBe(true);
   });
+
+  describe("the skew allowed is one minute, pinned from both sides", () => {
+    // The clock is frozen on a whole second so `l` (epoch seconds) carries the
+    // probe exactly: with a running clock, a start 61 s ahead floors to the
+    // second and the validation runs a few ms later, which can land it back
+    // inside the minute. Widening LINEAGE_CLOCK_SKEW_MS admits +61 s;
+    // narrowing it refuses +59 s.
+    async function validateLineageAhead(aheadMs: number) {
+      const now = Math.floor(Date.now() / 1000) * 1000;
+      jest.spyOn(Date, "now").mockReturnValue(now);
+      const { token, row } = grantRow({ lineageStartMs: now + aheadMs });
+      const { client } = clientFor(row);
+      mockCreateServiceRoleClient.mockReturnValue(client);
+      return validateDeviceGrant({ grant: token, siteId: SITE_ID, device });
+    }
+
+    it("a lineage start 59 s ahead validates", async () => {
+      expect((await validateLineageAhead(59_000)).valid).toBe(true);
+    });
+
+    it("a lineage start 61 s ahead is refused as expired", async () => {
+      await expect(validateLineageAhead(61_000)).resolves.toEqual({
+        valid: false,
+        reason: "expired",
+      });
+    });
+  });
 });

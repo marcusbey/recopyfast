@@ -377,13 +377,17 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *                  esbuild keeps as `1440*60*1e3`
  *   45818 / 33059  measured on the branch — the new ceilings
  *
- * `location` ×11 stays bare: it is unforgeable, so a page's top-level
- * `let`/`const`/`class location` is a SyntaxError and `var location` binds
- * nothing new (measured in Chromium 145 and WebKit 26). Tried and rejected,
- * each larger: the scroll listener on the editor's AbortSignal (+6 / +5), a
- * local for `window.visualViewport` (+16 / +10), one storage helper for the
- * auth client (+9 / +5), one captured sessionStorage (+0 / +1). The middle
- * lines carry the banner hash's ±2 B; only the two ends are measurements.
+ * `location` stays bare on all 13 references, on 11 lines — the 11 fix pass 1
+ * un-prefixed and the story's two `location.hash` reads: it is unforgeable, so
+ * a page's top-level `let`/`const`/`class location` is a SyntaxError and
+ * `var location` binds nothing new (measured in Chromium 145 and WebKit 26).
+ * Counted with ESLint's `no-restricted-globals` — the scope analysis
+ * host-page-globals-census.test.ts runs on the other six names — not by grep.
+ * Tried and rejected, each larger: the scroll listener on the editor's
+ * AbortSignal (+6 / +5), a local for `window.visualViewport` (+16 / +10), one
+ * storage helper for the auth client (+9 / +5), one captured sessionStorage
+ * (+0 / +1). The middle lines carry the banner hash's ±2 B; only the two ends
+ * are measurements.
  */
 const MAX_BUNDLE_GZ = 45818;
 const MAX_WIDGET_GZ = 33059;
