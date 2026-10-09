@@ -63,8 +63,11 @@ Verified on `origin/main` `72f4cff`.
 Found with `grep -rn asChild src --include='*.tsx'` on `Button` (DropdownMenu/Dialog/Select
 `asChild` are other primitives and are untouched). Before the fix every one renders as a bare
 `<a>`: surrounding text colour, no underline, no padding, lucide icons at their default 24px.
-After, each gets the variant and size it already asks for. None is adjusted: every call site
-passes an explicit variant, and none's intent was a bare link.
+After, each gets the variant and size it already asks for. None is adjusted: nine pass an
+explicit variant and "Open site page" takes the default (primary, its intent); none's intent was
+a bare link. Review follow-ups (orchestrator): with asChild `disabled` is not forwarded (invalid
+on an <a>) and development warns, as for a child that is not one element (minor 1); the
+registration dialog's footer stacks primary-on-top below 640px (`flex-col-reverse`, minor 2).
 
 | # | Call site | Control | After the fix |
 |---|---|---|---|

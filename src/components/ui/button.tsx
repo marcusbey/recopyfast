@@ -67,6 +67,12 @@ const buttonVariants = cva(
   },
 );
 
+/** True when `children` is exactly one React element — what asChild needs. */
+function isSingleElement(children: React.ReactNode): boolean {
+  const nodes = React.Children.toArray(children);
+  return nodes.length === 1 && React.isValidElement(nodes[0]);
+}
+
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
@@ -94,6 +100,23 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     const Comp = asChild ? Slot : "button";
     const isDisabled = disabled || loading;
+
+    // s73 review minor 1. `disabled` is not valid on an <a> and stops no
+    // navigation, so with asChild it is not forwarded; and Slot renders
+    // nothing for a child that is not one element. Both are call-site
+    // mistakes, said out loud in development rather than shipped silently.
+    if (asChild && process.env.NODE_ENV !== "production") {
+      if (disabled) {
+        console.error(
+          "Button: `disabled` has no effect with asChild — the child element decides whether it can be used.",
+        );
+      }
+      if (!isSingleElement(children)) {
+        console.error(
+          "Button: asChild needs one element child (a link or button); text or several children render nothing.",
+        );
+      }
+    }
     // The dimmed label is a <button>-only detail. With asChild the content
     // belongs to the call site's element, which Button cannot wrap without
     // changing that element's structure.
@@ -123,7 +146,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
-        disabled={isDisabled}
+        disabled={asChild ? undefined : isDisabled}
         aria-busy={loading || undefined}
         {...props}
       >

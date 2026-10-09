@@ -247,6 +247,47 @@ describe("Button Component", () => {
       }
     });
 
+    // s73 review minor 1: `disabled` is not valid on an <a> and stops nothing
+    // there. With asChild it is not forwarded, and development says so; a
+    // non-element child, which Slot drops, is reported the same way.
+    it("does not put `disabled` on the child, and warns in development", () => {
+      const consoleError = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        render(
+          <Button asChild disabled>
+            <a href="/x">Go</a>
+          </Button>,
+        );
+
+        const link = screen.getByRole("link", { name: "Go" });
+        expect(link).not.toHaveAttribute("disabled");
+        expect(consoleError).toHaveBeenCalledWith(
+          expect.stringContaining("`disabled` has no effect with asChild"),
+        );
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it("warns in development when asChild gets no single element", () => {
+      const consoleError = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        render(<Button asChild>Plain text</Button>);
+
+        expect(consoleError).toHaveBeenCalledWith(
+          expect.stringContaining("asChild needs one element child"),
+        );
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
     it("should render as button when asChild is false", () => {
       render(<Button asChild={false}>Normal Button</Button>);
 

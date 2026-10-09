@@ -434,7 +434,10 @@ export function SiteRegistrationModal({
                   {registrationResult.site.id}
                 </code>
               </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+              {/* s73 review minor 2: below 640px the primary "Open site page"
+                  stacks on top (design-system.md, footer buttons: primary on
+                  top); the DOM and tab order are unchanged. */}
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:gap-4">
                 {/* An honest external-link icon: this one does open
                     elsewhere. "Go to Site Dashboard" carried the same icon
                     while only closing the dialog, so it is gone. */}

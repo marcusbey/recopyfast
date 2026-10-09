@@ -3751,8 +3751,10 @@ Acceptance criteria:
 - [ ] Rendering `asChild` logs nothing: no "Invalid prop `className` supplied to `React.Fragment`".
 - [ ] Without `asChild` the rendered markup is unchanged (plain, with icons, loading).
 - [ ] The ten call sites render the variant and size they ask for; each look change is listed in
-  the plan, and none is adjusted (all pass an explicit variant — none meant to look like a bare
-  link).
+  the plan (nine pass an explicit variant; "Open site page" takes the default — the primary it
+  was meant to be); none meant to look like a bare link. With asChild, `disabled` is not
+  forwarded and development warns, as it does for a child that is not one element (review
+  minor 1).
 - [ ] The two `it.failing` tests become plain `it` (a declared test change, AGENTS.md § Tests).
 - [ ] No API, data, embed or migration change; embed bytes untouched. Required gates pass; one
   story commit.
