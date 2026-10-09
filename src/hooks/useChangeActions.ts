@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   validateContentAttributePatch,
   type ContentAttributePatch,
@@ -53,6 +53,11 @@ export interface ActionOutcome {
    * (Discard's re-read): the row is read again so the owner can review it.
    */
   isStale?: boolean;
+  /**
+   * No answer came back from a write (the connection dropped): it may have
+   * landed or not. The row is read again so the owner sees what it holds.
+   */
+  isUncertain?: boolean;
 }
 
 interface ChangeActionsOptions {
@@ -75,18 +80,47 @@ export const ATTRIBUTE_DRAFT_NOTE =
 /** Said when what the draft stages is not known: it may change no attribute. */
 export const UNREAD_DRAFT_NOTE =
   "This draft could not be read in full, so it can't be discarded here. Reload the page to try again.";
+export const NEVER_PUBLISHED_NOTE =
+  "This text was never published, so its draft can't be discarded here. Edit or publish it on the page.";
 export const UPDATED_ELSEWHERE =
   "This change was updated elsewhere — review it again.";
 const NOT_CHECKED =
   "Could not check this draft before discarding it. Try again.";
 const NOT_REREAD =
   "This went through, but the row could not be read again and may be out of date. Reload the page to see it as it is now.";
+/** Appended to a message that already says something did not go to plan. */
+const ROW_OUT_OF_DATE =
+  "The row could not be read again and may be out of date. Reload the page to see it as it is now.";
+const lost = (what: string) =>
+  `The connection dropped before the server answered, so ${what}. Check the row before trying again.`;
+const PUBLISH_LOST = lost("it may or may not have been published");
+const REVERT_LOST = lost("the revert may or may not have been saved");
+const DISCARD_LOST = lost("the draft may or may not have been discarded");
+const REVERT_SAVED = "The revert was saved as a draft.";
+/** The page disables these rows; this is the hook's own guard behind it. */
+const ELEMENT_BUSY =
+  "A change to this text is still being saved. Try again once it has finished.";
+
+/**
+ * Why a write did not land. `isUncertain`: no answer came back at all (the
+ * request may have reached the server and committed); otherwise the server
+ * answered and refused, and nothing changed.
+ */
+interface WriteFailure {
+  error: string;
+  isUncertain: boolean;
+}
 
 const refusal = (error: string): ActionOutcome => ({ error, applied: null });
 const outcomeOf = (
   action: ChangeAction,
-  error: string | null,
-): ActionOutcome => ({ error, applied: error ? null : action });
+  failure: WriteFailure | null,
+): ActionOutcome => {
+  if (!failure) return { error: null, applied: action };
+  return failure.isUncertain
+    ? { error: failure.error, applied: null, isUncertain: true }
+    : refusal(failure.error);
+};
 
 /**
  * The attribute half of a discard: every attribute the draft stages, sent
@@ -122,9 +156,28 @@ export function discardAttributes(
   return patch;
 }
 
-/** Why a pending draft is not offered a discard (`discardAttributes` null). */
-export const discardRefusal = (row: ContentChange): string =>
-  Array.isArray(row.draftAttributes) ? ATTRIBUTE_DRAFT_NOTE : UNREAD_DRAFT_NOTE;
+/**
+ * Whether a pending draft can be discarded from this page: it has published
+ * text of its own to go back to, and every attribute it stages can go back.
+ *
+ * Tombstone (verification of 63d7ba2, minor 6): a translation is written with
+ * no published text (api/ai/translate), and "Live now" stands in the original
+ * for it. Discard saved that original as the draft, which the view still
+ * compares with the NULL published text: the row stayed Pending under
+ * "Draft discarded." Clearing a draft to NULL needs a discard operation no
+ * existing route has (the staging PUT stores `String(content)`), so such a
+ * draft is not offered a discard, and the row says why.
+ */
+export const canDiscardDraft = (row: ContentChange): boolean =>
+  row.hasLiveText && discardAttributes(row) !== null;
+
+/** Why a pending draft is not offered a discard (`canDiscardDraft` false). */
+export const discardRefusal = (row: ContentChange): string => {
+  if (!row.hasLiveText) return NEVER_PUBLISHED_NOTE;
+  return Array.isArray(row.draftAttributes)
+    ? ATTRIBUTE_DRAFT_NOTE
+    : UNREAD_DRAFT_NOTE;
+};
 
 const stagedNames = (attributes: DraftAttribute[]): string =>
   attributes
@@ -162,56 +215,122 @@ async function refusalMessage(
 }
 
 /**
+ * One write request. A response, ok or not, is the server's word. No
+ * response at all is not a refusal: the request may have reached the server
+ * and committed before the connection dropped. Tombstone (verification of
+ * 63d7ba2, minor 5): that case read "Could not save the draft. Try again."
+ * and the row was not read again, so a draft the server had discarded or
+ * published was still drawn Pending, with a dialog saying "Not discarded."
+ */
+async function send(
+  url: string,
+  method: "PUT" | "POST",
+  body: unknown,
+  { refused, lostMessage }: { refused: string; lostMessage: string },
+): Promise<WriteFailure | null> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return { error: lostMessage, isUncertain: true };
+  }
+  if (response.ok) return null;
+  return { error: await refusalMessage(response, refused), isUncertain: false };
+}
+
+/**
  * The draft body is exactly the four fields the staging PUT reads. The text is
  * sent as stored: ordinary copy (`&`, quotes, dashes, emoji) round-trips byte
  * for byte through `sanitizeIncomingContent`.
  */
-async function saveDraft(
+const saveDraft = (
   row: ContentChange,
   content: string,
+  lostMessage: string,
   attributes: ContentAttributePatch = {},
-): Promise<string | null> {
-  try {
-    const response = await fetch(`/api/staging/content/${row.siteId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        elementId: row.elementId,
-        content,
-        language: row.language,
-        variant: row.variant,
-        ...attributes,
-      }),
-    });
-    return response.ok ? null : await refusalMessage(response, DRAFT_FAILED);
-  } catch {
-    return DRAFT_FAILED;
-  }
-}
+): Promise<WriteFailure | null> =>
+  send(
+    `/api/staging/content/${row.siteId}`,
+    "PUT",
+    {
+      elementId: row.elementId,
+      content,
+      language: row.language,
+      variant: row.variant,
+      ...attributes,
+    },
+    { refused: DRAFT_FAILED, lostMessage },
+  );
 
 /**
  * Publishes this element only. The RPC publishes every language and variant
  * draft of the `element_id` (research, traps), which is the editor's own
  * behaviour for the same button.
  */
-async function publishElement(row: ContentChange): Promise<string | null> {
-  try {
-    const response = await fetch("/api/staging/publish", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteId: row.siteId, elementIds: [row.elementId] }),
-    });
-    return response.ok ? null : await refusalMessage(response, PUBLISH_FAILED);
-  } catch {
-    return PUBLISH_FAILED;
-  }
+const publishElement = (row: ContentChange): Promise<WriteFailure | null> =>
+  send(
+    "/api/staging/publish",
+    "POST",
+    { siteId: row.siteId, elementIds: [row.elementId] },
+    { refused: PUBLISH_FAILED, lostMessage: PUBLISH_LOST },
+  );
+
+/** One write from this page, from its first request to its re-read. */
+export interface WriteInFlight {
+  /** Unique per write: a write that ends clears its own entry, no other. */
+  id: number;
+  rowId: string;
+  siteId: string;
+  elementId: string;
+  action: ChangeAction;
 }
 
+type ElementOf = Pick<ContentChange, "siteId" | "elementId">;
+
+/**
+ * Whether a write to the row's element is in flight, from any of its rows:
+ * every language and variant row of an element is locked while one of them
+ * is written. An element id is unique only within a site, hence both.
+ */
+export const isElementWriting = (
+  writes: readonly WriteInFlight[],
+  row: ElementOf,
+): boolean =>
+  writes.some(
+    (write) => write.siteId === row.siteId && write.elementId === row.elementId,
+  );
+
+/** The action in flight on this very row, for its spinner; null if none. */
+export const busyActionOf = (
+  writes: readonly WriteInFlight[],
+  row: Pick<ContentChange, "id">,
+): ChangeAction | null =>
+  writes.find((write) => write.rowId === row.id)?.action ?? null;
+
 export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
-  const [pendingAction, setPendingAction] = useState<{
-    rowId: string;
-    action: ChangeAction;
-  } | null>(null);
+  // One entry per write, never one slot for the page. Tombstone
+  // (verification of 63d7ba2, major): `pendingAction` held "the" write in
+  // flight and the row compared its own id with it. Discard on an fr row
+  // stayed enabled while Publish on the en row of the same element was in
+  // flight: its re-read landed before the publish committed and its PUT
+  // after, so the old text was staged again under "Draft discarded.". And a
+  // second write replaced the first one's entry, and whichever ended first
+  // cleared both, so a row in flight was offered its buttons again.
+  //
+  // CTO decision: the lock is the element (site + element id), not the row
+  // and not the page. Publish promotes every language and variant row of
+  // the element and nothing else (20260924060000); a draft save writes one
+  // row of it; Discard's pre-read and every re-read read the element. Two
+  // writes to two elements cannot touch each other's rows, so they run side
+  // by side. The ref is the guard (it changes synchronously, before any
+  // render); the state is what the rows draw.
+  const [inFlight, setInFlight] = useState<readonly WriteInFlight[]>([]);
+  const writing = useRef<readonly WriteInFlight[]>([]);
+  const writeCount = useRef(0);
 
   const track = useCallback(
     async (
@@ -219,18 +338,41 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
       action: ChangeAction,
       write: () => Promise<ActionOutcome>,
     ): Promise<ActionOutcome> => {
-      setPendingAction({ rowId: row.id, action });
+      if (isElementWriting(writing.current, row)) return refusal(ELEMENT_BUSY);
+      writeCount.current += 1;
+      const entry: WriteInFlight = {
+        id: writeCount.current,
+        rowId: row.id,
+        siteId: row.siteId,
+        elementId: row.elementId,
+        action,
+      };
+      writing.current = [...writing.current, entry];
+      setInFlight(writing.current);
       try {
         const outcome = await write();
-        if (!reread || (!outcome.applied && !outcome.isStale)) return outcome;
-        const isFresh = await reread(row);
-        if (isFresh || !outcome.applied) return outcome;
+        // Read the element again whenever the server may hold something
+        // other than what the row shows: a write landed, the row changed
+        // elsewhere, or no answer came back.
+        const isWorthRereading =
+          outcome.applied !== null ||
+          outcome.isStale === true ||
+          outcome.isUncertain === true;
+        if (!reread || !isWorthRereading) return outcome;
+        if (await reread(row)) return outcome;
+        // Whatever the message said, the row under it was not read again.
+        // Tombstone (verification of 63d7ba2, minor 5): this was said only
+        // after a write that landed, so a stale Discard said "review it
+        // again" over a row that had not been refreshed.
         return {
           ...outcome,
-          error: outcome.error ? `${outcome.error} ${NOT_REREAD}` : NOT_REREAD,
+          error: outcome.error
+            ? `${outcome.error} ${ROW_OUT_OF_DATE}`
+            : NOT_REREAD,
         };
       } finally {
-        setPendingAction(null);
+        writing.current = writing.current.filter(({ id }) => id !== entry.id);
+        setInFlight(writing.current);
       }
     },
     [reread],
@@ -246,7 +388,10 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
         const original = row.original;
         if (original === null) return refusal(NO_ORIGINAL);
         if (original === row.live) return refusal(ALREADY_ORIGINAL);
-        return outcomeOf("revertToDraft", await saveDraft(row, original));
+        return outcomeOf(
+          "revertToDraft",
+          await saveDraft(row, original, REVERT_LOST),
+        );
       }),
     [track],
   );
@@ -259,17 +404,21 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
         if (original === row.live) return refusal(ALREADY_ORIGINAL);
         // Never publish a draft that was not saved: a refused PUT (402, 403,
         // 429) leaves the old draft, or none, and publishing then would push
-        // something other than the original live.
-        const draftRefused = await saveDraft(row, original);
-        if (draftRefused) return refusal(draftRefused);
-        const publishRefused = await publishElement(row);
-        if (!publishRefused) return outcomeOf("revertAndPublish", null);
+        // something other than the original live. Nor one whose save went
+        // unanswered: it may not exist.
+        const draftFailed = await saveDraft(row, original, REVERT_LOST);
+        if (draftFailed) return outcomeOf("revertAndPublish", draftFailed);
+        const publishFailed = await publishElement(row);
+        if (!publishFailed) return outcomeOf("revertAndPublish", null);
         // Two writes, not one: the draft is saved and pending now. Tombstone
         // (Devin review, PR #77): this returned the POST's refusal alone, the
         // dialog said "Not reverted", and the row stayed Published while its
         // revert waited as a draft that any later Publish would push.
+        const lead = publishFailed.isUncertain
+          ? REVERT_SAVED
+          : REVERT_NOT_PUBLISHED;
         return {
-          error: `${REVERT_NOT_PUBLISHED} ${publishRefused}`,
+          error: `${lead} ${publishFailed.error}`,
           applied: "revertToDraft",
         };
       }),
@@ -281,15 +430,21 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
   // as the page had loaded them, so a view gone stale (a second tab, an
   // editor publishing from the live page) staged the old copy again, and the
   // next Publish put it back live. When the draft is no longer the one the
-  // owner was shown, nothing is sent. Residual: a write landing between this
-  // read and the PUT (milliseconds) is not seen; closing it needs a
-  // compare-and-set in the staging PUT, an existing route this story does not
-  // change (follow-up: s81-version-restore-integrity).
+  // owner was shown, nothing is sent. Residual: a write from elsewhere (a
+  // second tab, the editor on the live page) landing between this read and
+  // the save RPC is not seen. That window is not milliseconds: it is this
+  // read's way back, then everything the staging PUT does before its RPC
+  // (`authorizeFirstPartyEditorAccess`, `enforceRateLimit`,
+  // `checkOwnerCanEdit`, each a round trip), so hundreds of milliseconds or
+  // more. This page's own writes cannot land there (one write at a time per
+  // element, above). Closing it needs a compare-and-set in the staging PUT,
+  // an existing route this story does not change (follow-up:
+  // s81-version-restore-integrity).
   const discardDraft = useCallback(
     (row: ContentChange) =>
       track(row, "discardDraft", async () => {
         if (row.live === null) return refusal(NO_LIVE_TEXT);
-        if (!discardAttributes(row)) return refusal(discardRefusal(row));
+        if (!canDiscardDraft(row)) return refusal(discardRefusal(row));
         let fresh: ContentChange | undefined;
         try {
           const rows = await readElementChanges(row.siteId, row.elementId);
@@ -301,13 +456,13 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
           return { error: UPDATED_ELSEWHERE, applied: null, isStale: true };
         }
         const attributes = discardAttributes(fresh);
-        if (!attributes) {
+        if (!attributes || !canDiscardDraft(fresh)) {
           return { error: discardRefusal(fresh), applied: null, isStale: true };
         }
         if (fresh.live === null) return refusal(NO_LIVE_TEXT);
         return outcomeOf(
           "discardDraft",
-          await saveDraft(fresh, fresh.live, attributes),
+          await saveDraft(fresh, fresh.live, DISCARD_LOST, attributes),
         );
       }),
     [track],
@@ -326,6 +481,7 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
     revertAndPublish,
     discardDraft,
     publish,
-    pendingAction,
+    /** Every write in flight; see `isElementWriting` and `busyActionOf`. */
+    inFlight,
   };
 }

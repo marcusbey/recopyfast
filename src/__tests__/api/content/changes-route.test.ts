@@ -473,6 +473,7 @@ describe("GET /api/content/changes", () => {
       live: "Live",
       draft: null,
       draftAttributes: [],
+      hasLiveText: true,
       state: "published",
       changedAt: "2026-10-08T10:00:00+00:00",
       changedBy: "ana@example.com",
@@ -575,6 +576,32 @@ describe("GET /api/content/changes", () => {
 
     expect(body.rows[0].live).toBe("Original");
     expect(body.rows[0].changedBy).toBeNull();
+  });
+
+  // Verification of 63d7ba2 (minor 6): a translation is written with no
+  // published_content (src/app/api/ai/translate/route.ts), and "Live now"
+  // stands in the original for it. A draft on such a row cannot be discarded
+  // through the staging PUT: any text it saves differs from that NULL, so
+  // the row stays pending. The page needs to know which rows those are.
+  it("says whether a row has live text of its own: none when it was never published", async () => {
+    mockRespond = defaultResponder(
+      [
+        viewRow(1, {
+          change_state: "pending",
+          published_content: null,
+          staging_content: "Brouillon",
+        }),
+        viewRow(2),
+      ],
+      2,
+    );
+
+    const body = await (await get()).json();
+
+    expect(
+      body.rows.map((row: { hasLiveText: unknown }) => row.hasLiveText),
+    ).toEqual([false, true]);
+    expect(body.rows[0].live).toBe("Original");
   });
 
   it("answers nextOffset null on the last page", async () => {

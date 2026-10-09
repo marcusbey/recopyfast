@@ -299,7 +299,7 @@ export function ChangesView({ siteId }: ChangesViewProps) {
         site={group.site}
         pages={group.pages}
         showHeader={!siteId}
-        busy={actions.pendingAction}
+        inFlight={actions.inFlight}
         onAction={runAction}
       />
     ));

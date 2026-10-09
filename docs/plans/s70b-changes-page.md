@@ -410,9 +410,13 @@ existing route. The only route change is an optional read-only filter on this st
   text and live attribute values are not part of the comparison, because they are not what the
   owner is discarding; when they moved (a bulk update writes the live text under a pending
   draft), the PUT sends the current ones, which is exactly what discarding means.
-  **Residual:** a write landing between that read and the PUT (milliseconds) is not seen. Closing
-  it needs a server-side compare-and-set in the staging PUT, an existing route this story does not
-  change. **Follow-up: s81-version-restore-integrity** (the version/concurrency story).
+  **Residual:** a write from elsewhere landing between that read and the save RPC is not seen.
+  (Corrected at the next verification, minor 2: this said "milliseconds". The window is the read's
+  way back plus everything the staging PUT runs before its RPC — `authorizeFirstPartyEditorAccess`,
+  `enforceRateLimit`, `checkOwnerCanEdit`, each a round trip — so hundreds of milliseconds or
+  more.) Closing it needs a server-side compare-and-set in the staging PUT, an existing route this
+  story does not change. **Follow-up: s81-version-restore-integrity** (the version/concurrency
+  story).
 - **m1 (minor): a filter changed while Publish was in flight dropped the row patch**, and the
   reload, read before the publish committed, drew the row Pending with Discard. Every read is now
   numbered as it starts, and a row is only replaced by a copy from a later-started read: a first
@@ -453,6 +457,129 @@ existing route. The only route change is an optional read-only filter on this st
   view (Publish en → fr Published without Discard, Revert and publish → sibling published, two
   stale-tab Discards, the filter race, focus after Publish, failed re-read). Each new view test was
   run against `403066e` and failed there for the reason it names.
+
+### Fix pass (verification of `63d7ba2`)
+
+One major and six minors, fixed without a new route, an RPC, a migration or a change to an existing
+route. The only route change is one field on this story's own `GET /api/content/changes` rows
+(`hasLiveText`). Nothing under `src/components/ui`, `public/`, `server/` or `supabase/` changed.
+
+> CTO decision under the owner's 2026-10-09 directive.
+
+- [x] **Major: one write at a time per element.** The busy state was one slot
+  (`useChangeActions.ts:211`, `pendingAction`), cleared by whichever write ended first (`:233`),
+  and a row compared its own id with it (`ChangeSiteGroup.tsx:137`). So Discard on the fr row
+  stayed enabled while Publish on the en row of the same element was in flight: its pre-read could
+  land before the publish committed and its PUT after, staging the old text again under "Draft
+  discarded.". And a second write replaced the first one's entry, so a row in flight was offered
+  its buttons again. Now the hook keeps one entry per write (`inFlight`, each with its own id; a
+  write that ends removes its own entry only), and every row whose site and element id match an
+  entry has Publish, Discard and Revert disabled, in the panel and in ⋮. The spinner stays on the
+  row whose action it is. The hook also refuses, sending nothing, a second write to an element
+  that is being written ("A change to this text is still being saved. Try again once it has
+  finished."), checked on a ref so it does not wait for a render.
+  **CTO decision: the lock is the element (site + element id), not the page.** Publish promotes
+  every language and variant row of the element ids it is given and nothing else
+  (`20260924060000`), a draft save writes one row of it, and every read the actions make (Discard's
+  pre-read, the re-read after a write) reads that element. Two writes to two elements cannot touch
+  each other's rows, so they run side by side; locking the whole page would serialise them for
+  nothing.
+  **Deviation from the finding's wording:** the revert/discard dialog's confirm buttons are not
+  given the lock. The dialog is modal and opens only from a Revert or Discard control, and those
+  are disabled while the element is written, so a confirm can never be reached while another write
+  to the element is in flight; a lock there could not be tested. The hook's refusal stands behind
+  it either way.
+- [x] **Minor 2: the residual race is not "milliseconds".** Corrected in `useChangeActions.ts` and
+  in the M1 paragraph above. Follow-up unchanged: s81-version-restore-integrity (compare-and-set in
+  the staging PUT).
+- [x] **Minor 3: the frame-ordering guard is pinned.** Two tests where overlapping writes' count
+  re-reads land out of order (two writes; a write and a filter change).
+  **CTO decision: the `rereadFrame` generation check is removed.** Mutation showed it guards
+  nothing `patchFrame`'s read order does not: removing it alone left every test green, removing the
+  read order alone turned the "two writes" test red, removing both turned both red. A filter
+  change's first page is a later-started read than any count read already out, and while it loads
+  there is no list to patch. With the check gone, removing the read order turns both tests red.
+- [x] **Minor 4: the element read pages.** `readElementChanges` read offset 0 alone, but an element
+  has a row per language × variant and nothing caps that at 50: a sibling past the first page kept
+  its old draft after Publish, and Discard on it said "updated elsewhere". It now follows
+  `nextOffset`, which the route stops offering at its ceiling and refuses past it, so the loop is
+  bounded there. A `nextOffset` that does not move forward is refused, and a read that does not end
+  with exactly the rows the last page counted (offset paging can skip a row that moves between two
+  pages) is a failure: the row is then said to be possibly out of date, or Discard sends nothing.
+- [x] **Minor 5: failure paths.** A stale Discard whose re-read failed said "review it again" over
+  a row that had not been refreshed: any message now gets "The row could not be read again and may
+  be out of date. Reload the page to see it as it is now." when the re-read fails (a clean success
+  keeps "This went through, but …"). A write that got no answer at all (the request threw: the
+  connection dropped) was reported as refused and not read again, though it may have committed: it
+  is now read again, the dialog closes onto the row as read, and the row says "The connection
+  dropped before the server answered, so <the draft may or may not have been discarded | the revert
+  may or may not have been saved | it may or may not have been published>. Check the row before
+  trying again." Revert and publish never publishes after an unanswered save. A revert whose save
+  landed and whose publish got no answer says "The revert was saved as a draft." first.
+  **CTO decision:** only a request that throws is "uncertain". Any HTTP answer is the server's word,
+  as before: the save and publish RPCs are atomic, so a 4xx/5xx from the route has written nothing.
+  A 502/504 from a proxy is the one ambiguous answer left; it reads as a refusal, as it did.
+  **Wording change, not pinned before:** a revert whose publish was refused and whose re-read then
+  failed ended "… This went through, but the row could not be read again …"; it now ends "… The
+  row could not be read again …", since the publish did not go through.
+- [x] **Minor 6: a draft on text never published is not offered a discard.** A translation is
+  written with no `published_content` (`src/app/api/ai/translate/route.ts:313-335`), "Live now"
+  stands in the original, and Discard saved that original as the draft, which the view still reads
+  as differing from NULL: the row stayed Pending under "Draft discarded." No existing route can
+  clear a draft to NULL (the staging PUT stores `String(content)`), so such a draft is not offered
+  Discard, and the row says "This text was never published, so its draft can't be discarded here.
+  Edit or publish it on the page." The list route's rows carry `hasLiveText`
+  (`published_content IS NOT NULL`, Task 3 contract amended); the hook reads anything but `true` as
+  false (no Discard), like `draftAttributes`. Discard re-checks it on the row it reads just before
+  the PUT. The test fake (`changes-server-fake.ts`) now models a NULL `published_content` the way
+  the SQL does (`hasLiveText: false` in a seed).
+- [x] **Minor 7: both focus branches after Publish are tested.** The immediate one (the re-read row
+  is drawn and focus falls before the action settles: the counts read is still out) now has its
+  test; each branch's test goes red when that branch is removed.
+- **Tests changed** (AGENTS.md § Tests):
+  - `useChangeActions.test.ts`: "reports which row is in flight while a write runs" and "re-reads
+    the row's element after the write lands, and keeps the row busy until it has" asserted the
+    removed `pendingAction` slot; they assert the same thing through `inFlight` (`busyActionOf`,
+    `isElementWriting`). The `row()` fixture carries `hasLiveText: true`.
+  - `changes-route.test.ts`: "maps rows to the contract…" pins the row's exact shape, which gains
+    `hasLiveText: true`.
+  - `ChangesView.test.tsx`: the `row()` fixture carries `hasLiveText: true` (the hook reads a
+    missing field as false, which would withdraw Discard from every static-list test).
+  - `e2e/support/changes-fixtures.ts`: every fixture row carries `hasLiveText: true`. No spec
+    changed; the contract count is unchanged (85).
+- **New tests:** hook actions (every write tracked, an end clears only its own, the element lock
+  and its scope, the refusal of a second write; Discard past the first page; never-published,
+  twice; stale + failed re-read; five unanswered-write cases); hook list (element read across two
+  pages, two incomplete reads, two frame-ordering races, `hasLiveText` normalisation); route
+  (`hasLiveText`); view (the probe: en Publish in flight → fr Discard and Publish disabled, ⋮
+  Discard disabled, both settle consistent; two overlapping writes; stale + failed re-read; lost
+  Discard answer; never-published Discard; immediate focus).
+- **Mutations** (each guard neutralised alone, its test red, restored byte for byte):
+
+  | Guard | Red |
+  |---|---|
+  | hook refuses a second write to an element | "refuses a second write…" |
+  | a write's end clears only its own entry | "tracks every write…", view "keeps each write's row busy…" |
+  | the lock matches site + element | 4 hook tests, both view lock tests |
+  | panel Discard disabled by the element lock | view "disables every row…" |
+  | ⋮ Discard disabled by the element lock | view "disables every row…" |
+  | the group passes the element lock, not the row's own | view "disables every row…" |
+  | `patchFrame` read order | both frame-ordering tests |
+  | element read follows `nextOffset` | 3 list tests, the Discard past page one |
+  | element read must be complete | "…pages missed a row" |
+  | element read refuses a non-advancing offset | "…does not move forward" (the loop exhausts the worker's heap) |
+  | re-read after an unanswered write | 5 hook tests, view "lost Discard answer" |
+  | out-of-date said whatever the outcome | 2 hook tests, view "stale + failed re-read" |
+  | a thrown request is uncertain, not refused | 6 hook tests, view "lost Discard answer" |
+  | no publish after an unanswered save | "revertAndPublish reads the row again…" |
+  | the dialog closes on an uncertain write | view "lost Discard answer" |
+  | route `hasLiveText` | route test |
+  | hook reads only `true` as live text | list normalisation test |
+  | no Discard on text never published | hook and view tests |
+  | the fresh row's live text re-checked | "…as read now has no live text…" |
+  | the never-published note | hook and view tests |
+  | immediate focus branch | view "moves focus … at once" |
+  | deferred focus branch | view "keeps a published row open…" |
 
 ## Run interdicts
 

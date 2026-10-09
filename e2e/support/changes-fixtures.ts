@@ -56,6 +56,9 @@ function rows() {
     // The list route's contract: the attributes a pending draft stages. None
     // here, so Discard is offered as for any text draft.
     draftAttributes: [] as Array<{ name: string; live: string | null }>,
+    // Every fixture row has published text of its own (none is a translation
+    // never published, which is offered no Discard).
+    hasLiveText: true,
     changedBy: null as string | null,
     createdAt: "2026-09-28T09:00:00.000Z",
   };

@@ -6,7 +6,13 @@ import { ChevronRight } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusBadge, contentStatuses } from "@/components/ui/status-badge";
-import type { ActionOutcome, ChangeAction } from "@/hooks/useChangeActions";
+import {
+  busyActionOf,
+  isElementWriting,
+  type ActionOutcome,
+  type ChangeAction,
+  type WriteInFlight,
+} from "@/hooks/useChangeActions";
 import type { ChangesSite, ContentChange } from "@/hooks/useContentChanges";
 import { cn } from "@/lib/utils/cn";
 import { ChangeRow } from "./ChangeRow";
@@ -23,7 +29,8 @@ interface ChangeSiteGroupProps {
   pages: PageGroup[];
   /** False on a site's own tab (s70c): the frame already names the site. */
   showHeader: boolean;
-  busy: { rowId: string; action: ChangeAction } | null;
+  /** Every write in flight on the page (useChangeActions). */
+  inFlight: readonly WriteInFlight[];
   onAction: (
     row: ContentChange,
     action: ChangeAction,
@@ -42,7 +49,7 @@ export function ChangeSiteGroup({
   site,
   pages,
   showHeader,
-  busy,
+  inFlight,
   onAction,
 }: ChangeSiteGroupProps) {
   const headingId = useId();
@@ -134,7 +141,8 @@ export function ChangeSiteGroup({
                 row={row}
                 site={site}
                 pageLabel={page.label}
-                busyAction={busy?.rowId === row.id ? busy.action : null}
+                busyAction={busyActionOf(inFlight, row)}
+                isLocked={isElementWriting(inFlight, row)}
                 onAction={onAction}
               />
             ))}

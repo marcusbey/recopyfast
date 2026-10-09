@@ -15,6 +15,10 @@ import {
  * an error, never an empty list (the `useSites.ts` rule: an empty list reads as
  * "you have no changes" when the truth is "we failed"); typing in search waits
  * 250 ms before it asks.
+ *
+ * Verification of 63d7ba2: the element read follows `nextOffset` and fails
+ * when incomplete; counts read after a write are taken only from a newer
+ * read; `hasLiveText` is believed only when it is `true`.
  */
 
 const SITE_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -276,6 +280,33 @@ describe("useContentChanges", () => {
     ]);
   });
 
+  // Verification of 63d7ba2 (minor 6): whether a row has published text of
+  // its own decides whether Discard is offered. Only an answer that says so
+  // is believed: anything else is read as no, which offers no Discard.
+  it("reads a row's live text as its own only when the answer says so", async () => {
+    const rows = [
+      change("yes", { hasLiveText: true }),
+      change("no", { hasLiveText: false }),
+      change("missing"),
+      { ...change("odd"), hasLiveText: "true" },
+    ] as unknown as ContentChange[];
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(response(page(rows))) as typeof fetch;
+
+    const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(
+      result.current.data?.rows.map((row) => [row.id, row.hasLiveText]),
+    ).toEqual([
+      ["yes", true],
+      ["no", false],
+      ["missing", false],
+      ["odd", false],
+    ]);
+  });
+
   it("refetch recovers from an error", async () => {
     global.fetch = jest
       .fn()
@@ -523,6 +554,216 @@ describe("useContentChanges", () => {
         ["e-fr", "published", "Bonjour"],
       ]);
       expect(result.current.data?.counts).toEqual(COUNTS_AFTER);
+    });
+
+    // Verification of 63d7ba2 (minor 4): the element read took the first 50
+    // rows and ignored `nextOffset`, but an element has one row per language
+    // × variant, and can have more. A sibling past the first page kept its
+    // old draft after Publish, and Discard on it found no row and said
+    // "updated elsewhere".
+    describe("an element with more rows than one page", () => {
+      const SIBLING_COUNT = 60;
+      const siblings = (isPublished: boolean) =>
+        Array.from({ length: SIBLING_COUNT }, (_, index) =>
+          change(`s-${index}`, {
+            elementId: "rcf-e",
+            language: `l${index}`,
+            state: isPublished ? "published" : "pending",
+            draft: isPublished ? null : "Draft",
+            live: isPublished ? "Draft" : "Live",
+          }),
+        );
+      /** The list route's paging, for the element read. */
+      const elementPage = (rows: ContentChange[], url: URL) => {
+        const offset = Number(url.searchParams.get("offset"));
+        const next = offset + 50;
+        return response(
+          page(rows.slice(offset, next), {
+            nextOffset: next < rows.length ? next : null,
+            total: rows.length,
+          }),
+        );
+      };
+
+      it("reads every page of the element, and re-draws a sibling the first page did not hold", async () => {
+        let written = false;
+        route((url) =>
+          isElementRead(url)
+            ? elementPage(siblings(written), url)
+            : response(page([siblings(written)[55]])),
+        );
+        const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        written = true;
+        let isFresh: boolean | undefined;
+        await act(async () => {
+          isFresh = await result.current.refreshAfterWrite(SITE_A, "rcf-e");
+        });
+
+        expect(isFresh).toBe(true);
+        expect(
+          requests()
+            .filter(isElementRead)
+            .map((url) => url.searchParams.get("offset")),
+        ).toEqual(["0", "50"]);
+        expect(shown(result.current.data?.rows)).toEqual([
+          ["s-55", "published", "Draft"],
+        ]);
+      });
+
+      it.each([
+        [
+          "pages missed a row (one moved between two pages)",
+          (url: URL) => {
+            const rows = siblings(true);
+            // The second page repeats a row of the first: one is never seen.
+            return url.searchParams.get("offset") === "0"
+              ? elementPage(rows, url)
+              : response(page(rows.slice(49, 59), { total: SIBLING_COUNT }));
+          },
+        ],
+        [
+          "next offset does not move forward",
+          (url: URL) =>
+            response(
+              page(siblings(true).slice(0, 50), {
+                nextOffset: Number(url.searchParams.get("offset")),
+                total: SIBLING_COUNT,
+              }),
+            ),
+        ],
+      ])(
+        "resolves false, leaving the rows as they were, when the element's %s",
+        async (_label, answer) => {
+          let written = false;
+          route((url) =>
+            written && isElementRead(url)
+              ? answer(url)
+              : response(page([siblings(false)[55]])),
+          );
+          const { result } = renderHook(() =>
+            useContentChanges(DEFAULT_FILTERS),
+          );
+          await waitFor(() => expect(result.current.data).not.toBeNull());
+
+          written = true;
+          let isFresh: boolean | undefined;
+          await act(async () => {
+            isFresh = await result.current.refreshAfterWrite(SITE_A, "rcf-e");
+          });
+
+          expect(isFresh).toBe(false);
+          expect(shown(result.current.data?.rows)).toEqual([
+            ["s-55", "pending", "Live"],
+          ]);
+          expect(requests().filter(isElementRead).length).toBeLessThan(10);
+        },
+      );
+    });
+
+    // Verification of 63d7ba2 (minor 3): the counts and total a write reads
+    // again are taken only from a read that started after the one on screen.
+    // Two writes overlap (two elements: the page writes one element at a
+    // time); the first one's count read lands last, with the counts as they
+    // were before the second write.
+    it("keeps the newer write's counts and total when an older write's count re-read lands after it", async () => {
+      const COUNTS_BETWEEN = { pending: 1, published: 2, original: 3 };
+      let frameReads = 0;
+      let answerFirst: (() => void) | null = null;
+      route((url) => {
+        if (isElementRead(url)) return response(page([EN_AFTER]));
+        frameReads += 1;
+        if (frameReads === 1) {
+          return response(page([EN_BEFORE, OTHER], { total: 9 }));
+        }
+        if (frameReads === 2) {
+          const body = {
+            ...page([EN_AFTER, OTHER], { total: 8 }),
+            counts: COUNTS_BETWEEN,
+          };
+          return new Promise<Response>((resolve) => {
+            answerFirst = () => resolve(response(body));
+          });
+        }
+        return response({
+          ...page([EN_AFTER, OTHER], { total: 7 }),
+          counts: COUNTS_AFTER,
+        });
+      });
+      const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
+      await waitFor(() => expect(result.current.data).not.toBeNull());
+
+      let first!: Promise<boolean>;
+      act(() => {
+        first = result.current.refreshAfterWrite(SITE_A, "rcf-e");
+      });
+      await waitFor(() => expect(answerFirst).not.toBeNull());
+      await act(async () => {
+        await result.current.refreshAfterWrite(SITE_A, "rcf-x");
+      });
+      expect(result.current.counts).toEqual(COUNTS_AFTER);
+      expect(result.current.data?.total).toBe(7);
+
+      await act(async () => {
+        answerFirst!();
+        await first;
+      });
+
+      expect(result.current.counts).toEqual(COUNTS_AFTER);
+      expect(result.current.data?.total).toBe(7);
+    });
+
+    // The same guard, across a filter change: a write's count read asked
+    // with the old filter lands after the new filter's first page.
+    it("never takes counts read for the previous filter when a write's count re-read lands after a filter change", async () => {
+      const COUNTS_OLD_FILTER = { pending: 5, published: 5, original: 5 };
+      const COUNTS_PENDING = { pending: 1, published: 0, original: 0 };
+      let answerOld: (() => void) | null = null;
+      let isWritten = false;
+      route((url) => {
+        if (isElementRead(url)) return response(page([EN_AFTER]));
+        if (url.searchParams.get("state") === "pending") {
+          return response({
+            ...page([FR_BEFORE], { total: 1 }),
+            counts: COUNTS_PENDING,
+          });
+        }
+        if (!isWritten) return response(page([EN_BEFORE, OTHER]));
+        const body = {
+          ...page([EN_AFTER, OTHER], { total: 40 }),
+          counts: COUNTS_OLD_FILTER,
+        };
+        return new Promise<Response>((resolve) => {
+          answerOld = () => resolve(response(body));
+        });
+      });
+      const { result, rerender } = renderHook(
+        (filters: ChangesFilters) => useContentChanges(filters),
+        { initialProps: DEFAULT_FILTERS },
+      );
+      await waitFor(() => expect(result.current.data).not.toBeNull());
+
+      isWritten = true;
+      let reread!: Promise<boolean>;
+      act(() => {
+        reread = result.current.refreshAfterWrite(SITE_A, "rcf-e");
+      });
+      await waitFor(() => expect(answerOld).not.toBeNull());
+      rerender({ ...DEFAULT_FILTERS, state: "pending" });
+      await waitFor(() =>
+        expect(result.current.counts).toEqual(COUNTS_PENDING),
+      );
+      await act(async () => {
+        answerOld!();
+        await reread;
+      });
+
+      expect(result.current.counts).toEqual(COUNTS_PENDING);
+      expect(result.current.data?.total).toBe(1);
+      expect(shown(result.current.data?.rows)).toEqual([
+        ["e-fr", "pending", "Salut"],
+      ]);
     });
 
     it("keeps the row a newer read drew when an older re-read lands after it", async () => {

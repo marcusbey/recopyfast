@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge, contentStatuses } from "@/components/ui/status-badge";
 import {
-  discardAttributes,
+  canDiscardDraft,
   type ActionOutcome,
   type ChangeAction,
 } from "@/hooks/useChangeActions";
@@ -127,8 +127,14 @@ interface ChangeRowProps {
   row: ContentChange;
   site: ChangesSite;
   pageLabel: string;
-  /** The action in flight on this row, if any. */
+  /** The action in flight on this row, if any (its spinner). */
   busyAction: ChangeAction | null;
+  /**
+   * A write to this row's element is in flight, from this row or another
+   * language or variant of it: every write action is disabled until it has
+   * ended and been read again (useChangeActions.ts, `isElementWriting`).
+   */
+  isLocked: boolean;
   onAction: (
     row: ContentChange,
     action: ChangeAction,
@@ -140,6 +146,7 @@ export function ChangeRow({
   site,
   pageLabel,
   busyAction,
+  isLocked,
   onAction,
 }: ChangeRowProps) {
   const detailId = `${useId()}-detail`;
@@ -174,12 +181,12 @@ export function ChangeRow({
     classifyContent(text, row.elementType === "img" ? "image" : undefined) ===
     "image";
   const who = isAdmin && row.changedBy ? row.changedBy : null;
-  // A draft whose staged link or alt cannot be sent back through the PUT is
-  // not offered a discard that would leave it pending (useChangeActions.ts,
-  // `discardAttributes`). A published row whose text is the original has
-  // nothing to revert (the publish RPC would skip that draft).
-  const canDiscard =
-    canEdit && row.state === "pending" && discardAttributes(row) !== null;
+  // A draft on text never published, or whose staged link or alt cannot be
+  // sent back through the PUT, is not offered a discard that would leave it
+  // pending (useChangeActions.ts, `canDiscardDraft`). A published row whose
+  // text is the original has nothing to revert (the publish RPC would skip
+  // that draft).
+  const canDiscard = canEdit && row.state === "pending" && canDiscardDraft(row);
   const canRevert =
     canEdit && row.state === "published" && row.live !== row.original;
 
@@ -190,14 +197,16 @@ export function ChangeRow({
   };
 
   // Nothing landed: the dialog stays open with the reason. Something landed
-  // but not all of it (a revert saved, its publish refused), or nothing was
-  // sent because the row changed elsewhere (Discard's re-read): the dialog
-  // closes on the row as the server now holds it, opened, with the reason
-  // under its actions — where they can be reviewed and tried again.
+  // but not all of it (a revert saved, its publish refused), nothing was
+  // sent because the row changed elsewhere (Discard's re-read), or no answer
+  // came back and it may have landed: the dialog closes on the row as the
+  // server now holds it, opened, with the reason under its actions — where
+  // they can be reviewed and tried again.
   const runConfirmed = async (action: ChangeAction) => {
     setConfirmError(null);
     const outcome = await onAction(row, action);
-    if (outcome.error && !outcome.applied && !outcome.isStale) {
+    const isRowToReview = outcome.isStale || outcome.isUncertain;
+    if (outcome.error && !outcome.applied && !isRowToReview) {
       setConfirmError(outcome.error);
       return;
     }
@@ -392,6 +401,7 @@ export function ChangeRow({
             {canRevert && (
               <DropdownMenuItem
                 className="gap-2"
+                disabled={isLocked}
                 onSelect={() => openConfirm("revert", menuRef.current)}
               >
                 <RotateCcw className="h-4 w-4" aria-hidden="true" />
@@ -401,6 +411,7 @@ export function ChangeRow({
             {canDiscard && (
               <DropdownMenuItem
                 className="gap-2 text-tone-danger-text focus:text-tone-danger-text"
+                disabled={isLocked}
                 onSelect={() => openConfirm("discard", menuRef.current)}
               >
                 <X className="h-4 w-4" aria-hidden="true" />
@@ -421,6 +432,7 @@ export function ChangeRow({
           canDiscard={canDiscard}
           canRevert={canRevert}
           busyAction={busyAction}
+          isLocked={isLocked}
           actionError={actionError}
           onPublish={() => void publish()}
           onConfirm={openConfirm}

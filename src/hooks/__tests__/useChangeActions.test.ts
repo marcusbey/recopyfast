@@ -1,5 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import {
+  busyActionOf,
+  isElementWriting,
   useChangeActions,
   type ActionOutcome,
   type ChangeAction,
@@ -32,6 +34,11 @@ import type { ContentChange } from "../useContentChanges";
  * the PUT and builds the PUT from that read, or sends nothing when the draft
  * changed meanwhile. Every write that landed is followed by a re-read of the
  * element, inside the action, so the row is never reported done as it was.
+ *
+ * Verification of 63d7ba2: every write in flight has its own entry, and a
+ * second write to an element being written is refused; a write whose answer
+ * never came back is read again, as one that may have landed; the element
+ * read pages past 50 rows; a draft on text never published is not discarded.
  */
 
 const SITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -53,6 +60,7 @@ function row(overrides: Partial<ContentChange> = {}): ContentChange {
     live: "Ship copy changes in minutes, not sprints",
     draft: null,
     draftAttributes: [],
+    hasLiveText: true,
     state: "published",
     changedAt: "2026-10-08T10:00:00+00:00",
     changedBy: null,
@@ -90,6 +98,15 @@ const ELEMENT_READ = {
 
 const UPDATED_ELSEWHERE =
   "This change was updated elsewhere — review it again.";
+const NEVER_PUBLISHED =
+  "This text was never published, so its draft can't be discarded here. Edit or publish it on the page.";
+const ROW_OUT_OF_DATE =
+  "The row could not be read again and may be out of date. Reload the page to see it as it is now.";
+const lost = (what: string) =>
+  `The connection dropped before the server answered, so ${what}. Check the row before trying again.`;
+const PUBLISH_LOST = lost("it may or may not have been published");
+const REVERT_LOST = lost("the revert may or may not have been saved");
+const DISCARD_LOST = lost("the draft may or may not have been discarded");
 
 /** The server answers reads with `rows` and accepts every write. */
 function serverHolds(rows: ContentChange[]) {
@@ -305,6 +322,24 @@ describe("useChangeActions", () => {
     },
   );
 
+  // Verification of 63d7ba2 (minor 6): a translation is written with no
+  // published text, and "Live now" stands in the original for it. Discard
+  // saved that original as the draft, which still differs from the NULL the
+  // view compares it with: the row stayed Pending under "Draft discarded."
+  it("refuses to discard a draft on text that was never published, sending nothing", async () => {
+    const pending = row({
+      state: "pending",
+      live: ORDINARY_COPY,
+      draft: "Essai gratuit de 14 jours",
+      hasLiveText: false,
+    });
+
+    expect(await run("discardDraft", pending)).toEqual(
+      refused(NEVER_PUBLISHED),
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   // M1: what goes back is what the server holds now, not what the page
   // loaded. Live text and links can move under a pending draft (a bulk
   // update writes published_content without touching the draft), and the
@@ -382,6 +417,68 @@ describe("useChangeActions", () => {
     },
   );
 
+  // Verification of 63d7ba2 (minor 4): the re-read took the element's first
+  // 50 rows only. An element has a row per language × variant; a row past
+  // the first page was "gone", and its Discard said "updated elsewhere".
+  it("finds its row past the element read's first page, and discards it", async () => {
+    const siblings = Array.from({ length: 60 }, (_, index) =>
+      row({
+        id: `row-${index}`,
+        language: `l${index}`,
+        state: "pending",
+        live: ORDINARY_COPY,
+        draft: "Start your 14-day trial",
+      }),
+    );
+    const target = siblings[55];
+    global.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") !== "GET") return response({ success: true });
+      const offset = Number(
+        new URL(url, "http://localhost").searchParams.get("offset"),
+      );
+      return response({
+        sites: [],
+        rows: siblings.slice(offset, offset + 50),
+        total: siblings.length,
+        counts: { pending: 60, published: 0, original: 0 },
+        nextOffset: offset + 50 < siblings.length ? offset + 50 : null,
+      });
+    }) as unknown as typeof fetch;
+
+    const outcome = await run("discardDraft", target);
+
+    expect(outcome).toEqual(done("discardDraft"));
+    expect(fetchCalls()).toEqual([
+      ELEMENT_READ,
+      {
+        ...ELEMENT_READ,
+        url: ELEMENT_READ.url.replace("offset=0", "offset=50"),
+      },
+      {
+        ...PUT_REVERT,
+        body: JSON.stringify({
+          elementId: "rcf-1gom2eazz3g",
+          content: ORDINARY_COPY,
+          language: "l55",
+          variant: "b",
+        }),
+      },
+    ]);
+  });
+
+  it("sends nothing when the row as read now has no live text of its own, and says why", async () => {
+    serverHolds([{ ...SEEN, hasLiveText: false }]);
+
+    const outcome = await run("discardDraft", SEEN);
+
+    expect(outcome).toEqual({
+      error: NEVER_PUBLISHED,
+      applied: null,
+      isStale: true,
+    });
+    expect(fetchCalls()).toEqual([ELEMENT_READ]);
+  });
+
   it("sends nothing when the staged attributes cannot be read now, and says why", async () => {
     serverHolds([{ ...SEEN, draftAttributes: null }]);
 
@@ -440,10 +537,7 @@ describe("useChangeActions", () => {
         await Promise.resolve();
       });
       expect(reread).toHaveBeenCalledWith(target);
-      expect(result.current.pendingAction).toEqual({
-        rowId: "row-1",
-        action: "publish",
-      });
+      expect(busyActionOf(result.current.inFlight, target)).toBe("publish");
 
       let outcome: ActionOutcome | null = null;
       await act(async () => {
@@ -451,7 +545,7 @@ describe("useChangeActions", () => {
         outcome = await pending;
       });
       expect(outcome).toEqual(done("publish"));
-      expect(result.current.pendingAction).toBeNull();
+      expect(busyActionOf(result.current.inFlight, target)).toBeNull();
     });
 
     it("re-reads after a revert whose publish failed: its draft landed", async () => {
@@ -491,6 +585,133 @@ describe("useChangeActions", () => {
         refused(PLAN_ENDED),
       );
       expect(reread).not.toHaveBeenCalled();
+    });
+
+    // Verification of 63d7ba2 (minor 5): "review it again" was shown over a
+    // row that could not be read again, as if what it showed were current.
+    it("says a row its discard found changed elsewhere may be out of date when it cannot be read again", async () => {
+      serverHolds([{ ...SEEN, draft: "Start your free trial" }]);
+      const reread = jest.fn(async () => false);
+
+      const outcome = await runWithReread("discardDraft", SEEN, reread);
+
+      expect(outcome).toEqual({
+        error: `${UPDATED_ELSEWHERE} ${ROW_OUT_OF_DATE}`,
+        applied: null,
+        isStale: true,
+      });
+      expect(reread).toHaveBeenCalledWith(SEEN);
+    });
+
+    // Verification of 63d7ba2 (minor 5): a write whose answer never came
+    // back (the connection dropped) was reported as refused and not read
+    // again, though it may have landed: the row could show a draft the
+    // server had published, or discarded.
+    describe("when a write's answer is lost", () => {
+      const LOST = () => Promise.reject(new TypeError("Failed to fetch"));
+      const PENDING = row({
+        state: "pending",
+        live: ORDINARY_COPY,
+        draft: "Start your 14-day trial",
+      });
+
+      it.each([
+        [
+          "publish",
+          PENDING,
+          {
+            error: PUBLISH_LOST,
+            applied: null,
+            isUncertain: true,
+          },
+          [POST_PUBLISH],
+        ],
+        [
+          "revertToDraft",
+          row(),
+          {
+            error: REVERT_LOST,
+            applied: null,
+            isUncertain: true,
+          },
+          [PUT_REVERT],
+        ],
+        [
+          // Never publishes a draft whose save was not confirmed.
+          "revertAndPublish",
+          row(),
+          {
+            error: REVERT_LOST,
+            applied: null,
+            isUncertain: true,
+          },
+          [PUT_REVERT],
+        ],
+      ] as const)(
+        "%s reads the row again and says it may or may not have landed",
+        async (action, target, expected, calls) => {
+          (global.fetch as jest.Mock).mockImplementation(LOST);
+          const reread = jest.fn(async () => true);
+
+          const outcome = await runWithReread(action, target, reread);
+
+          expect(outcome).toEqual(expected);
+          expect(fetchCalls()).toEqual(calls);
+          expect(reread).toHaveBeenCalledWith(target);
+        },
+      );
+
+      it("reads a discard whose PUT's answer was lost again, and says the draft may or may not be gone", async () => {
+        serverHolds([PENDING]);
+        const reads = global.fetch as jest.Mock;
+        const answer = reads.getMockImplementation()!;
+        reads.mockImplementation((url: string, init?: RequestInit) =>
+          init?.method === "PUT" ? LOST() : answer(url, init),
+        );
+        const reread = jest.fn(async () => true);
+
+        const outcome = await runWithReread("discardDraft", PENDING, reread);
+
+        expect(outcome).toEqual({
+          error: DISCARD_LOST,
+          applied: null,
+          isUncertain: true,
+        });
+        expect(fetchCalls().map(({ method }) => method)).toEqual([
+          "GET",
+          "PUT",
+        ]);
+        expect(reread).toHaveBeenCalledWith(PENDING);
+      });
+
+      it("says a revert landed as a draft when its publish's answer was lost", async () => {
+        (global.fetch as jest.Mock)
+          .mockImplementationOnce(async () => response({ success: true }))
+          .mockImplementationOnce(LOST);
+        const reread = jest.fn(async () => true);
+
+        const outcome = await runWithReread("revertAndPublish", row(), reread);
+
+        expect(outcome).toEqual({
+          error: `The revert was saved as a draft. ${PUBLISH_LOST}`,
+          applied: "revertToDraft",
+        });
+        expect(fetchCalls()).toEqual([PUT_REVERT, POST_PUBLISH]);
+        expect(reread).toHaveBeenCalledTimes(1);
+      });
+
+      it("says the row may be out of date when it cannot be read again either", async () => {
+        (global.fetch as jest.Mock).mockImplementation(LOST);
+        const reread = jest.fn(async () => false);
+
+        const outcome = await runWithReread("publish", PENDING, reread);
+
+        expect(outcome).toEqual({
+          error: `${PUBLISH_LOST} ${ROW_OUT_OF_DATE}`,
+          applied: null,
+          isUncertain: true,
+        });
+      });
     });
 
     it("says the write went through but the row may be out of date when it cannot be read again", async () => {
@@ -552,20 +773,118 @@ describe("useChangeActions", () => {
       }),
     );
     const { result } = renderHook(() => useChangeActions());
+    const target = row();
 
     let pending!: Promise<ActionOutcome>;
     act(() => {
-      pending = result.current.publish(row());
+      pending = result.current.publish(target);
     });
-    expect(result.current.pendingAction).toEqual({
-      rowId: "row-1",
-      action: "publish",
-    });
+    expect(busyActionOf(result.current.inFlight, target)).toBe("publish");
+    expect(isElementWriting(result.current.inFlight, target)).toBe(true);
 
     await act(async () => {
       finish(response({ success: true }));
       await pending;
     });
-    expect(result.current.pendingAction).toBeNull();
+    expect(result.current.inFlight).toEqual([]);
+    expect(busyActionOf(result.current.inFlight, target)).toBeNull();
+  });
+
+  // Verification of 63d7ba2 (major): one slot held "the" write in flight, so
+  // a second write replaced the first one's busy state and whichever ended
+  // first cleared both. Each write now has its own entry.
+  describe("one write at a time per element", () => {
+    function heldFetches() {
+      const answers: Array<(value: Response) => void> = [];
+      (global.fetch as jest.Mock).mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            answers.push(resolve);
+          }),
+      );
+      return answers;
+    }
+
+    it("tracks every write in flight, and a write's end clears only its own", async () => {
+      const answers = heldFetches();
+      const first = row({ id: "row-a", elementId: "rcf-a", state: "pending" });
+      const second = row({ id: "row-b", elementId: "rcf-b", state: "pending" });
+      const { result } = renderHook(() => useChangeActions());
+
+      let firstDone!: Promise<ActionOutcome>;
+      let secondDone!: Promise<ActionOutcome>;
+      act(() => {
+        firstDone = result.current.publish(first);
+      });
+      act(() => {
+        secondDone = result.current.publish(second);
+      });
+      expect(busyActionOf(result.current.inFlight, first)).toBe("publish");
+      expect(busyActionOf(result.current.inFlight, second)).toBe("publish");
+
+      await act(async () => {
+        answers[0](response({ success: true }));
+        await firstDone;
+      });
+      expect(busyActionOf(result.current.inFlight, first)).toBeNull();
+      expect(busyActionOf(result.current.inFlight, second)).toBe("publish");
+      expect(isElementWriting(result.current.inFlight, second)).toBe(true);
+
+      await act(async () => {
+        answers[1](response({ success: true }));
+        await secondDone;
+      });
+      expect(result.current.inFlight).toEqual([]);
+    });
+
+    it("locks every language and variant row of the element, and no other element", async () => {
+      heldFetches();
+      const en = row({ id: "row-en", language: "en", state: "pending" });
+      const fr = row({ id: "row-fr", language: "fr", state: "pending" });
+      const otherSite = row({ id: "row-x", siteId: "other-site" });
+      const otherElement = row({ id: "row-y", elementId: "rcf-other" });
+      const { result } = renderHook(() => useChangeActions());
+
+      act(() => {
+        void result.current.publish(en);
+      });
+
+      expect(isElementWriting(result.current.inFlight, fr)).toBe(true);
+      expect(busyActionOf(result.current.inFlight, fr)).toBeNull();
+      expect(isElementWriting(result.current.inFlight, otherSite)).toBe(false);
+      expect(isElementWriting(result.current.inFlight, otherElement)).toBe(
+        false,
+      );
+    });
+
+    it("refuses a second write to an element while one is in flight, sending nothing", async () => {
+      heldFetches();
+      const en = row({
+        id: "row-en",
+        language: "en",
+        state: "pending",
+        draft: "Start your 14-day trial",
+      });
+      const fr = row({
+        id: "row-fr",
+        state: "pending",
+        live: ORDINARY_COPY,
+        draft: "Essai gratuit de 14 jours",
+      });
+      const { result } = renderHook(() => useChangeActions());
+
+      act(() => {
+        void result.current.publish(en);
+      });
+      let outcome: ActionOutcome | null = null;
+      await act(async () => {
+        outcome = await result.current.discardDraft(fr);
+      });
+
+      expect(outcome).toEqual(refused(/still being saved/i));
+      expect(fetchCalls()).toEqual([POST_PUBLISH]);
+      expect(busyActionOf(result.current.inFlight, fr)).toBeNull();
+      expect(busyActionOf(result.current.inFlight, en)).toBe("publish");
+    });
   });
 });

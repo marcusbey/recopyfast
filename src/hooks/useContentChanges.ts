@@ -72,6 +72,12 @@ export interface ContentChange {
    * answer carried no valid list): such a draft is never offered a discard.
    */
   draftAttributes: DraftAttribute[] | null;
+  /**
+   * False when the row has no published text of its own (a translation
+   * never published): `live` is the original standing in, and a draft on it
+   * cannot be discarded. Read as false unless the answer says true.
+   */
+  hasLiveText: boolean;
   state: ChangeState;
   changedAt: string | null;
   changedBy: string | null;
@@ -176,24 +182,54 @@ async function fetchChanges(
     rows: body.rows.map((row) => ({
       ...row,
       draftAttributes: knownAttributes(row.draftAttributes),
+      hasLiveText: row.hasLiveText === true,
     })),
   };
 }
 
+const INCOMPLETE_ELEMENT = `${FALLBACK_ERROR}: the element could not be read in full`;
+
 /**
  * Every row of one element on one site, every language and variant, as the
- * server holds them now (`?site&element&state=all`). An element has one row
- * per language × variant, far fewer than the route's 50-row page.
+ * server holds them now (`?site&element&state=all`), page after page.
+ *
+ * Tombstone (verification of 63d7ba2, minor 4): this read offset 0 alone,
+ * "an element has far fewer rows than a page". It has one row per language
+ * × variant, and nothing caps that at 50: a sibling past the first page kept
+ * its old draft after Publish, and Discard on it found no row and said
+ * "updated elsewhere". So it follows `nextOffset`. The loop is bounded by
+ * the route: it stops offering a next page at its ceiling, and refuses any
+ * offset past it (changes-paging.ts); an offset that does not move forward is
+ * refused here rather than followed.
+ *
+ * Offset paging over rows that can change between two pages can skip one (a
+ * row whose `changed_at` moves jumps pages). A read that does not end with
+ * exactly the rows the last page counted, each once, is not complete, and
+ * is a failure: the caller then says the row may be out of date, or sends
+ * nothing, rather than act on a partial element.
  */
 export async function readElementChanges(
   siteId: string,
   elementId: string,
 ): Promise<ContentChange[]> {
-  const page = await fetchChanges(
-    { site: siteId, element: elementId, state: "all", q: "" },
-    0,
-  );
-  return page.rows;
+  const filters: ChangesRead = {
+    site: siteId,
+    element: elementId,
+    state: "all",
+    q: "",
+  };
+  const rows = new Map<string, ContentChange>();
+  let offset = 0;
+  for (;;) {
+    const page = await fetchChanges(filters, offset);
+    for (const row of page.rows) rows.set(row.id, row);
+    if (page.nextOffset === null) {
+      if (rows.size !== page.total) throw new Error(INCOMPLETE_ELEMENT);
+      return [...rows.values()];
+    }
+    if (page.nextOffset <= offset) throw new Error(INCOMPLETE_ELEMENT);
+    offset = page.nextOffset;
+  }
 }
 
 /** What the filter bar draws from an answer: it outlives a reload. */
@@ -345,9 +381,10 @@ export function useContentChanges({ site, state, q }: ChangesFilters) {
   /** Numbers every read as it starts: a later-started read's row wins. */
   const reads = useRef(0);
   /** The filters of the newest first-page read, for a re-read after a write. */
-  const active = useRef<{ generation: number; filters: ChangesFilters }>({
-    generation: 0,
-    filters: { site, state, q: debouncedQuery },
+  const activeFilters = useRef<ChangesFilters>({
+    site,
+    state,
+    q: debouncedQuery,
   });
   /** True while a first page is on its way. */
   const isFirstPageInFlight = useRef(false);
@@ -370,7 +407,7 @@ export function useContentChanges({ site, state, q }: ChangesFilters) {
     reads.current += 1;
     const read = reads.current;
     const filters = { site, state, q: debouncedQuery };
-    active.current = { generation: current, filters };
+    activeFilters.current = filters;
     isFirstPageInFlight.current = true;
     setLoading(true);
     setIsLoadingMore(false);
@@ -459,16 +496,19 @@ export function useContentChanges({ site, state, q }: ChangesFilters) {
         }
       };
 
+      // The frame is taken only from a read newer than the one on screen
+      // (`patchFrame`): an older write's count read landing after a newer
+      // one's, or after a new filter's first page (a later-started read),
+      // is dropped. Tombstone (verification of 63d7ba2, minor 3): a second
+      // check here, "the filter generation has not moved", guarded nothing
+      // that rule does not; no test could tell it apart, so it went.
       const rereadFrame = async () => {
-        const owner = active.current;
+        const filters = activeFilters.current;
         reads.current += 1;
         const read = reads.current;
         try {
-          const page = await fetchChanges(owner.filters, 0);
-          // A newer filter's first page owns the frame now.
-          if (owner.generation === generation.current) {
-            setHeld((previous) => patchFrame(previous, page, read));
-          }
+          const page = await fetchChanges(filters, 0);
+          setHeld((previous) => patchFrame(previous, page, read));
           return true;
         } catch {
           return false;

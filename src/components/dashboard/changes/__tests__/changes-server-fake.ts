@@ -14,7 +14,12 @@
  * - the publish RPC (20260924060000) promotes EVERY row of the element ids it
  *   is given, every language and variant, that has a draft differing from
  *   live or a staged attribute differing from live;
- * - the view (20261009120000) derives the state and `changed_at`.
+ * - the view (20261009120000) derives the state and `changed_at`;
+ * - `published_content` may be NULL, as a translation writes it
+ *   (src/app/api/ai/translate/route.ts): seed a row with `hasLiveText:
+ *   false`. The list route then answers the original as "Live now", the view
+ *   reads the row as Published (NULL is distinct from the original), and any
+ *   draft saved on it stays Pending, because no saved text equals NULL.
  * Rows are answered in the order they were seeded (ordering is not under
  * test here) and `q` is a plain case-insensitive substring.
  */
@@ -87,7 +92,7 @@ function seed(row: SeedRow): StoredRow {
     variant: String(row.variant),
     pagePath: text(row.pagePath),
     original: text(row.original),
-    published: text(row.live),
+    published: row.hasLiveText === false ? null : text(row.live),
     staging: text(row.draft),
     liveAttributes,
     stagedAttributes,
@@ -134,6 +139,7 @@ function toAnswer(row: StoredRow): SeedRow {
     live: row.published ?? row.original,
     draft: row.staging,
     draftAttributes,
+    hasLiveText: row.published !== null,
     state,
     changedAt:
       state === "pending"

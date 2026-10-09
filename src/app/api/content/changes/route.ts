@@ -197,6 +197,12 @@ function toRow(row: ViewRow, draftAttributes: DraftAttribute[] | null) {
     live: row.published_content ?? row.original_content,
     draft: row.staging_content,
     draftAttributes,
+    // False when the row has no published text of its own (a translation is
+    // written without one: api/ai/translate), and `live` stands in the
+    // original. Its draft cannot be discarded through the staging PUT: any
+    // text it saves still differs from that NULL, so the row stays pending
+    // (verification of 63d7ba2, minor 6). The page says so instead.
+    hasLiveText: row.published_content !== null,
     state: row.change_state,
     changedAt: row.changed_at,
     changedBy: emailOrNull(row.changed_by),

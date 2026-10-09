@@ -33,6 +33,12 @@
  * on one language row show its sibling rows as the server left them; a
  * Discard whose row changed in another tab sends nothing; a filter changed
  * while Publish is in flight never draws the row as it was before it.
+ *
+ * Verification of 63d7ba2: one write at a time per element (every language
+ * and variant row is disabled while one of them is written, and each write
+ * frees only its own row); a Discard whose answer was lost reads the row
+ * again; a draft on text never published is offered no Discard; focus after
+ * Publish, in both orders.
  */
 
 import {
@@ -97,6 +103,7 @@ function row(id: string, overrides: Record<string, unknown>): Row {
     live: `Live ${id}`,
     draft: null,
     draftAttributes: [],
+    hasLiveText: true,
     state: "published",
     changedAt: ago(2),
     changedBy: null,
@@ -994,6 +1001,48 @@ describe("ChangesView — actions by state and grant", () => {
     },
   );
 
+  // Verification of 63d7ba2 (minor 6): a translation is written with no
+  // published text (src/app/api/ai/translate/route.ts), and "Live now" stands
+  // in the original for it. Discard saved that original as the draft, which
+  // the view still reads as differing from the NULL published text: the row
+  // stayed Pending, under "Draft discarded."
+  it("offers no Discard on a draft over text that was never published, and says why", async () => {
+    mockApi({
+      rows: [
+        HERO,
+        row("t-fr", {
+          elementId: "rcf-cta",
+          language: "fr",
+          original: "Start free trial",
+          live: "Start free trial",
+          draft: "Essai gratuit de 14 jours",
+          state: "pending",
+          hasLiveText: false,
+        }),
+      ],
+    });
+    const user = await renderLoaded();
+    const region = await expand(user, "Essai gratuit de 14 jours");
+
+    expect(actionNames(region)).toEqual(["Publish", "Edit on page"]);
+    expect(
+      within(region).getByText(
+        "This text was never published, so its draft can't be discarded here. Edit or publish it on the page.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(
+      within(rowOf("Essai gratuit de 14 jours")).getByRole("button", {
+        name: /^More actions for /,
+      }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Compare and history" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "Discard draft" }),
+    ).not.toBeInTheDocument();
+  });
+
   // Devin re-review N1 (critical): the row kept the link's old live value
   // after Publish made the staged link live. Revert → Save as draft, then
   // Discard, sent that old value back, and the save RPC STAGED it, because it
@@ -1471,6 +1520,231 @@ describe("ChangesView — after a write, the server is read again (s70b fix pass
     expect(button.toggle).toHaveAttribute("aria-expanded", "true");
     expect(button.region()).toBeInTheDocument();
     expect(document.activeElement).toBe(button.toggle);
+  });
+
+  // Verification of 63d7ba2 (minor 7): the other order. The element's rows
+  // are read again and drawn (Publish leaves, focus falls to the page) while
+  // the counts read is still out; when the action then settles, focus has
+  // already fallen, and the row has no later commit to look again on.
+  it("moves focus to the expand button at once when Publish has already gone as the action settles", async () => {
+    let listReads = 0;
+    let releaseCounts: (() => void) | null = null;
+    mockApi({
+      rows: [HERO, HERO_BUTTON],
+      list: (url) => {
+        const answer = served.list(url);
+        if (url.searchParams.has("element") || (listReads += 1) !== 2) {
+          return answer;
+        }
+        return new Promise<Response>((resolve) => {
+          releaseCounts = () => resolve(answer);
+        });
+      },
+    });
+    const user = await renderLoaded();
+    const button = await expandRow(user, "Start your 14-day trial");
+
+    await user.click(
+      within(button.region()).getByRole("button", { name: "Publish" }),
+    );
+    await waitFor(() =>
+      expect(
+        within(button.region()).queryByRole("button", { name: "Publish" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(releaseCounts).not.toBeNull();
+    expect(document.activeElement).toBe(document.body);
+
+    await act(async () => {
+      releaseCounts!();
+    });
+
+    expect(await screen.findByText("Published.")).toBeInTheDocument();
+    expect(document.activeElement).toBe(button.toggle);
+  });
+
+  // Verification of 63d7ba2 (major): the busy state was one slot, per row.
+  // Discard on the fr row stayed enabled while Publish on the en row of the
+  // same element was in flight; its pre-read landed before the publish
+  // committed and its PUT after, so the old text was staged again, and
+  // "Draft discarded." was shown over a row the server held as Pending.
+  it("disables every row of an element while a write to it is in flight, and both settle as the server holds them", async () => {
+    let releasePublish: (() => void) | null = null;
+    mockApi({
+      rows: [HERO, CTA_EN, CTA_FR],
+      publish: (body) =>
+        new Promise<Response>((resolve) => {
+          releasePublish = () => resolve(served.publish(body));
+        }),
+    });
+    const user = await renderLoaded();
+    const en = await expandRow(user, "Start your 14-day trial");
+    const fr = await expandRow(user, "Essai gratuit de 14 jours");
+
+    await user.click(
+      within(en.region()).getByRole("button", { name: "Publish" }),
+    );
+    await waitFor(() => expect(releasePublish).not.toBeNull());
+
+    const frDiscard = within(fr.region()).getByRole("button", {
+      name: "Discard draft",
+    });
+    expect(frDiscard).toBeDisabled();
+    expect(
+      within(fr.region()).getByRole("button", { name: "Publish" }),
+    ).toBeDisabled();
+    await user.click(
+      within(fr.item).getByRole("button", { name: /^More actions for / }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Discard draft" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Escape}");
+    await user.click(frDiscard);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await act(async () => {
+      releasePublish!();
+    });
+
+    expect(await screen.findByText("Published.")).toBeInTheDocument();
+    expect(
+      within(rowLine("Essai gratuit de 14 jours")).getByText("Published"),
+    ).toBeInTheDocument();
+    expect(actionsOf(fr.region())).toEqual([
+      "Revert to original",
+      "Edit on page",
+    ]);
+    expect(
+      within(fr.region()).getByRole("button", { name: "Revert to original" }),
+    ).toBeEnabled();
+    expect(requests(/^\/api\/staging\/content\//, "PUT")).toHaveLength(0);
+    expect(screen.queryByText("Draft discarded.")).not.toBeInTheDocument();
+  });
+
+  // The same slot, with two writes on two elements: starting the second
+  // freed the first row's buttons while its write was still in flight, and
+  // the first one ending freed the second's.
+  it("keeps each write's row busy until that write ends, whatever another write does", async () => {
+    const releases = new Map<string, () => void>();
+    mockApi({
+      rows: [HERO, HERO_BUTTON, CTA_FR],
+      publish: (body) =>
+        new Promise<Response>((resolve) => {
+          const [elementId] = body.elementIds as string[];
+          releases.set(elementId, () => resolve(served.publish(body)));
+        }),
+    });
+    const user = await renderLoaded();
+    const button = await expandRow(user, "Start your 14-day trial");
+    const cta = await expandRow(user, "Essai gratuit de 14 jours");
+    const publishOf = (target: { region: () => HTMLElement }) =>
+      within(target.region()).getByRole("button", { name: "Publish" });
+
+    await user.click(publishOf(button));
+    await waitFor(() =>
+      expect(releases.has(HERO_BUTTON.elementId as string)).toBe(true),
+    );
+    await user.click(publishOf(cta));
+    await waitFor(() => expect(releases.has("rcf-cta")).toBe(true));
+    expect(publishOf(button)).toBeDisabled();
+    expect(publishOf(cta)).toBeDisabled();
+
+    await act(async () => {
+      releases.get(HERO_BUTTON.elementId as string)!();
+    });
+    await waitFor(() =>
+      expect(
+        within(rowLine("Start your 14-day trial")).getByText("Published"),
+      ).toBeInTheDocument(),
+    );
+    expect(publishOf(cta)).toBeDisabled();
+
+    await act(async () => {
+      releases.get("rcf-cta")!();
+    });
+    await waitFor(() =>
+      expect(
+        within(rowLine("Essai gratuit de 14 jours")).getByText("Published"),
+      ).toBeInTheDocument(),
+    );
+    expect(requests("/api/staging/publish", "POST")).toHaveLength(2);
+  });
+
+  // Verification of 63d7ba2 (minor 5): a stale Discard whose re-read failed
+  // said "review it again" over the row as it was, which looked current.
+  it("says a Discard found the row changed elsewhere and could not read it again", async () => {
+    let elementReads = 0;
+    mockApi({
+      rows: [HERO, HERO_BUTTON],
+      // Discard's own read before the PUT works; the read after it fails.
+      list: (url) =>
+        url.searchParams.has("element") && (elementReads += 1) > 1
+          ? json({ error: "Failed to load changes" }, 500)
+          : served.list(url),
+    });
+    const user = await renderLoaded();
+    const button = await expandRow(user, "Start your 14-day trial");
+    server.put(ACME, {
+      elementId: HERO_BUTTON.elementId,
+      content: "Start your free trial",
+      language: "en",
+      variant: "default",
+    });
+
+    await user.click(
+      within(button.region()).getByRole("button", { name: "Discard draft" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Discard this draft?",
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Discard draft" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(within(button.region()).getByRole("alert")).toHaveTextContent(
+      `${UPDATED_ELSEWHERE} The row could not be read again and may be out of date. Reload the page to see it as it is now.`,
+    );
+    expect(requests(/^\/api\/staging\/content\//, "PUT")).toHaveLength(0);
+  });
+
+  // Verification of 63d7ba2 (minor 5): the connection dropped after the
+  // server had discarded the draft. The page said "Not discarded. Could not
+  // save the draft." and kept drawing the row as Pending.
+  it("reads a row again when a Discard's answer was lost, and says the draft may or may not be gone", async () => {
+    mockApi({
+      rows: [HERO, HERO_BUTTON],
+      put: (url, body) => {
+        served.put(url, body);
+        return Promise.reject(new TypeError("Failed to fetch"));
+      },
+    });
+    const user = await renderLoaded();
+    const button = await expandRow(user, "Start your 14-day trial");
+
+    await user.click(
+      within(button.region()).getByRole("button", { name: "Discard draft" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Discard this draft?",
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Discard draft" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(within(button.region()).getByRole("alert")).toHaveTextContent(
+      "The connection dropped before the server answered, so the draft may or may not have been discarded. Check the row before trying again.",
+    );
+    expect(
+      within(rowLine("Start free trial")).getByText("Original"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Draft discarded.")).not.toBeInTheDocument();
   });
 
   it("says a published row may be out of date when it cannot be read again", async () => {

@@ -30,7 +30,10 @@ interface ChangeDetailProps {
   canDiscard: boolean;
   /** False when the live text is already the original. */
   canRevert: boolean;
+  /** This row's action in flight, for the pressed button's spinner. */
   busyAction: ChangeAction | null;
+  /** A write to this row's element is in flight: no write may start. */
+  isLocked: boolean;
   /** A refused Publish or Edit on page, shown under the actions. */
   actionError: string | null;
   onPublish: () => void;
@@ -179,12 +182,12 @@ export function ChangeDetail({
   canDiscard,
   canRevert,
   busyAction,
+  isLocked,
   actionError,
   onPublish,
   onConfirm,
   onEditOnPage,
 }: ChangeDetailProps) {
-  const isBusy = busyAction !== null;
   const isPending = row.state === "pending";
   const showLanguage = row.language !== "en" || row.variant !== "default";
 
@@ -201,7 +204,7 @@ export function ChangeDetail({
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             {isPending && canPublish && (
-              <Button size="sm" onClick={onPublish} disabled={isBusy}>
+              <Button size="sm" onClick={onPublish} disabled={isLocked}>
                 {busyAction === "publish" ? (
                   <Loader2 className="animate-spin" aria-hidden="true" />
                 ) : (
@@ -215,7 +218,7 @@ export function ChangeDetail({
                 variant="ghost"
                 size="sm"
                 onClick={(event) => onConfirm("discard", event.currentTarget)}
-                disabled={isBusy}
+                disabled={isLocked}
               >
                 <X aria-hidden="true" />
                 Discard draft
@@ -226,7 +229,7 @@ export function ChangeDetail({
                 variant="outline"
                 size="sm"
                 onClick={(event) => onConfirm("revert", event.currentTarget)}
-                disabled={isBusy}
+                disabled={isLocked}
               >
                 <RotateCcw aria-hidden="true" />
                 Revert to original
