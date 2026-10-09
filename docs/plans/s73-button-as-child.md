@@ -86,7 +86,7 @@ In `src/components/ui/__tests__/button.test.tsx`, a characterization test assert
 `loading` (spinner + dimmed label, icons dropped). Green on `main` by design — it pins today's
 output — so its sensitivity is proven by mutation instead: drop the `opacity-70` span → red.
 
-- [ ] Task 1
+- [x] Task 1
 
 ## Task 2 — red: `asChild` gives the child the button
 
@@ -102,7 +102,7 @@ Same file, before touching `button.tsx`; run and watch each fail:
 6. Convert the two `it.failing` tests (`:149` className, `:250` ref) to plain `it`; update their
    comment to the tombstone (what broke, why `Slottable`).
 
-- [ ] Task 2
+- [x] Task 2
 
 ## Task 3 — fix the primitive
 
@@ -112,7 +112,7 @@ spinner when loading), `<Slottable>{label}</Slottable>`, `rightIcon` (none when 
 Tombstone comment on why the children are listed flat and why `Slottable` (AGENTS.md § Comments).
 Task 1 and Task 2 green; full `button.test.tsx` green.
 
-- [ ] Task 3
+- [x] Task 3
 
 ## Task 4 — gates and mutation
 
@@ -123,4 +123,4 @@ Task 1 and Task 2 green; full `button.test.tsx` green.
   `npm run build:embed -- --check` (45828 / 33062 untouched), `npx playwright test --list` count
   (unchanged: no e2e added).
 
-- [ ] Task 4
+- [x] Task 4

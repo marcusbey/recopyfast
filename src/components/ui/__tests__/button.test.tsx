@@ -4,6 +4,8 @@
 import React from "react";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Loader2 } from "lucide-react";
+import Link from "next/link";
 import { Button, buttonVariants } from "../button";
 
 // Mock class-variance-authority and utils
@@ -134,31 +136,116 @@ describe("Button Component", () => {
     });
 
     /**
-     * KNOWN PRODUCTION DEFECT — src/components/ui/button.tsx.
-     *
-     * With `asChild`, Button renders <Slot> whose only child is the JSX
-     * fragment that wraps leftIcon/children/rightIcon. Radix Slot therefore
-     * merges className, ref and disabled onto that React.Fragment instead of
-     * the user's element, so the child renders unstyled and React logs
-     * "Invalid prop `className` supplied to `React.Fragment`".
-     *
-     * `it.failing` keeps the correct expectation in the suite: it passes while
-     * the bug exists and starts failing the moment button.tsx is fixed, at
-     * which point these two should be converted back to plain `it`.
+     * s73 tombstone. Until s73, Button rendered <Slot> with one child: the
+     * Fragment wrapping leftIcon/children/rightIcon. Radix Slot clones its one
+     * child, so className, ref and every other prop landed on React.Fragment
+     * and were dropped — React logged "Invalid prop `className` supplied to
+     * `React.Fragment`", and ten call sites shipped a bare <a> where they asked
+     * for a button. This test and the asChild ref test below were `it.failing`
+     * while the defect stood; they are plain `it` since the fix.
      */
-    it.failing(
-      "should apply button classes to child element when asChild is true",
-      () => {
+    it("should apply button classes to child element when asChild is true", () => {
+      render(
+        <Button asChild variant="destructive">
+          <a href="/test">Delete Link</a>
+        </Button>,
+      );
+
+      const link = screen.getByRole("link");
+      expect(link.className).toContain("bg-destructive");
+    });
+
+    it("gives the child the base, variant, size and call-site classes, merged with its own", () => {
+      render(
+        <Button asChild variant="outline" size="sm" className="extra">
+          <a href="/sites" className="mine">
+            Sites
+          </a>
+        </Button>,
+      );
+
+      const link = screen.getByRole("link", { name: "Sites" });
+      expect(link).toHaveClass("inline-flex", "border", "h-8", "extra", "mine");
+      expect(link).toHaveAttribute("href", "/sites");
+    });
+
+    it("styles a next/link child, the shape of nine of the ten call sites", () => {
+      render(
+        <Button asChild variant="outline" size="sm">
+          <Link href="/dashboard/sites">Sites</Link>
+        </Button>,
+      );
+
+      const link = screen.getByRole("link", { name: "Sites" });
+      expect(link).toHaveClass("inline-flex", "border", "h-8");
+      expect(link).toHaveAttribute("href", "/dashboard/sites");
+    });
+
+    it("renders leftIcon and rightIcon inside the child, around its content", () => {
+      render(
+        <Button
+          asChild
+          leftIcon={<svg data-testid="left" />}
+          rightIcon={<svg data-testid="right" />}
+        >
+          <a href="/open">Open</a>
+        </Button>,
+      );
+
+      const link = screen.getByRole("link", { name: "Open" });
+      expect(link.innerHTML).toBe(
+        '<svg data-testid="left"></svg>Open<svg data-testid="right"></svg>',
+      );
+    });
+
+    it("marks a loading child busy, with the spinner in place of the icons and its content unwrapped", () => {
+      render(
+        <Button
+          asChild
+          loading
+          leftIcon={<svg data-testid="left" />}
+          rightIcon={<svg data-testid="right" />}
+        >
+          <a href="/open">Open</a>
+        </Button>,
+      );
+
+      const link = screen.getByRole("link", { name: "Open" });
+      expect(link).toHaveAttribute("aria-busy", "true");
+      expect(link.firstElementChild).toHaveClass("animate-spin");
+      expect(screen.queryByTestId("left")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("right")).not.toBeInTheDocument();
+      // The dimmed <span> is a <button>-only detail: the child's own content
+      // is not Button's to wrap.
+      expect(link.lastChild?.nodeType).toBe(Node.TEXT_NODE);
+      expect(link.textContent).toBe("Open");
+    });
+
+    it("logs nothing — no prop lands on React.Fragment", () => {
+      const consoleError = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
         render(
-          <Button asChild variant="destructive">
-            <a href="/test">Delete Link</a>
+          <Button asChild variant="outline">
+            <a href="/download" download>
+              <svg data-testid="icon" />
+              Download Markdown
+            </a>
+          </Button>,
+        );
+        render(
+          <Button asChild loading rightIcon={<svg />}>
+            <Link href="/dashboard/sites">Back to Sites</Link>
           </Button>,
         );
 
-        const link = screen.getByRole("link");
-        expect(link.className).toContain("bg-destructive");
-      },
-    );
+        expect(consoleError).not.toHaveBeenCalled();
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
 
     it("should render as button when asChild is false", () => {
       render(<Button asChild={false}>Normal Button</Button>);
@@ -245,9 +332,9 @@ describe("Button Component", () => {
       expect(ref.current?.textContent).toBe("Ref Button");
     });
 
-    // Same root cause as the asChild className case above: the ref lands on the
-    // wrapping React.Fragment, never on the <a>. See the comment there.
-    it.failing("should forward ref when using asChild", () => {
+    // s73: was `it.failing` — the ref landed on the wrapping React.Fragment,
+    // never on the <a>. See the tombstone in "AsChild Prop".
+    it("should forward ref when using asChild", () => {
       const ref = React.createRef<HTMLAnchorElement>();
 
       render(
@@ -353,6 +440,59 @@ describe("Button Component", () => {
 
     it.each(variants)("casts no shadow in the %s variant", (variant) => {
       expect(buttonVariants({ variant })).not.toMatch(/(^|\s|:)shadow-/);
+    });
+  });
+
+  /**
+   * s73 guard. The asChild fix restructures Button's children around Radix
+   * `Slottable`; a `<button>` must come out byte for byte as it did before.
+   * These pin today's markup, so they were green before the fix by design.
+   */
+  describe("Markup without asChild (s73)", () => {
+    const leftIcon = <svg data-testid="left" />;
+    const rightIcon = <svg data-testid="right" />;
+    const icons = '<svg data-testid="left"></svg>';
+    const trailing = '<svg data-testid="right"></svg>';
+    // innerHTML escapes `&` in attributes (`[&_svg]:size-4`).
+    const classes = buttonVariants().replace(/&/g, "&amp;");
+
+    it("renders a plain button unchanged", () => {
+      const { container } = render(<Button>Save</Button>);
+
+      expect(container.innerHTML).toBe(
+        `<button class="${classes}">Save</button>`,
+      );
+    });
+
+    it("renders icons either side of the label unchanged", () => {
+      const { container } = render(
+        <Button leftIcon={leftIcon} rightIcon={rightIcon}>
+          Save
+        </Button>,
+      );
+
+      expect(container.innerHTML).toBe(
+        `<button class="${classes}">${icons}Save${trailing}</button>`,
+      );
+    });
+
+    it("renders loading as spinner plus dimmed label, icons dropped", () => {
+      const { container: spinner } = render(
+        <Loader2 className="animate-spin" aria-hidden="true" />,
+      );
+      const spinnerMarkup = spinner.innerHTML;
+      cleanup();
+
+      const { container } = render(
+        <Button loading leftIcon={leftIcon} rightIcon={rightIcon}>
+          Save
+        </Button>,
+      );
+
+      expect(container.innerHTML).toBe(
+        `<button class="${classes}" disabled="" aria-busy="true">` +
+          `${spinnerMarkup}<span class="opacity-70">Save</span></button>`,
+      );
     });
   });
 

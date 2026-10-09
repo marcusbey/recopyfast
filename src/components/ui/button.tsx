@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
+import { Slot, Slottable } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils/cn";
 import { Loader2 } from "lucide-react";
@@ -94,7 +94,31 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     const Comp = asChild ? Slot : "button";
     const isDisabled = disabled || loading;
+    // The dimmed label is a <button>-only detail. With asChild the content
+    // belongs to the call site's element, which Button cannot wrap without
+    // changing that element's structure.
+    const label =
+      loading && !asChild ? (
+        <span className="opacity-70">{children}</span>
+      ) : (
+        children
+      );
 
+    /**
+     * s73: the children are listed flat, with the label inside `Slottable`.
+     *
+     * Until s73 they were one Fragment (`<>{leftIcon}{children}{rightIcon}</>`).
+     * Radix `Slot` clones its single child, so with asChild it cloned that
+     * Fragment: className, ref and every prop landed on React.Fragment and were
+     * dropped ("Invalid prop `className` supplied to `React.Fragment`"), and
+     * ten call sites shipped a bare <a> where they asked for a button.
+     *
+     * `Slottable` marks which child is the call site's element: Slot clones it
+     * with the merged props and puts the icons inside it, around its content.
+     * It must stay a direct child of `Comp` — `Slot` does not look inside a
+     * Fragment, so wrapping these three again brings the bug back. For a
+     * <button>, `Slottable` renders `<>{children}</>`: the markup is unchanged.
+     */
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
@@ -104,17 +128,12 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {loading ? (
-          <>
-            <Loader2 className="animate-spin" aria-hidden="true" />
-            <span className="opacity-70">{children}</span>
-          </>
+          <Loader2 className="animate-spin" aria-hidden="true" />
         ) : (
-          <>
-            {leftIcon}
-            {children}
-            {rightIcon}
-          </>
+          leftIcon
         )}
+        <Slottable>{label}</Slottable>
+        {loading ? null : rightIcon}
       </Comp>
     );
   },
