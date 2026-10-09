@@ -65,6 +65,31 @@ name cap, domains limiters ×4, share limiters ×3) — every one red.
 - Gates: jest 390 suites / 5,140 (38 skipped); type-check (both) 0; lint 0 errors; format:check clean; build:embed
   45828; Playwright `--list` 80.
 
+## CI fix pass (`ff06915`) — E2E timeouts on PR #82, verified by the orchestrator
+
+CI run 37960549645: `realtime-additive` AC 6 and `realtime-parity` "a snippet with no data-ws-url…" timed out on every
+retry (75 passed, 2 failed, 3 skipped). Root cause — not the limiters, `canonicalSiteId` or Redis (Redis logged under 50
+limiter checks for the whole run): the m3 fix made every refusal from `GET /api/ab-tests/active` `no-store`; the
+widget's `fetchActiveTests` returns on `!response.ok` without reading the body, and Chromium never finishes a request
+whose unread body its HTTP cache may not store, so `waitUntil: "networkidle"` never came. Reproduced on `next build` +
+`next start` (AC 6 failed at 90 s; the only pending request was the 401 A/B lookup) and in a bare page:
+
+| Refusal header                                                | Body              | Network idle |
+| ------------------------------------------------------------- | ----------------- | ------------ |
+| `no-store`                                                    | unread            | never        |
+| `public, max-age=60, stale-while-revalidate=300` (before s77) | unread            | ~0.6 s       |
+| `no-cache` / `private, no-cache`                              | unread            | ~0.6 s       |
+| `no-store`                                                    | read or cancelled | ~0.5 s       |
+
+Fix: every non-2xx carries `Cache-Control: private, no-cache` — never reused without asking the server, never kept by a
+shared cache — and the route comment records why `no-store` must not come back. CTO decision: fixed in the header, not
+the widget (every installed snippet has the same early return; the embed has 0 bytes of headroom). Existing test changed
+(declared): `active-refusals-not-cached.test.ts` refusal rows expect `private, no-cache` (5 of 6 red against `no-store`,
+`no-cache`, and the old public cache). `realtime-additive` 2/2 locally (AC 6 in 5.2 s). Rebased on main 122ad2e (s74,
+s75): contract 81, no new DB suite. Jest 394 suites / 5,183; type-check (both) 0; lint 0 errors; format:check clean;
+build:embed 45828 / 33062; Playwright `--list` 81. Follow-up (embed bytes needed): `sendContentMap`'s discovery POST,
+`hydrateStoredContent` and `bucketVisitor` also leave unread bodies.
+
 ## Not verified
 
 DB suites (`content-write-privileges`) and core e2e under the new 200/min guards → CI. Real Redis on a preview: 201
