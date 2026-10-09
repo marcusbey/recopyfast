@@ -28,6 +28,10 @@ interface PgPool {
   ): Promise<QueryResult<R>>;
   connect(): Promise<PgClient>;
   end(): Promise<void>;
+  on(
+    event: "error",
+    listener: (error: Error & { code?: string }) => void,
+  ): unknown;
 }
 
 interface PgClient {
@@ -576,7 +580,21 @@ if (!DB_URL) {
 
     afterAll(async () => {
       routeDatabase = undefined;
-      if (db) await db.end();
+      if (db) {
+        // s75: pg-pool's end() resolves as soon as its idle clients are asked
+        // to close (pg-pool 3.10 `_pulseQueue`), not once their backends exit,
+        // and an idle client's error is re-emitted on the pool. The DROP …
+        // WITH (FORCE) below can then terminate a backend that is still
+        // closing; with no pool listener its FATAL 57P01 surfaced as
+        // "Unhandled error" and failed this suite after every test had passed
+        // — 2 of 5 replay runs on a fresh PostgreSQL 17 cluster, 0 on a warm
+        // one. That termination is this teardown's own doing, so it is the
+        // one error tolerated here; any other error still throws.
+        db.on("error", (error) => {
+          if (error.code !== "57P01") throw error;
+        });
+        await db.end();
+      }
       if (admin) {
         await admin.query(
           `DROP DATABASE IF EXISTS ${quoteIdentifier(databaseName)} WITH (FORCE)`,

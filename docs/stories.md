@@ -3532,8 +3532,9 @@ at that commit, to be re-verified at research time):
   121 bare handshakes/min lock real editors out of realtime.
 - [x] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
   (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`. → closed by s72.
-- [ ] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
-  Node 24.14.0.
+- [x] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
+  Node 24.14.0. → closed by s75: `node:24-alpine`, the major CI tests on; the major tag is kept
+  on purpose so each deploy picks up Node security patches (s75 plan, decision 6).
 - [ ] L17 — Grant hygiene: `ALTER DEFAULT PRIVILEGES … REVOKE … FROM PUBLIC`
   (`20260809120000:213`) is a no-op; `generate_verification_code()` uses `random()` and is
   executable by `authenticated` (`20251230000000:172,275`); view-only members can read webhook
@@ -3544,6 +3545,8 @@ at that commit, to be re-verified at research time):
 - [ ] L19 — CI/header hygiene: `ci.yml` has no top-level `permissions:` and actions are pinned by
   tag, not SHA; HSTS lacks `includeSubDomains`; legacy `X-XSS-Protection` still set;
   `docs/operations/deployment-checklist.md:24` carries a truncated live-key account prefix.
+  → CI half closed by s75 (`contents: read`, every action SHA-pinned); the header and doc halves
+  remain.
 - [ ] L20 — Dev-only dependency advisories: critical `shell-quote` via `concurrently` 9.2.0
   (GHSA-pqg4-j6r4-53mv, fixed args only), high brace-expansion/braces/micromatch via
   `eslint-config-next`, `@typescript-eslint`, jest, and server `nodemon`. `npm audit fix` clears

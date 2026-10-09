@@ -37,7 +37,7 @@
  *   twice: it must converge, never reach a legitimate session.
  * - Real PostgREST with a real GoTrue JWT, when a local stack is configured.
  *   Gated to a "[gated]" test only when RCF_TEST_POSTGREST_URL is absent: the
- *   bare PostgreSQL 14 runner (scripts/run-db-invariants.mjs) has no PostgREST
+ *   bare PostgreSQL 17 runner (scripts/run-db-invariants.mjs) has no PostgREST
  *   and runs this file under RCF_REQUIRE_TEST_DB=1, so the catalogue and
  *   role-switched halves are what it enforces there.
  */

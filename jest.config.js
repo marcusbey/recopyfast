@@ -48,12 +48,19 @@ const customJestConfig = {
   // branches 34.32, functions 39.51, lines 41.82, statements 41.57. Each is
   // rounded down to the integer below the measurement, so the gate has a
   // fraction of a point of slack and still ratchets. Never lower these.
+  //
+  // Raised 2026-10-09 (s75) from 34/39/41/41, when CI started enforcing them
+  // (`--coverage` on the CI Jest step; until then only the local prepush hook
+  // read them). Measured that day with the CI placeholder environment:
+  // branches 61.56, functions 65.72, lines 69.23, statements 68.62. Lines has
+  // the least slack (0.23). src/__tests__/ci/release-gates.test.ts holds the
+  // same floor, so lowering one here fails that test too.
   coverageThreshold: {
     global: {
-      branches: 34,
-      functions: 39,
-      lines: 41,
-      statements: 41,
+      branches: 61,
+      functions: 65,
+      lines: 69,
+      statements: 68,
     },
   },
   // Only *.test.* / *.spec.* are suites. The previous

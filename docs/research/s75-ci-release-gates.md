@@ -104,9 +104,11 @@ Docker was not running on the author machine, so nothing that needs `supabase st
   matches nothing is ignored while the others run, and the exit code stays 0. The replay step
   must check that every suite it names produced a result.
 - **`describe.skip` and `[gated]` both exit 0.** Jest `--ci` does not fail on skipped tests. The
-  guard is: each named suite ran, has at least one passing test, and no test title contains
-  `[gated]`. A blanket "no skipped tests" rule is wrong here: `column-privileges`'s PostgREST
-  test skips in the replay step by design.
+  guard is: each named suite ran, has at least one passing real test, and registered no `[gated]`
+  placeholder except "no PostgREST target configured". Neither a blanket "no skipped tests" nor
+  a blanket "no `[gated]`" rule works here: `column-privileges`'s PostgREST test skips in the
+  replay step by design, and `edit-sessions-privileges` registers a PostgREST placeholder there
+  by design (found at execution; both halves run in the e2e job).
 - **Local PostgreSQL 14 is first on this machine's `PATH`** (`/usr/local/bin/psql` → 14.17), and
   `findBinary` checks `/usr/local/bin` before `/opt/homebrew/bin` (`run-db-invariants.mjs:40-47`).
   Locally, `RCF_POSTGRES_BIN=/opt/homebrew/opt/postgresql@17/bin` is required; the version error
