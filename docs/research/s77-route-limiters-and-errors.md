@@ -71,8 +71,31 @@ constant-time comparison; `!==` never calls it.
   limiter (`:150`). GET (the publish dialog's preview, `recopyfast.src.js:2355`): no limiter at
   all, then a service-role read of every `content_elements` row of the site (`:301-311`).
 - `staging/content/[siteId]` GET (`:45-166`): no limiter at all; service-role read of the site's
-  staged copy. Nothing in the product calls it today (the widget only PUTs, `recopyfast.src.js:2973`);
-  it is still routable. PUT has its per-site limiter behind the grade (`:277`) and no IP guard.
+  staged copy. PUT has its per-site limiter behind the grade (`:277`) and no IP guard.
+  **Corrected after review (m1)** — the first version of this line said "nothing in the product
+  calls it today (the widget only PUTs)". Wrong: the widget reads it on every load that can reach
+  staging (re-verified on `fc5968b`, `public/embed/recopyfast.src.js`):
+  - `contentReadEndpoint` (`:878-881`) builds `/staging/content/<id>` whenever
+    `canReachStagingContent()` (`:1353-1355`) is true — a staging or edit-session link, or a
+    stored editor grant;
+  - `hydrateStoredContent` (`:3881-3895`) GETs it, through `loadRows` (`:3766-3784`): once per
+    page load, and once per new path of a single-page app (`checkRoute`, `:3716-3728`; cached
+    per path, a failed fetch is forgotten so the next visit asks again);
+  - `startPolling` (`:5798-5818`) GETs it every 5 s per tab. It starts only from
+    `establishConnection`'s catch (`:3101-3104`): the socket cannot even be constructed (no
+    bundled socket.io client — the raw source; the built artifact always prepends it). No WS URL
+    returns before any socket; a server refusing connections is socket.io's reconnection
+    (5 attempts), not the poll.
+
+  Arithmetic for the limits s77 puts on it (plan decision 2):
+  - per site, `staging/content-read`, `USER_GENERAL` 100/min, shared by every editor tab of the
+    site from every address: 100 editor page views a minute, or 8 polling tabs (8 × 12 = 96/min)
+    with a few page views on top; the 9th polling tab (108/min) is the first refusal;
+  - per IP, `staging/content:ip`, `IP_GENERAL` 200/min, shared by GET and PUT and by every site
+    one address edits: 16 polling tabs (192/min), or e.g. 4 polling tabs (48) + 100 page views +
+    50 saves (the per-site PUT ceiling);
+  - a refusal costs a polling tab one 5 s tick (the next tick asks again), or shows one page as
+    authored with a console warning until the next visit asks again. It never loses a write.
 - Visitor impact of `IP_GENERAL` on the A/B routes: the content GET on the same page view is
   already behind `IP_GENERAL` per IP (`content/read`), so the A/B guards add no ceiling a visitor
   would not already meet; a refusal costs the A/B variant, the page keeps its authored copy.

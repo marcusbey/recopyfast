@@ -34,7 +34,9 @@ import {
  * authorization (an anonymous caller must not spend the customer's budget);
  * this guard is what bounds the authorizer.
  *
- * 200/min per address, shared by GET and PUT — the per-site edit ceiling is 50.
+ * 200/min per address, shared by GET and PUT and by every site the address
+ * edits — the per-site edit ceiling is 50, and a polling tab reads 12 a minute
+ * (see the GET limiter), so one office address holds 16 polling tabs (192).
  * Fails CLOSED: each handler's per-site limiter behind it fails closed too, so
  * in an outage an editor is refused there anyway — failing open here would only
  * hand a flood the authorizer.
@@ -121,8 +123,18 @@ export async function GET(
     // s77 (s69 L7). Per site, fail closed, behind the permission grade — ADR 002
     // rule 4, which this service-role read of the site's staged copy went
     // without. Behind authorization for the reason PUT gives below: the bucket
-    // is the customer's. 100/min: nothing in the product reads this on a loop
-    // (the widget only PUTs), so the ceiling only meets a copied credential.
+    // is the customer's.
+    //
+    // Who reads this (s77 review m1): the widget, whenever the page load can
+    // reach staging (a staging or edit-session link, or a stored editor grant)
+    // — once per page view and once per new path of a single-page app
+    // (`hydrateStoredContent` through `loadRows`, cached per path), plus every
+    // 5 s per tab in `startPolling`, the fallback taken only when the socket
+    // cannot even be constructed (no bundled socket.io client).
+    // 100/min per site, shared by every editor tab of the site: 100 editor page
+    // views a minute, or 8 polling tabs (8 × 12 = 96) with a few page views on
+    // top. A refusal costs one 5 s tick, or shows one page as authored until
+    // the next visit asks again — never a write.
     const limited = await enforceRateLimit(request, {
       limit: "USER_GENERAL",
       endpoint: "staging/content-read",

@@ -158,10 +158,16 @@ function refuse(
   });
 }
 
+// Not even the service-role client is created: ADR 037 step 5 comes after the
+// permission check, and creating the client is where step 5 starts (s77
+// review m4 — POST used to create it before `getUser`).
 function nothingPastTheGate() {
   expect(checkSitePermission).not.toHaveBeenCalled();
+  expect(createServiceRoleClient).not.toHaveBeenCalled();
   expect(serviceFrom).not.toHaveBeenCalled();
 }
+
+const firstCall = (mock: jest.Mock) => mock.mock.invocationCallOrder[0];
 
 describe("/api/sites/[siteId]/share — ADR 037 order on every verb", () => {
   beforeEach(() => {
@@ -242,12 +248,38 @@ describe("/api/sites/[siteId]/share — ADR 037 order on every verb", () => {
       nothingPastTheGate();
     });
 
+    it("creates the service-role client only once the caller is authorized", async () => {
+      await call();
+
+      const userBucket = checkLimit.mock.calls.findIndex(
+        ([config]) => config.endpoint === userEndpoint,
+      );
+      const order = [
+        firstCall(getUser),
+        checkLimit.mock.invocationCallOrder[userBucket],
+        firstCall(checkSitePermission),
+        firstCall(createServiceRoleClient as jest.Mock),
+      ];
+      expect(order.every((n) => typeof n === "number")).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    it("never creates the service-role client for a caller without the permission", async () => {
+      checkSitePermission.mockResolvedValue({ hasPermission: false });
+
+      const response = await call();
+
+      expect(response.status).toBe(403);
+      expect(createServiceRoleClient).not.toHaveBeenCalled();
+    });
+
     it("never opens a user's bucket for an anonymous caller", async () => {
       getUser.mockResolvedValue({ data: { user: null }, error: null });
 
       const response = await call();
 
       expect(response.status).toBe(401);
+      expect(createServiceRoleClient).not.toHaveBeenCalled();
       const endpoints = checkLimit.mock.calls.map(
         ([config]) => config.endpoint,
       );

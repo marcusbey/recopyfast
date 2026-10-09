@@ -24,6 +24,16 @@ existing surfaces already print (the API keys panel's error box, the bulk form's
    caller must not spend a customer's bucket). The two staging GETs, which had none, gain one:
    `staging/publish-preview` and `staging/content-read`, `USER_GENERAL` 100/min per site, fail
    closed (service-role reads, ADR 002 §4) — the publish dialog opens one preview per click.
+   **Corrected after review (m1).** The content GET is not uncalled, as first written: the widget
+   reads it on every page load that can reach staging (staging/edit-session link or stored editor
+   grant), once per new SPA path, and every 5 s per tab in the poll fallback (research §L7 has the
+   call sites). Re-checked: per site, 100/min = 100 editor page views a minute or 8 polling tabs
+   (96/min); per IP, 200/min shared by GET + PUT and every site = 16 polling tabs (192/min). A
+   refusal costs one 5 s tick or one page shown as authored, never a write. **CTO decision: the
+   numbers do not call for a change** — the poll is reached only when the socket cannot be built
+   (the built artifact always bundles socket.io), and 8 simultaneous polling editor tabs on one
+   site or 16 on one address is above the editing the PRD's users do (a business owner changing
+   copy a few times a year; an agency editing its clients' sites one at a time); limits unchanged.
 3. **R1: `requireUuid` at the top of each handler** that takes a `siteId` from the caller
    (`staging/publish` GET/POST, `staging/content` GET/PUT, `edit-board/{history,languages,styles,
    styles/apply,themes}` — 17 handlers), so the canonical lower-case id is what the authorizer,
@@ -136,6 +146,32 @@ existing surfaces already print (the API keys panel's error box, the bulk form's
   17 with the bootstrap and every migration. `content-write-privileges` needs PostgREST/GoTrue —
   left to CI's e2e DB step.
 
+## Review fix pass (minors m1, m3, m4)
+
+Rebased onto `origin/main` `fc5968b` first (only conflict: the `docs/stories.md` append, s73
+kept before s77 in id order).
+
+11. [x] **m3 — no cached refusals on `GET /api/ab-tests/active`.** Its CORS helper stamped
+    `public, max-age=60, stale-while-revalidate=300` on every answer, so a 429/503 could be
+    reused by a browser or CDN after the limiter let go.
+    - RED `src/__tests__/api/ab-tests/active-refusals-not-cached.test.ts`: 200 keeps the public
+      cache; a 429 from the IP or the site bucket, a 503 from either store, and a 401 are
+      `no-store` (5 red, 200 green).
+    - GREEN: the helper sets the public cache only on a 2xx (`response.ok`), `no-store`
+      otherwise. CTO decision: every non-2xx, not only 429/503 — a cached 401 or 500 is the same
+      defect, and one rule is simpler than a list. The 204 preflight keeps its header.
+12. [x] **m4 — the R5/R6 acceptance criterion made true for `sites/[siteId]/share` POST.** POST
+    created the service-role client before `getUser` (no request, but not ADR 037's order).
+    - RED `src/__tests__/api/sites/share-limiters.test.ts`: the "nothing past the gate" helper
+      also asserts `createServiceRoleClient` was never called; new rows assert the order
+      `getUser` → per-user limiter → `checkSitePermission` → `createServiceRoleClient` on every
+      verb, and no client for a 403 or a 401 (5 red, POST only).
+    - GREEN: the client is created after the permission check and the site lookup, before its
+      first use. The criterion stands as written.
+13. [x] **m1 — corrected premise for `staging/content/[siteId]` GET.** Decision 2, the research
+    (§L7) and the route's comments now say who reads it and carry the arithmetic; limits
+    unchanged (decision 2). Comment and docs only — no behaviour changed, so no test.
+
 ## Follow-up — s77b (files owned by other stories while s77 runs)
 
 - `POST /api/staging/validate`: no limiter before authorization (L7).
@@ -146,6 +182,23 @@ existing surfaces already print (the API keys panel's error box, the bulk form's
 - `edit-board/*`: an IP guard before authorization (R1 only is done here).
 - Optional: a database-enforced key cap (ADR 056 "Considered options"); the dashboard could quote
   the key and name limits beside the form.
+
+## Merge coordination (other branches' code — recorded here, not implemented)
+
+- **s89 (`feature/s89-blog-drafts-only`)** rewrites `src/app/api/blog/generate/route.ts` to
+  admin-only (Origin check + admin guard; the cron bearer no longer opens it), and its cron route
+  `cron/generate-blog-post` drafts in-process. When s89 rebases onto s77:
+  - its cron route must decide the bearer with `isAuthorizedCronRequest(request)`
+    (`src/lib/security/cron-auth.ts`), not the `!==` it has on its branch (`:30-32`);
+  - the `POST /api/blog/generate` rows of `src/__tests__/api/cron/cron-secret.test.ts` must be
+    **removed**, not re-opened to the cron bearer — that route no longer takes it. The
+    `GET /api/cron/generate-blog-post` rows stay and pin s89's bearer check (their database mocks
+    follow s89's in-process draft).
+- **s76 (`feature/s76-grant-and-edit-token-hardening`)**:
+  `src/__tests__/api/edit-board/staging-outage.test.ts` uses `SITE_ID = "site-123"`, which
+  `canonicalSiteId` refuses (400 before any authorizer or limiter). s76 must use an RFC v4 UUID
+  fixture (e.g. `22222222-2222-4222-8222-222222222222`) when it lands on top of s77, or the
+  suite fails for the wrong reason.
 
 ## Rollout
 

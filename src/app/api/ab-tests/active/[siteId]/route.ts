@@ -11,6 +11,12 @@ function extractToken(request: NextRequest) {
   return request.nextUrl.searchParams.get("token");
 }
 
+/**
+ * s77 review m3: only a successful answer is cacheable. A 429/503 from either
+ * limiter (or a 401, or a 500) used to carry the same one-minute public cache
+ * plus five minutes stale, so a browser or CDN could keep serving a refusal
+ * long after its `Retry-After` — the limiter would have let go, the cache not.
+ */
 function withCors(response: NextResponse) {
   response.headers.set("Access-Control-Allow-Origin", "*");
   response.headers.set(
@@ -20,7 +26,7 @@ function withCors(response: NextResponse) {
   response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS");
   response.headers.set(
     "Cache-Control",
-    "public, max-age=60, stale-while-revalidate=300",
+    response.ok ? "public, max-age=60, stale-while-revalidate=300" : "no-store",
   );
   return response;
 }

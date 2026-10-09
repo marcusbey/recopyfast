@@ -109,11 +109,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const supabase = await createServerClient();
     const permissions = new CollaborationPermissions();
 
-    // Every `site_permissions` query below goes through this client — see the
-    // module header. Authorisation for this request is checkSitePermission
-    // (["manager","owner"]) plus the canShareSite seat quota, both below.
-    const serviceClient = createServiceRoleClient();
-
     // Get current user
     const {
       data: { user },
@@ -171,6 +166,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (siteError || !site) {
       return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
+
+    // Every `site_permissions` query below goes through this client — see the
+    // module header. Created only now, after checkSitePermission
+    // (["manager","owner"]): ADR 037 step 5 follows the authorization, as in
+    // GET and DELETE (s77 review m4). The canShareSite seat quota still runs
+    // below, before the insert.
+    const serviceClient = createServiceRoleClient();
 
     // Only the display name is used (in the notification body and the success
     // message). A parallel `targetIdentifier` was assigned in both branches and
