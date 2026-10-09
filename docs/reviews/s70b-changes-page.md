@@ -63,9 +63,87 @@ the design's (`expand status location location menu` / `. text…` / `. who who 
 counts and a held reload — the assertion now fails on the old code. N4: TOKEN_REFRESHED / SIGNED_IN keep the
 cache. Mutations red; jest 5,130 passed; `e2e/changes.spec.ts` 5/5 against a production build (scratch stack).
 
+## Devin Review on PR #77 — fixed (`8bcc805`)
+
+Discard left staged `href`/`alt` attributes (the save RPC merges attribute patches) → the discard PUT sends each staged
+attribute back with its live value; the list route returns `draftAttributes` for pending rows; a draft whose attribute
+cannot go back is not offered Discard and the row says why. A failed publish after "Revert and publish" saved the draft
+→ the row turns Pending with the reverted draft and says so, Publish retries. `nextOffset` is null past the 10 000
+ceiling (it offered 10 050, refused forever) and the page says the list is capped. Revert is not offered when the live
+text is already the original. Page bands keep the first segment (`Products › Alpha › Setup`).
+
+## Verification of `8bcc805` — critical N1, fixed (`e3098b6`)
+
+Fresh reviewer: the row a write left on screen kept the staged attributes' old live values, so Publish → Revert → Save
+as draft → Discard re-staged the old link and the next Publish restored it (**critical**). Fixed per action from the
+RPCs' semantics; N2–N5 (missing metadata row = unknown, never offered a discard; metadata read fenced by `site_id`;
+malformed list refused; design doc matches the code).
+
+## Verification of `e3098b6` — critical C1, major M1, fixed (`0fec9ad`)
+
+Fresh reviewer: Publish promotes every language and variant row of the element (`20260924060000`) but the page redrew
+only the row acted on, so an `fr` sibling kept its old draft and a Discard there re-staged old copy (**C1 critical**);
+Discard built its PUT from the row on screen (**M1 major**). CTO decision: stop deriving post-write state on the
+client — refetch after mutate. After every write that lands, the page re-reads every row of the element and the
+current filters' counts (`refreshAfterWrite`; `rowAfter` deleted); GET `/api/content/changes` gains a read-only
+`element` filter (needs `site`, ≤ 255 chars, RLS client). Discard re-reads its row just before the PUT and sends
+nothing if it was published, replaced or gone ("updated elsewhere"). Reads are numbered; a row is only replaced by a
+later read. The read-to-PUT window stays open → s81 (compare-and-set in the staging PUT).
+
+## Verification of `0fec9ad` — major (single-tab race), fixed (`e6fc8cf`)
+
+Fresh reviewer: two writes on the same element from one tab (Publish on one language, Discard on another) could
+interleave (**major**), plus minors 2–7. Fixed: per-write `inFlight` entries and an element lock (site + element id)
+across panel and ⋮; the hook refuses a second write; out-of-order count re-reads; element read follows `nextOffset`
+and refuses non-advancing offsets; a thrown write is re-read ("may or may not have landed"); revert+publish never
+publishes after an unanswered save; never-published translations (`hasLiveText`) are not offered Discard; focus
+branches tested. 22 mutations red.
+
+## Verification of `e6fc8cf` — minor
+
+Fresh-context `reviewer` (opus), 2026-10-09. All seven claims hold; no regression, no invented symbol, no security change.
+
+Gates (HEAD e6fc8cf): jest 388 suites / 5,214 passed; type-check (both) 0; lint 0 errors; format:check clean;
+build:embed 45828 / 33062; Playwright `--list` 85; `git merge-tree` against origin/main clean.
+
+- Element lock (`useChangeActions`): per-write `inFlight` entries; every row of the element (all languages/variants)
+  disabled in panel and ⋮ while a write is in flight; the hook refuses a second write. Lock per site + element id.
+- `hasLiveText` matches the SQL: `is_pending` = `staging_content IS NOT NULL AND staging_content IS DISTINCT FROM
+published_content`; discovered elements get a published text (`api/content/[siteId]/route.ts:174`), translations
+  don't (`api/ai/translate/route.ts:315-336`).
+- Removing the `rereadFrame` generation check is safe: the reviewer built the out-of-order case (old filter's count
+  re-read landing while the new first page loads) — `data` is null then, nothing is patched; the other order is covered
+  and goes red without `patchFrame`'s read-order check.
+- Route change is one derived field from a column already read under the caller's permissions; limiter, getUser,
+  ownership 404, generic errors, no service role unchanged. Page-following loop bounded (offsets must advance; route
+  refuses > 10 000; ~201 requests worst case, cut by the 200/min IP limiter).
+
+Mutations: 27 guards; red for all except M3c/M3e (Revert lock in panel / ⋮) and M16 (lock clear on throw — no
+production path throws inside `track`; `finally` handles it). M6 (non-advancing offset) red only via worker OOM.
+
+Findings: minor 1 — Revert lock untested (`ChangeDetail.tsx:232`, `ChangeRow.tsx:404`). minor 2 — lock lives in the
+mounted page, not the tab; comment `useChangeActions.ts:439` overstated (same class as the second-tab case → s81).
+minor 3 — no timeout on write requests (`useChangeActions.ts:233`): a hung request locks the whole element until
+reload; add a local page cap in `readElementChanges` so M6 fails by assertion.
+
+Not verified: e2e specs executed (CI); real-browser lock under Slow 3G; DevTools Offline during Discard; `hasLiveText`
+against real PostgREST (non-prod stack, translation with a draft → no Discard); `next build`; merged-result jest.
+
+## Final fix pass (`b48db29`) — verified by the orchestrator
+
+Revert lock tested (a published `de` sibling: panel Revert disabled, ⋮ Revert `aria-disabled`, no dialog; both
+mutations red). Lock scope comment honest (the lock lives in the mounted page; leave-and-return during a write → s81
+follow-up). Writes bounded: `AbortSignal.timeout(30 s)` (same 30 s as `DELIVERY_TIMEOUT_MS`), a hung write ends as
+"may or may not have landed", is re-read and unlocks; `readElementChanges` stops after `MAX_ELEMENT_PAGES` (201) so the
+non-advancing-offset mutation fails by assertion, not a heap crash. Residual: reads done while the lock is held share
+`fetchChanges` and have no timeout (recorded in the plan). Jest 5,229 passed.
+
+Rebased onto main `2357871` (s74): the Playwright strict contract is now 81 + 5 = **86** in `playwright.config.ts`,
+every place in `ci.yml` and `playwright-ci-contract.test.ts`; `--list` 86 / expected 86; contract test 11/11.
+
 ## Not verified
 
-The DB suite's GoTrue block (real signup JWTs) and the full 85-test Playwright run — CI. A real browser at 375
+The DB suite's GoTrue block (real signup JWTs) and the full 86-test Playwright run — CI. A real browser at 375
 for the who·when line. Production: after applying the view (owner approval), check
 `SELECT reloptions FROM pg_class WHERE oid = 'public.content_changes'::regclass` read-only, then open
 `/dashboard/changes` and revert one row as an editor and as a publisher.
