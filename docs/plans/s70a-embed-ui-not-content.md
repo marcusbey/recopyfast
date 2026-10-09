@@ -88,8 +88,10 @@ Acceptance criteria (proposed; the owner validates them with this plan):
      record what the branch measures, and refuse anything above 45,841 / 33,073).
 2. [x] **Delete the rows the embed's UI left behind.**
    - Owner precondition, before merge (not run by the implementer unless the owner says so): the
-     read-only count below, run through the `read-prod-database` skill (`agents_readonly`), its
-     output pasted in the PR.
+     read-only count below, its output pasted in the PR. Channel: the Supabase connector, against
+     production; only `SELECT` statements ran through it. (Amended at the s70a review, F7: this
+     line first named the `read-prod-database` skill and its `agents_readonly` role. That skill
+     belongs to another project; it was not used.)
      **Done 2026-10-08** (read-only `SELECT`, production, through the Supabase connector): 25 rows
      to delete — 13 on www.aicompoz.com, 12 on the cross-device QA site (one of them holds an email
      address); 0 embed-UI rows anyone edited; 0 review-tier rows; openflows.ai and localhost: 0.

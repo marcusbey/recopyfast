@@ -268,14 +268,22 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *
  *   45841 / 33073  ceilings before s70a = measured on main at 828970c, where
  *                  s70a branched (its base adds docs only)
- *   +5 / +7        two markers (`data-rcf-ignore` on the AI suggestions overlay
+ *   +6 / +7        two markers (`data-rcf-ignore` on the AI suggestions overlay
  *                  and on the form-field popover) and the corrected id
  *                  (`#rcf-edit-board-panel`), the six skip checks kept
- *   −6 / −7        one `closest()` for the six skip checks, no behaviour change
+ *   −7 / −7        one `closest()` for the six skip checks, no behaviour change
  *   45840 / 33073  measured on the branch — the new ceilings
  *
- * (Research measured 45839 / 33072, −7 / −8 for the consolidation, on a copy
- * of the tree; only this branch's own measurement is recorded as the ceiling.)
+ * The two middle lines are not exact to the byte, and no split of them is.
+ * The artifact's banner carries the sha256 of the source, so any source edit,
+ * a comment included, changes 64 hex characters that gzip packs differently:
+ * three comment-only edits of this source measured −2 to +2 (bundle) and 0 to
+ * +2 (widget) at the s70a review. The same intermediate tree measured +5 / +7
+ * without the branch's comments; the review measured +6 / +8 then −7 / −8, and
+ * research −7 / −8 for the consolidation on a copy of the tree. Only the two
+ * ends are measurements of shipped bytes. With no headroom, a comment-only
+ * edit can fail this gate: one tried in the s70a review fix pass, above
+ * shouldSkipElement, measured 45840 / 33074 and was not shipped.
  * build-size-gate.test.ts pins the same pair.
  */
 const MAX_BUNDLE_GZ = 45840;

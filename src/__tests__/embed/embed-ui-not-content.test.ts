@@ -15,12 +15,27 @@
  *   - the AI suggestions modal: its own overlay, no class, id or marker;
  *   - the form-field popover: `.rcf-form-popover`, which nothing skipped.
  *
- * Every other surface is driven too, so a later "simplification" of the skip
- * rule that drops one of them fails here. These tests boot the real source IIFE
- * the way embed-spa.test.ts does: a visitor's page, a stubbed `fetch`, the
- * observer's debounced rescan run on fake timers, then a forced trailing
- * discovery report so nothing the rescan mapped can hide behind the 10 s
- * coalescing window.
+ * What is driven here, and what is not (s70a review, F4). Driven: the editor
+ * bar, the staging bar, the Edit Board (Elements, then History), the AI
+ * suggestions modal (refused, then answered), the form-field popover, the
+ * publish confirmation, the text-edit toolbar and counter, the container hint,
+ * and copy inside a host's contenteditable region. Removing any one part of
+ * the skip selector, or the marker on the editor bar, the toolbar, the AI
+ * modal or the popover, fails a test here (each was mutated at review). Two
+ * driven surfaces pass whatever the rule says: the container hint and the
+ * counter are bare `div`s, and discovery's scan selector never matches a bare
+ * `div`, so their text is never a candidate in the first place.
+ *
+ * Not driven: the hover hint, the animation badge, the field panel (a link's
+ * fields), and four of the five `createOverlay` callers (showEditorCodeUI,
+ * showVerificationUI, showStagingError, openImageEditor; only
+ * showPublishConfirmation is). Their markers (`data-rcf-ignore`, or
+ * `.rcf-overlay` from createOverlay) keep them out; no test here proves it.
+ *
+ * These tests boot the real source IIFE the way embed-spa.test.ts does: a
+ * visitor's page, a stubbed `fetch`, the observer's debounced rescan run on
+ * fake timers, then a forced trailing discovery report so nothing the rescan
+ * mapped can hide behind the 10 s coalescing window.
  */
 
 import { readFileSync } from "node:fs";
@@ -393,5 +408,46 @@ describe("the embed never maps or reports its own UI", () => {
 
     expect(document.querySelector(".rcf-container-hint")).not.toBeNull();
     await expectNoEmbedUiRecorded(recorded);
+  });
+});
+
+describe("the embed never maps or reports text inside an editable region", () => {
+  /**
+   * `[contenteditable="true"]` is the one part of the skip selector that names
+   * no embed root: it covers a host's own rich-text editor, and the element the
+   * embed itself is editing. Text inside one is being typed, not authored, so
+   * mapping it would record a half-written draft as the page's copy.
+   */
+  it('host copy inside a contenteditable="true" container', async () => {
+    const recorded = await boot();
+    const typed = "Half-written draft in the host's own editor";
+    const written = "Written by the host after load";
+
+    const editor = document.createElement("div");
+    editor.setAttribute("contenteditable", "true");
+    const draft = document.createElement("p");
+    draft.textContent = typed;
+    editor.appendChild(draft);
+    const control = document.createElement("p");
+    control.textContent = written;
+    host().append(editor, control);
+    await advancePastRescan();
+
+    const rcf = widget();
+    rcf.lastReport = 0;
+    rcf.sendContentMap();
+    await flushMicrotasks();
+
+    // GUARD: the rescan saw this mutation — the paragraph appended beside the
+    // editor is mapped and reported — so the draft's absence is the skip.
+    const mapped = Array.from(rcf.elements.values()).map(
+      (entry) => entry.element,
+    );
+    expect(mapped).toContain(control);
+    expect(reportedContents(recorded)).toContain(written);
+
+    expect(mapped).not.toContain(draft);
+    expect(draft.hasAttribute("data-rcf-id")).toBe(false);
+    expect(reportedContents(recorded)).not.toContain(typed);
   });
 });

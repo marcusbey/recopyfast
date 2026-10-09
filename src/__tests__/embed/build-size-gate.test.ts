@@ -96,10 +96,13 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // 33073 → 33073. The embed stops recording its own UI as site copy:
 //
 //   45841 / 33073  ceilings before s70a = measured on main at 828970c
-//   +5 / +7        two markers (the AI suggestions overlay, the form-field
+//   +6 / +7        two markers (the AI suggestions overlay, the form-field
 //                  popover) and the corrected id (`#rcf-edit-board-panel`)
-//   −6 / −7        one `closest()` for the six skip checks
+//   −7 / −7        one `closest()` for the six skip checks
 //   45840 / 33073  measured on feature/s70a-embed-ui-not-content
+// The middle split carries up to 2 B of noise: the artifact's banner holds
+// the source's sha256, so even a comment edit moves the gzipped size. Only
+// the two ends are measurements of shipped bytes (build-embed.mjs, same note).
 const SEEDED_MAX_BUNDLE_GZ = 45840;
 const SEEDED_MAX_WIDGET_GZ = 33073;
 

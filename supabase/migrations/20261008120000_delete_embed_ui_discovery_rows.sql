@@ -35,10 +35,21 @@
 -- It reaches production only after the owner has run the same CTE read-only
 -- (will_delete, embed_ui_but_edited_kept, review_not_deleted per domain; the
 -- query is in docs/plans/s70a-embed-ui-not-content.md) and approved the delete.
--- It fires the existing BEFORE DELETE history trigger (20260809130000) and the
--- AFTER DELETE statement trigger that rotates each affected site's
--- public_content_revision (20261005000000), so no cached public snapshot of
--- the old rows stays reachable.
+--
+-- WHAT IT LEAVES BEHIND: NOTHING. The BEFORE DELETE history trigger
+-- (20260809130000) writes a 'delete' row to content_history, and the same
+-- statement's ON DELETE CASCADE erases it: all four foreign keys into
+-- content_elements (content_history, staging_history, ab_test_variants,
+-- content_editing_sessions) cascade. No audit row of this cleanup survives,
+-- and every history row of a deleted junk row goes with it.
+--
+-- WHAT BOUNDS THE PUBLIC COPY: THE CDN LIFETIME. The AFTER DELETE statement
+-- trigger rotates each affected site's public_content_revision
+-- (20261005000000), but nothing that serves copy reads that revision
+-- (ADR 046, "s62's fate"). GET /api/published/<site> is cached at our edge
+-- and served at most 60 seconds after it was read from the database
+-- (ADR 046, "Freshness and retraction"), so a deleted row stops being served
+-- there within 60 s of the commit; a host's own HTML caching adds to that.
 --
 -- One statement, no BEGIN/COMMIT: the migration runner wraps the file, and
 -- src/__tests__/db/embed-ui-rows-cleanup.test.ts executes it inside a

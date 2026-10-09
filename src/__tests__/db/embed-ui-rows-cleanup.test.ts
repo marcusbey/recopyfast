@@ -18,6 +18,13 @@
  * review tier, listed for the owner, never deleted by pattern. The migration
  * file itself is executed, inside a transaction rolled back at the end, so
  * the statement under test is the one that ships.
+ *
+ * Four kept rows were added at review (s70a, F5): with the plan's seed alone,
+ * deleting any of four guards from the predicate stayed green. One row per
+ * guard: an embed row published as discovered (`published_at IS NULL`), one
+ * holding only an attribute draft (`staging_attributes`), and customer copy
+ * in the popover's and the AI modal footer's selector shapes (the popover's
+ * text list, the footer's `= 'Close'`).
  */
 
 import { readFileSync } from "node:fs";
@@ -35,6 +42,10 @@ interface SeedRow {
   /** Defaults to the original: discovery writes both (content route :172-174). */
   published?: string;
   staging?: string;
+  /** Set by a publish, even one that left the text as discovered. */
+  publishedAt?: string;
+  /** Defaults to `{"type":"span"}`, what discovery stores. */
+  metadata?: Record<string, unknown>;
 }
 
 const DELETED: SeedRow[] = [
@@ -86,6 +97,31 @@ const KEPT: SeedRow[] = [
     original: "History",
     staging: "Past versions",
   },
+  // Published as discovered: the live text still equals the original, so only
+  // `published_at` says someone touched it.
+  {
+    selector: "#rcf-edit-board-panel > div:nth-child(2) > button:nth-child(2)",
+    original: "Elements",
+    publishedAt: "2026-10-01T12:00:00Z",
+  },
+  // An attribute-only draft (an image's alt, a link's href): the text is
+  // untouched, only `metadata.staging_attributes` holds the edit.
+  {
+    selector: "#rcf-editor-banner > a:nth-child(2)",
+    original: "Open dashboard",
+    metadata: {
+      type: "a",
+      staging_attributes: { href: "https://example.com/next" },
+    },
+  },
+  // Customer copy in the shape of an embed root, with text that is not the
+  // embed's: the shape alone never deletes. The popover's first paragraph
+  // and the AI modal's footer button share these selectors.
+  { selector: "div:nth-child(3) > p:nth-child(1)", original: "Our story" },
+  {
+    selector: "div:nth-child(5) > div > div:nth-child(5) > button",
+    original: "Contact sales",
+  },
   // Review tier: an AI suggestion's text is arbitrary, so it is listed for the
   // owner by the read-only count, not deleted by pattern.
   {
@@ -114,8 +150,8 @@ describeDb("s70a: the embed-UI cleanup migration", ({ withClient }) => {
           await client.query(
             `INSERT INTO content_elements
                  (site_id, element_id, selector, original_content, current_content,
-                  published_content, staging_content, metadata)
-               VALUES ($1, $2, $3, $4, $4, $5, $6, '{"type":"span"}'::jsonb)`,
+                  published_content, staging_content, published_at, metadata)
+               VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8::jsonb)`,
             [
               siteId,
               `rcf-s70a-${index}`,
@@ -123,6 +159,8 @@ describeDb("s70a: the embed-UI cleanup migration", ({ withClient }) => {
               row.original,
               row.published ?? row.original,
               row.staging ?? null,
+              row.publishedAt ?? null,
+              JSON.stringify(row.metadata ?? { type: "span" }),
             ],
           );
         }
