@@ -1280,6 +1280,15 @@ describe("ChangesView — after a write, the server is read again (s70b fix pass
     draft: "Essai gratuit de 14 jours",
     state: "pending",
   });
+  // Published, so it offers Revert, never Publish or Discard.
+  const CTA_DE = row("cta-de", {
+    elementId: "rcf-cta",
+    elementType: "button",
+    selector: "#root > main > a.cta",
+    language: "de",
+    original: "Kostenlos testen",
+    live: "Jetzt 14 Tage kostenlos testen",
+  });
   const HERO_FR = row("hero-fr", {
     elementId: HERO.elementId,
     elementType: "h1",
@@ -1568,10 +1577,13 @@ describe("ChangesView — after a write, the server is read again (s70b fix pass
   // same element was in flight; its pre-read landed before the publish
   // committed and its PUT after, so the old text was staged again, and
   // "Draft discarded." was shown over a row the server held as Pending.
-  it("disables every row of an element while a write to it is in flight, and both settle as the server holds them", async () => {
+  // Verification of d381b7b (minor 1): no sibling here offered Revert, so
+  // the lock on the panel's Revert and on ⋮ Revert could be removed with
+  // every test green. The de row is published and offers it.
+  it("disables every row of an element while a write to it is in flight, and each settles as the server holds it", async () => {
     let releasePublish: (() => void) | null = null;
     mockApi({
-      rows: [HERO, CTA_EN, CTA_FR],
+      rows: [HERO, CTA_EN, CTA_FR, CTA_DE],
       publish: (body) =>
         new Promise<Response>((resolve) => {
           releasePublish = () => resolve(served.publish(body));
@@ -1580,6 +1592,7 @@ describe("ChangesView — after a write, the server is read again (s70b fix pass
     const user = await renderLoaded();
     const en = await expandRow(user, "Start your 14-day trial");
     const fr = await expandRow(user, "Essai gratuit de 14 jours");
+    const de = await expandRow(user, "Jetzt 14 Tage kostenlos testen");
 
     await user.click(
       within(en.region()).getByRole("button", { name: "Publish" }),
@@ -1603,6 +1616,20 @@ describe("ChangesView — after a write, the server is read again (s70b fix pass
     await user.click(frDiscard);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
+    const deRevert = within(de.region()).getByRole("button", {
+      name: "Revert to original",
+    });
+    expect(deRevert).toBeDisabled();
+    await user.click(
+      within(de.item).getByRole("button", { name: /^More actions for / }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Revert to original" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Escape}");
+    await user.click(deRevert);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
     await act(async () => {
       releasePublish!();
     });
@@ -1617,6 +1644,9 @@ describe("ChangesView — after a write, the server is read again (s70b fix pass
     ]);
     expect(
       within(fr.region()).getByRole("button", { name: "Revert to original" }),
+    ).toBeEnabled();
+    expect(
+      within(de.region()).getByRole("button", { name: "Revert to original" }),
     ).toBeEnabled();
     expect(requests(/^\/api\/staging\/content\//, "PUT")).toHaveLength(0);
     expect(screen.queryByText("Draft discarded.")).not.toBeInTheDocument();

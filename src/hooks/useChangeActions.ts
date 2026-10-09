@@ -100,6 +100,12 @@ const REVERT_SAVED = "The revert was saved as a draft.";
 /** The page disables these rows; this is the hook's own guard behind it. */
 const ELEMENT_BUSY =
   "A change to this text is still being saved. Try again once it has finished.";
+/**
+ * How long a write request may go unanswered before the page gives up on it
+ * (the repo's fetch-timeout form: `DELIVERY_TIMEOUT_MS`, webhooks/manager.ts).
+ * A draft save or a one-element publish answers in well under a second.
+ */
+const WRITE_TIMEOUT_MS = 30_000;
 
 /**
  * Why a write did not land. `isUncertain`: no answer came back at all (the
@@ -221,6 +227,12 @@ async function refusalMessage(
  * 63d7ba2, minor 5): that case read "Could not save the draft. Try again."
  * and the row was not read again, so a draft the server had discarded or
  * published was still drawn Pending, with a dialog saying "Not discarded."
+ *
+ * A request still unanswered after `WRITE_TIMEOUT_MS` is aborted, and the
+ * abort throws, so it ends the same way: read again, said to be uncertain.
+ * Tombstone (verification of d381b7b, minor 3): there was no timeout, and a
+ * request that never settled held its element's lock, every language and
+ * variant row of it disabled, until the page was reloaded.
  */
 async function send(
   url: string,
@@ -234,6 +246,7 @@ async function send(
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
     });
   } catch {
     return { error: lostMessage, isUncertain: true };
@@ -436,10 +449,14 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
   // read's way back, then everything the staging PUT does before its RPC
   // (`authorizeFirstPartyEditorAccess`, `enforceRateLimit`,
   // `checkOwnerCanEdit`, each a round trip), so hundreds of milliseconds or
-  // more. This page's own writes cannot land there (one write at a time per
-  // element, above). Closing it needs a compare-and-set in the staging PUT,
-  // an existing route this story does not change (follow-up:
-  // s81-version-restore-integrity).
+  // more. This page's writes cannot land there while it stays mounted (one
+  // write at a time per element, above), but the lock lives in the mounted
+  // page, not the tab. Correction (verification of d381b7b, minor 2): this
+  // said "This page's own writes cannot land there". Leaving the page while
+  // a write is still out and coming back mounts a new, unlocked page, and
+  // that write, still running, can land in this window too. Closing it needs
+  // a compare-and-set in the staging PUT, an existing route this story does
+  // not change (follow-up: s81-version-restore-integrity).
   const discardDraft = useCallback(
     (row: ContentChange) =>
       track(row, "discardDraft", async () => {

@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  CHANGES_LIST_CEILING,
+  CHANGES_PAGE_SIZE,
+} from "@/lib/content/changes-paging";
 
 /**
  * The Changes page's server state (s70b): one `GET /api/content/changes` per
@@ -190,6 +194,13 @@ async function fetchChanges(
 const INCOMPLETE_ELEMENT = `${FALLBACK_ERROR}: the element could not be read in full`;
 
 /**
+ * The most pages an element read follows: every page the list route serves,
+ * offsets 0 to `CHANGES_MAX_OFFSET` (201). The route stops offering a next
+ * page there; the read stops here too, should an answer offer one anyway.
+ */
+const MAX_ELEMENT_PAGES = CHANGES_LIST_CEILING / CHANGES_PAGE_SIZE;
+
+/**
  * Every row of one element on one site, every language and variant, as the
  * server holds them now (`?site&element&state=all`), page after page.
  *
@@ -200,7 +211,11 @@ const INCOMPLETE_ELEMENT = `${FALLBACK_ERROR}: the element could not be read in 
  * "updated elsewhere". So it follows `nextOffset`. The loop is bounded by
  * the route: it stops offering a next page at its ceiling, and refuses any
  * offset past it (changes-paging.ts); an offset that does not move forward is
- * refused here rather than followed.
+ * refused here rather than followed. And by the read itself: it follows at
+ * most `MAX_ELEMENT_PAGES`, then fails. Tombstone (verification of d381b7b,
+ * minor 3): without that cap, an answer that kept offering a next page was
+ * followed for ever, and removing the forward check ran the test worker out
+ * of memory instead of failing an assertion.
  *
  * Offset paging over rows that can change between two pages can skip one (a
  * row whose `changed_at` moves jumps pages). A read that does not end with
@@ -220,7 +235,7 @@ export async function readElementChanges(
   };
   const rows = new Map<string, ContentChange>();
   let offset = 0;
-  for (;;) {
+  for (let pages = 0; pages < MAX_ELEMENT_PAGES; pages += 1) {
     const page = await fetchChanges(filters, offset);
     for (const row of page.rows) rows.set(row.id, row);
     if (page.nextOffset === null) {
@@ -230,6 +245,7 @@ export async function readElementChanges(
     if (page.nextOffset <= offset) throw new Error(INCOMPLETE_ELEMENT);
     offset = page.nextOffset;
   }
+  throw new Error(INCOMPLETE_ELEMENT);
 }
 
 /** What the filter bar draws from an answer: it outlives a reload. */

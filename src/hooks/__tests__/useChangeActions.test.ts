@@ -712,6 +712,62 @@ describe("useChangeActions", () => {
           isUncertain: true,
         });
       });
+
+      // Verification of d381b7b (minor 3): a write request had no timeout,
+      // so one that never settled held its element's lock (every language
+      // and variant row disabled) until the page was reloaded.
+      describe("when a write never answers", () => {
+        const WRITE_TIMEOUT_MS = 30_000;
+        /** No answer ever; an aborted request rejects, as `fetch` does. */
+        const HUNG = (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(init.signal?.reason),
+            );
+          });
+
+        beforeEach(() => jest.useFakeTimers());
+        afterEach(() => jest.useRealTimers());
+
+        it.each([
+          ["publish", PENDING, PUBLISH_LOST],
+          ["revertToDraft", row(), REVERT_LOST],
+        ] as const)(
+          "%s gives up after 30 s, reads the row again, says it may or may not have landed and frees the element",
+          async (action, target, lostMessage) => {
+            (global.fetch as jest.Mock).mockImplementation(HUNG);
+            const reread = jest.fn(async () => true);
+            const { result } = renderHook(() => useChangeActions({ reread }));
+            let outcome: ActionOutcome | null = null;
+            act(() => {
+              void result.current[action](target).then((settled) => {
+                outcome = settled;
+              });
+            });
+
+            await act(async () => {
+              await jest.advanceTimersByTimeAsync(WRITE_TIMEOUT_MS - 1);
+            });
+            expect(outcome).toBeNull();
+            expect(isElementWriting(result.current.inFlight, target)).toBe(
+              true,
+            );
+
+            await act(async () => {
+              await jest.advanceTimersByTimeAsync(1);
+            });
+            expect(outcome).toEqual({
+              error: lostMessage,
+              applied: null,
+              isUncertain: true,
+            });
+            expect(reread).toHaveBeenCalledWith(target);
+            expect(isElementWriting(result.current.inFlight, target)).toBe(
+              false,
+            );
+          },
+        );
+      });
     });
 
     it("says the write went through but the row may be out of date when it cannot be read again", async () => {

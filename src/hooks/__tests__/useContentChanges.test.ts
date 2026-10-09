@@ -660,6 +660,43 @@ describe("useContentChanges", () => {
           expect(requests().filter(isElementRead).length).toBeLessThan(10);
         },
       );
+
+      // Verification of d381b7b (minor 3): the loop was bounded only by the
+      // route, so an answer that kept offering a next page was followed for
+      // ever (and a non-advancing-offset mutation ran the worker out of
+      // memory instead of failing an assertion). It follows at most the
+      // pages the route serves: offsets 0, 50, …, 10,000.
+      it("follows no more pages than the route serves, and resolves false, when the next offset never stops", async () => {
+        const ROUTE_PAGES = 10_000 / 50 + 1;
+        const FAR_PAST_THE_ROUTE = 20_000;
+        let written = false;
+        route((url) => {
+          if (!written || !isElementRead(url)) {
+            return response(page([siblings(false)[55]]));
+          }
+          const offset = Number(url.searchParams.get("offset"));
+          return response(
+            page([siblings(true)[55]], {
+              nextOffset: offset < FAR_PAST_THE_ROUTE ? offset + 50 : null,
+              total: 1,
+            }),
+          );
+        });
+        const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
+        await waitFor(() => expect(result.current.data).not.toBeNull());
+
+        written = true;
+        let isFresh: boolean | undefined;
+        await act(async () => {
+          isFresh = await result.current.refreshAfterWrite(SITE_A, "rcf-e");
+        });
+
+        expect(isFresh).toBe(false);
+        expect(shown(result.current.data?.rows)).toEqual([
+          ["s-55", "pending", "Live"],
+        ]);
+        expect(requests().filter(isElementRead)).toHaveLength(ROUTE_PAGES);
+      });
     });
 
     // Verification of 63d7ba2 (minor 3): the counts and total a write reads

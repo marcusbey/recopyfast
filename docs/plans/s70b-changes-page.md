@@ -581,6 +581,57 @@ route. The only route change is one field on this story's own `GET /api/content/
   | immediate focus branch | view "moves focus … at once" |
   | deferred focus branch | view "keeps a published row open…" |
 
+### Fix pass (verification of `d381b7b`)
+
+Max severity minor, ship allowed; three minors fixed before merge. No route, RPC, migration or
+`src/components/ui` change.
+
+> CTO decision under the owner's 2026-10-09 directive.
+
+- [x] **Minor 1: the Revert lock is tested.** `disabled={isLocked}` on the panel's Revert
+  (`ChangeDetail.tsx`) and on ⋮ Revert (`ChangeRow.tsx`) could be removed with every test green:
+  the lock test had no sibling that offers Revert. The view test "disables every row of an
+  element…" gains a published de row of the same element; while the en Publish is in flight its
+  panel Revert is disabled, its ⋮ Revert is `aria-disabled`, a click opens no dialog, and Revert
+  comes back once the publish settles.
+- [x] **Minor 2: the lock's scope is said as it is.** The lock lives in the mounted Changes page
+  (`useChangeActions`' state and ref), not in the tab: leaving the page and coming back while a
+  write is still out starts unlocked, so that write can land inside a new Discard's window. The
+  comment above `discardDraft` said "This page's own writes cannot land there"; it now says
+  "this page's writes, while it stays mounted", and names the case. Added to the
+  s81-version-restore-integrity follow-up (the compare-and-set in the staging PUT closes it too),
+  here and in `docs/stories.md` (s70b entry).
+- [x] **Minor 3: a write that never answers ends.** `send` had no timeout, so a request that never
+  settled locked every row of its element until reload. **CTO decision:** every write request
+  carries `AbortSignal.timeout(WRITE_TIMEOUT_MS)`, 30 s, the repo's existing fetch-timeout form
+  (`src/lib/webhooks/manager.ts` `DELIVERY_TIMEOUT_MS = 30_000`). An aborted request throws, so it
+  takes the existing uncertain path: "… may or may not have …", the element is read again, the
+  lock is released. The message is unchanged ("The connection dropped before the server
+  answered"): the page drops it. **Residual:** the reads inside the lock (Discard's pre-read, the
+  re-read after a write) carry no timeout; they are shared with the list's own reads, which this
+  pass does not change.
+  `readElementChanges` gets an explicit page cap, `CHANGES_LIST_CEILING / CHANGES_PAGE_SIZE`
+  (201: every page the route serves), so an answer that keeps offering a next page ends in a
+  failure, and the non-advancing-offset mutation fails by assertion instead of exhausting the
+  worker's heap.
+- **Tests changed** (AGENTS.md § Tests): `ChangesView.test.tsx` "disables every row of an element
+  while a write to it is in flight, and both settle…" is renamed "…and each settles as the server
+  holds it": it seeds a third row (`CTA_DE`, published, same element) and asserts its panel and ⋮
+  Revert locked, then Revert back after the publish. No assertion removed or loosened.
+- **New tests:** hook actions — publish (POST) and Save as draft (PUT) never answered: still in
+  flight at 29.999 s, at 30 s uncertain, read again, the element free (fake timers drive jsdom's
+  `AbortSignal.timeout`); hook list — an element read whose next offset never stops follows exactly
+  201 pages and resolves false, the rows as they were.
+- **Mutations** (each guard neutralised alone, its test red, restored):
+
+  | Guard | Red |
+  |---|---|
+  | panel Revert disabled by the element lock (`ChangeDetail.tsx`) | view "disables every row…" (`deRevert` not disabled) |
+  | ⋮ Revert disabled by the element lock (`ChangeRow.tsx`) | view "disables every row…" (menuitem not `aria-disabled`) |
+  | write requests carry `AbortSignal.timeout` | both "…gives up after 30 s…" (outcome never settles) |
+  | element read page cap | "follows no more pages than the route serves…" (resolves true after 401 pages) |
+  | element read refuses a non-advancing offset | "…does not move forward" — now by assertion (201 reads, expected < 10), no longer a heap crash |
+
 ## Run interdicts
 
 - **Ceilings only go down.** `MAX_BUNDLE_GZ`/`MAX_WIDGET_GZ` and the seeded pair never rise;

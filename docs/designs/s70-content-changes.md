@@ -274,7 +274,7 @@ caller's grant) when the caller may edit; "Show all text" otherwise.
 | No matches | Inside the panel area: "Nothing matches “pricng”." · ghost "Clear search" | same |
 | Error (list) | `Alert variant="destructive"`: "Changes could not be loaded." + the reason + **Try again**. Never the empty state | same |
 | Error (row action) | Inside the dialog, or under the panel's action row for Publish: destructive `Alert`, `role="alert"` | same |
-| No answer (row action) | The connection dropped before the server answered: the row is read again, the dialog closes onto it, and under its actions: "The connection dropped before the server answered, so the draft may or may not have been discarded / the revert may or may not have been saved / it may or may not have been published. Check the row before trying again." No announcement | same |
+| No answer (row action) | The connection dropped before the server answered, or no answer came within 30 s (the page then drops the request): the row is read again, the dialog closes onto it, and under its actions: "The connection dropped before the server answered, so the draft may or may not have been discarded / the revert may or may not have been saved / it may or may not have been published. Check the row before trying again." No announcement | same |
 | Success | Once the element is read again: its rows update in place; polite announcement in the result line | same |
 
 ## Accessibility
