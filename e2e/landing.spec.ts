@@ -353,41 +353,67 @@ test.describe("Landing Page", () => {
     expect(await page.title()).not.toContain("Universal CMS");
   });
 
-  // E2E-019 (s74): the sky's shaders run only on a GPU. This browser has none:
-  // Playwright launches Chromium with --enable-unsafe-swiftshader, so WebGL is
-  // shaded on the CPU. When the sky drew its shaders here anyway, a frame took
-  // 1–2 s and the main thread was busy most of every second; E2E-012 waited
-  // over 10 s for a Starter card that had not rendered (main, run
-  // 37902163949) and E2E-017's reload never reached `load`. A visitor whose
-  // browser draws WebGL in software gets the same page, so it gets the static
-  // sky. See docs/research/s74-deflake-landing-pricing.md.
+  // E2E-019 (s74): the sky's shaders run only on a GPU. Without one, WebGL is
+  // shaded on the CPU, and when the sky drew its shaders there anyway a frame
+  // took 1–2 s and the main thread was busy most of every second. In CI (main,
+  // run 37902163949) E2E-012 waited over 10 s for a Starter card that had not
+  // rendered, and E2E-017 needed 56 s to pass; in the local reproduction
+  // E2E-017's reload never reached `load`. A visitor whose browser draws WebGL
+  // in software gets the same page, so it gets the static sky. See
+  // docs/research/s74-deflake-landing-pricing.md.
   test("E2E-019: a software WebGL renderer gets the static sky, not the shader", async ({
-    page,
+    playwright,
+    launchOptions,
+    baseURL,
   }) => {
-    await page.goto("/", { waitUntil: "load", timeout: 45000 });
+    // This test brings its own browser, told to draw WebGL the way a browser
+    // without a GPU does, so it means the same thing on a runner with a GPU.
+    // `--use-angle=swiftshader-webgl` is SwiftShader as the software fallback,
+    // the one path Chromium reports as a major performance caveat:
+    // `--use-angle=swiftshader` also draws on SwiftShader but reports no
+    // caveat, so the shader sky would mount. Appended last, the flags win over
+    // any GPU backend in the configuration's args. Not `test.use`: launch
+    // options are per worker and Playwright refuses them inside a describe.
+    const browser = await playwright.chromium.launch({
+      args: [
+        ...(launchOptions.args ?? []),
+        "--use-gl=angle",
+        "--use-angle=swiftshader-webgl",
+        "--enable-unsafe-swiftshader",
+      ],
+    });
 
-    // The sky is a dynamic import: wait for it to mount, or "no canvas" would
-    // also be true of a shader sky whose chunk has not arrived yet.
-    const sky = page.locator("[data-sky]");
-    await expect(sky).toBeAttached({ timeout: 15000 });
+    try {
+      const page = await browser.newPage({ baseURL });
+      await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
-    // What this test is about: WebGL2 exists, but only with a major
-    // performance caveat. If this fails, the browser running the suite has a
-    // GPU and the assertions below test nothing.
-    const webgl = await page.evaluate(() => ({
-      hasWebGL2: Boolean(document.createElement("canvas").getContext("webgl2")),
-      hasWebGL2WithoutCaveat: Boolean(
-        document
-          .createElement("canvas")
-          .getContext("webgl2", { failIfMajorPerformanceCaveat: true }),
-      ),
-    }));
-    expect(
-      webgl,
-      "E2E-019 needs a browser that draws WebGL2 in software (headless Chromium with SwiftShader)",
-    ).toEqual({ hasWebGL2: true, hasWebGL2WithoutCaveat: false });
+      // The sky is a dynamic import: wait for it to mount, or "no canvas"
+      // would also be true of a shader sky whose chunk has not arrived yet.
+      const sky = page.locator("[data-sky]");
+      await expect(sky).toBeAttached({ timeout: 15000 });
 
-    await expect(sky).toHaveAttribute("data-sky", "static");
-    await expect(page.locator("canvas")).toHaveCount(0);
+      // What this test is about: WebGL2 exists, but only with a major
+      // performance caveat. If this fails, the flags above no longer give a
+      // software renderer and the assertions below test nothing.
+      const webgl = await page.evaluate(() => ({
+        hasWebGL2: Boolean(
+          document.createElement("canvas").getContext("webgl2"),
+        ),
+        hasWebGL2WithoutCaveat: Boolean(
+          document
+            .createElement("canvas")
+            .getContext("webgl2", { failIfMajorPerformanceCaveat: true }),
+        ),
+      }));
+      expect(
+        webgl,
+        "E2E-019's browser must draw WebGL2 in software (SwiftShader as the WebGL fallback)",
+      ).toEqual({ hasWebGL2: true, hasWebGL2WithoutCaveat: false });
+
+      await expect(sky).toHaveAttribute("data-sky", "static");
+      await expect(page.locator("canvas")).toHaveCount(0);
+    } finally {
+      await browser.close();
+    }
   });
 });

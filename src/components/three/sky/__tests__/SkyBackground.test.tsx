@@ -24,6 +24,24 @@ jest.mock("@/lib/hooks/useLenis", () => ({
   subscribeScrollProgress: () => () => {},
 }));
 
+/* jsdom answers every media query with "no". This visitor answers the
+   reduced-motion query with what they asked for, and every other with "no". */
+function prefersReducedMotion(isReduced: boolean): void {
+  jest.spyOn(window, "matchMedia").mockImplementation(
+    (query: string) =>
+      ({
+        matches: isReduced && query.includes("prefers-reduced-motion"),
+        media: query,
+        onchange: null,
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+        dispatchEvent: jest.fn(),
+      }) as MediaQueryList,
+  );
+}
+
 afterEach(() => {
   jest.restoreAllMocks();
   mockCanvas.mockClear();
@@ -60,5 +78,27 @@ describe("SkyBackground", () => {
     expect(mockCanvas).toHaveBeenCalled();
     expect(container.querySelector("canvas")).not.toBeNull();
     expect(container.querySelector('[data-sky="shader"]')).not.toBeNull();
+  });
+
+  it("draws the shader sky on demand, not on a running loop, for a GPU visitor who asked for reduced motion", () => {
+    installBrowser("gpu");
+    prefersReducedMotion(true);
+
+    render(<SkyBackground />);
+
+    expect(mockCanvas).toHaveBeenLastCalledWith(
+      expect.objectContaining({ frameloop: "demand" }),
+    );
+  });
+
+  it("runs the shader sky's loop for a GPU visitor who did not ask for reduced motion", () => {
+    installBrowser("gpu");
+    prefersReducedMotion(false);
+
+    render(<SkyBackground />);
+
+    expect(mockCanvas).toHaveBeenLastCalledWith(
+      expect.objectContaining({ frameloop: "always" }),
+    );
   });
 });

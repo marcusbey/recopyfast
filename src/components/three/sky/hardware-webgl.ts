@@ -5,15 +5,15 @@
  * WHY THIS EXISTS — a software renderer turned the landing page into a slideshow.
  *
  * A browser with no usable GPU (blocklisted driver, hardware acceleration off,
- * a VM or remote desktop, and every CI runner) can still hand out a WebGL
- * context: it shades on the CPU through SwiftShader, llvmpipe or WARP. The sky
- * is a full-screen raymarcher plus a six-layer noise field on a free-running
- * frame loop, and on that path a frame took 1–2 s and kept the main thread busy
- * for 1.2–4.8 s of every 3 s, on a 10-core laptop. Hydration, the pricing fetch
- * and every click queued behind it. That is how `main` went red on 2026-10-09:
- * CI's Chromium (Playwright launches it with `--enable-unsafe-swiftshader`)
- * waited more than 10 s for the Starter card. See
- * docs/research/s74-deflake-landing-pricing.md.
+ * a VM or remote desktop, and GitHub's standard GPU-less runners) can still
+ * hand out a WebGL context: it shades on the CPU through SwiftShader, llvmpipe
+ * or WARP. The sky is a full-screen raymarcher plus a six-layer noise field on
+ * a free-running frame loop, and on that path a frame took 1–2 s and kept the
+ * main thread busy for 1.2–4.8 s of every 3 s, on a 10-core laptop. Hydration,
+ * the pricing fetch and every click queued behind it. That is how `main` went
+ * red on 2026-10-09: CI's Chromium (Playwright launches it with
+ * `--enable-unsafe-swiftshader`) waited more than 10 s for the Starter card.
+ * See docs/research/s74-deflake-landing-pricing.md.
  *
  * `failIfMajorPerformanceCaveat` is the WebGL spec's own signal for exactly
  * this: the browser refuses the context when it would perform dramatically

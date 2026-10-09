@@ -105,3 +105,56 @@ load: 20/24, with E2E-019 red on "1 canvas, expected 0" and the stall reproducin
 `page.reload` timeout. Numbers in the research, "After the fix".
 
 - [x] Task 4
+
+## Deviations — review fix pass (minors 2–4)
+
+Rebased on `origin/main` `fc5968b` (s73, deps bump) first; the only conflict was `docs/stories.md`,
+both entries kept in id order.
+
+**Minor 2, E2E-019 forces software WebGL itself.** The fix suggested was `test.use({ launchOptions:
+{ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] } })` in its own describe. Both
+halves were checked on Playwright 1.58 and neither works:
+- `launchOptions` is a worker fixture, and `test.use` of one inside a describe is a load error:
+  "Cannot use({ launchOptions }) in a describe group, because it forces a new worker"
+  (`node_modules/playwright/lib/common/fixtures.js:101-103`, reproduced with `--list`).
+- `--use-angle=swiftshader` draws on SwiftShader but Chromium reports no major performance caveat,
+  so the probe answers "hardware" and the shader sky mounts. What reports the caveat is SwiftShader
+  as the WebGL *fallback*, `--use-gl=angle --use-angle=swiftshader-webgl`. Measured with
+  Playwright's Chromium on the M1 Max, `webgl2` with `failIfMajorPerformanceCaveat: true`:
+
+| Flags | Headless | Headed |
+|---|---|---|
+| none (Playwright adds `--enable-unsafe-swiftshader`) | refused (SwiftShader) | granted |
+| `--use-angle=metal` (real GPU) | granted (Metal) | granted (Metal) |
+| `--use-angle=swiftshader` | granted (SwiftShader) | granted (SwiftShader) |
+| `--disable-gpu` | granted | refused |
+| `--use-gl=angle --use-angle=swiftshader-webgl` | refused | refused |
+| `--use-angle=metal` then `--use-gl=angle --use-angle=swiftshader-webgl` | refused | refused |
+
+As built: E2E-019 launches its own Chromium through the `playwright` fixture, with the configured
+`launchOptions.args` followed by `--use-gl=angle --use-angle=swiftshader-webgl
+--enable-unsafe-swiftshader` (the last switch wins, last row above), opens a page on the run's
+`baseURL` and closes the browser in `finally`. Its assertions are unchanged; the precondition
+message now names the flags. CTO decision: an in-test browser rather than moving E2E-019 to a
+file of its own with a top-level `test.use`: the test stays in `landing.spec.ts` where the
+contract comment and the research point, and it adds to the configured args instead of replacing
+them. The strict count stays 81.
+
+Evidence, production build with the E2E job's env (`next start` on 127.0.0.1:3074):
+- before this change, E2E-019 passed on Playwright's default headless browser and went red on a
+  GPU (`--use-angle=metal` project, M1 Max) at its precondition, `hasWebGL2WithoutCaveat: true`;
+- after: 5/5 and 3/3 on the default headless browser, 3/3 on the GPU project, 1/1 headed;
+- gate forced open (`{(true || canDrawShaderSky) && (`, rebuilt): red on both the default and the
+  GPU project, "toHaveCount: expected 0, received 1".
+
+Local durations include `browser.close()`, which on this Mac takes 2–26 s for any Playwright
+Chromium, default flags included; the shared `browser` fixture pays it at worker teardown instead.
+
+**Minor 3, reduced motion pinned.** Two tests in `SkyBackground.test.tsx`: on a GPU, a visitor who
+prefers reduced motion gets `frameloop: "demand"`, otherwise `"always"`. They pin behaviour that
+already existed, so they passed on first run; mutations `frameloop="always"` and
+`frameloop="demand"` each turn one of them red.
+
+**Minor 4, comments.** E2E-019's comment now says E2E-017's `page.reload` timeout was the local
+reproduction, and that in CI run 37902163949 E2E-017 passed in 56 s. `hardware-webgl.ts` says
+"GitHub's standard GPU-less runners" instead of "every CI runner".
