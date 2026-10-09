@@ -250,6 +250,31 @@ describe("Button Component", () => {
     // s73 review minor 1: `disabled` is not valid on an <a> and stops nothing
     // there. With asChild it is not forwarded, and development says so; a
     // non-element child, which Slot drops, is reported the same way.
+    // Devin review, PR #78: a native <button> child CAN be disabled, so
+    // `disabled` and `loading` must reach it — a slotted submit button must not
+    // submit again while its Button says it is busy.
+    it.each([
+      ["disabled", { disabled: true }],
+      ["loading", { loading: true }],
+    ])("disables a native button child when %s", (_name, extra) => {
+      const consoleError = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        render(
+          <Button asChild {...extra}>
+            <button type="submit">Save</button>
+          </Button>,
+        );
+
+        expect(screen.getByRole("button", { name: /Save/ })).toBeDisabled();
+        expect(consoleError).not.toHaveBeenCalled();
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
     it("does not put `disabled` on the child, and warns in development", () => {
       const consoleError = jest
         .spyOn(console, "error")

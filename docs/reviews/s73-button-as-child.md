@@ -41,5 +41,16 @@ No browser render of the ten call sites (CI runs `app-layout` and `site-pages` e
 `site-registered-*` captures). Next's server-to-client path on `/docs/install` from a real build. `npm run build`
 (CI).
 
+## Devin Review on PR #78 — fixed in the follow-up commit
+
+🟡 **Disabled slotted buttons remain clickable** (valid): withholding `disabled` from every asChild
+child left `<Button asChild loading><button type="submit">` clickable. Button now forwards
+`disabled`/`loading` to a native form-control child (`button`, `input`, `select`, `textarea`,
+`fieldset`) and never to a link or component; the development warning fires only when `disabled`
+cannot apply. Tests red first: a native button child is disabled when `disabled` and when
+`loading`, with no warning; the link test still has no `disabled` attribute. `src/components/ui`
+207 passed. Flag "Story research lacks its required file": research moved to
+`docs/research/s73-button-as-child.md`. Reviewed by the orchestrator.
+
 Max severity: minor
 Ship allowed: yes
