@@ -3504,8 +3504,9 @@ at that commit, to be re-verified at research time):
   no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`.
 - [ ] L2 — Bulk CSV export has no formula-injection guard (`src/lib/bulk/csv.ts:21-25`); the
   analytics export has one.
-- [ ] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
+- [x] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
   and the region (`src/app/api/health/route.ts:93,130`; `health/ready/route.ts:41,78,104,159`).
+  → closed by s84-observability.
 - [ ] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
   use `timingSafeEqual` over SHA-256 digests.
 - [ ] L5 — Raw Stripe errors returned to authenticated callers (payment-method existence oracle);
@@ -3760,3 +3761,79 @@ Acceptance criteria:
   story commit.
 
 Complexity: 2. Branch `feature/s73-button-as-child`. Embed allocation: 0 bytes.
+
+## Story s84-observability — an outage is noticed within minutes, and no monitoring surface leaks or relays
+
+> CTO decision under the owner's 2026-10-09 directive. Infrastructure story; no new UI, so no
+> Design step. Closes s69 L3 and the s07b review's "public, unlimited endpoint" minor.
+
+As the owner of a product with paying customers on the way, I learn that production is down from an
+issue in my own repository within ten minutes — not from a customer — and nothing I added to watch
+production can be read or abused by someone else.
+
+Cause (verified on `origin/main` `c0c40bf`; research: `docs/research/s84-observability.md`):
+
+- **`/api/health` is blind to Redis.** `checks.cache` is declared (`src/app/api/health/route.ts:20`)
+  and never populated; `GET` runs database, storage, optional external and realtime (`:363-368`),
+  `HEAD` the database alone (`:497-502`). Editor login fails closed on the same store, so the probe
+  stays green through the outage that matters. Three `test.failing` pins say so
+  (`src/__tests__/api/health/cache-check.test.ts:132,156,172`). The severity maths also answers a
+  database-only outage `degraded`/200 on `GET` (`:401-411`) while `HEAD` answers 503 — a `GET`
+  monitor would miss it.
+- **Health bodies leak (s69 L3).** Raw `error.message` (`route.ts:93,130,165`), the bucket name and
+  its public flag (`:115-119`), the realtime service's live connection count (`:242-246`), heap
+  metrics and the Sentry-enabled flag behind `?detailed=true` (`:141-148,438-441`); the readiness
+  route names missing environment variables (`ready/route.ts:41`), returns raw errors (`:77-78`,
+  `:104`) and the region (`:159`).
+- **No limiter.** `/api/health` is unlimited by design (`route.ts:279-298`), flagged by the s07b
+  review (`docs/reviews/s07b-realtime-deploy.md:179-183`); `/api/health/ready` likewise.
+- **The Sentry tunnel is an open relay.** `tunnelRoute` (`next.config.ts:173`) makes
+  `@sentry/nextjs` rewrite `/monitoring?o=<org>&p=<project>[&r=<region>]` to
+  `https://o<org>.ingest[.<region>].sentry.io/api/<project>/envelope/` for any digits
+  (`node_modules/@sentry/nextjs/build/cjs/config/withSentryConfig/tunnel.js:19-71`); the middleware
+  lets the path through untouched (`src/middleware.ts:113`). Anyone can post envelopes to any
+  Sentry project through our origin.
+- **The browser release can be `undefined`.** `release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA`
+  (`src/instrumentation-client.ts:46`) is unset unless Vercel exposes system variables to the
+  bundle, and the SDK spreads user options after its own default
+  (`@sentry/nextjs/build/cjs/client/index.js:54-58`), so the explicit `undefined` erases the
+  release the SDK injected. Server and edge read a different variable
+  (`sentry.server.config.ts:23`, `sentry.edge.config.ts:23`).
+- **The realtime server reports nothing.** `server/package.json` has no Sentry; a crash is a log
+  line and `process.exit(1)` (`server/index.js:657-669`), visible only in `fly logs`.
+- **No uptime monitor runs.** Sentry's plan has one uptime seat, used by another project; the two
+  Sentry uptime monitors were created disabled.
+- **No backup runbook.** Supabase Free has no backups or PITR; the nightly encrypted backup built
+  on 2026-10-09 is undocumented here.
+
+Acceptance criteria:
+- [ ] Redis unreachable ⇒ `GET` and `HEAD /api/health` answer 503 with `checks.cache.status` `error`;
+  Redis reachable ⇒ `checks.cache.status` `ok`. The three A-30 pins are plain tests.
+- [ ] Database down on its own ⇒ `GET /api/health` answers 503 `unhealthy`, as `HEAD` already does.
+  Storage alone stays `degraded`/200; realtime stays capped at `degraded`.
+- [ ] Every public health body reports each component as `{ status, latency }` only — no error
+  text, environment variable name, region, bucket, connection count or memory metric; the detail is
+  logged server-side.
+- [ ] `GET`/`HEAD /api/health` and `GET /api/health/ready` are rate limited per IP before any check:
+  60 per minute, fail-open; one check every 5–10 minutes from one IP is never limited, and a Redis
+  outage is reported, not refused.
+- [ ] `/monitoring` forwards only to our DSN's org, region and project, and only an envelope whose
+  header DSN names our host and project; anything else is a 400 carrying the security headers and
+  costing no GoTrue round trip.
+- [ ] Browser, server and edge Sentry report one release — the build's Vercel commit SHA, also the
+  source-map upload release — and none of them passes an explicit `undefined`.
+- [ ] With `SENTRY_DSN` set, the realtime server reports uncaught exceptions and unhandled
+  rejections to Sentry with tokens scrubbed from URLs, query strings, headers and messages; unset,
+  it is a no-op. Either way it logs and exits 1 exactly as before.
+- [ ] `.github/workflows/uptime.yml` probes `https://www.recopyfa.st/api/health` and
+  `https://recopyfast-ws.fly.dev/health` every 10 minutes and on demand, with timeouts and two
+  retries; on failure it opens (or comments on) the open `uptime` issue "Production down: <target>",
+  on recovery it comments and closes it. Least privilege (`contents: read`, `issues: write`),
+  actions pinned by full SHA, decision logic tested with `node --test` in CI.
+- [ ] `docs/operations/backups.md` and `docs/operations/monitoring.md` describe the backup system,
+  the restore drill and every monitor, with no secret in them.
+- [ ] Required gates pass; the realtime server's production audit stays clean.
+
+Complexity: 3. Dependencies: none. No migration; no embed change.
+
+Embed allocation: 0 bytes (ceilings only go down).
