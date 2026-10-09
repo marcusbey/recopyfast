@@ -354,7 +354,8 @@ None. **Owns the install-recipe data consumed by `s18`.**
 **so that** I can tell whether the product's primary claim is true.
 
 ### Complexity
-3 — read models and event plumbing over existing data.
+5 at execution preflight — atomic evidence capture, immutable edit attribution and an operator
+read/UI surface. Proposed split below; neither child is executable until human validation.
 
 ### Acceptance criteria
 - [ ] Four timestamps persist per account: account confirmed, first site registered, first verified install, first persisted content update.
@@ -364,16 +365,20 @@ None. **Owns the install-recipe data consumed by `s18`.**
 - [ ] Accounts that predate this story are marked `unmeasurable` and are excluded from p50/p90, and a test asserts an unmeasurable account contributes to no percentile.
 - [ ] Edits by non-account grant holders are attributed to the site's owning account, and are separately countable as non-account edits.
 - [ ] The funnel is readable at `/dashboard/analytics` without running SQL by hand.
-- [ ] This story's `account_milestones` table is the single source for account-level edit activity; `s14` and `s15` read from it rather than re-aggregating the activity log.
+- [ ] `account_milestones` is the single source for funnel timestamps and append-only
+  `account_edit_activity` is the single source for ongoing account edit history; `s14` and `s15`
+  read those sources rather than re-aggregating the activity log or live permissions.
 
 ### Dependencies
-`s01-trial-signup` (defines account start), `s02-install-verified` (defines the install step).
+Parent framing: shipped `s01-trial-signup`, shipped `s02-install-verified`. The proposed data split
+also depends on `s24-staging-write-integrity` and `s26-owner-quota-integrity`; exact child edges are
+listed below and require validation.
 
 ### Agentic notes
 - Existing: `src/lib/analytics/tracker.ts`, `src/app/api/analytics/track/route.ts`,
   `src/app/api/analytics/performance/route.ts`, `src/app/dashboard/analytics/page.tsx`.
 - The PRD names time-to-first-edit < 5 min the **primary success metric**. It is not
-  instrumented — confirmed, no milestone table across the 43 files in
+  instrumented — confirmed, no milestone table across the 51 source migrations in
   `supabase/migrations/`. Until this ships, every activation claim is unfalsifiable.
 - Model as a narrow `account_milestones` table with nullable timestamps and a write-once
   constraint, not as a scan over the activity log. The activity log is high-volume and will
@@ -383,6 +388,29 @@ None. **Owns the install-recipe data consumed by `s18`.**
   read as failure. Key on site ownership.
 - `tracker.ts` has two dead locals (`siteAnalytics`, `date`) flagged by lint; clean them
   while in the file.
+
+### Proposed split at execution preflight (2026-09-12 — validation required)
+
+The original AC8 cannot be carried literally by one row with four timestamps: it cannot answer
+`s14`'s recent edits or `s15`'s monthly edit count. Full scope is preserved by separating
+first-occurrence funnel truth from ongoing edit events:
+
+- **`s03a-activation-evidence` (4)** — `account_milestones` plus append-only
+  `account_edit_activity`; pinned database triggers capture Auth confirmation, `s26`'s marked-owner
+  registration, `sites.live_at`, and `s24`'s atomic staging-history event with explicit validated
+  actor kind/user identity (`account|edit-session|staging|device-grant|unknown`) in the source
+  transaction. Dependencies: shipped `s01`, shipped `s02`, proposed `s24`, proposed `s26`.
+  Plan: [`plans/s03a-activation-evidence.md`](./plans/s03a-activation-evidence.md).
+- **`s03b-activation-funnel-surface` (3)** — operator-only UTC range query, reproducible
+  drop-off/p50/p90/edit attribution, and the existing Activation-tab design. Dependency:
+  `s03a-activation-evidence`. Plan:
+  [`plans/s03b-activation-funnel-surface.md`](./plans/s03b-activation-funnel-surface.md).
+
+Proposed [ADR 027](./decisions/027-activation-milestones-and-edit-activity.md) preserves ADR 007's
+write-once milestone rule and supersedes its post-write caller topology. After validation, replace
+the parent dependency edges with the exact child ids: `s14c` and `s15` consume `s03a`; release/UI
+evidence consumes `s03b`. Until then, `docs/plans/s03-activation-funnel.md` is reopened
+`validated: no` and `/ks-execute s03` must fail closed.
 
 ---
 

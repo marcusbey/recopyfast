@@ -1,5 +1,17 @@
 # Design — Story s03-activation-funnel
 
+> **Execution preflight amendment — 2026-09-12.** This visual contract is preserved for proposed
+> story `s03b-activation-funnel-surface`; `s03a` has no UI. The server page supplies a boolean
+> operator capability computed from the same server-only `ADMIN_EMAILS` / `app_metadata.role`
+> helper as the API. Client components never read or reconstruct the allowlist. The new tab mounts
+> and fetches only when that capability is true. Counts come from `account_milestones`; ongoing
+> edit attribution comes from the immutable `account_edit_activity` ledger defined by ADR 027.
+> The range cohort is anchored to account creation, so an unconfirmed account remains visible as
+> first-step drop-off; confirmation is a reached step, not the query's admission ticket.
+> Time-to-first-edit includes only measurable accounts with both timestamps and a nonnegative
+> confirmation-to-edit interval. Edit share excludes legacy `unknown` actor rows from both sides;
+> when no classified edits exist, the metric reads “Not enough classified edits,” not 0%.
+
 ## Screen(s)
 
 **`/dashboard/analytics` — new "Activation" tab.**
@@ -19,7 +31,8 @@ Content of the new tab, top to bottom:
    the right (p50/p90 and the attribution split are queried over this range; the story's own
    AC2 requires an arbitrary range).
 2. **Four-step funnel** — account confirmed → first site registered → first verified install →
-   first persisted content update. Each step shows its count, its percentage of the funnel's
+   first persisted content update. The funnel base is accounts created in the selected UTC range,
+   so unconfirmed accounts remain visible as drop-off before step 1. Each step shows its count, its percentage of the funnel's
    base, and (from step 2 on) the drop-off from the previous step.
 3. **Four metrics** — p50 time-to-first-edit, p90 time-to-first-edit, non-account edit share,
    and the unmeasurable-cohort count — each a `Metric` tile.
@@ -77,11 +90,10 @@ never how an error renders:
    daily funnel movement over time) will need a real charting primitive, which does not exist
    today. This screen does not need one — a static bar is enough for a point-in-time / one
    selected range view.
-2. **`docs/design-system.md` lists `Select` as an available Radix-wrapped component**
-   (`design-system.md:117`), but no `src/components/ui/select.tsx` or any `Select` import exists
-   anywhere in `src/` — confirmed by search. Used two `Input type="date"` fields instead,
-   matching the one existing precedent in the codebase
-   (`src/components/dashboard/AnalyticsDashboard.tsx:233-256`). Flagging the doc/code mismatch
-   rather than inventing a `Select` component to match the doc.
+2. **`Select` now exists, but a date is not a select choice.** `s16` added
+   `src/components/ui/select.tsx` after this design was first written. The two
+   `Input type="date"` fields remain the correct control and match the existing analytics
+   precedent (`AnalyticsDashboard.tsx:233-256`); no dropdown is introduced merely because the
+   primitive now exists.
 3. **No toast primitive** — already an open gap in `design-system.md`. Not needed on this
    screen; feedback stays inline via `Alert`, per the existing rule.

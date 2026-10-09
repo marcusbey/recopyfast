@@ -1,5 +1,29 @@
 # Research — Story s03-activation-funnel
 
+> **Execution preflight correction — 2026-09-12 (`ee3942d`).** This August research is retained
+> for its source-path findings, but three premises drifted. The repository now has 51 migrations;
+> `s02-install-verified` is merged (`92864ae`) and exposes `sites.live_at`; and `s26` now defines
+> the only authoritative owner marker (`site_permissions.granted_by IS NULL`). More importantly,
+> the originally validated plan wrote milestones in application code *after* site/edit/install
+> persistence. A transient analytics failure would permanently lose the one event the funnel needs.
+> Capture must be a trigger inside the same database transaction as the source event, with pinned,
+> locked-down trigger bodies.
+>
+> AC8 also cannot be implemented by `account_milestones`: one row with four timestamps cannot
+> answer `s14`'s recent-edit list or `s15`'s monthly edit count. Re-querying `staging_history` on
+> every consumer silently reattributes old edits when admin rows change and contradicts the claimed
+> single source. The full scope is therefore re-scored 5 and split without dropping anything:
+> `s03a` owns `account_milestones` plus an immutable append-only `account_edit_activity` ledger;
+> `s03b` owns the operator read model and dashboard. `s03a` waits for `s26`'s owner invariant and
+> `s24`'s atomic staging/history write. See proposed ADR 027 and the two replacement plan files.
+> Current `EditorAccess` also has a third kind the August pass predates: `device-grant`. It writes
+> `staging_history.staging_access_id = NULL`, so that nullable FK cannot classify non-account
+> activity. The corrected `s24` dependency must persist explicit validated actor kind/user identity
+> in the atomic history row: `account`/`edit-session` are account activity,
+> `staging`/`device-grant` are non-account, and legacy `unknown` is excluded from both sides of the
+> share. Cohort range selection likewise uses immutable account creation time,
+> because an unconfirmed legacy account has no confirmation timestamp to filter on.
+
 > **Review gate warning.** `docs/reviews/stories.md` ends `Stories ready: no` (max severity:
 > major, dated as the second-pass review of `stories.md` revision `6f11b3f`). None of the six
 > majors or eight minors in that review touch `s03` by name, and `s03`'s own prior finding
