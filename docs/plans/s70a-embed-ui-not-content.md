@@ -86,7 +86,7 @@ Acceptance criteria (proposed; the owner validates them with this plan):
      `+5 / +7` (two markers, the corrected id) · `−7 / −8` (one `closest()` for six checks) ·
      `45839 / 33072 measured — the new ceilings` (measured at research on `828970c`; re-measure,
      record what the branch measures, and refuse anything above 45,841 / 33,073).
-2. [ ] **Delete the rows the embed's UI left behind.**
+2. [x] **Delete the rows the embed's UI left behind.**
    - Owner precondition, before merge (not run by the implementer unless the owner says so): the
      read-only count below, run through the `read-prod-database` skill (`agents_readonly`), its
      output pasted in the PR.
