@@ -90,10 +90,11 @@ summary, evidence, failure and janitor-state files for that run index.
   processed genuine event IDs and `/api/billing/entitlement` all agree on Pro.
 - One captured event is re-signed with the ephemeral local listener secret and replayed. The route
   reports it as a duplicate and neither the subscription nor ledger count changes.
-- Cleanup cancels the captured test subscription, deletes the captured test customer, deletes only
-  captured IDs from the local tables, deletes the captured Auth user and proves no mutable residue.
-  Cleanup always re-reads the captured Checkout Session first, records any Customer/Subscription
-  created after form submission, and expires the Session when it is still open.
+- The process-external janitor cancels the captured test subscription, deletes the captured test
+  customer, deletes only captured IDs from local tables, deletes the captured Auth user and proves
+  no mutable residue. It repeatedly rediscovers run-owned Checkout Sessions, Customers,
+  subscriptions and local rows, including objects created after form submission, and expires every
+  owned Session that remains open. The Playwright fixture exposes no provider/local/Auth cleanup API.
 
 The safe evidence files under `test-results/` contain the run ID, provider object IDs, statuses,
 event types and cleanup booleans only. The runner accepts evidence only when its run ID, run index,
@@ -110,9 +111,9 @@ On failure the spec writes one owner-only (`0600`) JSON file named
 email, card, key, signing secret or JWT shape before printing it. The next run removes the previous
 safe failure file before starting; raw Playwright output is never retained.
 
-Cleanup failures expose only a count and fixed operation labels (`expire_checkout`,
-`cancel_subscription`, `delete_customer`, `wait_deliveries`, `discover_rows`, known-table deletes
-and `delete_auth_user`). Raw provider errors and object IDs never enter the safe diagnostic.
+The janitor keeps its detailed stage diagnostics on stderr for the operator, while the persisted
+failure artifact receives only the fixed `external_janitor` cleanup label. Raw provider errors and
+object IDs never enter the safe failure JSON.
 
 The state-backed `afterEach` hook is deliberately non-destructive. It writes bounded failure
 diagnostics, gives the still-running flow ten seconds to settle, aborts its harness signal and closes
@@ -171,8 +172,11 @@ and creates a fail-closed human recovery gate: a new run is blocked until an ope
 exact test run from provider truth. The manifest and janitor state never contain credentials, email,
 card data or Checkout URLs.
 
-When cleanup fails after a primary timeout, the safe failure JSON keeps the primary stage diagnostic
-and appends the fixed cleanup operation labels within the same bounded/redacted four-field schema.
+When the external janitor fails after a validated primary Playwright failure, the safe failure JSON
+keeps the primary stage diagnostic and appends only the fixed label
+`cleanup failed: external_janitor` within the same bounded/redacted four-field schema. If the janitor
+is the only failure, the runner creates an owner-only four-field failure at stage `cleanup` with that
+same fixed diagnostic. Raw janitor exceptions and provider IDs are never copied into this artifact.
 
 Stripe retains immutable Checkout Session and event history after cleanup. The evidence reports
 that history as retained; it must never claim those immutable records were deleted. A canceled

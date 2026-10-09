@@ -15,6 +15,7 @@ const {
   assertNoUncleanRunManifest,
   assertNoUncleanRunManifests,
   assertRunnerOwnedProviderInvocation,
+  recordExternalJanitorFailure,
   spawnDetached,
   terminateProcessGroup,
   waitForProcessGroupGone,
@@ -36,6 +37,11 @@ const {
   assertNoUncleanRunManifests(directory: string): void;
   assertRunnerOwnedProviderInvocation(
     env: Record<string, string | undefined>,
+  ): void;
+  recordExternalJanitorFailure(
+    path: string,
+    runIndex: number,
+    hasPrimaryFailure: boolean,
   ): void;
   spawnDetached(
     command: string,
@@ -79,6 +85,80 @@ const {
 };
 
 describe("Stripe provider runner process cleanup", () => {
+  it("preserves a primary failure and appends only the fixed external janitor label", () => {
+    const directory = mkdtempSync(join(tmpdir(), "recopyfast-s25-failure-"));
+    const path = join(directory, "failure.json");
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        mode: "test",
+        runIndex: 2,
+        failedStage: "checkout:hosted-form",
+        diagnostic: "Test timeout of 300000ms exceeded",
+      })}\n`,
+      { mode: 0o644 },
+    );
+
+    recordExternalJanitorFailure(path, 2, true);
+
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      mode: "test",
+      runIndex: 2,
+      failedStage: "checkout:hosted-form",
+      diagnostic:
+        "Test timeout of 300000ms exceeded | cleanup failed: external_janitor",
+    });
+  });
+
+  it("creates a closed-schema cleanup failure when only the external janitor fails", () => {
+    const directory = mkdtempSync(join(tmpdir(), "recopyfast-s25-failure-"));
+    const path = join(directory, "failure.json");
+
+    recordExternalJanitorFailure(path, 1, false);
+
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    const evidence = JSON.parse(readFileSync(path, "utf8"));
+    expect(evidence).toEqual({
+      mode: "test",
+      runIndex: 1,
+      failedStage: "cleanup",
+      diagnostic: "cleanup failed: external_janitor",
+    });
+    expect(Object.keys(evidence).sort()).toEqual([
+      "diagnostic",
+      "failedStage",
+      "mode",
+      "runIndex",
+    ]);
+  });
+
+  it("replaces malformed primary evidence instead of copying unsafe janitor detail", () => {
+    const directory = mkdtempSync(join(tmpdir(), "recopyfast-s25-failure-"));
+    const path = join(directory, "failure.json");
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        mode: "test",
+        runIndex: 1,
+        failedStage: "provider:raw",
+        diagnostic: "janitor failed for cus_sensitive sub_sensitive",
+      })}\n`,
+    );
+
+    recordExternalJanitorFailure(path, 1, true);
+
+    const text = readFileSync(path, "utf8");
+    expect(JSON.parse(text)).toEqual({
+      mode: "test",
+      runIndex: 1,
+      failedStage: "cleanup",
+      diagnostic: "cleanup failed: external_janitor",
+    });
+    expect(text).not.toContain("cus_sensitive");
+    expect(text).not.toContain("sub_sensitive");
+  });
+
   it("serializes interruption cleanup and runs the janitor before services stop", async () => {
     const order: string[] = [];
     const machine = createCleanupStateMachine({

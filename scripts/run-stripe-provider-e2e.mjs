@@ -14,9 +14,11 @@ import dotenv from "dotenv";
 import processHelpers from "./stripe-provider-process.cjs";
 
 const {
+  PROVIDER_FAILURE_STAGES,
   assertNoUncleanRunManifest,
   assertNoUncleanRunManifests,
   createCleanupStateMachine,
+  recordExternalJanitorFailure,
   registerProcess,
   spawnDetached,
   terminateProcessGroup,
@@ -47,24 +49,6 @@ const STRIPE_EVENTS = [
   "customer.subscription.updated",
   "invoice.payment_succeeded",
 ].join(",");
-const PROVIDER_FAILURE_STAGES = new Set([
-  "fixture:create",
-  "baseline:entitlement",
-  "checkout:create",
-  "checkout:inspect-open",
-  "checkout:hosted-form",
-  "checkout:reconcile",
-  "checkout:inspect-complete",
-  "billing:durable-state",
-  "billing:provider-subscription",
-  "billing:events",
-  "billing:entitlement",
-  "billing:replay",
-  "evidence:capture",
-  "cleanup",
-  "cleanup:assert",
-]);
-
 let activeRunCleanup;
 let activeCommandRegistry;
 let signalExitPromise;
@@ -354,6 +338,7 @@ async function runOnce(index) {
 
     let playwrightError;
     let diagnosticError;
+    let hasValidatedPrimaryFailure = false;
     try {
       await command(
         "npx",
@@ -365,6 +350,7 @@ async function runOnce(index) {
       playwrightError = error;
       try {
         const failure = readAndValidateFailure(providerFailureFile, index);
+        hasValidatedPrimaryFailure = true;
         process.stderr.write(
           `[stripe-provider] run ${index}/${runs} failed at ` +
             `${failure.failedStage}: ${failure.diagnostic}\n`,
@@ -388,6 +374,11 @@ async function runOnce(index) {
       hasCompletedParentJanitor = true;
     } catch (error) {
       janitorError = error;
+      recordExternalJanitorFailure(
+        providerFailureFile,
+        index,
+        hasValidatedPrimaryFailure,
+      );
     }
     if (janitorError) throw janitorError;
     if (diagnosticError) throw diagnosticError;

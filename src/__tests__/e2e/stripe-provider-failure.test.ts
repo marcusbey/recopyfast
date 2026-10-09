@@ -2,7 +2,6 @@ import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  appendProviderCleanupFailureEvidence,
   buildProviderFailureEvidence,
   writeProviderFailureEvidence,
 } from "../../../e2e/support/stripe-provider-failure";
@@ -63,39 +62,5 @@ describe("Stripe provider safe failure evidence", () => {
       failedStage: "checkout:hosted-form",
       diagnostic: "postal code incomplete",
     });
-  });
-
-  it("preserves fixed cleanup labels beside an existing primary failure", () => {
-    const outputFile = join(
-      mkdtempSync(join(tmpdir(), "rcf-provider-failure-")),
-      "failure.json",
-    );
-    writeProviderFailureEvidence(outputFile, {
-      runIndex: 1,
-      failedStage: "checkout:hosted-form",
-      error: new Error("Test timeout of 300000ms exceeded"),
-    });
-
-    appendProviderCleanupFailureEvidence(
-      outputFile,
-      new Error(
-        "Stripe provider fixture cleanup failed in 2 steps: " +
-          "expire_checkout, delete_customer.",
-      ),
-    );
-
-    const evidence = JSON.parse(readFileSync(outputFile, "utf8"));
-    expect(evidence.failedStage).toBe("checkout:hosted-form");
-    expect(evidence.diagnostic).toContain("Test timeout");
-    expect(evidence.diagnostic).toContain(
-      "cleanup: Stripe provider fixture cleanup failed in 2 steps: " +
-        "expire_checkout, delete_customer.",
-    );
-    expect(Object.keys(evidence).sort()).toEqual([
-      "diagnostic",
-      "failedStage",
-      "mode",
-      "runIndex",
-    ]);
   });
 });

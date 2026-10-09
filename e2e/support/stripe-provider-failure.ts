@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { redactDiagnostic } from "./redacted-diagnostics";
 
@@ -55,26 +55,6 @@ export function writeProviderFailureEvidence(
 ): void {
   const evidence = buildProviderFailureEvidence(input);
   writeFailureFile(outputFile, evidence);
-}
-
-export function appendProviderCleanupFailureEvidence(
-  outputFile: string,
-  cleanupError: unknown,
-): void {
-  const existing = JSON.parse(
-    readFileSync(outputFile, "utf8"),
-  ) as ProviderFailureEvidence;
-  const cleanupDiagnostic = redactDiagnostic(
-    safeErrorMessage(cleanupError),
-    400,
-  );
-  writeFailureFile(outputFile, {
-    ...existing,
-    diagnostic: redactDiagnostic(
-      `${existing.diagnostic} | cleanup: ${cleanupDiagnostic}`,
-      800,
-    ),
-  });
 }
 
 function writeFailureFile(

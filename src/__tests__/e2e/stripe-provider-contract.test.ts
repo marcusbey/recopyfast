@@ -64,6 +64,10 @@ describe("Stripe provider E2E operator contract", () => {
     expect(runner).toContain("removeProviderOutput(providerOutputDir)");
     expect(runner).toContain("STRIPE_PROVIDER_FAILURE_FILE");
     expect(runner).toContain("readAndValidateFailure");
+    expect(runner).toContain("recordExternalJanitorFailure");
+    expect(runner.indexOf("recordExternalJanitorFailure(")).toBeLessThan(
+      runner.indexOf("if (janitorError) throw janitorError"),
+    );
     expect(runner).toContain("removeSafeFailureFile(providerFailureFile)");
     expect(runner).toContain("randomUUID");
     expect(runner).toContain("STRIPE_PROVIDER_RUN_ID");
@@ -168,9 +172,6 @@ describe("Stripe provider E2E operator contract", () => {
     expect(providerSpec).toContain("state.fixturePromise");
     expect(providerSpec).toContain("state.flowPromise");
     expect(providerSpec).toContain("state.abortController");
-    expect(
-      providerSpec.indexOf("fixture.markCheckoutRequested()"),
-    ).toBeLessThan(providerSpec.indexOf("page.request.post"));
     const teardownBlock = providerSpec.slice(
       providerSpec.indexOf("test.afterEach"),
       providerSpec.indexOf('test("a genuine paid test subscription'),
@@ -193,31 +194,17 @@ describe("Stripe provider E2E operator contract", () => {
     expect(testBody).not.toContain("} finally {");
   });
 
-  it("proves post-cleanup provider history and clears the browser session", () => {
-    expect(providerFixture).toContain("stripe.checkout.sessions.retrieve");
-    expect(providerFixture).toContain("stripe.checkout.sessions.expire");
-    expect(providerFixture).toContain("stripe.checkout.sessions.list");
-    expect(providerFixture).toContain("client_reference_id");
-    expect(providerFixture).toContain("metadata?.user_id");
-    expect(providerFixture).toContain("onAuthUserCreated");
+  it("keeps worker teardown non-destructive and assigns cleanup to the external janitor", () => {
     expect(providerFixture).toContain("id: requestedAuthUserId");
-    expect(providerFixture).toContain("reconcileCapturedCheckoutForCleanup");
-    expect(providerFixture).toContain("expireOwnedCheckoutSession");
-    expect(providerFixture).toContain("cancelOwnedSubscription");
-    expect(providerFixture).toContain("deleteOwnedCustomer");
-    expect(providerFixture).toContain("stripe.events.retrieve");
-    expect(providerFixture).toContain("context.clearCookies()");
-    for (const cleanupLabel of [
-      "expire_checkout",
-      "cancel_subscription",
-      "delete_customer",
-      "wait_deliveries",
-      "discover_rows",
-      "delete_billing_events",
-      "delete_auth_user",
-    ]) {
-      expect(providerFixture).toContain(cleanupLabel);
-    }
+    expect(providerFixture).not.toContain("cleanupCapturedFixture");
+    expect(providerFixture).not.toContain(
+      "reconcileCapturedCheckoutForCleanup",
+    );
+    expect(providerFixture).not.toContain("auth.admin.deleteUser");
+    expect(providerFixture).not.toContain("stripe.checkout.sessions.expire");
+    expect(providerFixture).not.toContain("stripe.subscriptions.cancel");
+    expect(providerFixture).not.toContain("stripe.customers.del");
+    expect(providerFixture).not.toContain("cleanup(options");
     expect(failureSupport).toContain("redactDiagnostic");
     expect(failureSupport).toContain("mode: 0o600");
     expect(teardownSupport).toContain("Promise.race");

@@ -10,6 +10,24 @@ const {
 } = require("node:fs");
 const { dirname, normalize, sep } = require("node:path");
 
+const PROVIDER_FAILURE_STAGES = new Set([
+  "fixture:create",
+  "baseline:entitlement",
+  "checkout:create",
+  "checkout:inspect-open",
+  "checkout:hosted-form",
+  "checkout:reconcile",
+  "checkout:inspect-complete",
+  "billing:durable-state",
+  "billing:provider-subscription",
+  "billing:events",
+  "billing:entitlement",
+  "billing:replay",
+  "evidence:capture",
+  "cleanup",
+  "cleanup:assert",
+]);
+
 function spawnDetached(command, args, options = {}) {
   return spawn(command, args, {
     ...options,
@@ -154,6 +172,40 @@ function writeRunManifest(path, manifest) {
   chmodSync(path, 0o600);
 }
 
+function recordExternalJanitorFailure(path, runIndex, hasPrimaryFailure) {
+  const cleanupDiagnostic = "cleanup failed: external_janitor";
+  let failure = {
+    mode: "test",
+    runIndex,
+    failedStage: "cleanup",
+    diagnostic: cleanupDiagnostic,
+  };
+
+  if (hasPrimaryFailure && existsSync(path)) {
+    const existing = JSON.parse(readFileSync(path, "utf8"));
+    const keys = Object.keys(existing).sort();
+    const hasSafePrimarySchema =
+      JSON.stringify(keys) ===
+        JSON.stringify(["diagnostic", "failedStage", "mode", "runIndex"]) &&
+      existing.mode === "test" &&
+      existing.runIndex === runIndex &&
+      PROVIDER_FAILURE_STAGES.has(existing.failedStage) &&
+      typeof existing.diagnostic === "string" &&
+      existing.diagnostic.length > 0 &&
+      existing.diagnostic.length <= 800;
+
+    if (hasSafePrimarySchema) {
+      const suffix = ` | ${cleanupDiagnostic}`;
+      failure = {
+        ...existing,
+        diagnostic: `${existing.diagnostic.slice(0, 800 - suffix.length)}${suffix}`,
+      };
+    }
+  }
+
+  writeRunManifest(path, failure);
+}
+
 function assertNoUncleanRunManifest(path) {
   if (!existsSync(path)) return;
   let previous;
@@ -245,10 +297,12 @@ function validateProviderEvidence(evidence, expectations, nowUnix) {
 }
 
 module.exports = {
+  PROVIDER_FAILURE_STAGES,
   assertNoUncleanRunManifest,
   assertNoUncleanRunManifests,
   assertRunnerOwnedProviderInvocation,
   createCleanupStateMachine,
+  recordExternalJanitorFailure,
   registerProcess,
   spawnDetached,
   terminateProcessGroup,

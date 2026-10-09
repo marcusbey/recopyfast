@@ -12,7 +12,7 @@ summaries were presented. This plan depends on merged s24 ephemeral-stack suppor
 - [x] Add a fail-closed opt-in test-mode provider guard: application/Supabase must be loopback,
       Stripe key/price objects must be test mode, and the user must have no existing trial/paid grant.
 - [x] Build a disposable fixture that creates one confirmed ephemeral Auth/user record, signs in
-      through the app, records all created DB/provider IDs and guarantees scoped cleanup in `finally`.
+      through the app and records created DB/provider IDs for the process-external janitor to reconcile.
 - [x] Start a Stripe CLI test listener to the real webhook route, inject/mask its ephemeral signing
       secret, create Checkout through the authenticated API, and automate the hosted test Checkout.
       First prove the test fails before webhook/entitlement assertions are wired.
@@ -187,6 +187,13 @@ describe the state immediately after each repair; the dated final proof at the e
   before any run begins, and success evidence is finalized only after the parent janitor completes.
   This closes ordinary late-route work but does not expand the stated `SIGKILL`, host/kernel or
   external-Docker failure boundary.
+- Formal review removed the obsolete fixture cleanup API, its Auth rollback callback and its dead
+  cleanup tests, leaving worker teardown diagnostic/capture/browser-only and the process-external
+  janitor as the sole provider/local/Auth deletion authority. The runner now records janitor failure
+  before rethrowing: a validated primary failure keeps its original stage and diagnostic plus the
+  fixed bounded label `cleanup failed: external_janitor`; a janitor-only failure creates the same
+  owner-only four-field schema at stage `cleanup`. Neither path accepts the raw janitor exception or
+  provider IDs.
 - Fresh provider-focused verification after the final activity-reset repair used this exact command:
 
   ```bash

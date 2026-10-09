@@ -175,7 +175,6 @@ test.describe("Stripe test Checkout entitlement provider proof", () => {
         });
 
         state.failedStage = "checkout:create";
-        fixture.markCheckoutRequested();
         const checkoutResponse = await page.request.post(
           `${fixture.environment.appUrl}/api/billing/checkout`,
           {
