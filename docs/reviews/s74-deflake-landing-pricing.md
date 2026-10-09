@@ -55,5 +55,12 @@ reads the renderer name (`WEBGL_debug_renderer_info`, else `RENDERER`) and treat
 "Basic Render" / "software" as software, releasing the context either way. Test (red first): a fake browser that grants the
 caveat-free context but reports a SwiftShader renderer → no shader sky. Sky suites 11/11. Reviewed by the orchestrator.
 
+🟡 **Renderer probe errors leave contexts open** (valid, second Devin pass): if reading the renderer threw after the
+context was granted, `hasHardwareWebGL` returned without releasing it, and repeated sky mounts could use up the browser's
+cap on live WebGL contexts. The release now sits in a `finally`. Test (red first: "Expected number of calls: 1, Received
+number of calls: 0"): a fake browser that grants the context, then throws while its renderer is read → static sky and
+exactly one release. Sky suites 12/12. CI on 4f46ebb: strict Playwright 81/81, E2E-017 2.4 s (was 30–56 s), E2E-012 1.0 s,
+E2E-019 0.8 s. Reviewed by the orchestrator.
+
 Max severity: minor
 Ship allowed: yes

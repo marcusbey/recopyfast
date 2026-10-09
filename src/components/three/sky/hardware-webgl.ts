@@ -50,9 +50,12 @@ export function hasHardwareWebGL(): boolean {
     if (!context) {
       return false;
     }
-    const isSoftware = SOFTWARE_RENDERER.test(rendererName(context));
-    context.getExtension("WEBGL_lose_context")?.loseContext();
-    return !isSoftware;
+    try {
+      return !SOFTWARE_RENDERER.test(rendererName(context));
+    } finally {
+      // Released even when reading the renderer throws (Devin review, PR #80).
+      context.getExtension("WEBGL_lose_context")?.loseContext();
+    }
   } catch {
     return false;
   }

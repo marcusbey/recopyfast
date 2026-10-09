@@ -10,7 +10,8 @@
  * when the caller says it will not accept a major performance caveat.
  * `software-unflagged` is Chromium launched with `--use-angle=swiftshader`:
  * it grants even the caveat-free context and only its renderer name tells
- * (Devin review, PR #80).
+ * (Devin review, PR #80). `throws-on-renderer` grants the context, then
+ * fails while its renderer is read (a lost GPU process, a hostile extension).
  */
 export type FakeBrowser =
   | "gpu"
@@ -18,7 +19,8 @@ export type FakeBrowser =
   | "software-unflagged"
   | "webgl1-only"
   | "no-webgl"
-  | "throws-on-probe";
+  | "throws-on-probe"
+  | "throws-on-renderer";
 
 export function installBrowser(browser: FakeBrowser): {
   loseContext: jest.Mock;
@@ -38,9 +40,12 @@ export function installBrowser(browser: FakeBrowser): {
       }
       return null;
     }),
-    getParameter: jest.fn((pname: number) =>
-      pname === UNMASKED_RENDERER_WEBGL ? renderer : "WebKit WebGL",
-    ),
+    getParameter: jest.fn((pname: number) => {
+      if (browser === "throws-on-renderer") {
+        throw new Error("context lost while reading the renderer");
+      }
+      return pname === UNMASKED_RENDERER_WEBGL ? renderer : "WebKit WebGL";
+    }),
   };
 
   const getContext = (
@@ -51,6 +56,7 @@ export function installBrowser(browser: FakeBrowser): {
     switch (browser) {
       case "gpu":
       case "software-unflagged":
+      case "throws-on-renderer":
         return isWebGL ? context : null;
       case "software-only":
         return isWebGL && !attributes?.failIfMajorPerformanceCaveat

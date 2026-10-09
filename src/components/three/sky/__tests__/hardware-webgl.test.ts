@@ -46,4 +46,14 @@ describe("hasHardwareWebGL", () => {
     expect(() => hasHardwareWebGL()).not.toThrow();
     expect(hasHardwareWebGL()).toBe(false);
   });
+
+  // Devin review, PR #80: a context the probe was granted must be released
+  // even when reading its renderer fails, or repeated sky mounts use up the
+  // browser's cap on live WebGL contexts.
+  it("says no, and still releases the context, when reading the renderer fails", () => {
+    const { loseContext } = installBrowser("throws-on-renderer");
+
+    expect(hasHardwareWebGL()).toBe(false);
+    expect(loseContext).toHaveBeenCalledTimes(1);
+  });
 });
