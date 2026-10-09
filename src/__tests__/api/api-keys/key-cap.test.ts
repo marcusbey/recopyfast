@@ -183,6 +183,20 @@ describe("POST /api/api-keys — per-site key cap and name bound", () => {
     expect(inserts).toHaveLength(0);
   });
 
+  // Devin on PR #82: the bound was measured on what the caller typed, but
+  // sanitizing HTML-encodes it, so 100 `<` were stored as 400 characters.
+  it("refuses a name whose stored, encoded form exceeds the bound", async () => {
+    const response = await POST(createKey("<".repeat(MAX_API_KEY_NAME_LENGTH)));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(
+      `Key name must be at most ${MAX_API_KEY_NAME_LENGTH} characters.`,
+    );
+    expect(permissionReads).toBe(0);
+    expect(inserts).toHaveLength(0);
+  });
+
   it("accepts a name exactly at the bound", async () => {
     const response = await POST(createKey("n".repeat(MAX_API_KEY_NAME_LENGTH)));
 

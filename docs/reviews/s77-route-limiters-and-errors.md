@@ -90,6 +90,17 @@ s75): contract 81, no new DB suite. Jest 394 suites / 5,183; type-check (both) 0
 build:embed 45828 / 33062; Playwright `--list` 81. Follow-up (embed bytes needed): `sendContentMap`'s discovery POST,
 `hydrateStoredContent` and `bucketVisitor` also leave unread bodies.
 
+## Devin Review on PR #82 — fixed (orchestrator)
+
+🟡 **Stored key names exceed length cap** (valid): the 100-character bound was measured on the typed name, but
+`validateAndSanitizeInput` HTML-encodes it, so 100 `<` were stored as 400 characters. `POST /api/api-keys` now refuses
+when either the typed or the stored (encoded) name exceeds `MAX_API_KEY_NAME_LENGTH`, still before any read. Test (red
+first: "Expected 400, Received 200"): 100 `<` → 400, no permission read, no insert. api-keys suites 44/44.
+
+Flag **Concurrent creates exceed site key cap** (investigate): the check-then-insert overshoot is bounded (≤ 9 per
+admin burst at 10 writes/min) and recorded in ADR 056; an atomic cap needs a database constraint — follow-up with the
+s80 grant-hygiene migration lane.
+
 ## Not verified
 
 DB suites (`content-write-privileges`) and core e2e under the new 200/min guards → CI. Real Redis on a preview: 201

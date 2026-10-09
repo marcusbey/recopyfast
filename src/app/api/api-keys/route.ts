@@ -188,9 +188,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // s77 (s42 review m3). Measured on what the caller typed, before
-    // sanitizing (which HTML-encodes and so lengthens it) and before any read.
-    if (String(name).trim().length > MAX_API_KEY_NAME_LENGTH) {
+    // s77 (s42 review m3). Bounds both what the caller typed and what is
+    // stored: sanitizing HTML-encodes, so 100 `<` would be stored as 400
+    // characters (Devin on PR #82). Checked before any read.
+    if (
+      String(name).trim().length > MAX_API_KEY_NAME_LENGTH ||
+      sanitizedName.length > MAX_API_KEY_NAME_LENGTH
+    ) {
       return NextResponse.json(
         {
           error: `Key name must be at most ${MAX_API_KEY_NAME_LENGTH} characters.`,
