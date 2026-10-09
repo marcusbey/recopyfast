@@ -19,18 +19,26 @@ against production: no Supabase connector, no Stripe call (live or test), no cre
    lower one, never a higher one — and `PAID_PLAN_IDS` is declared as exactly that order
    ("Ascending entitlement priority", `src/lib/stripe/plan-types.ts:33-38`).
 2. **"Held for life" already has one reader.** The billing page reads
-   `readGrantedPlanIds(supabase, userId)` (`src/app/dashboard/billing/page.tsx:52`): live,
-   non-revoked, non-trial `plan_entitlements` rows (`effective-plan.ts:246-269`). Checkout's
-   lifetime guard reads the same function (`checkout/route.ts:602`). The reactivate guard reads it
-   too, through the same RLS client `reactivateSubscription` already holds, so the page, checkout
-   and the endpoint cannot disagree about who holds what. Trials are excluded by the query
+   `readGrantedPlanIds(supabase, userId)` (`src/app/dashboard/billing/page.tsx:52`): non-revoked,
+   non-trial `plan_entitlements` rows (`effective-plan.ts:246-269`). Checkout's lifetime guard
+   reads the same function (`checkout/route.ts:602`). The reactivate guard reads it too, through
+   the same RLS client `reactivateSubscription` already holds, so the page, checkout and the
+   endpoint cannot disagree about who holds what. Trials are excluded by the query
    (`.neq("source", TRIAL_SOURCE)`), so a trial-only account is not refused.
+   **Corrected in the fix pass (review finding 2):** that query had no expiry predicate, while the
+   entitlement resolver's own grant read does (`effective-plan.ts:410`, `.or(spendableFilter())`).
+   A non-trial grant can carry an `expires_at` — production holds one (source
+   `qa_recovery_20260919`, the orchestrator's read-only count on 2026-10-09) — so after that date
+   the resolver stopped honouring it while this reader still reported it held. It now sends the
+   same predicate; every caller (page, dashboard route, entitlement badge, checkout, reactivation,
+   plan change) reads through it.
 3. **Founding Agency + Agency subscription.** ADR 038: a live subscription on the same plan makes
    the account hold full Agency (1,000) while it runs; the purchase alone gives 250. The webhook
    cancels that subscription at period end (`:941-1000`, no exception for agency/agency), the card
    never offers Reactivate under lifetime (`SubscriptionCard.tsx:221-227`), and the plan dialog
-   disables Agency for an Agency holder (`UpgradeDialog.tsx:385`). Reactivation would be the only
-   path to a recurring Agency subscription for a lifetime Agency owner. Decision in the plan.
+   disables Agency for an Agency holder (`UpgradeDialog.tsx:385`). Decision in the plan.
+   **Corrected in the fix pass (review finding 1):** this said reactivation "would be the only
+   path" to a recurring Agency subscription for a lifetime Agency owner. It was not: see fact 12.
 4. **The allowance after the subscription can only be resolved server-side.** Whether a grant was
    bought (payment intent, ADR 038) or comped decides it — a comped Agency grant keeps 1,000 after
    the subscription ends, a bought one drops to 250 — and the client never sees payment intents.
@@ -78,6 +86,26 @@ against production: no Supabase connector, no Stripe call (live or test), no cre
 11. **The limiter convention for billing.** Checkout rate-limits per IP before `getUser()`
     (`checkout/route.ts:145-156`, `CHECKOUT_IP`, `onStoreFailure: "allow"`, justified in a comment)
     and per user after it. Presets: `src/lib/security/rate-limiter.ts:419-444`.
+    `enforceRateLimit` answers a 429 as `{ error: "Rate limit exceeded", message }`
+    (`src/lib/api/rate-limit.ts:154-165`); the only billing UI that handled a 429 was `useCheckout`,
+    which prints `error` plus "Try again at HH:MM." from `X-RateLimit-Reset` — so a route's own
+    `message` never reaches the page (review finding 7).
+12. **Two more doors into a covered subscription (fix pass, review finding 1).** On `origin/main`,
+    Checkout's subscription intent reads no grant: it reads the live subscription
+    (`checkout/route.ts:209-214`) and goes on to `getRecoverableSubscriptionCheckout` (`:237`, the
+    first Stripe call) and a new session; only the lifetime intent reads grants (`:602`). The plan
+    change `updateSubscription` (`src/lib/stripe/subscription.ts:313-410`) reads the subscription
+    and goes straight to the price and `stripe.subscriptions.retrieve`/`update`. A Lifetime Pro owner
+    with nothing billing could buy Starter (or Pro, by request); one still paying for Agency could
+    switch it down to Pro or Starter — each billed monthly for a plan the grant includes, and the
+    webhook would not stop it (`stopBillingForLifetimeOwner` runs only on a lifetime purchase). On
+    `c02df19` the plan dialog refused only the plan held for life (`UpgradeDialog.tsx`,
+    `isSelectedHeldForLife`).
+13. **A subscription read error was told to the customer as "no subscription" (fix pass, review
+    finding 3).** `updateSubscription`, `cancelSubscription` and `reactivateSubscription`
+    (`subscription.ts:331,434,505` on `c02df19`) answered `fetchError || !row` with the 404
+    `BillingRefusal`, which `billingErrorResponse` does not log. `.single()` answers a missing row
+    with PGRST116; any other code is a failure, not an absence.
 
 ## Traps
 
@@ -90,7 +118,12 @@ against production: no Supabase connector, no Stripe call (live or test), no cre
   (`dashboard-unentitled.test.ts:51-54`, `dashboard-founding-offer.test.ts:54-57`). A new export
   called unconditionally would be `undefined` there. Calling it only when a live subscription AND a
   permanent grant exist keeps those suites untouched (both return `[]` grants with a subscription)
-  and spares every plain subscriber the extra read.
+  and spares every plain subscriber the resolution's reads — not every read: a plain subscriber
+  still pays the one grant read that finds no grant (corrected in the fix pass, review finding 6).
+- **Test fakes of `plan_entitlements` that do not apply `.or()`** break once `readGrantedPlanIds`
+  sends the expiry predicate (`subscription-rls.test.ts`, `reactivate-lifetime.test.ts`). The
+  filtering fakes in `entitlements.test.ts` and `founding-offer-allowance.test.ts` already parse
+  `.or()` arms; the new ones copy that parser.
 - **`subscription.test.ts:196-206` pins the leak.** "should return 500 with the underlying reason"
   rejects with a plain `Error("No active subscription found")` and expects that text. Under this
   story a plain error is answered generically; the deliberate refusal is a typed error. The test
@@ -103,6 +136,9 @@ against production: no Supabase connector, no Stripe call (live or test), no cre
 
 ## Not verified here
 
-No Stripe test-mode run; no real database. The `plan_entitlements` filters the reactivate guard
-relies on are the ones `readGrantedPlanIds` already ships with and are unit-tested in
-`src/__tests__/lib/billing/entitlements.test.ts`.
+No Stripe test-mode run; no real database. The `plan_entitlements` filters the reactivate,
+checkout and plan-change guards rely on are `readGrantedPlanIds`'s, unit-tested in
+`src/__tests__/lib/billing/entitlements.test.ts` (expiry included since the fix pass); the
+`.or(spendableFilter())` string is the one the entitlement resolver already sends to production.
+The `qa_recovery_20260919` grant was not read here (no database access); its existence and date
+come from the orchestrator's read-only count.

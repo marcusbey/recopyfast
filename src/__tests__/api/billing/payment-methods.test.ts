@@ -195,6 +195,8 @@ describe("rate limited per IP, before authorisation", () => {
     endpoint: "billing/payment-methods:ip",
     identifierType: "ip",
     onStoreFailure: "allow",
+    // s82 review, finding 7: the sentence the card shows on a 429.
+    message: "Too many payment method requests.",
   });
 
   it.each([

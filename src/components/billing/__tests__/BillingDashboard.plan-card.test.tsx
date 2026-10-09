@@ -278,6 +278,34 @@ describe("the plan dialog for a lifetime Founding Agency owner", () => {
   });
 });
 
+describe("the plan dialog for a Lifetime Pro owner paying for Agency", () => {
+  // s82 review, finding 1: the page passes the account's grants to the
+  // dialog, so a plan a grant includes (Pro, under Lifetime Pro) is refused
+  // there as the server refuses it — even though Agency, not Pro, is the plan
+  // in force and nothing is "held for life" on the card.
+  it("refuses Pro, which Lifetime Pro already includes", async () => {
+    await renderPlanCard(
+      payload({
+        creditWallet: wallet(1000),
+        subscription: subscription("agency"),
+      }),
+      { kind: "granted", planIds: ["pro"] },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    const dialog = await screen.findByRole("dialog");
+    const pro = within(dialog).getByRole("radio", { name: /^Pro/ });
+    fireEvent.click(pro);
+
+    expect(pro).toHaveTextContent("Included");
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Included in your lifetime Pro",
+      }),
+    ).toBeDisabled();
+  });
+});
+
 describe("the plan card for a Pro subscriber who bought Lifetime Pro", () => {
   // s71 review M-1: the plan held for life used to count only when no
   // subscription billed that very plan. But buying Lifetime Pro sets the Pro

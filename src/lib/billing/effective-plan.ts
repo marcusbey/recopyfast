@@ -242,6 +242,15 @@ export function hasAnyEntitlement(entitlement: Entitlement): boolean {
  * 409 that reads as intentional, and have the offer card hidden from them.
  * That is the defect the comment above documents having already shipped once,
  * arriving through a second door. A trial is not a purchase.
+ *
+ * Expired grants are excluded too, by the same predicate `readEffectivePlanBasis`
+ * uses (s82 review, finding 2). Purchases and comps write `expires_at` NULL,
+ * but a non-trial grant CAN carry a date — production holds one
+ * (`qa_recovery_20260919`). Without the filter this reader kept answering
+ * "held" after the resolver had stopped honouring the grant, so the lifetime
+ * guards refused checkout, plan changes and reactivation for a plan the
+ * account no longer had. One rule for both reads: held while not revoked and
+ * not yet expired.
  */
 export async function readGrantedPlanIds(
   supabase: SupabaseClient,
@@ -253,6 +262,7 @@ export async function readGrantedPlanIds(
     .eq("user_id", userId)
     .is("revoked_at", null)
     .neq("source", TRIAL_SOURCE)
+    .or(spendableFilter())
     .returns<Array<{ plan_id: string }>>();
 
   if (error) {

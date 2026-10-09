@@ -520,6 +520,44 @@ describe("getGrantedPlanIds with a trial in the table", () => {
   });
 });
 
+/**
+ * s82 review, finding 2: a non-trial grant can carry an `expires_at` —
+ * production holds one (source `qa_recovery_20260919`). The entitlement
+ * resolver already stops honouring it once that date passes (expiry is a
+ * predicate inside its query); the grant reader the lifetime guards, the
+ * billing page and the entitlement badge use did not, so an account whose
+ * dated grant had ended was still refused checkout and reactivation for a
+ * plan it no longer held. One rule now: a grant is held while it is not
+ * revoked and its `expires_at` is null or still ahead.
+ */
+describe("getGrantedPlanIds with a dated non-trial grant", () => {
+  it("drops the grant once its expires_at has passed", async () => {
+    setTable("plan_entitlements", [
+      grant({ source: "qa_recovery_20260919", expires_at: daysFromNow(-1) }),
+    ]);
+
+    await expect(getGrantedPlanIds(USER)).resolves.toEqual([]);
+  });
+
+  it("keeps the grant while its expires_at is still ahead", async () => {
+    setTable("plan_entitlements", [
+      grant({ source: "qa_recovery_20260919", expires_at: daysFromNow(30) }),
+    ]);
+
+    await expect(getGrantedPlanIds(USER)).resolves.toEqual(["pro"]);
+  });
+
+  it("agrees with the plan in force about the same expired grant", async () => {
+    setTable("plan_entitlements", [
+      grant({ source: "qa_recovery_20260919", expires_at: daysFromNow(-1) }),
+    ]);
+    setTable("billing_subscriptions", []);
+
+    await expect(getEffectivePlanId(USER)).resolves.toBeNull();
+    await expect(getGrantedPlanIds(USER)).resolves.toEqual([]);
+  });
+});
+
 describe("hasAnyEntitlement", () => {
   it.each([
     ["a plan", { kind: "plan", planId: "pro", plan: PRO } as const, true],

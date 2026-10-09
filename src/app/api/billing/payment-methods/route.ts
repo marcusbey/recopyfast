@@ -36,7 +36,9 @@ function limitPaymentMethodRequests(req: NextRequest) {
     endpoint: "billing/payment-methods:ip",
     identifierType: "ip",
     onStoreFailure: "allow",
-    message: "Too many payment method requests. Please try again shortly.",
+    // The card prints this, then "Try again at HH:MM." from the reset header
+    // (PaymentMethodsCard, as checkout's 429 reads), so it names no time.
+    message: "Too many payment method requests.",
   });
 }
 
