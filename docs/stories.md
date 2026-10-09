@@ -3501,7 +3501,7 @@ each; no research or plan until the owner schedules it.
 at that commit, to be re-verified at research time):
 
 - [ ] L1 — Production CSP is `script-src 'self' 'unsafe-inline'` (`src/middleware.ts:247`, live);
-  no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`.
+  no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`. → s79
 - [ ] L2 — Bulk CSV export has no formula-injection guard (`src/lib/bulk/csv.ts:21-25`); the
   analytics export has one.
 - [ ] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
@@ -3518,7 +3518,7 @@ at that commit, to be re-verified at research time):
   `staging/validate`, `edit-sessions/{validate,extend}`. → s77 closes the A/B and
   `staging/{content,publish}` part; `staging/validate` and `edit-sessions/*` → s77b.
 - [ ] L8 — `public/embed/__fidelity__/index.html` test harness is served in production (live
-  200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`.
+  200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`. → s79
 - [ ] L9 — `analytics/track` is a service-role write with `onStoreFailure:"allow"` (`:91-97`); a
   site-token caller can forge `login`/`content_edit` activity rows.
 - [ ] L10 — `upload/image` reachable with only the public site token (`:124-136`): image hosting
@@ -3528,9 +3528,9 @@ at that commit, to be re-verified at research time):
 - [ ] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
   content routes pin the exact host.
 - [ ] L13 — WS server: no helmet, `x-powered-by: Express`, `ACAO:*` and the live connection count
-  on `/health` (`server/index.js:78,125-136`; live).
+  on `/health` (`server/index.js:78,125-136`; live). → s79
 - [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
-  121 bare handshakes/min lock real editors out of realtime.
+  121 bare handshakes/min lock real editors out of realtime. → s79
 - [x] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
   (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`. → closed by s72.
 - [x] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
@@ -3546,8 +3546,8 @@ at that commit, to be re-verified at research time):
 - [ ] L19 — CI/header hygiene: `ci.yml` has no top-level `permissions:` and actions are pinned by
   tag, not SHA; HSTS lacks `includeSubDomains`; legacy `X-XSS-Protection` still set;
   `docs/operations/deployment-checklist.md:24` carries a truncated live-key account prefix.
-  → CI half closed by s75 (`contents: read`, every action SHA-pinned); the header and doc halves
-  remain.
+  → CI half closed by s75 (`contents: read`, every action SHA-pinned); the header half and the
+  checklist prefix: s79.
 - [ ] L20 — Dev-only dependency advisories: critical `shell-quote` via `concurrently` 9.2.0
   (GHSA-pqg4-j6r4-53mv, fixed args only), high brace-expansion/braces/micromatch via
   `eslint-config-next`, `@typescript-eslint`, jest, and server `nodemon`. `npm audit fix` clears
@@ -4017,3 +4017,74 @@ own right now (`staging/validate`, `edit-sessions/*` including s68a review m9, a
 front of `edit-board/*`), listed in the plan.
 
 Embed allocation: 0 bytes.
+
+## Story s79-headers-csp-ws — security headers that hold, and a realtime server that verifies before it counts
+
+Owner directive, 2026-10-09: **"don't ask me questions; take CTO-level decisions; implement
+everything left; test everything."** Scope: s69 L1, L8, L13, L14, the header half of L19, and the
+follow-up ADR 027 left open (rotation must close live sockets). No new screen, so no Design step.
+Research: `docs/research/s79-headers-csp-ws.md`. Decision: ADR 059.
+
+Cause (verified on `origin/main` `fc5968b`, and against production with read-only GETs):
+
+- **L1.** `src/middleware.ts:245-247` sends `script-src 'self' 'unsafe-inline'` in production on
+  every page (live header confirmed). An injected inline script or `javascript:` handler runs on
+  the dashboard, which renders text scraped off customers' pages.
+- **L8.** `public/embed/__fidelity__/index.html` is a manual measurement harness; `public/` is
+  served verbatim, so `https://www.recopyfa.st/embed/__fidelity__/index.html` answers 200, and
+  `:366-409` turns `?widget=<url>` into a `<script src>` on the app's own origin.
+- **L13.** `server/index.js:125` `app.use(cors())` answers `Access-Control-Allow-Origin: *`;
+  Express adds `X-Powered-By: Express`; `:129-136` `/health` returns the live connection count
+  (production: `{"status":"ok","connections":1,…}`). No security headers at all.
+- **L14.** `server/index.js:231-234` spends the per-site bucket (`rate-limit.js`
+  `checkConnection`, 120/min) before the token is even present-checked (`:241`) or verified
+  (`:247-265`): 121 handshakes with no token lock every real editor of that site out for a minute.
+- **Rotation.** ADR 027 ("WebSocket boundary"): rotating `sites.api_key` refuses reconnects but
+  an open socket keeps its handshake token — `revalidateSocket` (`:158-181`) returns early for a
+  non-staging socket, the sweep (`:195-204`) visits staging sockets only, and the message
+  handlers compare the echoed token with the handshake one (`:389`, `:429`), never with the key.
+- **L19 (headers).** `src/middleware.ts:234` still sends the legacy `X-XSS-Protection`; HSTS is
+  Vercel's custom-domain default `max-age=63072000` with no `includeSubDomains` (live);
+  `docs/operations/deployment-checklist.md:24-25` carries the live Stripe account prefix.
+
+Acceptance criteria:
+
+- [ ] Every page under `/dashboard`, `/login`, `/signup` and `/edit` is served with a per-request
+  nonce policy: `script-src` (and `script-src-elem`) `'nonce-<fresh>' 'strict-dynamic'`, the
+  root layout's theme script by its SHA-256, and `'self' 'unsafe-inline'` as the CSP1/CSP2
+  fallback that CSP3 browsers ignore; the same policy reaches Next on the request so every Next
+  script and script preload carries the nonce; two requests never share a nonce; those segments
+  render dynamically. Tests: `src/lib/security/__tests__/content-security-policy.test.ts`,
+  `src/__tests__/middleware-csp.test.ts`, `src/__tests__/security/nonce-routes-render-dynamically.test.tsx`.
+- [ ] Marketing pages (`/`, `/compare/*`, `/blog`, `/docs/install`, `/privacy`, `/terms`, `/demo`,
+  `/try`) stay statically prerendered with today's `script-src 'self' 'unsafe-inline'` — ADR 059.
+- [ ] A production build loads `/`, `/pricing` (→ `/#pricing`), `/login`, `/signup`, `/edit` and a
+  signed-in `/dashboard` with no CSP violation and hydrated, and the nonce pages' served HTML
+  carries the header's nonce on every script but the hashed theme script. Test: `e2e/csp.spec.ts`
+  (+5; Playwright contract 80 → 85). The signed-in case runs in CI's disposable stack.
+- [ ] Every response sends `Strict-Transport-Security: max-age=63072000; includeSubDomains`
+  (no `preload`); no response sends `X-XSS-Protection`. Tests: `src/__tests__/next-config-hsts.test.ts`,
+  `middleware-csp.test.ts`, `e2e/csp.spec.ts`.
+- [ ] The fidelity harness lives in `e2e/fixtures/embed-fidelity/`, served only by the local
+  `scripts/serve-embed-fidelity.mjs` (loopback); nothing under `public/` is named `__fidelity__`.
+  Test: `src/__tests__/embed/fidelity-harness-not-public.test.ts`.
+- [ ] The realtime service sends no `X-Powered-By` and no `Access-Control-Allow-Origin` on its HTTP
+  surface, sends `nosniff`, `X-Frame-Options: DENY`, `default-src 'none'`, `no-referrer`, HSTS and
+  `Cross-Origin-Resource-Policy: same-origin`, and `/health` answers `200 {"status":"ok"}` with
+  `no-store` and no connection count. Test: `src/__tests__/websocket/server.integration.test.ts`.
+- [ ] A handshake is metered per client address before any database work, and spends the per-site
+  bucket only once its token and origin verified: unauthenticated handshakes beyond the per-site
+  cap leave a real editor's connection admitted; the per-address cap bounds the `sites` lookups;
+  `Fly-Client-IP` keys the address only on Fly. Test: `server.integration.test.ts`.
+- [ ] Rotating a site's key closes every open socket holding the old token within one sweep, at
+  the next `content-update`/`join-dashboard` for an editor, and a socket signed with the new key
+  connects; one `sites` read per site per sweep. Test: `server.integration.test.ts`.
+- [ ] No live-key account prefix in the repository. Test: `src/__tests__/security/no-live-key-prefixes.test.ts`.
+- [ ] Docs: ADR 059, `docs/architecture.md` (security headers), `server/README.md`. Required gates
+  pass; docs commit plus one story commit.
+
+Complexity: 4. Dependencies: none. Coordination: s84 drops the app's relay of the realtime
+`/health` body (`src/app/api/health/route.ts` `details`) and touches `server/index.js`
+(crash handlers); s88 makes the same `dashboard/layout.tsx` → `DashboardFrame.tsx` split and adds
+`login`/`signup` layouts — merge-time conflicts, resolved by keeping both. Branch
+`feature/s79-headers-csp-ws`. Embed allocation: 0 bytes.
