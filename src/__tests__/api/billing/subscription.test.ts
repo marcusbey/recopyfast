@@ -26,6 +26,7 @@ import {
   updateSubscription,
   cancelSubscription,
 } from "@/lib/stripe/subscription";
+import { BillingRefusal } from "@/lib/billing/billing-refusal";
 
 describe("/api/billing/subscription", () => {
   beforeEach(() => {
@@ -193,16 +194,44 @@ describe("/api/billing/subscription", () => {
       expect(updateSubscription).not.toHaveBeenCalled();
     });
 
-    it("should return 500 with the underlying reason when the change fails", async () => {
+    // s82 (s69 L5): this case used to be "should return 500 with the
+    // underlying reason when the change fails" — it pinned the leak itself:
+    // whatever text an exception carried, Stripe's included, went to the
+    // client. A refusal written for the customer is now a `BillingRefusal`
+    // and keeps its words; anything else stays in the log.
+    it("answers a deliberate refusal with its own status and message", async () => {
       (updateSubscription as jest.Mock).mockRejectedValue(
-        new Error("No active subscription found"),
+        new BillingRefusal("No active subscription found", 404),
       );
+
+      const response = await PUT(putRequest({ planId: "pro" }));
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        error: "No active subscription found",
+      });
+    });
+
+    it("never returns any other error's text: Stripe's stays in the log", async () => {
+      const consoleError = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const stripeError = Object.assign(
+        new Error("No such customer: 'cus_live_123'"),
+        { type: "StripeInvalidRequestError" },
+      );
+      (updateSubscription as jest.Mock).mockRejectedValue(stripeError);
 
       const response = await PUT(putRequest({ planId: "pro" }));
       const data = await response.json();
 
       expect(response.status).toBe(500);
-      expect(data.error).toBe("No active subscription found");
+      expect(data).toEqual({ error: "Failed to update subscription" });
+      expect(JSON.stringify(data)).not.toContain("cus_live_123");
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.any(String),
+        stripeError,
+      );
     });
   });
 
@@ -248,6 +277,44 @@ describe("/api/billing/subscription", () => {
       expect(response.status).toBe(200);
       expect(data.subscription).toEqual(mockSubscription);
       expect(cancelSubscription).toHaveBeenCalledWith("test-user-id", true);
+    });
+
+    it("answers a deliberate refusal with its own status and message", async () => {
+      (cancelSubscription as jest.Mock).mockRejectedValue(
+        new BillingRefusal("No active subscription found", 404),
+      );
+
+      const response = await DELETE(
+        new NextRequest("http://localhost:3000/api/billing/subscription"),
+      );
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        error: "No active subscription found",
+      });
+    });
+
+    it("never returns any other error's text", async () => {
+      const consoleError = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const stripeError = new Error(
+        "No such subscription: 'sub_live_456'; a similar object exists in test mode",
+      );
+      (cancelSubscription as jest.Mock).mockRejectedValue(stripeError);
+
+      const response = await DELETE(
+        new NextRequest("http://localhost:3000/api/billing/subscription"),
+      );
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Failed to cancel subscription",
+      });
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.any(String),
+        stripeError,
+      );
     });
   });
 });

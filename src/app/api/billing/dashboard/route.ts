@@ -7,6 +7,7 @@ import { getEffectivePlan } from "@/lib/billing/entitlements";
 import {
   readGrantedPlanIds,
   readTrialGrant,
+  resolveMonthlyCreditsWithoutSubscription,
 } from "@/lib/billing/effective-plan";
 import { trialDaysRemaining } from "@/lib/billing/trial";
 import { listPaymentMethods } from "@/lib/stripe/payment-methods";
@@ -158,6 +159,18 @@ export async function GET() {
     const endedOfferId =
       trialGrant && !trialGrant.isActive ? trialGrant.offerId : undefined;
 
+    // s82 (s71 review N-1): what the allowance becomes once the live
+    // subscription ends, for the card's running-out row. A Founding Agency
+    // owner running out an Agency subscription holds 1,000 credits now and 250
+    // after (ADR 038), and nothing on the page said so. Asked only with a live
+    // subscription AND a permanent grant — the one state whose card has that
+    // row — so a plain subscriber pays no extra read; sent only when lower
+    // than the allowance in force, so every other payload keeps its keys.
+    const includedAfterSubscription =
+      subscription && (await readGrantedPlanIds(supabase, user.id)).length > 0
+        ? await resolveMonthlyCreditsWithoutSubscription(supabase, user.id)
+        : null;
+
     const dashboardData: BillingDashboardData = {
       customer: customer || undefined,
       subscription: subscription || undefined,
@@ -180,6 +193,10 @@ export async function GET() {
           : null,
       everTrialed: trialGrant !== null,
       ...(endedOfferId ? { endedOfferId } : {}),
+      ...(includedAfterSubscription !== null &&
+      includedAfterSubscription < creditWallet.included
+        ? { includedAfterSubscription }
+        : {}),
     };
 
     return NextResponse.json(dashboardData);

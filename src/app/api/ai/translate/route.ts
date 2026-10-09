@@ -37,6 +37,15 @@ const MAX_ELEMENT_TEXT_LENGTH = 5000;
 const NOTHING_TRANSLATED = "No text could be translated.";
 
 /**
+ * Said to an editor who is not the site owner when the owner's plan or wallet
+ * refuses (s82). The gate's own sentences say "Your … plan" and "you have 0",
+ * which are about the owner's account, not the reader's — same reason as
+ * `ai/suggest`'s EDITOR_DENIED_MESSAGE.
+ */
+const EDITOR_DENIED_MESSAGE =
+  "AI translation isn't available on this site's plan right now. Ask the site owner to add AI credits.";
+
+/**
  * The credits to give back when only part of a batch came back.
  *
  * A request costs a flat `AI_TRANSLATION` whatever its size, so the failed
@@ -230,6 +239,7 @@ export async function POST(request: NextRequest) {
     if (!ownerCanEdit.ok) {
       return ownerCanEditRefusal(ownerCanEdit);
     }
+    const ownerId = ownerCanEdit.ownerId;
 
     // The translated rows are written through the service role (s56, ADR 042):
     // no web principal holds DML on `content_elements` any more, because a
@@ -257,18 +267,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check feature access and consume usage
-    const usageResult = await consumeFeatureUsage(user.id, "translation", {
-      siteId,
-      fromLanguage,
-      toLanguage,
-      elementCount: elements.length,
-    });
+    // The SITE OWNER pays (ADR 035), through the service client. s82: this
+    // charged `user.id` through the cookie client, so an invited editor's own
+    // wallet paid for the owner's site — or, holding no plan of their own, the
+    // editor was refused on a site whose owner had credits. The owner's wallet
+    // is not readable through the editor's RLS client, which is why the
+    // service client is passed; ADR 035 permits that only to a route that has
+    // authorised the caller, graded them and resolved the owner, and this one
+    // has done all three above (`getUser()`, the `edit`/`admin` read,
+    // `checkOwnerCanEdit`). With the service client, `ownerId` alone decides
+    // whose wallet is spent, so this call must stay below those checks.
+    const usageResult = await consumeFeatureUsage(
+      ownerId,
+      "translation",
+      {
+        siteId,
+        editor: user.id,
+        fromLanguage,
+        toLanguage,
+        elementCount: elements.length,
+      },
+      writer,
+    );
 
     if (!usageResult.success) {
+      const isOwner = user.id === ownerId;
       return NextResponse.json(
         {
-          error: usageResult.error,
+          error: isOwner ? usageResult.error : EDITOR_DENIED_MESSAGE,
           requiresUpgrade:
             usageResult.error?.includes("plan") ||
             usageResult.error?.includes("credits"),

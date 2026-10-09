@@ -74,7 +74,7 @@ Test changed (declared): `subscription.test.ts` "should return 500 with the unde
 the change fails" asserted the leak — a plain error's text in the response. It becomes the two
 cases above.
 
-- [ ] Task 1
+- [x] Task 1
 
 ## Task 2 — reactivation refused when a lifetime grant covers the subscription
 
@@ -94,7 +94,7 @@ Change: `isPlanCoveredByGrants` in `src/lib/stripe/plan-types.ts`; `reactivateSu
 Test fixture changed (declared): the `subscription-rls.test.ts` harness answers `plan_entitlements`
 (no grants) so its reactivate cases reach Stripe as before. No assertion changes.
 
-- [ ] Task 2
+- [x] Task 2
 
 ## Task 3 — payment methods: one 404, generic errors, a limiter
 
@@ -109,7 +109,7 @@ Failing tests first, new `src/__tests__/api/billing/payment-methods.test.ts`:
 
 Change: `payment-methods/route.ts`.
 
-- [ ] Task 3
+- [x] Task 3
 
 ## Task 4 — "You were not charged" only when it is true
 
@@ -124,7 +124,7 @@ Failing tests first, `src/__tests__/api/ai/suggest/route.test.ts`:
 Change: `refundOwner` returns whether the whole charge came back and reports a failure through
 `@/lib/monitoring/logger`.
 
-- [ ] Task 4
+- [x] Task 4
 
 ## Task 5 — translation is charged to the site owner
 
@@ -136,7 +136,7 @@ Failing tests first, `src/__tests__/api/ai/translate/route.test.ts`:
 
 Change: `consumeFeatureUsage(ownerCanEdit.ownerId, "translation", { …, editor: user.id }, writer)`.
 
-- [ ] Task 5
+- [x] Task 5
 
 ## Task 6 — the allowance bullet, found structurally
 
@@ -149,7 +149,7 @@ Failing tests first:
 Change: `featuresWithMonthlyCredits` in `src/lib/stripe/plan-types.ts`; `SubscriptionCard` uses it
 (its local exact-phrase matcher goes).
 
-- [ ] Task 6
+- [x] Task 6
 
 ## Task 7 — the running-out row says what the allowance becomes
 
@@ -168,7 +168,7 @@ Change: `readEffectivePlanBasis` takes an `ignoreSubscription` option (default u
 `resolveMonthlyCreditsWithoutSubscription` exported; dashboard route; `BillingDashboardData`;
 `BillingDashboard`; `SubscriptionCard`.
 
-- [ ] Task 7
+- [x] Task 7
 
 ## Task 8 — the plan dialog shows a plan held for life
 
@@ -182,7 +182,7 @@ Failing tests first, `src/components/billing/__tests__/UpgradeDialog.agency.test
 Change: `UpgradeDialog` optional `heldForLife` prop; `BillingDashboard` passes it when
 `isPlanHeldForLife`.
 
-- [ ] Task 8
+- [x] Task 8
 
 ## Gates
 
@@ -196,3 +196,17 @@ matcher, post-subscription sentence, held-for-life tile), see its test red, rest
 - Translate and A/B generate refunds report failures to `console.error` only (decision 5).
 - `reactivateSubscription` reads the newest row whatever its status (research, Traps).
 - The plan dialog still lets a lifetime owner select a lower plan than the one held for life.
+
+## Execution notes (deviations, declared)
+
+- Task 1: the lib-level refusal cases live in `subscription-rls.test.ts` as planned; its harness
+  gained a `rowMissing` switch (the "no subscription" state) and its Stripe defaults moved into one
+  `armStripeDefaults()` both describes call — fixture only, no existing assertion changed.
+- Task 2: the route-level 409 case is in `subscription-reactivate.test.ts` (written in Task 1).
+- Task 6: after mutation M8b survived (identification by "credit" alone), a case was added: with
+  no resolved allowance, only the allowance bullet is dropped, never another bullet about credits.
+- Task 7: the resolver cases were added to the existing s45 harness
+  (`lifetime-agency-allowance.test.ts`, real resolver and catalogue parser over a filtering
+  double) rather than a new file.
+- Task 8: the disabled submit for a plan held for life reads "You hold Agency for life" instead of
+  "Continue to payment — $49" (not in the plan; recorded in the design's dialog table).

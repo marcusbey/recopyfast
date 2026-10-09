@@ -77,6 +77,12 @@ let effects: string[] = [];
  */
 let allWritesBlocked = false;
 
+/**
+ * When true, the SELECT finds no row — the "no subscription" state (s82: its
+ * refusal is a `BillingRefusal` a route may show).
+ */
+let rowMissing = false;
+
 type SupabaseError = { code?: string; message: string; details?: string };
 
 /**
@@ -90,7 +96,22 @@ type SupabaseError = { code?: string; message: string; details?: string };
 function createPolicyScopedClient(role: "authenticated" | "service_role") {
   const canWrite = role === "service_role" && !allWritesBlocked;
 
-  const from = () => {
+  const from = (table: string) => {
+    // s82: `reactivateSubscription` asks whether a lifetime grant covers the
+    // subscription before it touches Stripe. This account holds none, so the
+    // read answers no rows and every case below behaves as before; the grant
+    // cases live in reactivate-lifetime.test.ts.
+    if (table === "plan_entitlements") {
+      const grants: Record<string, unknown> = {
+        then: (resolve: (value: unknown) => unknown) =>
+          Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      for (const method of ["select", "eq", "is", "neq", "returns"]) {
+        grants[method] = () => grants;
+      }
+      return grants;
+    }
+
     let isWrite = false;
     let patch: Partial<SubscriptionRow> = {};
 
@@ -110,6 +131,16 @@ function createPolicyScopedClient(role: "authenticated" | "service_role") {
         error: SupabaseError | null;
       }> => {
         if (!isWrite) {
+          if (rowMissing) {
+            return {
+              data: null,
+              error: {
+                code: "PGRST116",
+                message:
+                  "JSON object requested, multiple (or no) rows returned",
+              },
+            };
+          }
           return { data: { ...stored }, error: null };
         }
 
@@ -179,6 +210,47 @@ import {
   reactivateSubscription,
   updateSubscription,
 } from "@/lib/stripe/subscription";
+import { BillingRefusal } from "@/lib/billing/billing-refusal";
+
+/** The provider answers every test starts from (shared by both suites below). */
+function armStripeDefaults() {
+  mockStripeRetrieve.mockResolvedValue({
+    id: STRIPE_SUBSCRIPTION_ID,
+    metadata: { user_id: "user-1" },
+    items: { data: [{ id: "si_1", price: { id: CURRENT_PRICE_ID } }] },
+  });
+
+  mockStripeUpdate.mockImplementation(async () => {
+    effects.push("stripe.update");
+    return {
+      id: STRIPE_SUBSCRIPTION_ID,
+      status: "active",
+      cancel_at: null,
+      canceled_at: null,
+      latest_invoice: { status: "paid", hosted_invoice_url: null },
+      items: {
+        data: [
+          {
+            id: "si_1",
+            price: { id: TARGET_PRICE_ID },
+            current_period_start: 1785484800,
+            current_period_end: 1788163200,
+          },
+        ],
+      },
+    };
+  });
+
+  mockStripeCancel.mockImplementation(async () => {
+    effects.push("stripe.cancel");
+    return {
+      id: STRIPE_SUBSCRIPTION_ID,
+      status: "canceled",
+      cancel_at: null,
+      canceled_at: 1785484800,
+    };
+  });
+}
 
 describe("A-6: subscription writes run under the caller's RLS policy set", () => {
   beforeEach(() => {
@@ -186,43 +258,9 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
     stored = seedRow();
     effects = [];
     allWritesBlocked = false;
+    rowMissing = false;
 
-    mockStripeRetrieve.mockResolvedValue({
-      id: STRIPE_SUBSCRIPTION_ID,
-      metadata: { user_id: "user-1" },
-      items: { data: [{ id: "si_1", price: { id: CURRENT_PRICE_ID } }] },
-    });
-
-    mockStripeUpdate.mockImplementation(async () => {
-      effects.push("stripe.update");
-      return {
-        id: STRIPE_SUBSCRIPTION_ID,
-        status: "active",
-        cancel_at: null,
-        canceled_at: null,
-        latest_invoice: { status: "paid", hosted_invoice_url: null },
-        items: {
-          data: [
-            {
-              id: "si_1",
-              price: { id: TARGET_PRICE_ID },
-              current_period_start: 1785484800,
-              current_period_end: 1788163200,
-            },
-          ],
-        },
-      };
-    });
-
-    mockStripeCancel.mockImplementation(async () => {
-      effects.push("stripe.cancel");
-      return {
-        id: STRIPE_SUBSCRIPTION_ID,
-        status: "canceled",
-        cancel_at: null,
-        canceled_at: 1785484800,
-      };
-    });
+    armStripeDefaults();
   });
 
   /**
@@ -350,5 +388,90 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
 
     expect(mockStripeUpdate).not.toHaveBeenCalled();
     expect(stored.plan).toBe("pro");
+  });
+});
+
+/**
+ * s82 (s69 L5): the sentences these functions write for the customer are
+ * `BillingRefusal`s — the routes answer them with their own words and status
+ * and answer everything else generically. A refusal is decided before Stripe
+ * is touched.
+ */
+describe("s82: deliberate refusals are BillingRefusals", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    stored = seedRow();
+    effects = [];
+    allWritesBlocked = false;
+    rowMissing = false;
+    armStripeDefaults();
+  });
+
+  async function refusalOf(promise: Promise<unknown>) {
+    const error = await promise.then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(BillingRefusal);
+    return error as BillingRefusal;
+  }
+
+  it("a change to the price already billed is a 409", async () => {
+    mockStripeRetrieve.mockResolvedValue({
+      id: STRIPE_SUBSCRIPTION_ID,
+      metadata: {},
+      items: { data: [{ id: "si_1", price: { id: TARGET_PRICE_ID } }] },
+    });
+
+    const refusal = await refusalOf(
+      updateSubscription("user-1", { planId: "starter" }),
+    );
+
+    expect(refusal.status).toBe(409);
+    expect(refusal.message).toBe("You are already on this plan");
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("no subscription to change, cancel or reactivate is a 404", async () => {
+    rowMissing = true;
+
+    const change = await refusalOf(
+      updateSubscription("user-1", { planId: "starter" }),
+    );
+    const cancel = await refusalOf(cancelSubscription("user-1"));
+    const reactivate = await refusalOf(reactivateSubscription("user-1"));
+
+    expect([change.status, cancel.status, reactivate.status]).toEqual([
+      404, 404, 404,
+    ]);
+    expect(change.message).toBe("No active subscription found");
+    expect(cancel.message).toBe("No active subscription found");
+    expect(reactivate.message).toBe("No subscription found");
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+    expect(mockStripeCancel).not.toHaveBeenCalled();
+  });
+
+  it("reactivating a subscription not set to cancel is a 409", async () => {
+    const refusal = await refusalOf(reactivateSubscription("user-1"));
+
+    expect(refusal.status).toBe(409);
+    expect(refusal.message).toBe(
+      "Subscription is not scheduled for cancellation",
+    );
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a failed database write is not a refusal: its text stays server-side", async () => {
+    allWritesBlocked = true;
+
+    const error = await updateSubscription("user-1", {
+      planId: "starter",
+    }).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(BillingRefusal);
   });
 });

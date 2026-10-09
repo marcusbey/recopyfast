@@ -383,9 +383,41 @@ function otherHeldPlans(
     }));
 }
 
+/** The plan the newest live subscription bills, or null when none is live. */
+async function readLiveSubscription(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<{ plan: string } | null> {
+  const { data: subscription, error: subscriptionError } = await supabase
+    .from("billing_subscriptions")
+    .select("plan")
+    .eq("user_id", userId)
+    .in("status", LIVE_SUBSCRIPTION_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ plan: string }>();
+
+  if (subscriptionError) {
+    throw new Error(
+      `Failed to read billing subscriptions: ${subscriptionError.message}`,
+    );
+  }
+  return subscription;
+}
+
+interface ReadBasisOptions {
+  /**
+   * Resolve as if no subscription were live (s82). Only
+   * `resolveMonthlyCreditsWithoutSubscription` sets it; every entitlement
+   * decision reads the subscription.
+   */
+  readonly ignoreSubscription?: boolean;
+}
+
 async function readEffectivePlanBasis(
   supabase: SupabaseClient,
   userId: string,
+  options: ReadBasisOptions = {},
 ): Promise<EffectivePlanBasis | null> {
   const { data: entitlements, error: entitlementError } = await supabase
     .from("plan_entitlements")
@@ -445,20 +477,9 @@ async function readEffectivePlanBasis(
     return fullPlan(HIGHEST_PAID_PLAN_ID);
   }
 
-  const { data: subscription, error: subscriptionError } = await supabase
-    .from("billing_subscriptions")
-    .select("plan")
-    .eq("user_id", userId)
-    .in("status", LIVE_SUBSCRIPTION_STATUSES)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ plan: string }>();
-
-  if (subscriptionError) {
-    throw new Error(
-      `Failed to read billing subscriptions: ${subscriptionError.message}`,
-    );
-  }
+  const subscription = options.ignoreSubscription
+    ? null
+    : await readLiveSubscription(supabase, userId);
 
   if (
     isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
@@ -596,6 +617,37 @@ async function withHeldAllowance(
     { ...plan, limits: { ...plan.limits, monthlyCredits } },
     basis.otherHeldPlans,
   );
+}
+
+/**
+ * The monthly AI-credit allowance this account keeps once its live
+ * subscription is gone, or null when it would hold no plan at all.
+ *
+ * s82 (s71 review N-1): a Founding Agency owner still running out an Agency
+ * subscription holds the full 1,000 credits while it runs and 250 after it
+ * ends (ADR 038), and the billing card said nothing about the drop. Only the
+ * server can answer: whether the grant was bought (250) or comped (1,000) is a
+ * payment-intent question the page never sees. It is `resolveEntitlement`'s
+ * own computation with the subscription read skipped, so Agency precedence,
+ * purchase-only overrides, offers and the allowance floor answer exactly as
+ * they do for the plan in force.
+ *
+ * Presentation only — never authorisation; nothing may gate on it.
+ */
+export async function resolveMonthlyCreditsWithoutSubscription(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<number | null> {
+  const basis = await readEffectivePlanBasis(supabase, userId, {
+    ignoreSubscription: true,
+  });
+  if (basis === null) {
+    return null;
+  }
+  const plan = await findHeldPlan(basis);
+  return plan === null
+    ? null
+    : (await withHeldAllowance(plan, basis)).limits.monthlyCredits;
 }
 
 /**

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import {
+  featuresWithMonthlyCredits,
   isPaidPlanId,
   planCyclePrice,
   planDisplayPrice,
@@ -54,6 +55,13 @@ interface UpgradeDialogProps {
   lifetimeOffers: readonly OneTimeProduct[];
   foundingAgencyAvailability: FoundingAgencyAvailability | null;
   agencyCheckoutEnabled?: boolean;
+  /**
+   * The plan in force when a permanent grant covers it, with the monthly AI
+   * credits the account actually gets (the wallet's `included`). Its tile
+   * reads "Lifetime access" with that allowance, never a monthly price, and
+   * cannot be bought. Absent for every account without one.
+   */
+  heldForLife?: { planId: string; monthlyCredits: number | null };
   onSuccess: () => void;
 }
 
@@ -71,6 +79,7 @@ export function UpgradeDialog({
   lifetimeOffers,
   foundingAgencyAvailability,
   agencyCheckoutEnabled = true,
+  heldForLife,
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
@@ -96,6 +105,7 @@ export function UpgradeDialog({
   const isBusy = isRedirecting || isChangingPlan;
   const error = planChangeError ?? checkoutError;
   const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);
+  const isSelectedHeldForLife = heldForLife?.planId === selectedPlan;
 
   /**
    * No subscription yet → hand off to Stripe Checkout.
@@ -158,6 +168,8 @@ export function UpgradeDialog({
     if (isRedirecting) return "Redirecting to Stripe…";
     if (isChangingPlan) return "Updating your plan…";
     if (!selectedPlanData) return "Select a plan";
+    if (isSelectedHeldForLife)
+      return `You hold ${selectedPlanData.name} for life`;
     return hasSubscription
       ? `Switch to ${selectedPlanData.name}`
       : `Continue to payment — $${planCyclePrice(selectedPlanData, billingPeriod)}`;
@@ -234,6 +246,16 @@ export function UpgradeDialog({
             {plans.map((plan) => {
               const isSelected = selectedPlan === plan.id;
               const isCurrent = currentPlan === plan.id;
+              // s82 (s45 review #1): the plan a lifetime grant covers read
+              // "Current" at "$49/month" with Agency's 1,000 credits — a
+              // subscription's price and semantics for a plan paid for once,
+              // beside a card saying "Lifetime access" and 250. It reads the
+              // way the card does: Lifetime, no price, the account's own
+              // allowance.
+              const isHeldForLife = heldForLife?.planId === plan.id;
+              const features = isHeldForLife
+                ? featuresWithMonthlyCredits(plan, heldForLife.monthlyCredits)
+                : plan.features;
 
               return (
                 <button
@@ -260,7 +282,9 @@ export function UpgradeDialog({
                         {plan.description}
                       </p>
                     </div>
-                    {isCurrent ? (
+                    {isHeldForLife ? (
+                      <Badge variant="secondary">Lifetime</Badge>
+                    ) : isCurrent ? (
                       <Badge variant="secondary">Current</Badge>
                     ) : (
                       isSelected && (
@@ -272,20 +296,28 @@ export function UpgradeDialog({
                     )}
                   </div>
 
-                  <div className="mb-4">
-                    <span className="text-3xl font-semibold tabular">
-                      ${planDisplayPrice(plan, billingPeriod)}
-                    </span>
-                    <span className="text-muted-foreground">/month</span>
-                    {billingPeriod === "yearly" && (
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Billed ${planCyclePrice(plan, "yearly")} once a year
-                      </p>
-                    )}
-                  </div>
+                  {isHeldForLife ? (
+                    <div className="mb-4">
+                      <span className="text-xl font-semibold">
+                        Lifetime access
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mb-4">
+                      <span className="text-3xl font-semibold tabular">
+                        ${planDisplayPrice(plan, billingPeriod)}
+                      </span>
+                      <span className="text-muted-foreground">/month</span>
+                      {billingPeriod === "yearly" && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Billed ${planCyclePrice(plan, "yearly")} once a year
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <ul className="space-y-2">
-                    {plan.features.map((feature) => (
+                    {features.map((feature) => (
                       <li key={feature} className="flex items-center text-sm">
                         <svg
                           className="w-4 h-4 text-tone-success-text mr-2 shrink-0"
@@ -382,7 +414,9 @@ export function UpgradeDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isBusy || currentPlan === selectedPlan}
+            disabled={
+              isBusy || currentPlan === selectedPlan || isSelectedHeldForLife
+            }
           >
             {submitLabel()}
           </Button>

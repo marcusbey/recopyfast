@@ -37,6 +37,33 @@ export const PAID_PLAN_IDS: readonly PaidPlanId[] = [
   "agency",
 ] as const;
 
+/**
+ * Does a permanent grant of one of `grantedPlanIds` already include `planId`?
+ *
+ * True when some granted plan ranks at or above it in `PAID_PLAN_IDS`. This is
+ * the rule the Stripe webhook applies when a lifetime purchase lands
+ * (`stopBillingForLifetimeOwner`): every subscription on the grant's plan or a
+ * lower one is set to cancel, and the one exception — a Lifetime Pro grant
+ * beside an Agency subscription — is exactly a subscription ranked above the
+ * grant. s82 refuses to reactivate what this answers true for, so the endpoint
+ * cannot restart what the webhook stopped.
+ *
+ * Retired and unknown ids rank nowhere: they cover nothing and nothing covers
+ * them. Pass only non-trial grants (`readGrantedPlanIds`): a trial is not
+ * something the account holds for life.
+ */
+export function isPlanCoveredByGrants(
+  planId: string,
+  grantedPlanIds: readonly string[],
+): boolean {
+  const ranks = PAID_PLAN_IDS as readonly string[];
+  const rank = ranks.indexOf(planId);
+  if (rank < 0) {
+    return false;
+  }
+  return grantedPlanIds.some((granted) => ranks.indexOf(granted) >= rank);
+}
+
 export const SUBSCRIPTION_PLAN_IDS: readonly SubscriptionPlanId[] = [
   "free",
   ...PAID_PLAN_IDS,
@@ -112,6 +139,65 @@ export interface OneTimeProduct {
    */
   grantLimits?: Readonly<Partial<PlanLimits>>;
   sortOrder: number;
+}
+
+/** A number as the catalogue may spell it: "1,000" or "1000". */
+const NUMBER_TOKEN = /\d{1,3}(?:,\d{3})+|\d+/g;
+const MENTIONS_CREDITS = /\bcredits?\b/i;
+
+function tokenValue(token: string): number {
+  return Number(token.replace(/,/g, ""));
+}
+
+/**
+ * A plan's feature bullets, with its monthly AI-credit allowance restated as
+ * the one this account actually gets (`monthlyCredits`, resolved server-side —
+ * the credit wallet's `included`), or that bullet dropped when it is not known.
+ *
+ * The allowance bullet is found STRUCTURALLY: it is the bullet that carries the
+ * plan's own `limits.monthlyCredits`, in either spelling, beside the word
+ * "credit". Only that number is replaced; the catalogue's wording stays.
+ *
+ * s82 (s45 review #2): the billing card used to look for the exact phrase
+ * "<n> AI credits". Agency's bullet ("1,000 AI credits / month") matched; Pro's
+ * live one ("AI rewrite suggestions, 500 credits a month",
+ * 20260928130000_catalogue_copy_truth.sql) never did, so a founding-offer
+ * holder metered at 100 read 500 — and any rewording of Agency's would have
+ * silently brought "1,000" back for a 250 Founding Agency owner (ADR 038). Do
+ * not go back to matching a sentence. A schema-level marker in
+ * `plans.features` was weighed and rejected: a catalogue migration, a loader
+ * change and every pricing surface for one number (s82 plan, decision 4).
+ */
+export function featuresWithMonthlyCredits(
+  plan: Pick<SubscriptionPlan, "features" | "limits">,
+  monthlyCredits: number | null,
+): readonly string[] {
+  const catalogueCredits = plan.limits.monthlyCredits;
+  if (monthlyCredits === catalogueCredits) {
+    return plan.features;
+  }
+
+  const statesAllowance = (feature: string): boolean =>
+    MENTIONS_CREDITS.test(feature) &&
+    (feature.match(NUMBER_TOKEN) ?? []).some(
+      (token) => tokenValue(token) === catalogueCredits,
+    );
+
+  return plan.features.flatMap((feature) => {
+    if (!statesAllowance(feature)) {
+      return [feature];
+    }
+    if (monthlyCredits === null) {
+      return [];
+    }
+    return [
+      feature.replace(NUMBER_TOKEN, (token) =>
+        tokenValue(token) === catalogueCredits
+          ? monthlyCredits.toLocaleString("en-US")
+          : token,
+      ),
+    ];
+  });
 }
 
 /** Credit-pack sizing, read from the `credits` product's `limits` JSON. */

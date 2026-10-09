@@ -316,6 +316,11 @@ export function BillingDashboard({
                 // catalogue row's: they differ for a lifetime Founding Agency owner
                 // (ADR 038).
                 monthlyCredits={dashboardData.creditWallet?.included ?? null}
+                // s82: what that allowance becomes once the subscription the
+                // card's running-out row names ends, when it is lower.
+                includedAfterSubscription={
+                  dashboardData.includedAfterSubscription ?? null
+                }
                 onUpdate={handleSubscriptionUpdate}
               />
               <PaymentMethodsCard
@@ -360,6 +365,17 @@ export function BillingDashboard({
             lifetimeOffers={lifetimeOffers}
             foundingAgencyAvailability={foundingAgencyAvailability}
             agencyCheckoutEnabled={agencyCheckoutEnabled}
+            // s82 (s45 review #1): the dialog marked this plan "Current" at
+            // its monthly price; held for life, it reads as the card does.
+            heldForLife={
+              isPlanHeldForLife
+                ? {
+                    planId: plan.id,
+                    monthlyCredits:
+                      dashboardData.creditWallet?.included ?? null,
+                  }
+                : undefined
+            }
             onSuccess={handleSubscriptionUpdate}
           />
         </>
