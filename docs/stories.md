@@ -3781,6 +3781,11 @@ Cause (verified on `origin/main` `72f4cff`):
   bought. The grant reader the guards share (`readGrantedPlanIds`) ignores `expires_at`, while the
   entitlement resolver honours it — production holds one dated non-trial grant
   (`qa_recovery_20260919`).
+- (Found by the second review, fix pass 2, on `84d7b0c`.) Checkout's catch answers
+  `error.message` (`checkout/route.ts:811-821`), so a grant read failure reaches the browser as
+  "Failed to read plan entitlements: <database text>". The plan dialog says "Included for life" and
+  "Included in your lifetime <plan>" for a plan included only by a dated grant
+  (`UpgradeDialog.tsx:127-130,340-345`), and its naming of the highest grant is unpinned.
 - A Founding Agency owner still running out an Agency subscription reads "1,000 AI credits /
   month" with nothing saying it drops to 250 when the subscription ends (s71 review N-1;
   `SubscriptionCard.tsx:102-128`, ADR 038).
@@ -3811,7 +3816,8 @@ Acceptance criteria:
   plan a live grant covers answers 409 with a clear message before any Stripe call, and fails
   closed when grants cannot be read; an Agency subscription beside Lifetime Pro stays on sale. The
   plan dialog marks such a plan "Included" and refuses it, naming the lifetime plan that includes
-  it (fix pass).
+  it (fix pass) — the highest undated grant; a plan included only by dated grants reads "Included
+  until <date>" and its submit "Included in your plan until <date>", never "for life" (fix pass 2).
 - [ ] A grant whose `expires_at` has passed is not held, for every reader (billing page, dashboard,
   entitlement badge, checkout, plan change, reactivation), exactly as the entitlement resolver
   already says; an unexpired dated grant is held (fix pass).
@@ -3828,8 +3834,8 @@ Acceptance criteria:
   production) with ids only, no secrets.
 - [ ] `ai/translate` charges the site owner's wallet through the service client (ADR 035), for the
   owner and for a non-owner editor alike; a non-owner editor's refusal tells them to ask the owner.
-- [ ] Subscription, reactivate and payment-method routes answer a generic message for anything
-  that is not a deliberate billing refusal and log the detail — a failed subscription read
+- [ ] Subscription, reactivate, payment-method and checkout (fix pass 2) routes answer a generic
+  message for anything that is not a deliberate billing refusal and log the detail — a failed subscription read
   included, which is never told as "No active subscription found" (fix pass); a missing and a
   foreign payment method answer the same 404; `payment-methods` is rate limited per IP before
   authorisation, and the card shows the limiter's sentence and when to try again (fix pass).

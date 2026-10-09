@@ -106,6 +106,15 @@ against production: no Supabase connector, no Stripe call (live or test), no cre
     (`subscription.ts:331,434,505` on `c02df19`) answered `fetchError || !row` with the 404
     `BillingRefusal`, which `billingErrorResponse` does not log. `.single()` answers a missing row
     with PGRST116; any other code is a failure, not an absence.
+14. **Checkout's catch and the dialog's "for life" (fix pass 2, second review m1 and m3).** On
+    `84d7b0c`, `POST /api/billing/checkout`'s catch (`route.ts:811-821`) answered `error.message`;
+    what reaches it is never a sentence for the customer (they are all returned before it) but a
+    read failure, Stripe or configuration text — `getGrantedPlanIds` throws "Failed to read plan
+    entitlements: <PostgREST message>". `GET` already answered generically. The dialog's
+    included tile said "for life" whatever the grant: the page read only `plan_id`
+    (`readGrantedPlanIds`), so no grant end reached the client; the dashboard payload carries the
+    trial's end only (`dashboard/route.ts:192-193`), and trials are excluded from the grants.
+    Selecting `expires_at` in that same query is the only source that needs no new fetch.
 
 ## Traps
 

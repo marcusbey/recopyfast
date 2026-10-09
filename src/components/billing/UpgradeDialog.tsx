@@ -73,6 +73,12 @@ interface UpgradeDialogProps {
    * finding 1). Absent or empty for every account without one.
    */
   grantedPlanIds?: readonly string[];
+  /**
+   * For a granted plan held only through dated grants, when that holding ends
+   * (ISO); a granted plan absent here is held without an end date. The page
+   * reads it with `grantedPlanIds`, in the same query (`readGrantedPlans`).
+   */
+  grantEndsAt?: Readonly<Partial<Record<string, string>>>;
   onSuccess: () => void;
 }
 
@@ -80,6 +86,57 @@ const BILLING_PERIODS: ReadonlyArray<{ id: BillingPeriod; label: string }> = [
   { id: "monthly", label: "Monthly" },
   { id: "yearly", label: "Yearly (save ~17%)" },
 ];
+
+/**
+ * How the account's grants include a plan: for life, through the highest
+ * undated grant that includes it, or — only when every grant that includes it
+ * has an end date — until the latest of those ends.
+ */
+type GrantInclusion =
+  | { kind: "for_life"; planId: PaidPlanId }
+  | { kind: "until"; endsAt: string };
+
+/**
+ * s82 review (second pass), m3: every included plan read "Included for life",
+ * including one held only through a dated grant (production holds one, the QA
+ * recovery grant `qa_recovery_20260919`). A dated grant ends, so it is never
+ * called lifetime here. Null when no grant includes the plan.
+ */
+function grantInclusion(
+  planId: string,
+  grantedPlanIds: readonly string[],
+  grantEndsAt: Readonly<Partial<Record<string, string>>>,
+): GrantInclusion | null {
+  // Ascending rank, so the last plan in any filtered list is the highest.
+  const including = PAID_PLAN_IDS.filter(
+    (granted) =>
+      grantedPlanIds.includes(granted) &&
+      isPlanCoveredByGrants(planId, [granted]),
+  );
+  if (including.length === 0) return null;
+
+  const highestForLife = including
+    .filter((granted) => grantEndsAt[granted] === undefined)
+    .at(-1);
+  if (highestForLife) return { kind: "for_life", planId: highestForLife };
+
+  // No undated grant includes the plan, so every one of `including` is dated.
+  const endsAt = including
+    .flatMap((granted) => grantEndsAt[granted] ?? [])
+    .reduce((latest, end) =>
+      Date.parse(end) > Date.parse(latest) ? end : latest,
+    );
+  return { kind: "until", endsAt };
+}
+
+/** The same long US date the subscription card prints. */
+function formatGrantEnd(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
 
 export function UpgradeDialog({
   open,
@@ -92,6 +149,7 @@ export function UpgradeDialog({
   agencyCheckoutEnabled = true,
   heldForLife,
   grantedPlanIds = [],
+  grantEndsAt = {},
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
@@ -118,16 +176,12 @@ export function UpgradeDialog({
   const error = planChangeError ?? checkoutError;
   const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);
   const isSelectedHeldForLife = heldForLife?.planId === selectedPlan;
-  const isSelectedIncluded = isPlanCoveredByGrants(
+  const selectedInclusion = grantInclusion(
     selectedPlan,
     grantedPlanIds,
+    grantEndsAt,
   );
-  // The highest plan held for life includes every lower one, so it is the one
-  // the submit names when it refuses an included plan.
-  const highestGrantedPlanName = findSubscriptionPlan(
-    catalogue,
-    PAID_PLAN_IDS.filter((planId) => grantedPlanIds.includes(planId)).at(-1),
-  )?.name;
+  const isSelectedIncluded = selectedInclusion !== null;
 
   /**
    * No subscription yet → hand off to Stripe Checkout.
@@ -186,16 +240,28 @@ export function UpgradeDialog({
     }
   };
 
+  // The highest undated grant includes every lower plan, so it is the one the
+  // submit names when it refuses an included plan; a plan included only by
+  // dated grants is refused with their end instead.
+  const includedLabel = (inclusion: GrantInclusion) => {
+    if (inclusion.kind === "until")
+      return `Included in your plan until ${formatGrantEnd(inclusion.endsAt)}`;
+    const lifetimePlanName = findSubscriptionPlan(
+      catalogue,
+      inclusion.planId,
+    )?.name;
+    return lifetimePlanName
+      ? `Included in your lifetime ${lifetimePlanName}`
+      : "Included in your lifetime plan";
+  };
+
   const submitLabel = () => {
     if (isRedirecting) return "Redirecting to Stripe…";
     if (isChangingPlan) return "Updating your plan…";
     if (!selectedPlanData) return "Select a plan";
     if (isSelectedHeldForLife)
       return `You hold ${selectedPlanData.name} for life`;
-    if (isSelectedIncluded)
-      return highestGrantedPlanName
-        ? `Included in your lifetime ${highestGrantedPlanName}`
-        : "Included in your lifetime plan";
+    if (selectedInclusion) return includedLabel(selectedInclusion);
     return hasSubscription
       ? `Switch to ${selectedPlanData.name}`
       : `Continue to payment — $${planCyclePrice(selectedPlanData, billingPeriod)}`;
@@ -282,10 +348,12 @@ export function UpgradeDialog({
               // s82 review, finding 1: a plan below the one held for life —
               // or below a lifetime grant while a higher subscription runs —
               // was still priced and buyable here; the server refuses it now.
-              // Its tile says it is included instead of what it would cost.
-              const isIncluded =
-                !isHeldForLife &&
-                isPlanCoveredByGrants(plan.id, grantedPlanIds);
+              // Its tile says it is included instead of what it would cost —
+              // for life, or until a dated grant ends (second pass, m3).
+              const inclusion = isHeldForLife
+                ? null
+                : grantInclusion(plan.id, grantedPlanIds, grantEndsAt);
+              const isIncluded = inclusion !== null;
               const features = isHeldForLife
                 ? featuresWithMonthlyCredits(plan, heldForLife.monthlyCredits)
                 : plan.features;
@@ -337,10 +405,12 @@ export function UpgradeDialog({
                         Lifetime access
                       </span>
                     </div>
-                  ) : isIncluded ? (
+                  ) : inclusion ? (
                     <div className="mb-4">
                       <span className="text-xl font-semibold">
-                        Included for life
+                        {inclusion.kind === "until"
+                          ? `Included until ${formatGrantEnd(inclusion.endsAt)}`
+                          : "Included for life"}
                       </span>
                     </div>
                   ) : (

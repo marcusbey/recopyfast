@@ -46,6 +46,7 @@ import {
 } from "@/lib/billing/founding-agency";
 import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { billingErrorResponse } from "@/lib/billing/billing-refusal";
 
 /**
  * Stripe Checkout entry point.
@@ -809,15 +810,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(session);
   } catch (error: unknown) {
-    console.error("Error creating checkout session:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to start checkout. Please try again.",
-      },
-      { status: 500 },
+    // s82 review (second pass), m1: this answered `error.message`, so a grant
+    // or subscription read failure reached the browser as the database's own
+    // text ("Failed to read plan entitlements: connection reset"). Every
+    // sentence written for the customer is returned above; what lands here is
+    // logged and answered generically.
+    return billingErrorResponse(
+      error,
+      "Error creating checkout session",
+      "Failed to start checkout. Please try again.",
     );
   }
 }

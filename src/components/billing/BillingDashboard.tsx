@@ -384,6 +384,13 @@ export function BillingDashboard({
             grantedPlanIds={
               lifetimeGrant.kind === "granted" ? lifetimeGrant.planIds : []
             }
+            // Second pass, m3: a plan included only by a dated grant reads
+            // "until <date>", never "for life".
+            grantEndsAt={
+              lifetimeGrant.kind === "granted"
+                ? lifetimeGrant.endsAt
+                : undefined
+            }
             onSuccess={handleSubscriptionUpdate}
           />
         </>

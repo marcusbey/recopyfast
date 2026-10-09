@@ -291,6 +291,7 @@ describe("UpgradeDialog, plans a lifetime grant already includes", () => {
     currentPlan: string | null;
     hasSubscription: boolean;
     grantedPlanIds: readonly string[];
+    grantEndsAt?: Readonly<Partial<Record<string, string>>>;
     heldForLife?: { planId: string; monthlyCredits: number | null };
   }) {
     render(
@@ -363,6 +364,111 @@ describe("UpgradeDialog, plans a lifetime grant already includes", () => {
 
     expect(submit).toBeDisabled();
     expect(startCheckout).not.toHaveBeenCalled();
+  });
+
+  // s82 review (second pass), m2: an account can hold several grants —
+  // Lifetime Pro, then Founding Agency (ADR 038). The submit names the highest
+  // one, which includes every lower plan; the grants arrive in database order,
+  // not rank order.
+  it("names the highest plan held for life when several grants include it", async () => {
+    const user = userEvent.setup();
+    renderFor({
+      currentPlan: "agency",
+      hasSubscription: false,
+      grantedPlanIds: ["agency", "pro"],
+      heldForLife: { planId: "agency", monthlyCredits: 250 },
+    });
+
+    await user.click(screen.getByRole("radio", { name: /^Starter/ }));
+
+    expect(
+      screen.getByRole("button", { name: "Included in your lifetime Agency" }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Included in your lifetime Pro" }),
+    ).toBeNull();
+  });
+
+  // s82 review (second pass), m3: "for life" was said for a plan included
+  // only by a grant that ends — production holds one (the QA recovery grant,
+  // `qa_recovery_20260919`). A dated grant is not a lifetime one: the tile and
+  // the submit say until when.
+  describe("when the grant that includes the plan has an end date", () => {
+    // Midday UTC, so the printed day is the same in every test runner's zone.
+    const ENDS_AT = "2026-11-19T12:00:00.000Z";
+
+    it("says until when, never for life", async () => {
+      const user = userEvent.setup();
+      renderFor({
+        currentPlan: "pro",
+        hasSubscription: false,
+        grantedPlanIds: ["pro"],
+        grantEndsAt: { pro: ENDS_AT },
+        heldForLife: { planId: "pro", monthlyCredits: 500 },
+      });
+
+      const starter = screen.getByRole("radio", { name: /^Starter/ });
+      expect(starter).toHaveTextContent("Included");
+      expect(starter).toHaveTextContent("Included until November 19, 2026");
+      expect(starter).not.toHaveTextContent("for life");
+      expect(starter).not.toHaveTextContent("$9");
+
+      await user.click(starter);
+      const submit = screen.getByRole("button", {
+        name: "Included in your plan until November 19, 2026",
+      });
+      await user.click(submit);
+
+      expect(submit).toBeDisabled();
+      expect(startCheckout).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: /lifetime/i })).toBeNull();
+    });
+
+    it("says the latest end when several dated grants include the plan", async () => {
+      const user = userEvent.setup();
+      renderFor({
+        currentPlan: "agency",
+        hasSubscription: false,
+        grantedPlanIds: ["agency", "pro"],
+        grantEndsAt: { agency: "2026-10-20T12:00:00.000Z", pro: ENDS_AT },
+      });
+
+      const starter = screen.getByRole("radio", { name: /^Starter/ });
+      expect(starter).toHaveTextContent("Included until November 19, 2026");
+
+      await user.click(starter);
+
+      expect(
+        screen.getByRole("button", {
+          name: "Included in your plan until November 19, 2026",
+        }),
+      ).toBeDisabled();
+    });
+
+    it("says for life when an undated grant includes the plan too, and names that grant", async () => {
+      const user = userEvent.setup();
+      // Lifetime Pro (no end) beside a dated Agency grant: Starter and Pro
+      // are included for life by Pro — not by the Agency grant, which ends.
+      renderFor({
+        currentPlan: "agency",
+        hasSubscription: false,
+        grantedPlanIds: ["agency", "pro"],
+        grantEndsAt: { agency: ENDS_AT },
+      });
+
+      expect(screen.getByRole("radio", { name: /^Pro/ })).toHaveTextContent(
+        "Included for life",
+      );
+      const starter = screen.getByRole("radio", { name: /^Starter/ });
+      expect(starter).toHaveTextContent("Included for life");
+      expect(starter).not.toHaveTextContent("until");
+
+      await user.click(starter);
+
+      expect(
+        screen.getByRole("button", { name: "Included in your lifetime Pro" }),
+      ).toBeDisabled();
+    });
   });
 
   it("still sells Agency to a Lifetime Pro owner: a higher plan is not included", async () => {

@@ -304,6 +304,36 @@ describe("the plan dialog for a Lifetime Pro owner paying for Agency", () => {
       }),
     ).toBeDisabled();
   });
+
+  // s82 review (second pass), m3: the page's grant read also says when a
+  // dated grant ends, and the dialog receives it — a grant that ends is never
+  // called lifetime.
+  it("says until when, not for life, when the Pro grant is dated", async () => {
+    await renderPlanCard(
+      payload({
+        creditWallet: wallet(1000),
+        subscription: subscription("agency"),
+      }),
+      {
+        kind: "granted",
+        planIds: ["pro"],
+        endsAt: { pro: "2026-11-19T12:00:00.000Z" },
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    const dialog = await screen.findByRole("dialog");
+    const pro = within(dialog).getByRole("radio", { name: /^Pro/ });
+    fireEvent.click(pro);
+
+    expect(pro).toHaveTextContent("Included until November 19, 2026");
+    expect(pro).not.toHaveTextContent("for life");
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Included in your plan until November 19, 2026",
+      }),
+    ).toBeDisabled();
+  });
 });
 
 describe("the plan card for a Pro subscriber who bought Lifetime Pro", () => {
