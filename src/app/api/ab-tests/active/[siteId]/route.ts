@@ -12,11 +12,25 @@ function extractToken(request: NextRequest) {
 }
 
 /**
- * s77 review m3: only a successful answer is cacheable. A 429/503 from either
+ * s77 review m3: only a successful answer is reusable. A 429/503 from either
  * limiter (or a 401, or a 500) used to carry the same one-minute public cache
  * plus five minutes stale, so a browser or CDN could keep serving a refusal
  * long after its `Retry-After` — the limiter would have let go, the cache not.
+ * A refusal is `private` (a 429 here is one address's, never a shared cache's
+ * to hand out) and `no-cache` (never served again without asking us).
+ *
+ * TOMBSTONE (PR #82 CI): NOT `no-store`, which is what the m3 fix first used.
+ * The widget reads this body only on an OK answer (`fetchActiveTests` returns
+ * on `!response.ok`), and Chromium never finishes a fetch whose body nobody
+ * reads unless its HTTP cache is writing the body down — `no-store` forbids
+ * that, so every page view that drew a refusal held a request open forever.
+ * The two realtime specs waited for network idle until they timed out, on every
+ * retry; a prerenderer or crawler waiting for network idle on a customer's page
+ * would hang the same way. Every widget ever installed has that early return,
+ * so the header is where it is fixed.
  */
+const REFUSAL_CACHE_CONTROL = "private, no-cache";
+
 function withCors(response: NextResponse) {
   response.headers.set("Access-Control-Allow-Origin", "*");
   response.headers.set(
@@ -26,7 +40,9 @@ function withCors(response: NextResponse) {
   response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS");
   response.headers.set(
     "Cache-Control",
-    response.ok ? "public, max-age=60, stale-while-revalidate=300" : "no-store",
+    response.ok
+      ? "public, max-age=60, stale-while-revalidate=300"
+      : REFUSAL_CACHE_CONTROL,
   );
   return response;
 }

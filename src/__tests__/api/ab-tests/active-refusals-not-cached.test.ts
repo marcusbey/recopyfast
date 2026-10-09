@@ -6,7 +6,20 @@
  * stale-while-revalidate=300` on every answer, so a 429 or a 503 from either
  * limiter could be served again from a cache for up to six minutes after the
  * limiter had let go — a refusal outliving its own `Retry-After`. Only a
- * successful answer is cacheable; every other answer is `no-store`.
+ * successful answer is reusable; every other answer is `private, no-cache`:
+ * no shared cache keeps it (a 429 here is one address's), and the browser may
+ * not serve it again without going back to the server.
+ *
+ * NOT `no-store`, which is what the m3 fix first shipped (PR #82). The widget
+ * reads this body only when the answer is OK (`fetchActiveTests`: `if
+ * (!response.ok) return;`), and Chromium never finishes a fetch whose body
+ * nobody reads unless its HTTP cache is writing that body down — `no-store`
+ * forbids exactly that. Every page view that drew a refusal kept a request open
+ * forever: CI's `realtime-additive` and `realtime-parity` specs waited for
+ * network idle until their 90 s / 180 s timeouts, on every retry, and so would
+ * any prerenderer or crawler that waits for network idle on a customer's page.
+ * `private, no-cache` may be stored, so the body is drained and the request
+ * completes; it is still never reused unrevalidated.
  *
  * Only the store is stubbed; `enforceRateLimit` and the site token are real.
  */
@@ -52,6 +65,7 @@ const REFUSED = {
 };
 
 const CACHED = "public, max-age=60, stale-while-revalidate=300";
+const NEVER_REUSED = "private, no-cache";
 
 const isIpBucket = (config: RateLimitConfig) => config.identifierType === "ip";
 const isSiteBucket = (config: RateLimitConfig) => !isIpBucket(config);
@@ -102,7 +116,7 @@ describe("GET /api/ab-tests/active — only a served list is cacheable", () => {
   it.each([
     ["the address is over its limit", isIpBucket],
     ["the site is over its limit", isSiteBucket],
-  ])("a 429 when %s is never stored", async (_case, refuses) => {
+  ])("a 429 when %s is never reused", async (_case, refuses) => {
     checkLimit.mockImplementation(async (config) =>
       refuses(config) ? REFUSED : ALLOWED,
     );
@@ -111,7 +125,7 @@ describe("GET /api/ab-tests/active — only a served list is cacheable", () => {
 
     expect(response.status).toBe(429);
     expect(response.headers.get("Retry-After")).not.toBeNull();
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Cache-Control")).toBe(NEVER_REUSED);
     // The widget still reads the refusal cross-origin.
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
   });
@@ -120,7 +134,7 @@ describe("GET /api/ab-tests/active — only a served list is cacheable", () => {
     ["the address bucket", isIpBucket],
     ["the site bucket", isSiteBucket],
   ])(
-    "a 503 when the store is down at %s is never stored",
+    "a 503 when the store is down at %s is never reused",
     async (_case, fails) => {
       checkLimit.mockImplementation(async (config) => {
         if (fails(config)) throw new Error("Redis unreachable");
@@ -130,14 +144,14 @@ describe("GET /api/ab-tests/active — only a served list is cacheable", () => {
       const response = await call();
 
       expect(response.status).toBe(503);
-      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(response.headers.get("Cache-Control")).toBe(NEVER_REUSED);
     },
   );
 
-  it("a 401 for a wrong site token is never stored", async () => {
+  it("a 401 for a wrong site token is never reused", async () => {
     const response = await call("not-the-site-key");
 
     expect(response.status).toBe(401);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Cache-Control")).toBe(NEVER_REUSED);
   });
 });

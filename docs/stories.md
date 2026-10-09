@@ -3930,6 +3930,12 @@ Acceptance criteria:
 - [x] s42 m3: an eleventh key on a site is 409 and a key name over 100 characters is 400, nothing
   written; ADR 056 records per-key metering with the cap (s44 m2). Test:
   `src/__tests__/api/api-keys/key-cap.test.ts`.
+- [x] Review m3, as corrected by PR #82's CI: every non-2xx answer of `GET /api/ab-tests/active`
+  is `private, no-cache` — never reused without going back to the server, never kept by a shared
+  cache, and never `no-store`, which left the widget's unread refusal open forever in Chromium (both
+  realtime specs timed out waiting for network idle). Tests:
+  `src/__tests__/api/ab-tests/active-refusals-not-cached.test.ts`; e2e `realtime-additive.spec.ts`
+  AC 6 and `realtime-parity.spec.ts` (legacy snippet).
 - [ ] No migration, nothing under `server/` or `public/embed/`, no new dependency; existing suites
   whose fixtures or call-order assertions change are listed in the PR. Required gates pass; one
   story commit. (Local: gates green, 27 mutations red; `content-write-privileges` needs PostgREST —

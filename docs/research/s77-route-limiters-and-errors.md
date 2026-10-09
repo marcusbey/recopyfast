@@ -166,6 +166,46 @@ authenticated writes on `api_keys`, ADR 034) = 1,000/min, the ceiling every widg
 limiter already uses (`API_KEY_DEFAULT`). ADR 056 records it. ADR 055 is taken by s76
 (`feature/s76-grant-and-edit-token-hardening`); renumber at merge if another branch claims 056.
 
+## PR #82 CI — `no-store` refusals pin the widget's request open (verified 2026-10-09)
+
+CI run 37960549645: `realtime-additive` AC 6 and `realtime-parity` "a snippet with no data-ws-url"
+time out at `page.goto(..., { waitUntil: "networkidle" })` on every retry; every other spec passes.
+The merge ref was `a33b72f` into `fc5968b`, so s77 alone did it. Redis' own log shows the first
+"100 changes in 300 seconds" save at 16:59:46, after both specs had finished: fewer than 50 metered
+requests (INCR + EXPIRE each) in the whole run until then, so no limiter refused anything.
+
+Reproduced on this machine: `next build` + `next start` with CI's env shape (placeholder keys,
+nothing on 54321), a private `redis-server`, `CI=1 npx playwright test e2e/realtime-additive.spec.ts`
+→ AC 6 red at 90 s. A Playwright probe of the same page lists every request; the only one never
+finished is `GET /api/ab-tests/active/<id>?token=…`, whose 401 the page DID receive (console
+"responded with a status of 401"). The widget's `fetchActiveTests` returns on `!response.ok`
+without reading the body (`public/embed/recopyfast.src.js`, `fetchActiveTests`).
+
+Chromium, isolated (a bare page that fetches and does not read the body, 5 s budget):
+
+| Answer | Body | Network idle |
+|---|---|---|
+| GET 401 `no-store` | unread | **never** |
+| GET 401 `public, max-age=60, stale-while-revalidate=300` (pre-s77) | unread | ~0.6 s |
+| GET 401 `no-cache` / `private, no-cache` / `max-age=0` | unread | ~0.6 s |
+| GET 401 `no-store`, empty body | — | ~0.5 s |
+| GET 401 `no-store` | `json()` or `body.cancel()` | ~0.5 s |
+| POST 200 (any) | unread | **never** |
+
+So Chromium completes an unread fetch only when its HTTP cache writes the body down. Task 11
+(review m3) changed this route's refusals from the public cache to `no-store`, which is the whole
+regression. `realtime-parity`'s legacy page is the same path: its site is real but the fixture's
+origin (`localhost`) is not the registered domain, so `authorizeSiteRequest` throws "Origin not
+allowed" and the route answers 401. The content GET and the discovery POST in both specs fail
+their CORS preflight (the site or the origin is not granted), so they never get an answer to pin.
+
+After the fix (`private, no-cache` on non-2xx), the same local run is green (AC 6 in 5.2 s, AC 5
+in 4.2 s). `realtime-parity` needs the Supabase stack (its `beforeAll` seeds a site) — CI only.
+
+The last row of the table is a latent widget defect, not this story's: on a real install whose
+discovery POST is answered, the page never reaches network idle in Chromium. Recorded as a
+follow-up in the plan.
+
 ## Left for s77b (files other stories own now)
 
 - `POST /api/staging/validate` — no limiter before authorization (L7).

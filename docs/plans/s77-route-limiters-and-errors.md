@@ -172,6 +172,44 @@ kept before s77 in id order).
     (§L7) and the route's comments now say who reads it and carry the arithmetic; limits
     unchanged (decision 2). Comment and docs only — no behaviour changed, so no test.
 
+## CI fix pass (PR #82, E2E run 37960549645)
+
+Rebased onto `origin/main` `122ad2e` (s74 + s75) first: the only conflict was the
+`docs/stories.md` append (s74, s75, then s77, in id order). s77 touches neither `ci.yml` nor the
+Playwright contract (81 on `main`, 81 here) and adds no database suite, so s75's "every DB suite is
+named" gate has nothing new to name.
+
+14. [x] **Refusals from `GET /api/ab-tests/active` are `private, no-cache`, not `no-store`.** CI:
+    `realtime-additive` AC 6 (90 s) and `realtime-parity` "a snippet with no data-ws-url" (180 s)
+    timed out on every retry, only on this branch (merge ref `a33b72f` into `fc5968b`). Both stop at
+    `page.goto(..., { waitUntil: "networkidle" })`. Root cause, proved locally against `next build`
+    + `next start` and Redis (research § "PR #82 CI"): the widget fetches `/ab-tests/active`, gets
+    a 401 (random site / origin not the registered domain) and returns on `!response.ok` without
+    reading the body; task 11 made that 401 `no-store`; Chromium never completes a fetch whose
+    body nobody reads unless its HTTP cache writes the body down, which `no-store` forbids. The
+    request stayed in flight forever, so network idle never came.
+    - RED `src/__tests__/api/ab-tests/active-refusals-not-cached.test.ts`: the five refusal rows
+      expect `private, no-cache` (5 red against `no-store`, the 200 row green). The e2e spec was
+      red locally before the fix (AC 6, 90 s timeout at `page.goto`).
+    - GREEN: `withCors` stamps `REFUSAL_CACHE_CONTROL = "private, no-cache"` on every non-2xx.
+      Jest 6/6; `realtime-additive` 2/2 locally (AC 6 in 5.2 s).
+    - **CTO decision:** fix the header, not the widget. `private, no-cache` keeps every property
+      m3 asked for — a refusal is never served again without asking us (`no-cache`) and no shared
+      cache holds one address's 429 (`private`) — while letting the browser cache drain the body.
+      The widget's early return is in every snippet already served and in browsers' cached copies
+      of `/embed/recopyfast.js`, so only the server can fix them; the embed ceilings also have
+      0 bytes of headroom (45,828 / 33,062 gzipped). Not a limiter exemption and not a different
+      fail mode: neither limiter refused anything in the failing runs (Redis saw fewer than 100
+      writes before 16:59:46, i.e. under 50 metered requests in the first 21 minutes).
+    - Test changed (AGENTS.md § Tests): `active-refusals-not-cached.test.ts` — the expected header
+      on refusals goes from `no-store` to `private, no-cache`, and the three refusal titles say
+      "never reused" instead of "never stored". Behaviour changed with it; declared in the PR.
+    - Follow-up (not s77, recorded in research): the widget should drain or cancel every body it
+      does not read — `sendContentMap`'s POST never reads its answer, and `hydrateStoredContent`
+      and `bucketVisitor` return on a refusal unread. Any of them answered with a body pins a
+      request open in Chromium the same way (an unread POST answer does even when cacheable,
+      since POSTs are never stored). Needs embed bytes the ceilings do not have today.
+
 ## Follow-up — s77b (files owned by other stories while s77 runs)
 
 - `POST /api/staging/validate`: no limiter before authorization (L7).
