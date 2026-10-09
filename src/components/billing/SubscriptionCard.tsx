@@ -13,8 +13,10 @@ interface SubscriptionCardProps {
   /** Plan in force, resolved server-side from the `plans` table. */
   plan: SubscriptionPlan;
   /**
-   * The plan in force is held through a permanent grant and no subscription
-   * bills it, so it has no monthly price to show.
+   * The plan in force is held through a permanent grant, so it has no monthly
+   * price to show. A subscription may still be running out beside it — even
+   * one on the same plan, bought before the grant (s71 review M-1) — and gets
+   * its own named row; it never makes the plan in force a monthly one.
    */
   isLifetime: boolean;
   /**
@@ -106,18 +108,23 @@ function runningOutSubscriptionText(
   const subject = subscriptionPlanName
     ? `Your ${subscriptionPlanName} subscription`
     : UNNAMED_SUBSCRIPTION;
+  const noLongerNeeded = `you hold ${heldPlanName} for life, so you no longer need it.`;
   // A live row is active, trialing or past_due (getUserSubscription); only
   // "active" goes without saying.
-  const status =
-    subscription.status === "active"
-      ? ""
-      : ` is ${subscription.status.replace("_", " ")} and`;
-  const outcome = !subscription.cancel_at_period_end
-    ? `renews ${periodEnd} — you hold ${heldPlanName} for life, so you no longer need it.`
-    : subscription.status === "past_due"
-      ? `ends ${periodEnd} — it will not renew.`
-      : `ends ${periodEnd} — you won't be charged again.`;
-  return `${subject}${status} ${outcome}`;
+  if (subscription.status === "active") {
+    return subscription.cancel_at_period_end
+      ? `${subject} ends ${periodEnd} — you won't be charged again.`
+      : `${subject} renews ${periodEnd} — ${noLongerNeeded}`;
+  }
+  const status = subscription.status.replace("_", " ");
+  // Review N-2: a past-due or trialing row not set to cancel is not said to
+  // "renew" on its period end — a past-due invoice is being retried now.
+  if (!subscription.cancel_at_period_end) {
+    return `${subject} is ${status} — ${noLongerNeeded}`;
+  }
+  return subscription.status === "past_due"
+    ? `${subject} is ${status} and ends ${periodEnd} — it will not renew.`
+    : `${subject} is ${status} and ends ${periodEnd} — you won't be charged again.`;
 }
 
 export function SubscriptionCard({
@@ -187,8 +194,9 @@ export function SubscriptionCard({
   // lifetime grant has none, so every lifetime owner read "Free" beside the plan
   // they paid for ("it says FRee on the right and PRO on the left", owner,
   // 2026-10-08). "Free" names a retired plan nobody is on; never reintroduce it
-  // as a fallback. A plan held for life wins over a lower subscription still
-  // running out its period: that row bills a different plan, not this one. With
+  // as a fallback. A plan held for life wins over any subscription still
+  // running out its period, lower or the same plan: the badge speaks for the
+  // plan in force, and the subscription's status moves to its named row. With
   // neither (a trial has no row), no badge beats a wrong one.
   const getStatusBadge = () => {
     if (isLifetime) return <Badge variant="default">Lifetime</Badge>;

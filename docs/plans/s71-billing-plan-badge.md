@@ -81,6 +81,11 @@ first.
   reads "Cancel your Pro subscription? You keep Agency for life, and you will not be charged
   again."; the non-lifetime text is unchanged. Test: "confirms the cancel without ending access
   the owner holds for life" (red before the fix).
+- [x] **Verification minors N-2, N-3** — a past-due or trialing subscription not set to cancel
+  under a lifetime plan is no longer said to "renew" on its period end ("Your Pro subscription is
+  past due — you hold Agency for life, so you no longer need it."); test "never says a past-due
+  subscription not set to cancel renews on a date" (red first). Two comments that restated the
+  dropped "a subscription never bills the plan in force" invariant now describe the M-1 rule.
 
 Case 3 of Task 1 asserted `getByText("Current period")` in the lifetime + running-out state; that
 grid is what M-2 replaces, so the assertion now checks the named row ("Your Pro subscription

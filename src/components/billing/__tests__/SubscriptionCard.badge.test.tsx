@@ -253,6 +253,28 @@ describe("a subscription running out under a plan held for life", () => {
     expect(within(header).queryByText("PAST DUE")).toBeNull();
   });
 
+  // Review N-2: a past-due subscription is being retried now, not at its
+  // period end, so it is never said to "renew" on a date.
+  it("never says a past-due subscription not set to cancel renews on a date", () => {
+    renderCard({
+      plan: AGENCY,
+      isLifetime: true,
+      subscription: subscription("pro", {
+        status: "past_due",
+        cancel_at_period_end: false,
+        current_period_end: PERIOD_END,
+      }),
+      subscriptionPlanName: "Pro",
+    });
+
+    expect(
+      screen.getByText(
+        "Your Pro subscription is past due — you hold Agency for life, so you no longer need it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/renews/)).toBeNull();
+  });
+
   it("keeps a trialing subscription's status on its row", () => {
     renderCard({
       plan: AGENCY,
