@@ -3530,8 +3530,8 @@ at that commit, to be re-verified at research time):
   on `/health` (`server/index.js:78,125-136`; live).
 - [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
   121 bare handshakes/min lock real editors out of realtime.
-- [ ] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
-  (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`.
+- [x] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
+  (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`. → closed by s72.
 - [ ] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
   Node 24.14.0.
 - [ ] L17 — Grant hygiene: `ALTER DEFAULT PRIVILEGES … REVOKE … FROM PUBLIC`
@@ -3654,3 +3654,68 @@ Acceptance criteria:
 - [ ] The empty payment-methods copy does not offer "start a subscription" to an account whose
   plan is held for life; it says a card is for AI credits.
 - [ ] Unit tests cover all four badge states and both empty-state copies.
+
+## Story s72-edit-board-history-xss — a version's author is shown as text, never run on the customer's site
+
+Owner decision, 2026-10-09, on the s70a review's F1 (major, pre-existing on main): **"Start s72 now,
+in parallel (Recommended)."** Security story; no new UI, so no Design step. Source:
+`docs/reviews/s70a-embed-ui-not-content.md` F1 and F4(a). Research:
+`docs/research/s72-edit-board-history-xss.md`. Closes s69 L15 (the same sink at older line
+numbers).
+
+Cause (verified on `origin/main` `85784a5` and s70a `107c400`): the Edit Board History tab builds
+"by <author>" with `innerHTML` from `content_versions.created_by`
+(`public/embed/recopyfast.src.js:6496` main / `:6516` s70a). The author is a staging invite's
+address, which a site admin chooses with no format check (`src/app/api/staging/access/route.ts:102-107`)
+and can verify without the mailbox (column SELECT of `verification_code`,
+`20260925120000:153-158`; table INSERT/UPDATE, `20251230000000:272`). A payload address runs on the
+customer's origin when a staging-invite editor opens History, beside the edit link's bearer tokens
+in `sessionStorage`. The same panel renders a restore's error and result through `innerHTML` too
+(server-fixed strings today; the result prints "Restored true elements"). Only a site `admin` can
+plant it; no non-admin or anonymous path reaches `created_by`.
+
+Acceptance criteria:
+- [ ] A version whose author is `<img src=x onerror=…>` shows the address as inert text in
+  History: no element is created, and the date and "by …" keep their two-item layout. Test:
+  `src/__tests__/embed/edit-board-history-xss.test.ts`.
+- [ ] A restore's refusal message and its result are text; a successful restore reads "Version
+  restored", never "Restored true elements" (plan decision 1). Test: same file.
+- [ ] Every `innerHTML` in the embed source is a string literal or the constant icon map;
+  `outerHTML`, `insertAdjacentHTML`, `document.write`, `createContextualFragment` and `DOMParser`
+  do not occur. Test: `src/__tests__/embed/html-sinks-are-literal.test.ts` (red on main).
+- [ ] `POST /api/staging/access` refuses with 400, creates nothing and echoes nothing when `email`
+  is not a string or not a valid address (WHATWG rule, dotted domain, ≤ 254 characters); the shared
+  `isPlausibleEmail` applies the same rule to the editor routes (plan decision 2). Tests:
+  `src/__tests__/api/staging/access.test.ts`, `src/lib/auth/__tests__/editor-directory-email.test.ts`.
+- [ ] The "THE RULE" comment above `shouldSkipElement` names the container hint as its one
+  exception (s70a review F4(a)), inside the same byte-negative source edit.
+- [ ] Embed bytes go down: the branch measures at or under main's ceilings at merge (45840 / 33073
+  once s70a is in), and `MAX_*` / `SEEDED_MAX_*` ratchet to the measurement (research:
+  45828–45829 / 33062–33064).
+- [ ] No migration, nothing under `server/`, no new dependency. Required gates pass; one story
+  commit. After deploy, the served `/embed/recopyfast.js` no longer contains the sink, and the
+  owner's read-only count of payload-shaped stored values is in the PR (plan decision 4).
+
+Complexity: 2. Dependencies: s70a (PR #75) merged — s72 rebases on it (same file, its ceilings).
+Branch `feature/s72-edit-board-history-xss`. Follow-up: s72b (the database half, below).
+
+Embed allocation: ≤ 0 bytes — measured −11 / −9 at research; the ceilings ratchet down to the
+branch's measurement.
+
+## Story s72b-staging-invite-writes — STUB (backlog, not planned)
+
+Split from s72 at research, 2026-10-09 (`docs/research/s72-edit-board-history-xss.md`, "What a
+site admin can do to `staging_access`"). A site admin writes `staging_access` directly through
+PostgREST — table-level INSERT/UPDATE for `authenticated` (`20251230000000:272`) under admin-only
+policies (`:120-142`) — and reads `verification_code` and `token` (`20260925120000:153-158`). So
+route rules (s68b's label, s72's email) are advisory against an admin, and an admin can verify an
+invite without its mailbox (read the code, insert their own, or write `email_verified` and the
+device binding). Not an escalation of site rights — the writer is already `admin` — but the "row is
+the authority" shape of ADR 047's "Watch". Revoking the code's SELECT alone closes nothing; the fix
+is ADR 037's pattern: invite create and revoke through the service role after the RLS admin read,
+web-role INSERT/UPDATE (and the platform's default privileges) revoked, `verification_code`
+dropped from the authenticated SELECT list, a real-database privilege suite (ADR 033), code-first
+deploy. Absorbs s69 R3. Alternative to weigh first: retire staging invites, since `site_editors`
+is the access model (s66c1).
+
+Complexity: 3 (estimate). Embed allocation: 0 bytes.

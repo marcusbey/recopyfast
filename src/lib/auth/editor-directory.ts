@@ -50,12 +50,33 @@ export function normalizeEmail(email: string): string {
 }
 
 /**
+ * The WHATWG HTML "valid e-mail address" with a dotted domain whose last label
+ * has two characters or more, at most 254 characters. The character set and
+ * the label shape are the ones Supabase Auth applies to its own users
+ * (docs/research/s72-edit-board-history-xss.md, "Supabase Auth"): no `<`, `>`,
+ * `"`, whitespace or non-ASCII.
+ */
+const EMAIL_PATTERN =
+  /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])$/;
+
+/**
  * Practical email validation. Deliberately not RFC 5322 — the address only has
  * to be deliverable, and the emailed code is the real check on whether it is
  * the right one.
+ *
+ * TOMBSTONE (s72). The rule was `/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/`: anything
+ * but whitespace around an `@`. It accepted `<svg/onload=alert(1)>@x.co` — no
+ * whitespace needed — and quoted local parts, empty and hyphen-led labels and
+ * non-ASCII. A site admin chooses the addresses of staging invites and site
+ * editors, a staging invite's address becomes a version's `created_by`, and the
+ * embed's History tab rendered that as markup on the customer's origin (s70a
+ * review F1). The embed renders it as text now; this rule keeps the address an
+ * address, for every route that calls it: staging invites, adding an editor,
+ * requesting and submitting a code. Length is checked first, so the pattern
+ * never runs on an unbounded string.
  */
 export function isPlausibleEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 254;
+  return email.length <= 254 && EMAIL_PATTERN.test(email);
 }
 
 /**

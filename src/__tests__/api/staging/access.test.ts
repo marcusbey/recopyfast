@@ -27,6 +27,8 @@ const mockDirectory: { rows: MockRow[]; readFails: boolean } = {
   readFails: false,
 };
 const mockInserts: Array<{ table: string; payload: MockRow }> = [];
+/** Every table the route reads or writes, in order (s72: refusal reads none). */
+const mockTablesRead: string[] = [];
 
 function mockReadDirectory(filters: Array<[string, unknown]>) {
   if (mockDirectory.readFails) {
@@ -63,6 +65,7 @@ jest.mock("@/lib/supabase/server", () => ({
           }),
       },
       from: (table: string) => {
+        mockTablesRead.push(table);
         const filters: Array<[string, unknown]> = [];
         let inserted: MockRow | null = null;
         const chain: Record<string, unknown> = {
@@ -383,6 +386,88 @@ describe("s68b — POST /api/staging/access label rule", () => {
       "editor@example.com",
       "482913",
       "Spring launch",
+    );
+  });
+});
+
+/**
+ * s72 — the invite's address is an address.
+ *
+ * A staging invite's `email` becomes the `created_by` of every version its
+ * holder saves, and the embed's History tab rendered that as markup on the
+ * customer's origin (s70a review F1). The route checked only that an email was
+ * present, so a site admin could invite `<img/src/onerror=alert(1)>@x.co`. It
+ * now refuses anything that is not a string holding a valid address — before
+ * the site is read, before anything is created or mailed — with a fixed message
+ * that never repeats what was sent.
+ */
+describe("s72 — POST /api/staging/access email rule", () => {
+  const INVALID_EMAIL_MESSAGE = "Enter a valid email address.";
+
+  function inviteWithEmail(email: unknown): NextRequest {
+    return new NextRequest("https://www.recopyfa.st/api/staging/access", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        siteId: SITE_ID,
+        type: "invite",
+        email,
+        permissions: ["view", "edit"],
+      }),
+    });
+  }
+
+  beforeEach(() => {
+    mockPermissionRow.mockReturnValue({
+      data: { permission: "admin" },
+      error: null,
+    });
+    mockCheckOwnerCanEdit.mockResolvedValue({ ok: true, ownerId: "owner-1" });
+    // An admin on a paying site: whatever reaches the manager is created and
+    // mailed, so a refusal below is the address rule and nothing else.
+    createStagingAccess.mockResolvedValue({
+      access: { token: "staging-token", email: "editor@example.com" },
+      verificationCode: "482913",
+    });
+    mockTablesRead.length = 0;
+  });
+
+  it.each([
+    ["a number", 42],
+    ["an array holding an address", ["editor@example.com"]],
+    ["an object", {}],
+    ["an address-shaped payload", "<img/src/onerror=alert(1)>@x.co"],
+    ["a dotless domain", "editor@example"],
+    ["255 characters", "a".repeat(243) + "@example.com"],
+  ])(
+    "refuses %s with 400, creates and sends nothing, echoes nothing",
+    async (_case, email) => {
+      const response = await POST(inviteWithEmail(email));
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body).toEqual({ error: INVALID_EMAIL_MESSAGE });
+      const sent = typeof email === "string" ? email : JSON.stringify(email);
+      expect(JSON.stringify(body)).not.toContain(sent);
+      expect(createStagingAccess).not.toHaveBeenCalled();
+      expect(sendStagingVerificationEmail).not.toHaveBeenCalled();
+      // Refused before the site is read (review minor 2): no table touched.
+      expect(mockTablesRead).toEqual([]);
+    },
+  );
+
+  it("creates the invite for the trimmed address when it is sent with stray spaces", async () => {
+    const response = await POST(inviteWithEmail(" editor@example.com "));
+
+    expect(response.status).toBe(200);
+    expect(createStagingAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "editor@example.com" }),
+    );
+    // The code goes to the address that was checked and stored.
+    expect(sendStagingVerificationEmail).toHaveBeenCalledWith(
+      "editor@example.com",
+      "482913",
+      undefined,
     );
   });
 });

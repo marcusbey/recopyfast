@@ -2703,7 +2703,11 @@
 
     /**
      * THE RULE: every root the embed appends to `body` carries
-     * `data-rcf-ignore` or matches the `closest()` selector below. Discovery
+     * `data-rcf-ignore` or matches the `closest()` selector below, with one
+     * named exception: the container hint (`showContainerHint`) is a bare `div`
+     * that discovery's scan selector never matches, so it carries neither (s70a
+     * review F4: a marker measured +7 / +8 bytes for no behaviour). Give it a
+     * marker the day it gains a child the scan selector can match. Discovery
      * scans the whole document, so a root that does neither has its labels
      * mapped, stamped `data-rcf-id` and POSTed as the customer's authored copy
      * — and the upsert ignores duplicates, so a junk row, once written, stays.
@@ -6513,7 +6517,19 @@
 
           const date = new Date(version.created_at);
           const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-          cardMeta.innerHTML = '<span>' + dateStr + '</span><span>by ' + (version.created_by || 'Unknown') + '</span>';
+          // TOMBSTONE (s72). This line was `cardMeta.innerHTML = '<span>' + dateStr +
+          // '</span><span>by ' + created_by + '</span>'`. created_by is a staging
+          // invite's address, which a site admin chose unchecked and could verify
+          // without its mailbox: an address shaped like `<img src=x onerror=…>` ran
+          // on the customer's origin when an editor opened History, beside the edit
+          // link's bearer tokens (s70a review F1). Text, never markup, for anything
+          // a response carries. The date goes in as a bare string: `.rcf-eb-card-meta`
+          // is a flex row, a text run is its own flex item, so the 8px gap still
+          // separates the two. Pinned by edit-board-history-xss.test.ts and
+          // html-sinks-are-literal.test.ts.
+          const by = document.createElement('span');
+          by.textContent = 'by ' + (version.created_by || 'Unknown');
+          cardMeta.append(dateStr, by);
 
           const restoreBtn = document.createElement('button');
           restoreBtn.className = 'rcf-eb-btn rcf-eb-btn-ghost';
@@ -6584,13 +6600,15 @@
         const result = await response.json();
 
         if (result.success) {
-          content.innerHTML = '<div class="rcf-eb-empty">Restored ' + result.elementsRestored + ' elements</div>';
+          // restore_content_version returns a boolean, so the count printed "true".
+          content.innerHTML = '<div class="rcf-eb-empty">Version restored</div>';
 
           setTimeout(() => {
             window.location.reload();
           }, 1500);
         } else {
-          content.innerHTML = '<div class="rcf-eb-empty">' + (result.error || 'Failed to restore') + '</div>';
+          content.innerHTML = '<div class="rcf-eb-empty"></div>';
+          content.firstChild.textContent = result.error || 'Failed to restore';
         }
       } catch (error) {
         console.error('Error restoring version:', error);

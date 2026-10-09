@@ -103,8 +103,20 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // The middle split carries up to 2 B of noise: the artifact's banner holds
 // the source's sha256, so even a comment edit moves the gzipped size. Only
 // the two ends are measurements of shipped bytes (build-embed.mjs, same note).
-const SEEDED_MAX_BUNDLE_GZ = 45840;
-const SEEDED_MAX_WIDGET_GZ = 33073;
+// RATCHETED 2026-10-09 (s72-edit-board-history-xss), DOWNWARD: 45840 → 45828,
+// 33073 → 33062. A version's author, a restore's refusal and its result are
+// text, never markup:
+//
+//   45840 / 33073  ceilings before s72 = measured on main at 59d0596
+//   −6 / −4        the History meta line as a text node and a span
+//   −6 / −5        the restore refusal as text (R1) with "Version restored"
+//                  (R2); R1 alone measured +6 / +6
+//   0 / −2         the "THE RULE" comment (s70a review F4(a)), banner hash only
+//   45828 / 33062  measured on feature/s72-edit-board-history-xss
+// The middle lines carry the banner hash's ±2 B; only the two ends are
+// measurements of shipped bytes (build-embed.mjs, same note).
+const SEEDED_MAX_BUNDLE_GZ = 45828;
+const SEEDED_MAX_WIDGET_GZ = 33062;
 
 interface CheckRun {
   status: number;
