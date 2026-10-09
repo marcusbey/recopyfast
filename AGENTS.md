@@ -105,8 +105,9 @@ npm run check:redis
    `npm run build:embed`. `--check` fails on a stale artifact.
 2. **`/embed/recopyfast.js` is a permanent public URL**, baked into every snippet ever issued.
    It can never move or break for existing installs.
-3. **Embed budget ≤ 30,000 bytes gzipped.** Currently breached at 46,781 — `s06` makes it a
-   build gate. Per-story allocation lives in `docs/stories.md` and nowhere else.
+3. **Embed budget ≤ 30,000 bytes gzipped.** Currently breached at 45,828 (bundle, 2026-10-09);
+   the `MAX_*` ceilings in `scripts/build-embed.mjs` are the build gate and only go down.
+   Per-story allocation lives in `docs/stories.md` and nowhere else.
 4. **The widget degrades, never breaks.** No uncaught exception may reach the host page's
    `window`; on failure the page keeps its authored copy. There is no error surface on their
    domain, so a broken branch presents as "editing stopped working on one site".
@@ -225,8 +226,8 @@ the asset. When you fix something subtle, leave the tombstone.
 Jest + Testing Library, colocated in `__tests__/`. Playwright in `e2e/`.
 
 - Coverage thresholds in `jest.config.js` are a **ratchet, not a target**: they are the floor
-  measured today (22% lines). Raise them as tests are added; never lower them. 80% remains the
-  goal and cannot be declared before it is earned.
+  last measured (69% lines, 2026-10-09), and CI enforces them. Raise them as tests are added;
+  never lower them. 80% remains the goal and cannot be declared before it is earned.
 - `jest.setup.js:177-182` mocks `IntersectionObserver` globally with a no-op `observe`. Any
   test that depends on intersection behaviour must supply its own controllable mock or it
   passes vacuously.
@@ -236,8 +237,9 @@ Jest + Testing Library, colocated in `__tests__/`. Playwright in `e2e/`.
 ## Definition of Done (per feature)
 
 - Single PR, structured description, readable diff
-- `lint`, `type-check`, `format:check`, `build`, `test` all green (the pre-commit hook runs the
-  first four and the full suite; CI additionally runs `audit:prod` and `type-check:build`)
+- `lint`, `type-check`, `format:check`, `build`, `test` all green (the pre-commit hook runs
+  lint, type-check, format:check and the full suite; CI runs all five plus `audit:prod`,
+  `type-check:build`, the coverage ratchet and every migration replayed on PostgreSQL 17)
 - Passing tests on business logic; no regression on existing code
 - Review passed, no open critical issue
 - Deployed to production

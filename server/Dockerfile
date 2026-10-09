@@ -6,7 +6,11 @@
 # Run:    docker run --env-file ../.env.local -p 4001:4001 recopyfast-ws
 # ---------------------------------------------------------------------------
 
-FROM node:20-alpine AS base
+# Node 24 LTS (s75): the major CI tests on and Vercel runs. node:20 was past
+# end of life (s69 L16). A major tag, not a digest, on purpose: each `fly
+# deploy` then picks up Node's security patches, which a digest with no update
+# bot would freeze.
+FROM node:24-alpine AS base
 
 # Install only production dependencies
 WORKDIR /app

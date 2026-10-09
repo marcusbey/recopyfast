@@ -18,7 +18,8 @@ describe("Playwright CI contract", () => {
   });
 
   it("pins and starts the disposable service stack", () => {
-    expect(workflow).toContain("supabase/setup-cli@v3");
+    // s75: pinned by commit SHA (s69 L19), still a v3 release of the action.
+    expect(workflow).toMatch(/supabase\/setup-cli@[0-9a-f]{40} # v3\.\d+\.\d+/);
     expect(workflow).toContain('version: "2.117.0"');
     expect(workflow).toContain("image: redis:7-alpine");
     expect(workflow).toContain("supabase start");
