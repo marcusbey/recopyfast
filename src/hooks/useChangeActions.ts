@@ -49,6 +49,9 @@ const REVERT_NOT_PUBLISHED =
   "The revert was saved as a draft but not published.";
 export const ATTRIBUTE_DRAFT_NOTE =
   "This draft changes a link or image attribute, which can't be discarded here. Change it on the page.";
+/** Said when what the draft stages is not known: it may change no attribute. */
+export const UNREAD_DRAFT_NOTE =
+  "This draft could not be read in full, so it can't be discarded here. Reload the page to try again.";
 
 const refusal = (error: string): ActionOutcome => ({ error, applied: null });
 const outcomeOf = (
@@ -71,10 +74,15 @@ const outcomeOf = (
  * JSON string with SQL NULL), a key the PUT does not know, or a value its
  * validation would trim or refuse cannot be cleared here, and the page says
  * so instead of announcing a discard that did not happen.
+ *
+ * Nor can a list that is not known (null: the list route could not read it;
+ * or not a list at all, which threw "not iterable" here, Devin re-review N4):
+ * the draft may stage a link, and a text-only discard would leave it staged.
  */
 export function discardAttributes(
   row: ContentChange,
 ): ContentAttributePatch | null {
+  if (!Array.isArray(row.draftAttributes)) return null;
   const patch: ContentAttributePatch = {};
   for (const { name, live } of row.draftAttributes) {
     if ((name !== "href" && name !== "alt") || live === null) return null;
@@ -84,6 +92,10 @@ export function discardAttributes(
   }
   return patch;
 }
+
+/** Why a pending draft is not offered a discard (`discardAttributes` null). */
+export const discardRefusal = (row: ContentChange): string =>
+  Array.isArray(row.draftAttributes) ? ATTRIBUTE_DRAFT_NOTE : UNREAD_DRAFT_NOTE;
 
 async function refusalMessage(
   response: Response,
@@ -212,7 +224,7 @@ export function useChangeActions() {
       track(row, "discardDraft", async () => {
         if (row.live === null) return refusal(NO_LIVE_TEXT);
         const attributes = discardAttributes(row);
-        if (!attributes) return refusal(ATTRIBUTE_DRAFT_NOTE);
+        if (!attributes) return refusal(discardRefusal(row));
         return outcomeOf(
           "discardDraft",
           await saveDraft(row, row.live, attributes),

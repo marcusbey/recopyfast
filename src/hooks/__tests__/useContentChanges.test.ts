@@ -237,6 +237,45 @@ describe("useContentChanges", () => {
     expect(result.current.data).toBeNull();
   });
 
+  // Devin re-review N4: a row without `draftAttributes` reached the page as
+  // `undefined`, and Discard's check threw "not iterable" while drawing it.
+  // A list that is missing or malformed is read as not known (null), which
+  // the page never offers to discard — never as `[]`, "stages nothing".
+  it("reads a missing or malformed attribute list as not known, and keeps a valid one", async () => {
+    const valid = [
+      { name: "href", live: "/signup" },
+      { name: "alt", live: null },
+    ];
+    const rows = [
+      change("missing", { state: "pending", draft: "Draft" }),
+      { ...change("null"), draftAttributes: null },
+      { ...change("string"), draftAttributes: "href" },
+      { ...change("hole"), draftAttributes: [null] },
+      { ...change("nameless"), draftAttributes: [{ live: "/signup" }] },
+      { ...change("valid"), draftAttributes: valid },
+      { ...change("empty"), draftAttributes: [] },
+    ] as unknown as ContentChange[];
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(response(page(rows))) as typeof fetch;
+
+    const { result } = renderHook(() => useContentChanges(DEFAULT_FILTERS));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(
+      result.current.data?.rows.map((row) => [row.id, row.draftAttributes]),
+    ).toEqual([
+      ["missing", null],
+      ["null", null],
+      ["string", null],
+      ["hole", null],
+      ["nameless", null],
+      ["valid", valid],
+      ["empty", []],
+    ]);
+  });
+
   it("refetch recovers from an error", async () => {
     global.fetch = jest
       .fn()

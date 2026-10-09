@@ -242,6 +242,30 @@ describe("useChangeActions", () => {
     },
   );
 
+  // Devin re-review N2 / N4: a pending row whose staged attributes are not
+  // known (the list route could not read them: null; or an answer without the
+  // field at all, which threw "not iterable" here) may stage a link that a
+  // text-only discard leaves staged. It is refused, and nothing is sent.
+  it.each([
+    ["could not be read (null)", null],
+    ["are missing from the row", undefined],
+  ])(
+    "refuses to discard, sending nothing, when the staged attributes %s",
+    async (_label, draftAttributes) => {
+      const pending = row({
+        state: "pending",
+        live: ORDINARY_COPY,
+        draft: "Start your 14-day trial",
+        draftAttributes: draftAttributes as ContentChange["draftAttributes"],
+      });
+
+      expect(await run("discardDraft", pending)).toEqual(
+        refused(/could not be read/i),
+      );
+      expect(global.fetch).not.toHaveBeenCalled();
+    },
+  );
+
   it("publishes with the POST alone", async () => {
     const outcome = await run(
       "publish",

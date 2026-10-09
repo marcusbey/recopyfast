@@ -54,8 +54,12 @@ export interface ContentChange {
   original: string | null;
   live: string | null;
   draft: string | null;
-  /** The attributes a pending row's draft stages; empty for any other row. */
-  draftAttributes: DraftAttribute[];
+  /**
+   * The attributes a pending row's draft stages; empty for any other row.
+   * Null when they are not known (the route could not read them, or the
+   * answer carried no valid list): such a draft is never offered a discard.
+   */
+  draftAttributes: DraftAttribute[] | null;
   state: ChangeState;
   changedAt: string | null;
   changedBy: string | null;
@@ -98,6 +102,27 @@ function isChangesPage(body: unknown): body is ChangesPage {
   );
 }
 
+function isDraftAttribute(value: unknown): value is DraftAttribute {
+  const candidate = value as Partial<DraftAttribute> | null;
+  return (
+    typeof candidate === "object" &&
+    candidate !== null &&
+    typeof candidate.name === "string" &&
+    (candidate.live === null || typeof candidate.live === "string")
+  );
+}
+
+/**
+ * A row's staged attributes as the page may trust them: a valid list, or null
+ * ("not known"), never a guess. Tombstone (Devin re-review N4): a row without
+ * the field reached `discardAttributes` as `undefined` and threw "not
+ * iterable" while the row was drawn. Defaulting it to `[]` would have been
+ * worse: "stages nothing" offers a Discard that leaves a staged link staged.
+ */
+function knownAttributes(value: unknown): DraftAttribute[] | null {
+  return Array.isArray(value) && value.every(isDraftAttribute) ? value : null;
+}
+
 async function fetchChanges(
   filters: ChangesFilters,
   offset: number,
@@ -128,7 +153,13 @@ async function fetchChanges(
   if (!isChangesPage(body)) {
     throw new Error(`${FALLBACK_ERROR}: unexpected response`);
   }
-  return body;
+  return {
+    ...body,
+    rows: body.rows.map((row) => ({
+      ...row,
+      draftAttributes: knownAttributes(row.draftAttributes),
+    })),
+  };
 }
 
 function appendPage(previous: ChangesPage, next: ChangesPage): ChangesPage {

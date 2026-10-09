@@ -13,10 +13,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ContentValue } from "@/components/ui/content-value";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  ATTRIBUTE_DRAFT_NOTE,
-  type ChangeAction,
-} from "@/hooks/useChangeActions";
+import { discardRefusal, type ChangeAction } from "@/hooks/useChangeActions";
 import {
   useChangeHistory,
   type ChangeHistoryEvent,
@@ -247,7 +244,7 @@ export function ChangeDetail({
           </div>
           {isPending && !canDiscard && (
             <p className="text-xs text-muted-foreground">
-              {ATTRIBUTE_DRAFT_NOTE}
+              {discardRefusal(row)}
             </p>
           )}
           {actionError && (

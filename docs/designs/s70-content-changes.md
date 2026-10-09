@@ -115,7 +115,8 @@ Page label (used in the band):
 | `/` | Homepage |
 | `/pricing` | Pricing |
 | `/blog/how-we-ship` | Blog › How we ship |
-| `/docs/a/b/c` | … › B › C (last two segments) |
+| `/products/alpha/setup` | Products › Alpha › Setup (three segments or fewer: whole) |
+| `/docs/a/b/c` | Docs › … › B › C (deeper: the first segment, then the last two) |
 | `NULL` | Every page |
 
 Element label (the row's Location column) = `[place · ]element`:
@@ -205,7 +206,14 @@ only, beside the draft it publishes.
   top.
 
 "Discard draft" (Pending) is the same dialog shape: "Discard this draft?" — body shows Draft and
-Live now — Cancel · **Discard draft** (destructive). Request: `PUT …` with the live text.
+Live now — Cancel · **Discard draft** (destructive). Request: `PUT …` with the live text, plus each
+attribute the draft stages (`href`, `alt`) with its live value, which the save RPC drops from the
+draft (`{ elementId, content, language, variant, href?, alt? }`). When one cannot go back that way
+(no live value, a key the PUT does not know, a value it would trim or refuse), Discard is not
+offered and the expanded row says "This draft changes a link or image attribute, which can't be
+discarded here. Change it on the page."; when the staged attributes could not be read, it says
+"This draft could not be read in full, so it can't be discarded here. Reload the page to try
+again."
 "Publish" (Pending, publish/admin) asks nothing more: the draft is visible right above it; the
 request is `POST /api/staging/publish` with the one element id.
 

@@ -24,6 +24,7 @@ import { CHANGES_LIST_CEILING } from "@/lib/content/changes-paging";
 import { describePage } from "@/lib/content/describe-location";
 import { ChangeSiteGroup, type PageGroup } from "./ChangeSiteGroup";
 import { ChangesFilterBar } from "./ChangesFilterBar";
+import { rowAfter } from "./row-after";
 
 interface ChangesViewProps {
   /** Fixes the view to one site (s70c's tab): no site select, no site header. */
@@ -47,43 +48,6 @@ const NO_ROWS_TITLE: Record<ChangesStateFilter, string> = {
 const count = (value: number) => value.toLocaleString("en-US");
 const plural = (value: number, one: string, many: string) =>
   `${count(value)} ${value === 1 ? one : many}`;
-
-/**
- * What the row becomes after a write that succeeded, without a reload (design,
- * "success in place"). The server derives the state (ADR 054); this mirrors
- * its rules for the one row that changed. A discarded draft cannot know
- * `published_at`, so a row published back to its original reads Original here
- * until the next read says Published.
- */
-function rowAfter(
-  row: ContentChange,
-  action: ChangeAction,
-): Partial<ContentChange> {
-  const changedAt = new Date().toISOString();
-  switch (action) {
-    case "revertToDraft":
-      return {
-        draft: row.original,
-        state: row.original !== row.live ? "pending" : row.state,
-        changedAt,
-      };
-    case "revertAndPublish":
-      return { state: "published", live: row.original, draft: null, changedAt };
-    case "discardDraft":
-      return {
-        state: row.live !== row.original ? "published" : "original",
-        draft: null,
-        changedAt,
-      };
-    case "publish":
-      return {
-        state: "published",
-        live: row.draft ?? row.live,
-        draft: null,
-        changedAt,
-      };
-  }
-}
 
 interface SiteGroup {
   site: ChangesSite;

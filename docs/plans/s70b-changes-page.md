@@ -315,6 +315,53 @@ no existing route changed.
   two). First-and-last alone was rejected: it would merge `/blog/2024/launch` and
   `/blog/2025/launch`, which the old label told apart.
 
+### Devin re-review (PR #77)
+
+One critical and four minors, fixed without a new route, RPC, migration or change to an existing
+route.
+
+- **N1 (critical): Discard sent back a link Publish had made live.** The row a write left on screen
+  never updated `draftAttributes`. After Publish made a staged `href` live, the row still held the
+  link's old live value; Revert → Save as draft, then Discard, sent it back, and the save RPC
+  staged it (it now differed from the live link), so the next Publish silently restored the old
+  link. `rowAfter` now sets the list per action, from the RPCs (`20260924030000`,
+  `20260924060000`): after Publish and after Revert and publish, `[]` (the publish RPC drops
+  `staging_attributes`); after Discard, `[]` (offered only when every staged key goes back to its
+  live value, which the save RPC drops); after Revert → Save as draft, including a revert whose
+  publish failed, a pending row keeps its list unchanged (a text-only PUT merges an empty patch, and
+  the live values stand), any other row gets `[]` (nothing staged differs from live: the view's own
+  pending test). Each case is exact from the row alone, so no row is re-read from the list route.
+  `rowAfter` moved from `ChangesView.tsx` to `src/components/dashboard/changes/row-after.ts` (new
+  file, inside "Files touched") so each rule is unit-tested: pending → Revert → Save as draft is not
+  reachable from the page, where Revert is offered on published rows only.
+- **N2: a pending row missing from the metadata read is not known.** The route gave it `[]`
+  ("stages nothing"), so Discard was offered and could leave a staged link staged. The Task 3
+  contract (as amended above) changes: `draftAttributes` is `null` for a pending row the metadata
+  read did not return, and the page never offers Discard on `null`.
+- **N3: the metadata read has its site fence.** `.in("site_id", <caller's sites>)` beside the ids,
+  as the route header promises for every read. RLS stays the first fence.
+- **N4: a row without `draftAttributes` no longer crashes the page.** The hook reads a missing or
+  malformed list as `null` (not known, not discardable), and `discardAttributes` refuses anything
+  that is not a list. Neither option the reviewer named was taken as such: rejecting the answer in
+  `isChangesPage` would turn one odd row into a failed page, and `?? []` would offer a Discard that
+  leaves a staged link staged.
+- **A second note for a draft that cannot be discarded** (not in the design). The existing note says
+  the draft "changes a link or image attribute", which is not known for an unread list. That case
+  reads "This draft could not be read in full, so it can't be discarded here. Reload the page to try
+  again." (`UNREAD_DRAFT_NOTE`, chosen by `discardRefusal`, used by the row and the hook's refusal).
+- **N5: the design matches the code** (`docs/designs/s70-content-changes.md`): page labels of up to
+  three segments are whole, deeper ones the first plus the last two; Discard's PUT carries each
+  staged attribute's live value, and both notes are quoted.
+- **One existing assertion changed** (`changes-route.test.ts`, "lists the attributes a pending draft
+  stages…"): the metadata query's `in` calls were pinned with `toEqual([["id", …]])`; the new site
+  fence adds a second `in`, so that line is now `toContainEqual`, and the new N3 test pins both calls
+  exactly.
+- **Database evidence** (`content-attributes-lifecycle.test.ts`, 4 new cases, run on a scratch
+  PostgreSQL 16 with every case of the suite): a save carrying the live value un-stages a staged
+  link and Publish then pushes nothing; a save carrying an old live value stages it and Publish puts
+  it back live (the N1 effect); a text-only save stages nothing on a row with nothing staged; a
+  text-only save keeps a pending row's staged link.
+
 ## Run interdicts
 
 - **Ceilings only go down.** `MAX_BUNDLE_GZ`/`MAX_WIDGET_GZ` and the seeded pair never rise;

@@ -155,7 +155,7 @@ function draftAttributesOf(metadata: unknown): DraftAttribute[] {
   }));
 }
 
-function toRow(row: ViewRow, draftAttributes: DraftAttribute[]) {
+function toRow(row: ViewRow, draftAttributes: DraftAttribute[] | null) {
   return {
     id: row.id,
     siteId: row.site_id,
@@ -313,18 +313,31 @@ export async function GET(request: NextRequest) {
       .map((row) => row.id);
     const attributesById = new Map<string, DraftAttribute[]>();
     if (pendingIds.length > 0) {
+      // The site filter is the second fence here too (this file's header):
+      // RLS is the first. Devin re-review N3: this read had the ids alone.
       const { data: metadataRows, error: metadataError } = await supabase
         .from("content_elements")
         .select("id, metadata")
-        .in("id", pendingIds);
+        .in("id", pendingIds)
+        .in("site_id", siteIds);
       if (metadataError) return failure("metadata read failed", metadataError);
       for (const row of (metadataRows ?? []) as MetadataRow[]) {
         attributesById.set(row.id, draftAttributesOf(row.metadata));
       }
     }
 
+    // A pending row the metadata read did not return (deleted between the two
+    // reads, or no longer readable) is null, "not known", which the page never
+    // offers to discard. Tombstone (Devin re-review N2): it was `[]`, "stages
+    // nothing", so Discard was offered and sent the text alone, which leaves a
+    // staged link staged (the save RPC merges attribute patches).
     const rows = viewRows.map((row) =>
-      toRow(row, attributesById.get(row.id) ?? []),
+      toRow(
+        row,
+        row.change_state === "pending"
+          ? (attributesById.get(row.id) ?? null)
+          : [],
+      ),
     );
     const total = listResult.count ?? rows.length;
     const reached = offset + rows.length;

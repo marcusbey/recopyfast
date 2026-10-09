@@ -927,6 +927,143 @@ describe("ChangesView — actions by state and grant", () => {
     ).not.toBeInTheDocument();
   });
 
+  // Devin re-review N2 / N4: a pending row whose staged attributes the route
+  // could not read (null), or an answer without the field (which threw "not
+  // iterable" while the row was drawn), may stage a link that a text-only
+  // discard would leave staged. No Discard, and the line says why, without
+  // claiming the draft changes a link it may not change.
+  it.each([
+    ["could not be read", { draftAttributes: null }],
+    ["are missing from the answer", { draftAttributes: undefined }],
+  ])(
+    "offers no Discard for a pending row whose staged attributes %s, and says why",
+    async (_label, overrides) => {
+      mockApi({
+        list: () => json(listBody([HERO, { ...HERO_BUTTON, ...overrides }])),
+      });
+      const user = await renderLoaded();
+      const region = await expand(user, "Start your 14-day trial");
+
+      expect(actionNames(region)).toEqual(["Publish", "Edit on page"]);
+      expect(
+        within(region).getByText(
+          "This draft could not be read in full, so it can't be discarded here. Reload the page to try again.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(region).queryByText(/changes a link or image attribute/),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  // Devin re-review N1 (critical): the row kept the link's old live value
+  // after Publish made the staged link live. Revert → Save as draft, then
+  // Discard, sent that old value back, and the save RPC STAGED it, because it
+  // now differed from the live link: the next Publish silently put the old
+  // link back on the customer's page.
+  const STAGED_LINK_ROW = {
+    ...HERO_BUTTON,
+    draftAttributes: [{ name: "href", live: "/signup" }],
+  };
+
+  it("never sends back a link it has published: Publish, Revert → Save as draft, then Discard carries no href", async () => {
+    mockApi({ list: () => json(listBody([HERO, STAGED_LINK_ROW])) });
+    const user = await renderLoaded();
+    const item = rowOf("Start your 14-day trial");
+    await expand(user, "Start your 14-day trial");
+    const region = () => within(item).getByRole("region");
+
+    await user.click(within(region()).getByRole("button", { name: "Publish" }));
+    expect(await screen.findByText("Published.")).toBeInTheDocument();
+    await user.click(
+      within(region()).getByRole("button", { name: "Revert to original" }),
+    );
+    const revert = await screen.findByRole("dialog", {
+      name: "Revert to the original text?",
+    });
+    await user.click(
+      within(revert).getByRole("button", { name: "Save as draft" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    await user.click(
+      within(region()).getByRole("button", { name: "Discard draft" }),
+    );
+    const discard = await screen.findByRole("dialog", {
+      name: "Discard this draft?",
+    });
+    await user.click(
+      within(discard).getByRole("button", { name: "Discard draft" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    const puts = requests(`/api/staging/content/${ACME}`, "PUT");
+    expect(puts).toHaveLength(2);
+    expect(JSON.parse(String((puts[1][1] as RequestInit).body))).toEqual({
+      elementId: "rcf-v6di4rh42g",
+      content: "Start your 14-day trial",
+      language: "en",
+      variant: "default",
+    });
+    expect(screen.getByText("Draft discarded.")).toBeInTheDocument();
+  });
+
+  it("never sends back a link it has published after a revert whose publish failed", async () => {
+    let publishes = 0;
+    mockApi({
+      list: () => json(listBody([HERO, STAGED_LINK_ROW])),
+      publish: () =>
+        (publishes += 1) === 1
+          ? json({ success: true })
+          : json({ error: "Publish rate limit exceeded for this site." }, 429),
+    });
+    const user = await renderLoaded();
+    const item = rowOf("Start your 14-day trial");
+    await expand(user, "Start your 14-day trial");
+    const region = () => within(item).getByRole("region");
+
+    await user.click(within(region()).getByRole("button", { name: "Publish" }));
+    expect(await screen.findByText("Published.")).toBeInTheDocument();
+    await user.click(
+      within(region()).getByRole("button", { name: "Revert to original" }),
+    );
+    const revert = await screen.findByRole("dialog");
+    await user.click(
+      within(revert).getByRole("button", { name: "Revert and publish" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(within(region()).getByRole("alert")).toHaveTextContent(
+      "The revert was saved as a draft but not published.",
+    );
+    await user.click(
+      within(region()).getByRole("button", { name: "Discard draft" }),
+    );
+    const discard = await screen.findByRole("dialog", {
+      name: "Discard this draft?",
+    });
+    await user.click(
+      within(discard).getByRole("button", { name: "Discard draft" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    const puts = requests(`/api/staging/content/${ACME}`, "PUT");
+    expect(puts).toHaveLength(2);
+    expect(JSON.parse(String((puts[1][1] as RequestInit).body))).toEqual({
+      elementId: "rcf-v6di4rh42g",
+      content: "Start your 14-day trial",
+      language: "en",
+      variant: "default",
+    });
+    expect(requests("/api/staging/publish", "POST")).toHaveLength(2);
+  });
+
   it("shows a revert whose publish failed as the pending draft it is, with the reason and Publish to retry", async () => {
     let publishes = 0;
     mockApi({

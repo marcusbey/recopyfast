@@ -457,7 +457,7 @@ describe("GET /api/content/changes", () => {
     expect(metadataQueries()).toHaveLength(1);
     const [metadata] = metadataQueries();
     expect(callsOf(metadata, "select")).toEqual([["id, metadata"]]);
-    expect(callsOf(metadata, "in")).toEqual([["id", ["row-1", "row-3"]]]);
+    expect(callsOf(metadata, "in")).toContainEqual(["id", ["row-1", "row-3"]]);
     expect(
       body.rows.map((row: { draftAttributes: unknown }) => row.draftAttributes),
     ).toEqual([
@@ -469,6 +469,45 @@ describe("GET /api/content/changes", () => {
       [],
     ]);
     expect(JSON.stringify(body)).not.toContain("/new");
+  });
+
+  // Devin re-review N3: the file header promises an explicit site filter as a
+  // second fence on every read, and this one had only the row ids.
+  it("fences the metadata read to the caller's sites, not only to the page's ids", async () => {
+    mockRespond = defaultResponder(
+      [viewRow(1, { change_state: "pending", staging_content: "Draft" })],
+      1,
+    );
+
+    await get();
+
+    const [metadata] = metadataQueries();
+    expect(callsOf(metadata, "in")).toEqual([
+      ["id", ["row-1"]],
+      ["site_id", [SITE_A, SITE_B]],
+    ]);
+  });
+
+  // Devin re-review N2: a pending row the metadata read did not return (gone
+  // between the two reads, or refused by RLS) got `[]`, "stages nothing", and
+  // Discard was offered for a draft that may stage a link, which a text-only
+  // discard leaves staged. Unknown is null, and null is never discardable.
+  it("marks a pending row missing from the metadata read as unread (null), never as staging nothing", async () => {
+    mockRespond = defaultResponder(
+      [
+        viewRow(1, { change_state: "pending", staging_content: "Draft" }),
+        viewRow(2, { change_state: "pending", staging_content: "Draft" }),
+        viewRow(3),
+      ],
+      3,
+    );
+    mockMetadata = [{ id: "row-2", metadata: { type: "h1" } }];
+
+    const body = await (await get()).json();
+
+    expect(
+      body.rows.map((row: { draftAttributes: unknown }) => row.draftAttributes),
+    ).toEqual([null, [], []]);
   });
 
   it("reads no metadata when the page holds no pending row", async () => {
