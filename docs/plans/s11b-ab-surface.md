@@ -1,7 +1,16 @@
 ---
-validated: yes
+validated: no
+previously_validated: yes
+validation_reopened: 2026-09-12
 ---
 # Plan — Story s11b-ab-surface
+
+> **Validation history.** This plan was initially validated. Execution preflight on 2026-09-12
+> reopened it before source work: Task 7 specified an index command that cannot run inside a
+> Supabase transactional migration, and Task 4 specified a parent-plus-children write without the
+> atomic database boundary required by `AGENTS.md`. The corrections below require a fresh human
+> validation. No production migration was applied and no source implementation began under the
+> superseded wording.
 
 Branch: `feature/s11b-ab-surface`
 Research: `docs/research/s11-ab-run-test.md` — read it first; this plan does not repeat it.
@@ -90,7 +99,7 @@ commit argues the feature is wrong; it argues it was unfinished and metered.
   seeded plans, so the two cannot drift silently.
   *Fails when:* an account that cannot generate can still activate.
 
-- [ ] **4 — A manual create path: variants without AI, without credits.**
+- [ ] **4 — A manual create path: variants without AI, without credits, committed atomically.**
   Extend `POST /api/ab-tests` (Task 8 converges it) to accept
   `{ site_id, target_element_id, name, variants: [{ name, content, traffic_percentage,
   is_control }] }`, writing `ab_tests.target_element_id` and the `(name, variant_content,
@@ -99,8 +108,43 @@ commit argues the feature is wrong; it argues it was unfinished and metered.
   naming generation in step). No OpenAI call, no `CREDIT_COSTS.AB_TEST_GENERATION` spend —
   entitlement still required (Task 3). Validation through `src/lib/api/validation.ts`, extended
   with a `requireIntegerInRange` and an array validator; **not zod** (ADR 003).
+
+  The route must not repeat the inherited parent-insert / child-insert / compensating-delete
+  sequence. The same forward migration Task 7 uses defines this exact database boundary:
+
+  `public.create_ab_test_atomic(p_site_id uuid, p_target_element_id text, p_name text,
+  p_variants jsonb) returns jsonb`.
+
+  It is `SECURITY INVOKER`, pins `search_path = public, pg_temp`, derives `created_by` from
+  `auth.uid()` and runs through the authenticated request client so the existing `ab_tests` and
+  `ab_test_variants` RLS policies remain the tenant boundary. Revoke `PUBLIC`/`anon` execute and
+  grant only `authenticated` and `service_role`. The function validates again at the trusted
+  boundary: the target element exists on `p_site_id`; `p_name` is non-empty; `p_variants` is an
+  array of at least two objects; every object has a non-empty `name`/`content`, integer
+  `traffic_percentage` in 1..100 and boolean `is_control`; exactly one control exists; the total
+  is exactly 100. It inserts one draft `ab_tests` row (`success_metric='conversion_rate'`) and all
+  variants in the same transaction, then returns exactly
+  `{ "test_id": <uuid>, "variants": [{ "id": <uuid>, "name": <text>, "content": <text>,
+  "traffic_percentage": <integer>, "is_control": <boolean> }] }`, in request order. The route
+  validates that result before returning `{ test: { id, variants } }`; a missing/malformed result
+  is a generic 500, never treated as a successful draft.
+
+  The manual branch remains local during `review-and-split`: its editable cards say **“Unsaved
+  draft”**, never “Saved,” because no server row exists yet. Once two or more complete variants
+  sum to 100, “Next” calls this atomic create route. The wizard advances only after the response
+  supplies the persistent test and variant ids; failure leaves the local draft and split intact.
+  If the user navigates back after that point, subsequent edits use Task 6's real variant route and
+  may show “Saved” only after its response succeeds. AI-generated variants already exist and use
+  that persisted branch from the first review render.
+
+  Stable failures: malformed name/variant/split uses SQLSTATE `22023` and maps to 400; a missing
+  target uses `P0002` and maps to 404; RLS/permission denial uses `42501` and maps to the existing
+  enumeration-safe 403; every other database failure maps to the generic 500 after server-side
+  detail logging. The route must never return raw SQL text. A DB-backed test forces a child-row
+  failure after the parent insert and proves both tables remain unchanged; success proves exactly
+  one parent, every child and the returned ids. Route tests prove each stable mapping.
   *Fails when:* a manually created test does not appear in `GET /api/ab-tests/active/:siteId`
-  with a non-null `target_element_id`.
+  with a non-null `target_element_id`, or any variant failure leaves an orphan parent/partial set.
 
 - [ ] **5 — Traffic split, validated server-side and surfaced client-side.**
   Server: every `traffic_percentage` an integer in 1..100 and the set summing to **exactly**
@@ -111,29 +155,45 @@ commit argues the feature is wrong; it argues it was unfinished and metered.
   it, with an `Alert variant="warning"` beneath — "Splits must add up to 100% — currently {n}%.";
   "Next" disabled until the total is exactly 100 and every variant has non-empty text, mirroring
   `ABTestElementPicker.tsx:150`. `Add variant` is `Button variant="outline" size="sm"` with
-  `Plus`. Compose from `src/components/ui/` only.
+  `Plus`. Compose from `src/components/ui/` only. The manual branch persists the complete split
+  in Task 4's atomic create. For an already-persisted AI/manual draft, Task 6's route writes the
+  edited percentage; activation re-reads every stored variant and refuses unless all are integers
+  in 1..100 and total exactly 100, so React state can never be the source of truth at start time.
   *Fails when:* a 99% or 101% split is accepted by the route, or the client lets "Next" through.
 
 - [ ] **6 — Review-step edits actually persist.**
   `useABTestCreation.ts:157-163` — `saveEdit` mutates local state and nothing else, so the user
-  edits a headline, activates, and the AI's original text ships. Make `saveEdit` a real write
-  (`PUT /api/ab-tests/variants/[variantId]` or the converged route from Task 8 — one route,
-  decided at execution, not two), awaited, with the failure surfaced in the wizard's existing
+  edits a headline, activates, and the AI's original text ships. Add exactly one route,
+  `PUT /api/ab-tests/variants/[variantId]`, using the signed-in server client plus the parent
+  test's `site_permissions` `edit|admin` check. Its allowlist accepts `content` and
+  `traffic_percentage`, updates both naming columns (`content` and `variant_content`) for text,
+  and validates an edited percentage as an integer in 1..100. It is awaited, with failure surfaced
+  in the wizard's existing
   `Alert` (`ABTestCreateFlow.tsx:43-47`). Only after the round trip does the design's inline
   `text-tone-success-text` check + "Saved" appear, at `--dur-fast`. That inline confirmation is
   the documented workaround for design-system gap #1 (no toast primitive) — it is not a new
-  component, and this story does not invent one.
+  component, and this story does not invent one. The response returns the persisted variant;
+  re-read/activation tests assert its content and split, not only the local hook state. Manual
+  cards without ids follow Task 4's “Unsaved draft” state and never call this route.
   *Fails when:* an edited variant reloads as the AI original, or "Saved" appears before the
   server confirms.
 
-- [ ] **7 — One active test per element: a partial unique index and a 409 with a reason.**
-  New forward migration
-  `supabase/migrations/<YYYYMMDDHHMMSS>_ab_tests_one_active_per_element.sql`:
-  `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS ux_ab_tests_active_element ON ab_tests
+- [ ] **7 — One active test per element: a transactional partial unique index and a 409 with a reason.**
+  The forward migration shared with Task 4,
+  `supabase/migrations/<YYYYMMDDHHMMSS>_ab_test_surface_invariants.sql`, first aborts with one
+  legible preflight error if existing active rows duplicate `(site_id, target_element_id)`, then
+  creates:
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_ab_tests_active_element ON ab_tests
   (site_id, target_element_id) WHERE status = 'active' AND target_element_id IS NOT NULL;`.
+  **Do not use `CONCURRENTLY`:** Supabase runs each migration inside a transaction and PostgreSQL
+  rejects `CREATE INDEX CONCURRENTLY` there; the repository records this exact incident and uses a
+  plain index in `20260611050000_content_elements_query_index.sql:16-20`. With zero users and the
+  current table size, the brief write lock is the bounded deploy tradeoff for a migration that can
+  actually apply atomically.
   `ab_tests` already carries RLS and policies from
-  `20260801200000_missing_base_tables.sql`; this migration adds an index, creates no table and
-  changes no policy, and its header says so (ADR 002). Never edit an applied migration. Map
+  `20260801200000_missing_base_tables.sql`; this migration adds the Task 4 function and this
+  index, creates no table and changes no policy, and its header says so (ADR 002). Never edit an
+  applied migration. Map
   Postgres `23505` on activation to **409** with `{ error, reason, conflicting_test_id }` — the
   reason string is the copy the design specifies: *"This element already has an active test
   running. Pause or end it first, or choose a different element."* Client: the existing greyed
@@ -204,6 +264,8 @@ commit argues the feature is wrong; it argues it was unfinished and metered.
 - **Do not touch the results view or `src/lib/ab-testing/lifecycle.ts`.** `s12` owns them.
 - **Do not touch `public/embed/`.** No widget bytes are spent by this story.
 - **Do not re-add the lifecycle cron to `vercel.json`.**
+- **Do not apply the new migration to any live or shared database during Execute or automated
+  tests.** Use a fresh isolated fixture. Deployment remains a later ship decision.
 - **Do not lower `jest.config.js` coverage thresholds.** Ratchet only.
 - **Server state is a custom hook** (`useState` + `useEffect` + `fetch`, returning
   `{ data, loading, error, refetch }`); a non-ok response produces an error state, never an
@@ -257,13 +319,15 @@ free.
 - `src/app/api/ab-tests/route.ts` — converge `POST` on the v2 shape; entitlement + 409 on `PUT`
   (3, 4, 7, 8)
 - `src/app/api/ab-tests/generate/route.ts` — call the extracted entitlement helper (3)
+- `src/app/api/ab-tests/variants/[variantId]/route.ts` — persisted content/split edits (6)
 - `src/__tests__/api/ab-tests/route.test.ts` — follows Task 8; **called out in the PR**
 - `src/__tests__/components/dashboard/DashboardNavigation.test.tsx` — follows Task 2;
   **called out in the PR**
 - `jest.config.js` — coverage ratchet up
 
 **Created**
-- `supabase/migrations/<YYYYMMDDHHMMSS>_ab_tests_one_active_per_element.sql` (7)
+- `supabase/migrations/<YYYYMMDDHHMMSS>_ab_test_surface_invariants.sql` —
+  `create_ab_test_atomic` (4) + plain partial unique index (7)
 - `src/lib/billing/ab-testing-entitlement.ts` (3)
 - `src/__tests__/api/ab-tests/surface-baseline.test.ts` (1)
 - `src/__tests__/app/dashboard/ab-tests-page.test.tsx` (1, 9)
@@ -296,7 +360,16 @@ mechanism that stops "audit what works" from becoming a paragraph nobody can che
   100 across two and across three variants → 200
 - a manual create → `target_element_id` non-null and the row visible through
   `GET /api/ab-tests/active/:siteId`
-- variant edit → persisted, and re-read after activation
+- manual cards remain “Unsaved draft” until atomic create returns test/variant ids; create failure
+  preserves the local draft and does not advance
+- persisted variant edit → content and split persisted, and re-read at activation; activation
+  refuses when stored splits do not total 100
+
+**Database fixture tests** run only against a fresh isolated database: the atomic create RPC
+commits one parent and every child on success; a forced child-insert exception rolls the parent
+back; invalid target/name/variant/control/split inputs expose the stable SQLSTATE contract; the
+plain partial index refuses two active tests on one element while permitting drafts and different
+elements. No `supabase db push` or production connection is part of this task.
 
 **Component tests**:
 - nav renders the item for a Pro entitlement and renders it locked (`opacity-45`,
@@ -307,6 +380,8 @@ mechanism that stops "audit what works" from becoming a paragraph nobody can che
   **never** the empty state — the distinction `useABTests` already keeps
 - zero tests renders `EmptyState` with the "Create test" action
 - the running total turns danger away from 100 and "Next" is disabled until 100
+- manual review never renders “Saved” before atomic create; the label changes from “Unsaved draft”
+  only after ids return, and a later edit shows “Saved” only after its PUT resolves
 - the 409 `Alert` renders the server's reason and both actions, at step 1 and at step 4
 
 **Not tested here:** bucketing distribution and hash parity (`s11a`), swap timing and bytes
@@ -324,12 +399,14 @@ mechanism that stops "audit what works" from becoming a paragraph nobody can che
 - [ ] Exactly one function decides A/B entitlement, and it is called on generation **and** on
       activation. A test proves the nav gate and `limits.abTesting` agree on the seeded plans.
 - [ ] An owner can create a test with two or more text variants **and** a traffic split, without
-      an AI call and without spending credits.
+      an AI call and without spending credits; the parent and children commit through
+      `create_ab_test_atomic` or roll back together, and the manual UI never claims persistence
+      before that response returns ids.
 - [ ] Splits are integers summing to exactly 100, enforced by the route (400) as well as the
       form (disabled "Next").
 - [ ] A review-step edit round-trips to the server; "Saved" appears only after it confirms; the
       activated test ships the edited text.
-- [ ] The partial unique index exists; a second activation on the same element returns **409**
+- [ ] The plain transactional partial unique index exists; a second activation on the same element returns **409**
       with a stated reason and a way out, and the `Alert` renders it at step 1 and step 4.
 - [ ] `POST /api/ab-tests` sets `target_element_id` and writes the column pair the embed reads;
       its test file follows and the change is called out in the PR.

@@ -133,11 +133,16 @@ constraint and a `409` are for, per the split proposal). Two touchpoints, not on
   - Text field: unchanged `textarea` + Save/Cancel, reachable whether the variant came from AI
     or was typed manually.
   - **Persisted-save confirmation** — the concrete fix for "review-step edits must persist."
-    On `Save`, once the write round-trips, a small `text-tone-success-text` check mark + "Saved"
-    label appears next to the Save button for a moment (`--dur-fast` fade, the system's existing
-    fast duration — no bespoke timing). This is the visible signal that the edit is now server
-    state, not React state that evaporates on activation — the defect `useABTestCreation.ts:
-    157-163` has today.
+    An AI-generated or already-created manual variant has a persistent id: on `Save`, once its
+    write round-trips, a small `text-tone-success-text` check mark + "Saved" label appears next
+    to the Save button for a moment (`--dur-fast` fade, the system's existing fast duration — no
+    bespoke timing). A new manual card has no row yet and reads **"Unsaved draft"** in muted text;
+    editing it changes local draft state and must never render “Saved.” Once every manual variant
+    is complete and the split totals 100, “Next” creates the test and all variants atomically.
+    The wizard advances only when that response returns persistent ids; a failure keeps every
+    local field intact. This makes the label literal: “Saved” always means server state, never
+    React state that can evaporate on activation — the defect `useABTestCreation.ts:157-163` has
+    today.
   - **Traffic split** — a plain `Input type="number"` (0–100) beside a `text-sm
     text-muted-foreground` "%" label, `Label` "Traffic split" above it. Not an icon-in-input —
     a right-side unit label, composed the same way the system already composes a left icon
@@ -154,7 +159,9 @@ constraint and a `409` are for, per the split proposal). Two touchpoints, not on
   and an `Alert variant="warning"` appears under it: "Splits must add up to 100% — currently
   {n}%." The step's "Next" button is disabled until the total is exactly 100 and every variant
   has non-empty text — mirrors the existing pattern of disabling "Generate Variants" until an
-  element is picked (`ABTestElementPicker.tsx:150`).
+  element is picked (`ABTestElementPicker.tsx:150`). On the manual path, this “Next” is also the
+  first persistence boundary; its pending state reads “Saving draft…” and prevents a second
+  submission.
 
 ### Create flow — start (step 4, was "configure")
 

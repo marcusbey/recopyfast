@@ -20,6 +20,20 @@
 > `error` (`bucket/[siteId]/route.ts:120`). This is precisely the silent-bucketing failure the
 > story's own Risk paragraph predicts, and it is live right now.
 
+> **Execution preflight correction — 2026-09-12.** The first validated `s11b` plan carried two
+> implementation shapes that this repository cannot safely execute. It specified `CREATE UNIQUE
+> INDEX CONCURRENTLY` inside a Supabase migration, although Supabase migrations are transactional
+> and the repository already records PostgreSQL rejecting that command in exactly this context
+> (`20260611050000_content_elements_query_index.sql:16-20`). It also kept the inherited
+> parent-insert / variant-insert / compensating-delete create flow, contrary to `AGENTS.md`'s rule
+> that multi-step writes use a Postgres function. The plan is reopened (`validated: no`): use a
+> plain partial unique index and one `SECURITY INVOKER` `create_ab_test_atomic(...)` RPC in a
+> forward-only migration, proven only on an isolated fixture until Ship. This corrects execution
+> mechanics without changing the researched product scope or acceptance criteria.
+> The preflight also made one UI truth explicit: the manual branch has no variant ids before that
+> atomic create returns, so its review cards are local “Unsaved draft” state. Only an AI-generated
+> or post-create variant may show “Saved,” and only after a real variant-update response.
+
 ---
 
 ## The five structuring facts
