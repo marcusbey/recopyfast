@@ -344,9 +344,22 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * Only the two ends are measurements of shipped bytes: every source edit moves
  * the banner hash, and with it gzip, by up to ±2 B, so the middle lines (each
  * a prototype run) carry that noise. build-size-gate.test.ts pins the same pair.
+ *
+ * RATCHETED DOWN again in the s76 review fix pass, from 45827 / 33059:
+ *
+ *   45827 / 33059  the s76 ceilings above, re-measured after the rebase on
+ *                  main at fc5968b (s73 changed no embed byte)
+ *   +13 / +15      a legacy `?rcf_edit_token=` is stripped from the address
+ *                  bar, tested for presence and never read (review minor 4)
+ *   −27 / −22      offsets: `window.` dropped from globals that always exist —
+ *                  `location` ×11, `open` ×2, `addEventListener` ×3,
+ *                  `removeEventListener`, `sessionStorage` ×2,
+ *                  `localStorage`, `history` — and `urlParams + ''` for
+ *                  `.toString()` with the one-use `cleanUrl` inlined
+ *   45813 / 33052  measured on the branch — the new ceilings
  */
-const MAX_BUNDLE_GZ = 45827;
-const MAX_WIDGET_GZ = 33059;
+const MAX_BUNDLE_GZ = 45813;
+const MAX_WIDGET_GZ = 33052;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

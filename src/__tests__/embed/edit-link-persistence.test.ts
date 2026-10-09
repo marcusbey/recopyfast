@@ -602,6 +602,33 @@ describe("s76 — the legacy query link is a visitor load", () => {
     expect(JSON.stringify(fetch.mock.calls)).not.toContain("real");
   });
 
+  it("takes a legacy ?rcf_edit_token= out of the address bar without using it", async () => {
+    // Review minor 4: a link minted before the deploy holds a token that is
+    // live for hours. Not reading it is not enough — left in the address bar
+    // it is copied, screenshotted, bookmarked. Stripped, never sent.
+    const fetch = await boot(
+      "/pricing?utm_source=mail&rcf_edit_token=legacy-live-token#plans",
+    );
+
+    expect(window.location.pathname).toBe("/pricing");
+    expect(window.location.search).toBe("?utm_source=mail");
+    expect(window.location.hash).toBe("#plans");
+    expect(widget().editMode).toBe(false);
+    expect(validateBodies(fetch)).toEqual([]);
+    expect(editLinkKeys()).toEqual([]);
+    expect(JSON.stringify(fetch.mock.calls)).not.toContain("legacy-live-token");
+  });
+
+  it("leaves a page's own query exactly as written", async () => {
+    // The strip rewrites the address only when it has something to take out:
+    // re-serialising every visitor's query would change `%20` to `+` and
+    // `?flag` to `?flag=` on the customer's own URLs.
+    await boot("/pricing?q=a%20b&flag#plans");
+
+    expect(window.location.search).toBe("?q=a%20b&flag");
+    expect(window.location.hash).toBe("#plans");
+  });
+
   it("does not let a legacy link displace the session the tab holds", async () => {
     await boot(link("held"));
     const next = await boot("/?rcf_edit_token=planted");

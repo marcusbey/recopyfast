@@ -50,11 +50,18 @@ export function readDeviceContext(request: NextRequest): DeviceContext | null {
  * `evil.example.com` (user content on a shared parent, a dangling CNAME): a
  * credential issued under our name for an origin that is not the customer's.
  * A site served from `www.` registers `www.`.
+ *
+ * NULL WHEN THE `sites` READ FAILED: no verdict either way. Callers answer 503
+ * and must not spend or discard what the caller presented (s76 review minor
+ * 2). This answered `false` on a database error, so an outage became "this
+ * site isn't served from its registered domain" — a 403, on which the widget
+ * forgets an edit-link code for good. A caller that forgets the null still
+ * refuses (`!null` is true): fail closed, never open.
  */
 export async function originBelongsToSite(
   siteId: string,
   origin: string,
-): Promise<boolean> {
+): Promise<boolean | null> {
   const supabase = createServiceRoleClient();
 
   const { data: site, error } = await supabase
@@ -63,7 +70,11 @@ export async function originBelongsToSite(
     .eq("id", siteId)
     .maybeSingle();
 
-  if (error || !site?.domain) return false;
+  if (error) {
+    console.error("[editor-auth] site domain lookup failed:", error.message);
+    return null;
+  }
+  if (!site?.domain) return false;
 
   const originHost = hostnameOf(origin);
   const domain = String(site.domain).trim();

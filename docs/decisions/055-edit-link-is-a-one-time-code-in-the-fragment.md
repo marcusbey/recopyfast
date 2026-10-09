@@ -29,11 +29,16 @@ contain no token and no query key at all.
    `history.replaceState`, and sends the code in the `editToken` field of its existing boot check,
    `POST /api/staging/validate`. That route — and no other — recognises the prefix, checks the
    signature, site and expiry offline, requires the request's `Origin` to be the site's exact
-   registered host, spends the code, then validates the session as any stored session is validated
-   (ADR 047). It answers the session's token in the response body; the widget swaps it in, in memory
-   and in the tab's storage (ADR 036). From then on the token travels exactly as before.
+   registered host, validates the session as any stored session is validated (ADR 047) without
+   recording a use, and only then spends the code. It answers the session's token in the response
+   body; the widget swaps it in, in memory and in the tab's storage (ADR 036). From then on the
+   token travels exactly as before. Check, then spend (s76 review fix): when the database fails at
+   any step the answer is 503 and the code is still unspent, so the widget, which keeps it on a
+   5xx, can retry; a token is never answered for a session that was not confirmed valid.
 3. The widget no longer reads `rcf_edit_token` from the query. A legacy or crafted
-   `?rcf_edit_token=` link boots a visitor and stores nothing.
+   `?rcf_edit_token=` link boots a visitor and stores nothing; the parameter is still stripped
+   from the address bar (tested for presence, never read), so a pre-deploy token does not stay
+   visible there.
 
 ## Considered options
 

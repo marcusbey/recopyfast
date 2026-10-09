@@ -75,6 +75,20 @@ export interface ValidateStagingAccessResult {
   unavailable?: boolean;
 }
 
+/**
+ * The status for a `validateStagingAccess` result that did not admit, for the
+ * routes that call it directly rather than through `validateEditorAccess` (the
+ * Edit Board, src/app/api/edit-board): 503 when the database gave no verdict,
+ * 401 for a verdict. Those fifteen call sites answered 401 to everything, so an
+ * outage read as a refused share link (s76 review minor 6). Census-pinned by
+ * src/__tests__/api/edit-board/staging-outage.test.ts.
+ */
+export function stagingRefusalStatus(
+  result: Pick<ValidateStagingAccessResult, "unavailable">,
+): 401 | 503 {
+  return result.unavailable ? 503 : 401;
+}
+
 export interface VerifyEmailParams {
   token: string;
   code?: string; // For verification code

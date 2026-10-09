@@ -109,6 +109,55 @@ banners and modals are unchanged.
 12. [x] **Gates, mutations, commit.** Full jest, type-check (both), lint, format, `build:embed
     --check`, Playwright `--list`. Mutation per guard (report table). One story commit.
 
+## Review fix pass (2026-10-09)
+
+Rebased on `origin/main` `fc5968b` (s73, the deps bump; `docs/stories.md` kept both entries in id
+order). The review found no critical or major; six minors were fixed, test-first. CTO decisions:
+
+9. **Check, then spend** (minor 3). The redemption validates the session the code names as any
+   stored session is validated (ADR 047) *without recording a use* (`validateEditorAccess`'s new
+   `recordUse: false`, honoured by the edit-session branch only), and only then runs the
+   conditional spend; the token is answered only for a session confirmed valid. A 503 at any step
+   — the site, the session, the holder's grant, the spend itself — leaves the code unspent; the
+   widget keeps it on a 5xx (ADR 036), so a reload within the minute spends it. Rejected: answering the token on a post-spend 503 (a session nobody confirmed
+   is still its holder's); un-spending after a failed validation (a compensating write during the
+   outage that caused it). The spend keeps every filter, as a second look atomic with the write.
+10. **No verdict is not a refusal** (minor 2). `originBelongsToSite` answers `null` when the
+   `sites` read fails; all three callers answer 503 (edit-link redemption, `handoff/redeem` with
+   reason `unavailable`, `submit-code` with `error: "unavailable"`). A caller that forgot the
+   null would still refuse (`!null`), never admit.
+11. **A legacy `?rcf_edit_token=` is stripped, never read** (minor 4): tested for presence only.
+   Paid for in the same file by dropping `window.` from globals that always exist (never from
+   one that may be missing, e.g. `visualViewport`); ceilings ratchet 45827 / 33059 → 45813 / 33052.
+12. **Edit Board outages** (minor 6): one helper, `stagingRefusalStatus`, at all fifteen call
+   sites, census-pinned like A-10.
+
+13. [x] **Minor 1 — redundant guards bite.** `readEditLinkCode` refuses a missing, string or null
+    expiry (`edit-link.test.ts`); the offline expiry check is written "not unexpired" and a code
+    whose expiry is no date (`x: 1e300`) is refused before any database call; the spend's
+    `last_used_at`, `expires_at`, `is_active` and `site_id` filters are each pinned by a test that
+    changes the session between the checks and the write (`validate-edit-link.test.ts`).
+14. [x] **Minor 2 — `sites` read failure → 503.** `editor-request-origin.test.ts` (null, declared
+    split of the "cannot be read" case), `validate-edit-link.test.ts`, `handoff/redeem/route.test.ts`,
+    `submit-code/route.test.ts`.
+15. [x] **Minor 3 — check, then spend.** `validate-edit-link.test.ts`: an outage reading the
+    session or its holder's grant → 503, code unspent, the retry spends it; a failed spend is
+    retried within the minute.
+16. [x] **Minor 4 — legacy token leaves the address bar.** `edit-link-persistence.test.ts`: the
+    query loses `rcf_edit_token` and keeps the page's own parameters and fragment, nothing is
+    validated, stored or sent; a page's own query is never re-serialised.
+17. [x] **Minor 5 — customer docs name `#rcf_edit=`.** `installation-content.ts`,
+    `install-recipes.ts`; tests in both formats (and `install-recipes.test.ts`'s
+    `rcf_edit_token` expectation replaced, declared).
+18. [x] **Minor 6 — Edit Board 503.** `staging-outage.test.ts`: helper, census of the fifteen call
+    sites, `GET /api/edit-board/styles` → 503 on a failed token read, 401 for an unknown token.
+19. [x] **Gates, mutations, one commit.**
+
+Follow-ups (not s76): **s95** — `site-auth.normalizeDomain` throws for a registered domain that
+starts with "http" (e.g. `httpbin.org`), review finding 8, its own story. `submit-code` spends the
+emailed code before its origin check, so a 503 there costs the editor a new code (the order
+predates s76; worth its own look).
+
 ## Rollout
 
 Application only: the Vercel deploy serves the new route behaviour and the new

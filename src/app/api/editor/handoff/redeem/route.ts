@@ -48,7 +48,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!(await originBelongsToSite(siteId, device.origin))) {
+    const belongs = await originBelongsToSite(siteId, device.origin);
+    if (belongs === null) {
+      // No verdict: the site could not be read (s76 review minor 2). The code
+      // is not spent yet, so the answer is retryable, never origin_mismatch.
+      return withPublicCors(
+        NextResponse.json(
+          { ok: false, reason: "unavailable" },
+          { status: 503 },
+        ),
+        request,
+      );
+    }
+    if (!belongs) {
       console.warn(
         `[editor-auth] handoff redemption refused: ${device.origin} is not the registered domain of site ${siteId}`,
       );

@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   extractEditorToken,
   validateEditorAccess,
+  type EditorAccessValidation,
 } from "@/lib/auth/editor-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { isEditLinkCode } from "@/lib/auth/edit-link";
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let editorToken =
+    const editorToken =
       extractEditorToken(request, body as Record<string, unknown>) ||
       (token ? { kind: "staging" as const, token } : null);
 
@@ -38,10 +39,10 @@ export async function POST(request: NextRequest) {
 
     // The owner's edit link (s76, ADR 055): the widget sends the code from
     // `#rcf_edit=` as its edit token, once, on its first load. Spent here and
-    // nowhere else; the session it names is then validated like any other,
-    // and its token goes back in this response body for the tab to keep
-    // (ADR 036). The code is worthless from here on.
-    let redeemedToken: string | null = null;
+    // nowhere else, and only after the session it names has been validated
+    // like any other (edit-link-redeem.ts: check, then spend); its token goes
+    // back in this response body for the tab to keep (ADR 036). The code is
+    // worthless from here on.
     if (
       editorToken.kind === "edit-session" &&
       isEditLinkCode(editorToken.token)
@@ -60,8 +61,10 @@ export async function POST(request: NextRequest) {
           request,
         );
       }
-      redeemedToken = redemption.token;
-      editorToken = { kind: "edit-session", token: redemption.token };
+      return withPublicCors(
+        validAnswer(redemption.validation, redemption.token),
+        request,
+      );
     }
 
     const result = await validateEditorAccess({
@@ -86,21 +89,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Token is valid but may need email or verification
-    return withPublicCors(
-      NextResponse.json({
-        valid: true,
-        kind: result.access?.kind,
-        verified: result.access?.verified,
-        permissions: result.access?.permissions || [],
-        email: result.access?.email,
-        expiresAt: result.access?.expiresAt?.toISOString(),
-        requiresEmail: result.requiresEmail,
-        requiresVerification: result.requiresVerification,
-        ...(redeemedToken ? { editToken: redeemedToken } : {}),
-      }),
-      request,
-    );
+    return withPublicCors(validAnswer(result), request);
   } catch (error) {
     console.error("Error validating staging token:", error);
     return withPublicCors(
@@ -108,6 +97,24 @@ export async function POST(request: NextRequest) {
       request,
     );
   }
+}
+
+/**
+ * A valid credential, which may still need email or verification. `editToken`
+ * only when an edit-link code was spent by this request.
+ */
+function validAnswer(result: EditorAccessValidation, editToken?: string) {
+  return NextResponse.json({
+    valid: true,
+    kind: result.access?.kind,
+    verified: result.access?.verified,
+    permissions: result.access?.permissions || [],
+    email: result.access?.email,
+    expiresAt: result.access?.expiresAt?.toISOString(),
+    requiresEmail: result.requiresEmail,
+    requiresVerification: result.requiresVerification,
+    ...(editToken ? { editToken } : {}),
+  });
 }
 
 export async function OPTIONS(request: NextRequest) {

@@ -261,6 +261,7 @@ export async function validateEditorAccess({
   allowUnverified = false,
   device,
   deviceContext,
+  recordUse = true,
 }: {
   siteId: string;
   token: EditorToken;
@@ -282,6 +283,16 @@ export async function validateEditorAccess({
    * other. Absent means refused — see `validateDeviceGrantAccess`.
    */
   deviceContext?: DeviceContext;
+  /**
+   * Stamp an edit session's `last_used_at` when it validates. Default true.
+   *
+   * False ONLY for the edit-link redemption's check before its spend (s76,
+   * src/lib/auth/edit-link-redeem.ts). Spending a link IS the conditional
+   * write `last_used_at = now() WHERE last_used_at IS NULL`: a check that
+   * recorded a use first would leave every link already opened when the spend
+   * ran. The spend records the use itself.
+   */
+  recordUse?: boolean;
 }): Promise<EditorAccessValidation> {
   if (token.kind === "device-grant") {
     return validateDeviceGrantAccess(siteId, token.token, deviceContext);
@@ -296,7 +307,7 @@ export async function validateEditorAccess({
     );
   }
 
-  return validateEditSessionAccess(siteId, token.token);
+  return validateEditSessionAccess(siteId, token.token, recordUse);
 }
 
 /**
@@ -488,6 +499,7 @@ const CREATED_AT_CLOCK_SKEW_MS = 5 * 60 * 1000;
 async function validateEditSessionAccess(
   siteId: string,
   token: string,
+  recordUse: boolean,
 ): Promise<EditorAccessValidation> {
   const refused: EditorAccessValidation = {
     valid: false,
@@ -573,10 +585,12 @@ async function validateEditSessionAccess(
     return refused;
   }
 
-  await supabase
-    .from("edit_sessions")
-    .update({ last_used_at: new Date().toISOString() })
-    .eq("id", session.id);
+  if (recordUse) {
+    await supabase
+      .from("edit_sessions")
+      .update({ last_used_at: new Date().toISOString() })
+      .eq("id", session.id);
+  }
 
   return {
     valid: true,

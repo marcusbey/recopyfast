@@ -43,9 +43,22 @@ const ORIGIN = "https://customer.example";
 
 type Row = Record<string, unknown>;
 
-function makeWorld(
-  options: { failConsume?: boolean; liveGrant?: boolean } = {},
-) {
+interface WorldOptions {
+  /** The spend (the UPDATE that sets `last_used_at`) errors. */
+  failConsume?: boolean;
+  /** Every read of this table errors: the database, not the code, failed. */
+  failRead?: "sites" | "edit_sessions" | "site_permissions";
+  liveGrant?: boolean;
+  /**
+   * Runs once, as the spend reaches the database: what another request or the
+   * clock did to the session between the redemption's checks and its write.
+   */
+  onSpend?: (session: Row) => void;
+}
+
+function makeWorld(options: WorldOptions = {}) {
+  // Mutable on purpose: `heal()` ends the outage between two requests.
+  const faults: WorldOptions = { ...options };
   const tables: Record<string, Row[]> = {
     sites: [{ id: SITE_ID, domain: "customer.example" }],
     edit_sessions: [
@@ -62,7 +75,7 @@ function makeWorld(
       },
     ],
     site_permissions:
-      options.liveGrant === false
+      faults.liveGrant === false
         ? []
         : [{ site_id: SITE_ID, user_id: OWNER_ID, permission: "admin" }],
   };
@@ -78,16 +91,21 @@ function makeWorld(
 
     const run = (single: boolean) => {
       if (update) {
-        if (
-          table === "edit_sessions" &&
-          options.failConsume &&
-          "last_used_at" in update
-        ) {
+        const isSpend = table === "edit_sessions" && "last_used_at" in update;
+        if (isSpend && faults.failConsume) {
           return { data: null, error: { message: "connection reset" } };
+        }
+        if (isSpend && faults.onSpend) {
+          const meanwhile = faults.onSpend;
+          faults.onSpend = undefined;
+          meanwhile(tables.edit_sessions[0]);
         }
         const rows = matching();
         for (const row of rows) Object.assign(row, update);
         return { data: rows.map((row) => ({ ...row })), error: null };
+      }
+      if (faults.failRead === table) {
+        return { data: null, error: { message: "connection reset" } };
       }
       const rows = matching();
       return single
@@ -134,6 +152,10 @@ function makeWorld(
   return {
     session: () => tables.edit_sessions[0],
     databaseCalls: () => calls,
+    heal: () => {
+      faults.failConsume = false;
+      faults.failRead = undefined;
+    },
   };
 }
 
@@ -207,6 +229,19 @@ describe("POST /api/staging/validate spends an edit-link code once", () => {
     expect(JSON.stringify(body)).not.toContain(TOKEN);
   });
 
+  it("stops a replay before the session validation's reads", async () => {
+    // Checking before spending (review minor 3) must not make a spent code
+    // cost a full validation: the unopened-session read refuses it first.
+    const world = makeWorld();
+    const code = freshCode();
+    expect((await bootCheck(code)).status).toBe(200);
+    const before = world.databaseCalls();
+
+    expect((await bootCheck(code)).status).toBe(401);
+    // The site's domain (origin check) and the unopened-session read.
+    expect(world.databaseCalls() - before).toBe(2);
+  });
+
   it("refuses a code for a session the token has already been used on", async () => {
     // Opening the link is the session's first use; any use closes the link.
     const world = makeWorld();
@@ -226,6 +261,18 @@ describe("POST /api/staging/validate spends an edit-link code once", () => {
           e: SESSION_ID,
           s: SITE_ID,
           x: Math.floor(Date.now() / 1000) - 1,
+        }),
+    ],
+    [
+      // A JSON number past every date: `new Date(x * 1000)` is Invalid Date,
+      // and NaN compares false both ways, so "expired?" must be asked as
+      // "not unexpired" (review minor 1).
+      "undatable",
+      () =>
+        encodeSignedToken("rcfl1", CRYPTO_DOMAIN.editLink, {
+          e: SESSION_ID,
+          s: SITE_ID,
+          x: 1e300,
         }),
     ],
     ["minted for another site", () => freshCode(OTHER_SITE_ID)],
@@ -279,6 +326,63 @@ describe("POST /api/staging/validate spends an edit-link code once", () => {
     expect(world.session().last_used_at).toBeNull();
   });
 
+  it("a spend that failed for an outage is retried within the minute", async () => {
+    const world = makeWorld({ failConsume: true });
+    const code = freshCode();
+    expect((await bootCheck(code)).status).toBe(503);
+
+    world.heal();
+    const retry = await bootCheck(code);
+
+    expect(retry.status).toBe(200);
+    expect((await retry.json()).editToken).toBe(TOKEN);
+  });
+
+  it.each([
+    ["the session's holder", "site_permissions" as const],
+    ["the session", "edit_sessions" as const],
+  ])(
+    "answers 503 and leaves the link unopened when %s cannot be read, so the retry works",
+    async (_, table) => {
+      // Review minor 3. The code used to be spent BEFORE the session was
+      // validated, so an outage in the validation answered 503 over a burnt
+      // code: the widget kept it, retried, and was told it was spent. The
+      // session is now confirmed first, without recording a use, and only a
+      // session confirmed valid is spent — and its token answered.
+      const world = makeWorld({ failRead: table });
+      const code = freshCode();
+
+      const response = await bootCheck(code);
+      const body = await response.json();
+
+      expect(response.status).toBe(503);
+      expect(JSON.stringify(body)).not.toContain(TOKEN);
+      expect(world.session().last_used_at).toBeNull();
+
+      world.heal();
+      const retry = await bootCheck(code);
+
+      expect(retry.status).toBe(200);
+      expect((await retry.json()).editToken).toBe(TOKEN);
+    },
+  );
+
+  it("answers 503 and leaves the link unopened when the site's domain cannot be read", async () => {
+    // Review minor 2. The origin check used to read a failed `sites` lookup
+    // as "not this site's origin": 403, which the widget answers by
+    // forgetting the code. No verdict is not a refusal.
+    const world = makeWorld({ failRead: "sites" });
+    const code = freshCode();
+
+    const response = await bootCheck(code);
+
+    expect(response.status).toBe(503);
+    expect(world.session().last_used_at).toBeNull();
+
+    world.heal();
+    expect((await bootCheck(code)).status).toBe(200);
+  });
+
   it("refuses a code whose session's holder has lost their grant (ADR 047)", async () => {
     makeWorld({ liveGrant: false });
 
@@ -298,6 +402,49 @@ describe("POST /api/staging/validate spends an edit-link code once", () => {
     expect(response.status).toBe(200);
     expect(body.valid).toBe(true);
     expect(body).not.toHaveProperty("editToken");
+  });
+});
+
+describe("the spend re-checks the session at the moment it writes", () => {
+  // The session is validated before it is spent (review minor 3), so each
+  // filter on the spend is a second look — and the only look that is atomic
+  // with the write. These change the session between the checks and the
+  // spend, as a concurrent request or the clock can (review minor 1: the
+  // filters were untested).
+  it.each([
+    [
+      "another tab opened the same link first",
+      (session: Row) => {
+        session.last_used_at = new Date().toISOString();
+      },
+    ],
+    [
+      "the session expired",
+      (session: Row) => {
+        session.expires_at = new Date(Date.now() - 1000).toISOString();
+      },
+    ],
+    [
+      "the session was deactivated (its holder was removed, s68a)",
+      (session: Row) => {
+        session.is_active = false;
+      },
+    ],
+    [
+      "the row is not the site's",
+      (session: Row) => {
+        session.site_id = OTHER_SITE_ID;
+      },
+    ],
+  ])("spends nothing and answers no token when %s", async (_, meanwhile) => {
+    makeWorld({ onSpend: meanwhile });
+
+    const response = await bootCheck(freshCode());
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.valid).toBe(false);
+    expect(JSON.stringify(body)).not.toContain(TOKEN);
   });
 });
 

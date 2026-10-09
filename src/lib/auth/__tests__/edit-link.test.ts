@@ -115,6 +115,21 @@ describe("the code", () => {
 
     expect(readEditLinkCode(incomplete)).toBeNull();
   });
+
+  it.each([
+    ["no expiry", { e: SESSION_ID, s: SITE_ID }],
+    // A string that `new Date(x * 1000)` would coerce into a valid far-future
+    // date: only a JSON number is an expiry (review minor 1).
+    [
+      "an expiry that is a string",
+      { e: SESSION_ID, s: SITE_ID, x: "4102444800" },
+    ],
+    ["an expiry that is null", { e: SESSION_ID, s: SITE_ID, x: null }],
+  ])("refuses a well-signed envelope with %s", (_, payload) => {
+    const code = encodeSignedToken("rcfl1", CRYPTO_DOMAIN.editLink, payload);
+
+    expect(readEditLinkCode(code)).toBeNull();
+  });
 });
 
 describe("the link", () => {

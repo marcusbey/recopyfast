@@ -4066,14 +4066,16 @@ Acceptance criteria:
   names one session and one site, lives 60 s and is spent once. The three A-29 pins are plain
   tests. Tests: `create-token-leak.test.ts`, `src/lib/auth/__tests__/edit-link.test.ts`.
 - [x] Only the widget's boot check (`POST /api/staging/validate`) spends a code, after its
-  signature, site and expiry are checked offline and the request's `Origin` is the site's
-  registered host; it answers the session's token in the body. A second presentation, a code past
-  60 s, a code for another site, a forged code, a code from another origin and a code whose holder
-  lost their grant are refused; an outage is 503. Test:
+  signature, site and expiry are checked offline, the request's `Origin` is the site's
+  registered host and the session is validated (without recording a use); it answers the
+  session's token in the body. A second presentation, a code past 60 s, a code for another site,
+  a forged code, a code from another origin and a code whose holder lost their grant are refused;
+  an outage at any step is 503 and leaves the code unspent. Test:
   `src/__tests__/api/staging/validate-edit-link.test.ts`.
 - [x] The widget reads the code from the fragment, strips it from the address bar, swaps it for the
   returned token in memory and in the tab's storage (ADR 036), and never reads `rcf_edit_token`
-  from the query: an old or crafted `?rcf_edit_token=` link boots a visitor and stores nothing.
+  from the query: an old or crafted `?rcf_edit_token=` link boots a visitor, stores nothing, and
+  leaves the address bar without it. Customer install docs name `#rcf_edit=` instead.
   Multi-page editing (s41) keeps working. Test: `src/__tests__/embed/edit-link-persistence.test.ts`.
 - [x] A refreshed grant's lifetime comes from its own lineage, never from the request body, and no
   lineage outlives 30 days from its first issue: past it, validation and refresh refuse
@@ -4086,13 +4088,16 @@ Acceptance criteria:
   that site (case-insensitive), and nobody else's. Test:
   `src/lib/auth/__tests__/editor-directory-revoke.test.ts`.
 - [x] An infrastructure error while validating an edit session, a staging invite or a device grant
-  answers 503, never 401; the widget keeps the edit link and the grant on 503. Tests:
+  (the Edit Board's routes included), or while reading a site's domain for an origin check,
+  answers 503, never 401/403; the widget keeps the edit link and the grant on 503. Tests:
   `src/lib/auth/__tests__/editor-access-outage.test.ts`, `edit-link-persistence.test.ts`,
-  `src/__tests__/embed/editor-auth.test.ts`.
+  `src/__tests__/embed/editor-auth.test.ts`, `src/__tests__/api/edit-board/staging-outage.test.ts`,
+  `editor-request-origin.test.ts`.
 - [ ] Embed bytes do not grow: the ceilings (45828 / 33062) ratchet down to the branch's
   measurement. No migration, nothing under `server/`, no new dependency. Required gates pass; e2e
   specs that landed with `?rcf_edit_token=` use the new link; Playwright count unchanged.
-  (Local: measured 45827 / 33059, gates green, `--list` 80. Open until CI runs the two e2e specs.)
+  (Local: measured 45813 / 33052 after the review fix pass, gates green, `--list` 80. Open until
+  CI runs the two e2e specs.)
 
 Complexity: 4. Dependencies: none (s72 merged). Branch `feature/s76-grant-and-edit-token-hardening`.
 Follow-ups (not s76): the widget's own API reads still carry `?rcf_edit_token=` to RecopyFast's API

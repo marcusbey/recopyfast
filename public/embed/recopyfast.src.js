@@ -71,7 +71,7 @@
 
   // Staging mode detection from URL parameters. `let`, not `const`: on a load
   // with no credential in the URL, the edit-link restore below fills them in.
-  const urlParams = new URLSearchParams(window.location.search);
+  const urlParams = new URLSearchParams(location.search);
   let STAGING_MODE = urlParams.get('rcf_staging') === '1';
   let STAGING_TOKEN = urlParams.get('rcf_token');
   // The owner's "Edit website" link: `#rcf_edit=<code>` (s76, ADR 055).
@@ -96,12 +96,19 @@
   // in browser history, bookmarks, or copy-pasted links — and the fragment when
   // it carried the edit-link code (any other fragment is the page's own).
   // `urlParams` is reused: its reads are done.
-  if (STAGING_MODE || STAGING_TOKEN || EDIT_SESSION_TOKEN) {
+  //
+  // A legacy `?rcf_edit_token=` is stripped too, and only stripped — tested
+  // for presence, never read (s76 review minor 4). A link minted before s76
+  // holds a token live for hours; not using it is not enough when it sits in
+  // the address bar to be copied, bookmarked or screen-shared. Byte offset:
+  // `window.` dropped from globals that always exist (never from one that may
+  // be missing — a bare `visualViewport` throws where it is undefined).
+  if (STAGING_MODE || STAGING_TOKEN || EDIT_SESSION_TOKEN || urlParams.has('rcf_edit_token')) {
     urlParams.delete('rcf_staging');
     urlParams.delete('rcf_token');
-    const cleanSearch = urlParams.toString();
-    const cleanUrl = window.location.pathname + (cleanSearch ? '?' + cleanSearch : '') + (EDIT_SESSION_TOKEN ? '' : location.hash);
-    history.replaceState(history.state, '', cleanUrl);
+    urlParams.delete('rcf_edit_token');
+    const cleanSearch = urlParams + '';
+    history.replaceState(history.state, '', location.pathname + (cleanSearch ? '?' + cleanSearch : '') + (EDIT_SESSION_TOKEN ? '' : location.hash));
   }
 
   // An edit link has to survive the next page load (s41, ADR 036).
@@ -593,10 +600,10 @@
     apiUrl: RECOPYFAST_API,
     siteId: SITE_ID,
     fetch: function(url, options) { return window.fetch(url, options); },
-    localStorage: (function() { try { return window.localStorage; } catch (e) { return null; } })(),
-    sessionStorage: (function() { try { return window.sessionStorage; } catch (e) { return null; } })(),
-    location: window.location,
-    history: window.history,
+    localStorage: (function() { try { return localStorage; } catch (e) { return null; } })(),
+    sessionStorage: (function() { try { return sessionStorage; } catch (e) { return null; } })(),
+    location: location,
+    history: history,
     warn: function(message) { console.warn(message); }
   });
 
@@ -1071,7 +1078,7 @@
         // This allows testing without database validation
         const editorToken = this.editSessionToken || this.stagingToken;
         const isDemoToken = editorToken && editorToken.startsWith('test_');
-        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
         if (isDemoToken && isLocalhost) {
           this.stagingAccess = {
@@ -1280,7 +1287,7 @@
       this.isMutationLocked = true;
       const keepDraft = function(id, text) {
         try {
-          if (id) window.sessionStorage.setItem('rcf_unsaved_draft:' + SITE_ID + ':' + id, text);
+          if (id) sessionStorage.setItem('rcf_unsaved_draft:' + SITE_ID + ':' + id, text);
         } catch (e) { /* The visible DOM remains the recovery copy. */ }
       };
       keepDraft(elementId, content);
@@ -1328,7 +1335,7 @@
           : 'rcf-banner-btn rcf-banner-btn-ghost';
         recovery.onclick = function() {
           const path = self.editorGrant() ? '/edit' : '/dashboard/sites';
-          window.open(new URL(path, RECOPYFAST_API).toString(), '_blank', 'noopener');
+          open(new URL(path, RECOPYFAST_API).toString(), '_blank', 'noopener');
         };
         banner.appendChild(recovery);
       }
@@ -1564,7 +1571,7 @@
       allSites.setAttribute('aria-label', 'Back to all your sites');
       allSites.onclick = function() {
         try {
-          window.location.href = new URL('/edit', RECOPYFAST_API).toString();
+          location.href = new URL('/edit', RECOPYFAST_API).toString();
         } catch (e) {}
       };
       banner.appendChild(allSites);
@@ -2344,7 +2351,7 @@
       // is why the two searchParams.delete calls that used to sit here, both
       // no-ops, are gone.
       previewBtn.onclick = function() {
-        window.open(window.location.href, '_blank', 'noopener');
+        open(location.href, '_blank', 'noopener');
       };
     }
 
@@ -2492,10 +2499,10 @@
       document.body.appendChild(overlay);
 
       closeBtn.onclick = function() {
-        const url = new URL(window.location.href);
+        const url = new URL(location.href);
         url.searchParams.delete('rcf_staging');
         url.searchParams.delete('rcf_token');
-        window.location.href = url.toString();
+        location.href = url.toString();
       };
     }
 
@@ -3193,7 +3200,7 @@
       if (this.socket && this.socket.connected) {
         this.socket.emit('content-map', {
           siteId: SITE_ID,
-          url: window.location.href,
+          url: location.href,
           token: SITE_TOKEN,
           stagingMode: this.stagingMode,
           stagingToken: this.stagingToken,
@@ -4781,8 +4788,8 @@
 
       reposition();
 
-      window.addEventListener('scroll', scheduleReposition, true);
-      window.addEventListener('resize', scheduleReposition, active);
+      addEventListener('scroll', scheduleReposition, true);
+      addEventListener('resize', scheduleReposition, active);
       if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', scheduleReposition, active);
         window.visualViewport.addEventListener('scroll', scheduleReposition, active);
@@ -4860,7 +4867,7 @@
       let isSaving = false;
 
       const cleanup = function() {
-        window.removeEventListener('scroll', scheduleReposition, true);
+        removeEventListener('scroll', scheduleReposition, true);
         if (resizeObserver) resizeObserver.disconnect();
         if (frame) cancelAnimationFrame(frame);
         ['contenteditable', 'spellcheck', 'role', 'aria-multiline', 'data-rcf-editing', 'data-rcf-edit-session'].forEach(function(attr) {
@@ -4896,7 +4903,7 @@
        * confirmation is the only thing that can interrupt a navigation, and it
        * only fires if a handler is registered while the work is actually dirty.
        */
-      window.addEventListener('beforeunload', function(event) {
+      addEventListener('beforeunload', function(event) {
         if (sanitizeContent() === originalText && !fieldsDirty()) return undefined;
         event.preventDefault();
         // Legacy browsers require returnValue to be set for the prompt to show.
@@ -6639,7 +6646,7 @@
           content.innerHTML = '<div class="rcf-eb-empty">Version restored</div>';
 
           setTimeout(() => {
-            window.location.reload();
+            location.reload();
           }, 1500);
         } else {
           content.innerHTML = '<div class="rcf-eb-empty"></div>';

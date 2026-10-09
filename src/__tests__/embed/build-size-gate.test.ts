@@ -127,8 +127,12 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 //   +2 / +1        the story's comments (banner hash only)
 //   45827 / 33059  measured on feature/s76-grant-and-edit-token-hardening
 // Only the two ends are measurements of shipped bytes.
-const SEEDED_MAX_BUNDLE_GZ = 45827;
-const SEEDED_MAX_WIDGET_GZ = 33059;
+// RATCHETED again in the s76 review fix pass, DOWNWARD: 45827 → 45813,
+// 33059 → 33052. A legacy `?rcf_edit_token=` leaves the address bar (+13 /
+// +15), paid for by dropping `window.` from always-present globals (−27 / −22,
+// itemised in build-embed.mjs).
+const SEEDED_MAX_BUNDLE_GZ = 45813;
+const SEEDED_MAX_WIDGET_GZ = 33052;
 
 interface CheckRun {
   status: number;

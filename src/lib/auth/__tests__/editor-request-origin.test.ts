@@ -95,7 +95,7 @@ describe("any other host does not", () => {
     );
   });
 
-  it("a site that does not exist, has no domain, or cannot be read", async () => {
+  it("a site that does not exist or has no domain", async () => {
     siteWithDomain(null);
     await expect(
       originBelongsToSite("site-1", "https://example.com"),
@@ -105,11 +105,20 @@ describe("any other host does not", () => {
     await expect(
       originBelongsToSite("site-1", "https://example.com"),
     ).resolves.toBe(false);
+  });
+});
 
+describe("a site that cannot be read gets no verdict", () => {
+  it("answers null, never false, so callers answer 503 rather than 403", async () => {
+    // s76 review minor 2: `false` here became "this site isn't served from
+    // its registered domain" — a 403 on which the widget forgets an edit-link
+    // code — for what was a database outage.
+    jest.spyOn(console, "error").mockImplementation(() => {});
     siteWithDomain("example.com", { message: "connection refused" });
+
     await expect(
       originBelongsToSite("site-1", "https://example.com"),
-    ).resolves.toBe(false);
+    ).resolves.toBeNull();
   });
 });
 
