@@ -114,6 +114,33 @@ test("a slow answer is a timeout, not a hang", async () => {
   );
 });
 
+test("a redirect is down: the probe never follows it", async () => {
+  // s84 review, F5. `/api/health` answers itself; a 3xx means something in
+  // front of it changed (a domain move, an auth wall, a parked domain) and
+  // following it would report the redirect's target as our health.
+  let requests = 0;
+  const server = createServer((request, response) => {
+    requests += 1;
+    if (request.url === "/health") {
+      response.writeHead(302, { location: "/elsewhere" });
+      response.end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end("{}");
+  });
+  await new Promise((done) => server.listen(0, "127.0.0.1", done));
+  try {
+    const { port } = server.address();
+    const result = await probeOnce(`http://127.0.0.1:${port}/health`, { timeoutMs: 1000 });
+    assert.deepEqual(result, { isOk: false, detail: "HTTP 302" });
+    assert.equal(requests, 1, "the redirect was not followed");
+  } finally {
+    server.closeAllConnections();
+    await new Promise((done) => server.close(done));
+  }
+});
+
 test("a refused connection is a network error, named by its code only", async () => {
   // Bind a port, release it, then probe it: nothing is listening.
   const url = await withServer([200], async (liveUrl) => liveUrl);
@@ -147,6 +174,31 @@ test("three failures in a row is down", async () => {
     assert.equal(result.isUp, false);
     assert.equal(result.attempts, 3);
     assert.equal(result.detail, "HTTP 503");
+    assert.equal(calls(), 3);
+  });
+});
+
+test("by default a target gets two retries, in the probe and in the whole run", async () => {
+  // s84 review, F5. Every other test passes `retries` explicitly, so the
+  // default the workflow actually runs with — one attempt plus two retries, so
+  // a single cold start never opens an issue — was pinned by nothing.
+  await withServer([503], async (url, calls) => {
+    const result = await probeTarget({ name: "local", url }, { timeoutMs: 1000, sleep: noSleep });
+    assert.equal(result.attempts, 3);
+    assert.equal(calls(), 3);
+  });
+  await withServer([503], async (url, calls) => {
+    const { gh } = recordingGh([]);
+    const code = await run({
+      targets: [{ name: "local.example/health", url }],
+      gh,
+      sleep: noSleep,
+      timeoutMs: 1000,
+      runUrl: RUN_URL,
+      now: () => NOW,
+      log: () => {},
+    });
+    assert.equal(code, 1);
     assert.equal(calls(), 3);
   });
 });

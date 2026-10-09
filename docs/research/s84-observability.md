@@ -62,6 +62,16 @@ The realtime check already returns fixed strings (s07b, `route.ts:262-275`). Con
   host regex `^o(\d+)\.ingest(?:\.([a-z]{2}))?\.sentry\.io$`), and only for SaaS DSNs.
 - The middleware runs before `beforeFiles` rewrites. `/monitoring` is in `isSessionlessPath`
   (`src/middleware.ts:113`) and only gets security headers.
+- **Correction (s84 review, F1).** "Two `beforeFiles` rewrites" above is wrong for this repo: our
+  `rewrites()` returns an array, so Sentry returns an array and Next files both rules under
+  `afterFiles` (`load-custom-routes.js` `loadRewrites`). Either way the match is
+  **case-insensitive with an optional trailing slash**: `buildCustomRoute`
+  (`next/dist/lib/build-custom-route.js`) compiles `/monitoring(/?)` with `sensitive: false` and
+  appends `(?:/)?$`; the built `routes-manifest.json` reads `caseSensitive: false`,
+  `^/monitoring(/?)(?:/)?$`, and Vercel routes by that manifest. `next start` matches the RAW path
+  (a percent-encoded letter 404s), while its middleware matcher tries raw and decoded. Proved on a
+  production build: a foreign envelope to `/MONITORING`, `/Monitoring`, `/MONITORING/` or
+  `/MONITORING?…&r=de` was relayed while `/monitoring` answered 400.
 - **Reading the body in middleware is safe for the rewrite.** Next hands middleware a clone and
   replaces the original stream with a buffered copy (`node_modules/next/dist/server/body-streams.js`,
   `getCloneableBody`, `cloneBodyStream`/`finalize`, 10 MB default `proxyClientMaxBodySize`). Vercel's
@@ -127,3 +137,17 @@ Private repo `marcusbey/recopyfast-backups`, workflow `nightly-db-backup.yml` at
 (`aws-0-us-east-2.pooler.supabase.com:5432`), age-encrypted to one recipient, 30-day artifacts. Key
 and password live in the owner's macOS Keychain. Supabase Free has no backups or PITR as of
 2026-10-09. Not inspected from this worktree — the brief is the source.
+
+**Addendum (s84 review, F2), read-only through `gh api`:** the job runs in `postgres:17` and dumps
+with `pg_dump --format=custom --no-owner --no-privileges --schema=public --schema=auth
+--schema=storage`, artifact `recopyfast-db-backup`, file `recopyfast-<UTC timestamp>.dump.age`. The
+dump therefore holds **no ACL entry**. The repository README's restore is `pg_restore --no-owner
+--no-privileges -d "<target url>" recopyfast.dump`. On PG17 with `scripts/db/bootstrap-supabase-fixtures.sql`
+(Supabase's default privileges) and all 72 migrations, that restore left all 8 `HIDDEN_COLUMNS`
+readable by `anon` and `authenticated` and 96 definer functions executable by a web role; restoring
+the schema with its privileges kept (from a dump that had them) still left 8 and 63 — pg_dump
+writes GRANTs relative to PostgreSQL's built-in defaults, never REVOKEs of Supabase's. Migrations,
+then `--data-only` under `session_replication_role = replica`, matched production's web-role ACL
+exactly (0 differing grants). Triggers that would rewrite loaded rows: `BEFORE INSERT ON
+staging_access`, `AFTER INSERT ON public.content_elements`. Migration-seeded tables: `plans`,
+`copy_styles`, `founding_offers`, one `sites` row.

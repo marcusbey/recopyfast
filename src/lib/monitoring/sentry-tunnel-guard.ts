@@ -29,8 +29,39 @@
  * Sentry SaaS host is never tunnelled by the SDK, so nothing is allowed then.
  */
 
+import { SENTRY_TUNNEL_ROUTE } from "./sentry-tunnel";
+
 /** A header line longer than this is not one the browser SDK wrote. */
 export const MAX_ENVELOPE_HEADER_CHARS = 16 * 1024;
+
+function decodedPath(pathname: string): string {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    // Malformed escapes: the router cannot decode them into the tunnel either.
+    return pathname;
+  }
+}
+
+/**
+ * Is this the tunnel, under ANY spelling its rewrite accepts?
+ *
+ * The first guard (s84) asked `pathname === "/monitoring"` and the review
+ * relayed a foreign envelope through `/MONITORING` on a production build: Next
+ * compiles the rewrite's `/monitoring(/?)` case-insensitively with an optional
+ * trailing slash (`routes-manifest.json`: `caseSensitive: false`,
+ * `^/monitoring(/?)(?:/)?$` — the manifest Vercel routes by too). So: any
+ * case, any trailing slashes, and the percent-decoded form as well — `next
+ * start` matches the raw path, but how Vercel's edge treats `/%6Donitoring` is
+ * not inspectable from here, and refusing a spelling no browser sends costs
+ * nothing. `sentry-tunnel-route-coverage.test.ts` compiles the real rewrite
+ * with Next's own route compiler and proves every path it accepts lands here;
+ * widen this, never narrow it, if that test goes red after an upgrade.
+ */
+export function isSentryTunnelPath(pathname: string): boolean {
+  const normalized = decodedPath(pathname).toLowerCase().replace(/\/+$/, "");
+  return normalized === SENTRY_TUNNEL_ROUTE.toLowerCase();
+}
 
 const SAAS_INGEST_HOST = /^o(\d+)\.ingest(?:\.([a-z]{2}))?\.sentry\.io$/;
 

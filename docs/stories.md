@@ -3817,9 +3817,10 @@ Acceptance criteria:
 - [ ] `GET`/`HEAD /api/health` and `GET /api/health/ready` are rate limited per IP before any check:
   60 per minute, fail-open; one check every 5–10 minutes from one IP is never limited, and a Redis
   outage is reported, not refused.
-- [ ] `/monitoring` forwards only to our DSN's org, region and project, and only an envelope whose
-  header DSN names our host and project; anything else is a 400 carrying the security headers and
-  costing no GoTrue round trip.
+- [ ] `/monitoring` — under every spelling its rewrite accepts (Next matches it case-insensitively,
+  with an optional trailing slash; percent-encoded letters too) — forwards only to our DSN's org,
+  region and project, and only an envelope whose header DSN names our host and project; anything
+  else is a 400 carrying the security headers and costing no GoTrue round trip.
 - [ ] Browser, server and edge Sentry report one release — the build's Vercel commit SHA, also the
   source-map upload release — and none of them passes an explicit `undefined`.
 - [ ] With `SENTRY_DSN` set, the realtime server reports uncaught exceptions and unhandled
@@ -3831,7 +3832,9 @@ Acceptance criteria:
   on recovery it comments and closes it. Least privilege (`contents: read`, `issues: write`),
   actions pinned by full SHA, decision logic tested with `node --test` in CI.
 - [ ] `docs/operations/backups.md` and `docs/operations/monitoring.md` describe the backup system,
-  the restore drill and every monitor, with no secret in them.
+  the restore drill and every monitor, with no secret in them. A restore keeps the column and
+  function privileges production has (ADR 033): schema from `supabase/migrations`, rows from the
+  backup, and a privilege check that fails on a restore that exposes them.
 - [ ] Required gates pass; the realtime server's production audit stays clean.
 
 Complexity: 3. Dependencies: none. No migration; no embed change.

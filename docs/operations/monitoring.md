@@ -66,7 +66,10 @@ every 15 s (`server/fly.toml`).
 
 - **Browser:** `src/instrumentation-client.ts`, through the same-origin tunnel `/monitoring`. The
   tunnel forwards only envelopes for **our** DSN's org, region and project; anything else is a
-  400 (`src/lib/monitoring/sentry-tunnel-guard.ts`).
+  400 (`src/lib/monitoring/sentry-tunnel-guard.ts`) — under **every spelling** the rewrite
+  accepts. Next matches the rewrite case-insensitively with an optional trailing slash, so
+  `/MONITORING` and `/Monitoring/` are the tunnel too; the first guard compared the exact path,
+  and the s84 review relayed a stranger's envelope through `/MONITORING` on a production build.
 - **Server and Edge:** `sentry.server.config.ts`, `sentry.edge.config.ts`, plus
   `onRequestError` in `src/instrumentation.ts`.
 - **Release:** every Next runtime reports the build's commit SHA (`VERCEL_GIT_COMMIT_SHA`, inlined
@@ -80,8 +83,17 @@ every 15 s (`server/fly.toml`).
 1. `fly secrets set SENTRY_DSN=<dsn> --stage -a recopyfast-ws`, then deploy `server/`.
 2. Trigger one browser error on production and confirm it arrives in Sentry with the commit SHA
    as its release — this also proves Vercel forwards the tunnel body after the middleware read it.
-3. `curl -s -o /dev/null -w '%{http_code}\n' -X POST 'https://www.recopyfa.st/monitoring?o=1&p=1' -d x`
-   prints `400`.
+3. Each of these prints `400` — the exact path, another case, and another case with a trailing
+   slash (`-L --post301 --post302 --post303` follows Next's 308 the way a scripted client would):
+
+   ```sh
+   for path in /monitoring /MONITORING /Monitoring/; do
+     curl -s -o /dev/null -w "$path %{http_code}\n" -L --post301 --post302 --post303 \
+       -X POST "https://www.recopyfa.st$path?o=1&p=1" -d x
+   done
+   ```
+
+   A `200` on any of them is an open relay: roll back.
 4. `gh workflow run uptime.yml`: both targets up, no issue opened.
 
 ## Turning the Sentry uptime monitors on

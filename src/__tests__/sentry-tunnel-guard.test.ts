@@ -85,8 +85,11 @@ function tunnelRequest(
   query: string,
   body: string,
   method = "POST",
+  pathname = SENTRY_TUNNEL_ROUTE,
 ): NextRequest {
-  const url = `https://www.recopyfa.st${SENTRY_TUNNEL_ROUTE}?${query}`;
+  // `new URL` keeps a percent-encoded letter encoded, as NextURL does: the
+  // middleware sees `/%6Donitoring`, not `/monitoring`.
+  const url = `https://www.recopyfa.st${pathname}?${query}`;
   return {
     url,
     method,
@@ -204,6 +207,70 @@ describe("the Sentry tunnel allow-list", () => {
     const response = await send(tunnelRequest(OUR_QUERY, envelope()));
 
     expect(response.status).toBe(400);
+  });
+
+  describe("under every spelling the rewrite accepts", () => {
+    // s84 review, F1 (critical). The guard compared `pathname === "/monitoring"`
+    // while Next compiles the tunnel rewrite case-insensitively, with an
+    // optional trailing slash (`routes-manifest.json`: `caseSensitive: false`,
+    // regex `^/monitoring(/?)(?:/)?$` — the same manifest Vercel routes by).
+    // On a production build, `POST /MONITORING?o=1&p=1` with a foreign
+    // envelope was relayed to Sentry: the open relay this story closes was
+    // one Shift key away. Percent-encoded letters are covered too: `next
+    // start` matches the raw path (they 404), but which form Vercel's edge
+    // matches is not inspectable from here, so the guard decodes as well.
+    // Every spelling below is proved against Next's own route compiler in
+    // `sentry-tunnel-route-coverage.test.ts`.
+    const FOREIGN_QUERY = "o=1&p=1";
+    const FOREIGN_ENVELOPE = envelope("https://key@o1.ingest.sentry.io/1");
+
+    it.each([
+      "/MONITORING",
+      "/Monitoring",
+      "/monitorinG",
+      "/MONITORING/",
+      "/monitoring/",
+      "/%6Donitoring",
+      "/%4Donitoring",
+      "/m%6fnitoring",
+      "/%6D%6F%6E%69%74%6F%72%69%6E%67",
+      "/monitoring%2F",
+    ])("answers 400 to a foreign envelope on %s", async (pathname) => {
+      const response = await send(
+        tunnelRequest(FOREIGN_QUERY, FOREIGN_ENVELOPE, "POST", pathname),
+      );
+
+      expect(response.kind).toBe("json");
+      expect(response.status).toBe(400);
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(asMock(createServerClient)).not.toHaveBeenCalled();
+    });
+
+    it("forwards our own envelope on another spelling, with no session lookup", async () => {
+      // The rewrite forwards `/Monitoring` like `/monitoring`, so it is the
+      // tunnel for `isSessionlessPath` too: no GoTrue round trip, and no
+      // rotated session cookie on Sentry's response.
+      const response = await send(
+        tunnelRequest(OUR_QUERY, envelope(), "POST", "/Monitoring"),
+      );
+
+      expect(response.kind).toBe("next");
+      expect(asMock(createServerClient)).not.toHaveBeenCalled();
+    });
+
+    it.each(["/monitoring/x", "/monitoringx", "/xmonitoring", "/monitorin"])(
+      "leaves %s alone: the rewrite does not accept it",
+      async (pathname) => {
+        getUser.mockResolvedValue({ data: { user: null } });
+
+        const response = await send(
+          tunnelRequest(FOREIGN_QUERY, FOREIGN_ENVELOPE, "POST", pathname),
+        );
+
+        expect(response.kind).toBe("next");
+        expect(getUser).toHaveBeenCalled();
+      },
+    );
   });
 
   describe("with a DSN that names no region", () => {

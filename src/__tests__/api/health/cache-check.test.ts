@@ -179,8 +179,9 @@ describe("A-30 /api/health does not check the rate-limit store", () => {
 
     const response = await HEAD(healthRequest());
 
-    // HEAD is what the uptime monitor calls. It checks the database alone,
-    // so it stays 200 straight through a Redis outage.
+    // HEAD is what a HEAD-based monitor calls. Until s84 it checked the
+    // database alone, so it stayed 200 straight through a Redis outage; it
+    // now reads the cache too.
     expect(response.status).toBe(503);
   });
 

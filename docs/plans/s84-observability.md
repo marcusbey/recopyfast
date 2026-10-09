@@ -34,7 +34,9 @@ No Design step: no screen changes. No migration, no embed change (0 bytes).
    what the rewrite turns into the destination, so it must name exactly our DSN's org, project and
    region (one value each). The envelope header's `dsn` must name our host and project (the brief's
    check, and defence in depth). Non-`POST`, missing or unparsable header, header over 16 KiB, no
-   DSN configured ⇒ 400. Reading the body is safe: middleware receives a clone.
+   DSN configured ⇒ 400. Reading the body is safe: middleware receives a clone. **The guard runs on
+   every path the rewrite accepts** (review F1): any case, trailing slashes, and the
+   percent-decoded form — never `=== "/monitoring"`.
 7. **One release value.** `next.config.ts` puts the build's `VERCEL_GIT_COMMIT_SHA` in
    `env.NEXT_PUBLIC_SENTRY_RELEASE` and in `withSentryConfig`'s `release.name` (source maps). The
    three inits pass `release` only when that value exists, so the SDK's own fallback is never
@@ -52,7 +54,21 @@ No Design step: no screen changes. No migration, no embed change (0 bytes).
    per target, titled `Production down: <host/path>`, label `uptime`. A target is up on any 2xx;
    `degraded` (200) is up — realtime has its own target. The job exits 1 while anything is down,
    so the run shows red as well. `concurrency: uptime` so two runs never open two issues.
-10. **Commits.** Per the orchestrator's protocol: this docs commit, then one story commit.
+10. **Commits.** Per the orchestrator's protocol: this docs commit, then one story commit; the
+    review fix is a third commit on the branch.
+11. **A restore rebuilds the schema from `supabase/migrations` and loads the backup's rows only**
+    (review F2, CTO decision). The nightly dump is `--no-owner --no-privileges` (read from the
+    private repo's workflow): it carries no GRANT or REVOKE, and a new Supabase project's default
+    privileges hand `anon`/`authenticated` every table and function created in `public`. Rejected:
+    restoring the dump's schema "keeping privileges" — measured, it still exposes all 8 secret
+    columns and 63 definer functions, because pg_dump writes GRANTs relative to PostgreSQL's
+    built-in defaults and never revokes Supabase's; and changing the backup job to keep ACLs, for
+    the same reason. Migrations are the reviewed, CI-tested source of every privilege (ADR 033).
+    Rows load in one transaction under `session_replication_role = replica` (triggers would
+    rewrite `staging_access` and `content_elements` rows), after emptying the migration-seeded
+    `public` tables in the same transaction. Verification adds three read-only checks that must
+    return zero rows: secret columns readable by a web role, definer functions executable by one
+    beyond the RLS-predicate allowlist, tables without RLS.
 
 ## Tasks (ordered, test-first)
 
@@ -117,11 +133,46 @@ claims Supabase Free keeps seven days of backups. A production build with a fake
 through the guarded tunnel to a local ingest and refused every foreign variant with 400 —
 self-hosted Next only; Vercel's forwarding is the after-merge check below.
 
+## Review fixes (2026-10-09, findings F1–F8 of the s84 review)
+
+> CTO decision under the owner's 2026-10-09 directive. Rebased onto `origin/main` `fc5968b` first.
+
+12. [x] **F1 (critical) — the tunnel guard sees every spelling.** RED: `sentry-tunnel-guard.test.ts`
+    sends a foreign envelope to `/MONITORING`, `/Monitoring`, `/MONITORING/`, `/%6Donitoring`, … and
+    our own to `/Monitoring` (sessionless); new `sentry-tunnel-route-coverage.test.ts` compiles the
+    real next.config through Next's own `loadCustomRoutes` + `buildCustomRoute` and sends every
+    accepted candidate (3,205 spellings) through the middleware. Reproduced first on `next build` +
+    `next start` with a fake DSN and a local ingest: `/MONITORING`, `/Monitoring`, `/MONITORING/`
+    and `?r=de` relayed a foreign envelope. GREEN: `isSentryTunnelPath` (decode, lower-case, strip
+    trailing slashes) in the guard and in `isSessionlessPath`.
+13. [x] **F2 (major) — a restore keeps privileges.** Decision 11; `docs/operations/backups.md`
+    § Restoring rewritten, its checks run verbatim on a PG17 replay of all migrations.
+14. [x] **F3 — scrub by key at every depth, and `key: value` text.** RED: the reviewer's six planted
+    secrets, six text forms, and the real CLI crashing after logging a handshake. Beyond the
+    finding: an object past the walk's depth limit is now dropped, not passed through unread, and
+    `event.modules` (package name → version) is kept whole — the deep key filter would otherwise
+    blank `jsonwebtoken`'s or `cookie`'s version. A nested `code` key is now filtered too (it can
+    be the handoff code); error codes stay readable in exception messages.
+15. [x] **F4 — never `NEXT_PUBLIC_SENTRY_DSN`.** Pinned in unit and through the real CLI.
+16. [x] **F5 — uptime defaults.** `RETRIES` (probe and run) and the unfollowed redirect pinned.
+17. [x] **F6 — `@sentry/node` loads only with a DSN.** RED: a fresh process's `require.cache`.
+18. [x] **F7** — `cache-check.test.ts` comment. **F8** — rebased, `docs/stories.md` keeps s73 then
+    s84; no lockfile changed on `main`, so no `npm ci`.
+
+Existing tests changed by the review fix (AGENTS.md § Tests): `sentry-tunnel-guard.test.ts`'s
+`tunnelRequest` takes a path (default unchanged); `websocket/sentry.test.ts`'s crash preload takes
+optional statements to run first, on lines of their own (default output byte-identical);
+`cache-check.test.ts` comment only. No test deleted.
+
 ## After merge (orchestrator; nothing here touches production)
 
 - `fly secrets set SENTRY_DSN=<dsn> --stage -a recopyfast-ws`, then deploy; confirm one test event.
 - Trigger a browser error on production; confirm it arrives through `/monitoring` with the commit
   SHA as release (proves Vercel forwards the body after the middleware read it).
 - `curl -s -X POST 'https://www.recopyfa.st/monitoring?o=1&p=1' -d x -o /dev/null -w '%{http_code}'`
-  ⇒ `400`.
+  ⇒ `400`, and the same for `/MONITORING?o=1&p=1` and `/Monitoring/?o=1&p=1` (with
+  `-L --post301 --post302 --post303`) — the loop is in `docs/operations/monitoring.md`. A `200` on
+  any spelling is an open relay.
+- Update the private backups repository's `README.md` restore steps to match
+  `docs/operations/backups.md` § Restoring (its step 5 is the procedure review F2 replaced).
 - Run `uptime.yml` once with `workflow_dispatch`; both targets up, no issue opened.

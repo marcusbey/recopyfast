@@ -5,8 +5,10 @@ import {
   hasAnyEntitlement,
   resolveEntitlement,
 } from "@/lib/billing/effective-plan";
-import { SENTRY_TUNNEL_ROUTE } from "@/lib/monitoring/sentry-tunnel";
-import { isForwardableTunnelRequest } from "@/lib/monitoring/sentry-tunnel-guard";
+import {
+  isForwardableTunnelRequest,
+  isSentryTunnelPath,
+} from "@/lib/monitoring/sentry-tunnel-guard";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -77,8 +79,9 @@ async function isUnentitled(
  * but every error event paid a GoTrue round trip, and a rotated session cookie
  * could land on Sentry's response. Sentry's docs say to drop the tunnel from the
  * matcher; this file keeps it matched, for the headers, like every path here.
- * Exact match: with `trailingSlash` off, `/monitoring/` is redirected before it
- * gets here, and anything under the path is not the tunnel.
+ * Every spelling the rewrite accepts (`isSentryTunnelPath`: any case, trailing
+ * slash, percent-encoded), not just the exact one — the rewrite forwards
+ * `/Monitoring` too. Anything under the path is not the tunnel.
  *
  * The installation guide and its Markdown handoff are public documentation.
  * A visitor may happen to carry a session cookie, but it changes neither
@@ -111,7 +114,7 @@ function isSessionlessPath(pathname: string): boolean {
     pathname === "/try/rcf-try.js" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
-    pathname === SENTRY_TUNNEL_ROUTE
+    isSentryTunnelPath(pathname)
   );
 }
 
@@ -123,8 +126,10 @@ export async function middleware(request: NextRequest) {
   // then the rewrite behind this path relayed to ANY Sentry project named in
   // its query string — see `sentry-tunnel-guard.ts`. This runs before that
   // rewrite, so a refusal here means nothing leaves for Sentry. Still served
-  // with the security headers, still no session work.
-  if (request.nextUrl.pathname === SENTRY_TUNNEL_ROUTE) {
+  // with the security headers, still no session work. Never `=== "/monitoring"`:
+  // the rewrite also accepts `/MONITORING`, and an exact match let the s84
+  // review relay a stranger's envelope through it (`isSentryTunnelPath`).
+  if (isSentryTunnelPath(request.nextUrl.pathname)) {
     const isForwardable = await isForwardableTunnelRequest(
       {
         method: request.method,
