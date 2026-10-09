@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 
-type QueryResult = { data: unknown; error: unknown };
+type QueryResult = { data: unknown; error: unknown; count?: number };
 type SelectCall = { table: string; columns: string | undefined };
 
 const mockGetUser = jest.fn();
@@ -162,6 +162,8 @@ describe("/api/api-keys secret projections", () => {
   it("creates a key with an explicit nonsecret returning projection", async () => {
     resultQueue = [
       { data: { permission: "admin" }, error: null },
+      // The per-site key count POST makes since s77 (ADR 056).
+      { data: null, error: null, count: 0 },
       { data: apiKeyRow, error: null },
     ];
 

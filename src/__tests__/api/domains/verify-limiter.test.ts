@@ -70,6 +70,16 @@ function putRequest(): NextRequest {
   });
 }
 
+/** The per-user bucket answers `status`; every other limiter lets through. */
+function refusePerUserBucketWith(status: 429 | 503) {
+  (enforceRateLimit as jest.Mock).mockImplementation(
+    async (_request: unknown, options: { endpoint: string }) =>
+      options.endpoint === "domains/verify"
+        ? NextResponse.json({ error: "Refused" }, { status })
+        : null,
+  );
+}
+
 describe("PUT /api/domains/verify — per-user limiter", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -78,9 +88,9 @@ describe("PUT /api/domains/verify — per-user limiter", () => {
   });
 
   it("answers 429 and performs no row read, DNS lookup or fetch when refused", async () => {
-    (enforceRateLimit as jest.Mock).mockResolvedValue(
-      NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 }),
-    );
+    // Only the per-user bucket refuses: since s77 a per-IP guard runs first
+    // (verify-limiters.test.ts), and this test is about the bucket behind it.
+    refusePerUserBucketWith(429);
 
     const response = await PUT(putRequest());
 
@@ -101,9 +111,7 @@ describe("PUT /api/domains/verify — per-user limiter", () => {
   });
 
   it("fails closed when the limiter's store is down", async () => {
-    (enforceRateLimit as jest.Mock).mockResolvedValue(
-      NextResponse.json({ error: "Unavailable" }, { status: 503 }),
-    );
+    refusePerUserBucketWith(503);
 
     const response = await PUT(putRequest());
 
@@ -117,7 +125,12 @@ describe("PUT /api/domains/verify — per-user limiter", () => {
     const response = await PUT(putRequest());
 
     expect(response.status).toBe(401);
-    expect(enforceRateLimit).not.toHaveBeenCalled();
+    // The per-IP guard (s77) runs before getUser by design; the user's bucket
+    // is never opened for an anonymous caller.
+    expect(enforceRateLimit).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ endpoint: "domains/verify" }),
+    );
   });
 
   it("proceeds to the row read when the limiter allows", async () => {

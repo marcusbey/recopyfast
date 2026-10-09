@@ -14,13 +14,39 @@ import {
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { sanitizeIncomingContent } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { validateContentAttributePatch } from "@/lib/api/validation";
+import {
+  canonicalSiteId,
+  validateContentAttributePatch,
+} from "@/lib/api/validation";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 import { normalizePagePath } from "@/lib/content/page-path";
 import {
   checkOwnerCanEdit,
   ownerCanEditRefusal,
 } from "@/lib/billing/owner-can-edit";
+
+/**
+ * s77 (s69 L7) — per IP, before anything is decided about the caller.
+ *
+ * Both handlers authorize first (a session lookup and a `site_permissions`
+ * read, then the editor-token validation). PUT metered only after that, behind
+ * the grade; GET was not metered at all. The per-site limiters stay behind
+ * authorization (an anonymous caller must not spend the customer's budget);
+ * this guard is what bounds the authorizer.
+ *
+ * 200/min per address, shared by GET and PUT — the per-site edit ceiling is 50.
+ * Fails CLOSED: each handler's per-site limiter behind it fails closed too, so
+ * in an outage an editor is refused there anyway — failing open here would only
+ * hand a flood the authorizer.
+ */
+function shedIpFlood(request: NextRequest) {
+  return enforceRateLimit(request, {
+    limit: "IP_GENERAL",
+    endpoint: "staging/content:ip",
+    identifierType: "ip",
+    onStoreFailure: "deny",
+  });
+}
 
 function jsonObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -47,7 +73,17 @@ export async function GET(
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
-    const { siteId } = await params;
+    const shed = await shedIpFlood(request);
+    if (shed) return withPublicCors(shed, request);
+
+    const canonical = canonicalSiteId((await params).siteId);
+    if (!canonical.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        request,
+      );
+    }
+    const siteId = canonical.value;
 
     // Same first-party path as PUT below. Without it the owner could save a
     // draft and then be refused when reading it back, which is a worse state
@@ -81,6 +117,21 @@ export async function GET(
 
       access = validation.access;
     }
+
+    // s77 (s69 L7). Per site, fail closed, behind the permission grade — ADR 002
+    // rule 4, which this service-role read of the site's staged copy went
+    // without. Behind authorization for the reason PUT gives below: the bucket
+    // is the customer's. 100/min: nothing in the product reads this on a loop
+    // (the widget only PUTs), so the ceiling only meets a copied credential.
+    const limited = await enforceRateLimit(request, {
+      limit: "USER_GENERAL",
+      endpoint: "staging/content-read",
+      identifier: siteId,
+      identifierType: "api_key",
+      onStoreFailure: "deny",
+      message: "Staging read rate limit exceeded for this site.",
+    });
+    if (limited) return withPublicCors(limited, request);
 
     const supabase = createServiceRoleClient();
 
@@ -171,7 +222,18 @@ export async function PUT(
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
-    const { siteId } = await params;
+    const shed = await shedIpFlood(request);
+    if (shed) return withPublicCors(shed, request);
+
+    const canonical = canonicalSiteId((await params).siteId);
+    if (!canonical.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        request,
+      );
+    }
+    const siteId = canonical.value;
+
     const requestBody = (await request.json()) as Record<string, unknown>;
     const elementId =
       typeof requestBody.elementId === "string" ? requestBody.elementId : "";
@@ -274,6 +336,9 @@ export async function PUT(
     // 50/min because a human is typing. The editor saves per element on blur,
     // not per keystroke (recopyfast.src.js persists on commit), so a real
     // session is nowhere near it and a refusal is retried by the next save.
+    //
+    // Keyed on the canonical id (s77, s69 R1): every spelling of one site
+    // spends this one bucket — see `canonicalSiteId` (src/lib/api/validation.ts).
     const limited = await enforceRateLimit(request, {
       limit: "USER_CONTENT_EDIT",
       endpoint: "staging/content-update",

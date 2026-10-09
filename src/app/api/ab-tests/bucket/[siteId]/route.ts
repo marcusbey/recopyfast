@@ -27,6 +27,22 @@ export async function GET(
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
+    // s77 (s69 L7). Per IP, BEFORE authorization. The per-site limiter below has
+    // to sit behind `authorizeSiteRequest` (an anonymous caller must not spend a
+    // customer's bucket), which left the authorizer's `sites` lookup unmetered
+    // for anyone naming a site id. 200/min per address: the content GET on the
+    // same page view is already behind the same ceiling, so no visitor meets a
+    // new one here. Fails CLOSED: every request this route would serve passes
+    // the fail-closed per-site limiter anyway, so an outage refuses visitors
+    // there regardless — failing open would only hand a flood the authorizer.
+    const shed = await enforceRateLimit(request, {
+      limit: "IP_GENERAL",
+      endpoint: "ab-tests/bucket:ip",
+      identifierType: "ip",
+      onStoreFailure: "deny",
+    });
+    if (shed) return withCors(shed);
+
     const { siteId } = await params;
     const token = extractToken(request);
     const visitorId = request.nextUrl.searchParams.get("visitor_id");

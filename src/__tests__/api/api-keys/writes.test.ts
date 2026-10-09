@@ -51,7 +51,7 @@ const API_KEY_RESPONSE_COLUMNS =
   "is_active, last_used_at, expires_at, created_at, updated_at";
 
 type Operation = "select" | "insert" | "update" | "delete";
-type QueryResult = { data: unknown; error: unknown };
+type QueryResult = { data: unknown; error: unknown; count?: number };
 
 interface RecordedQuery {
   client: "user" | "service";
@@ -59,6 +59,8 @@ interface RecordedQuery {
   operation: Operation;
   payload?: unknown;
   columns?: string;
+  /** A `head: true` count, as POST's per-site key cap issues (s77). */
+  head?: boolean;
   filters: Array<[string, unknown]>;
 }
 
@@ -121,6 +123,8 @@ function resolveAsService(query: RecordedQuery): QueryResult {
     return { data: null, error: scenario.serviceError };
   }
   if (query.operation === "delete") return { data: null, error: null };
+  // POST's per-site key count (s77, ADR 056): the site holds no other key.
+  if (query.head) return { data: null, error: null, count: 0 };
   const row = apiKeyRow();
   if (query.operation === "update") {
     return { data: { ...row, ...(query.payload as object) }, error: null };
@@ -158,10 +162,13 @@ function makeClient(
         single: jest.fn(settle),
         maybeSingle: jest.fn(settle),
       };
-      builder.select = jest.fn((columns?: string) => {
-        query.columns = columns;
-        return builder;
-      });
+      builder.select = jest.fn(
+        (columns?: string, options?: { head?: boolean }) => {
+          query.columns = columns;
+          query.head = options?.head;
+          return builder;
+        },
+      );
       for (const operation of ["insert", "update"] as const) {
         builder[operation] = jest.fn((payload: unknown) => {
           query.operation = operation;

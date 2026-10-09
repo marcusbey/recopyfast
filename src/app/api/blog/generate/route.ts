@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isAuthorizedCronRequest } from "@/lib/security/cron-auth";
 
 /**
  * Checks whether the incoming request is authorised to trigger blog generation.
@@ -16,9 +17,8 @@ import { createClient } from "@/lib/supabase/server";
  */
 async function isAuthorised(request: NextRequest): Promise<boolean> {
   // --- Path 1: CRON_SECRET bearer token ---
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
-  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+  // Constant-time and fail-closed: see isAuthorizedCronRequest (s77, s69 L4).
+  if (isAuthorizedCronRequest(request)) {
     return true;
   }
 

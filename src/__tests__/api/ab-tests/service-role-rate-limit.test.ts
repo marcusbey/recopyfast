@@ -147,6 +147,15 @@ const ROUTES = {
 
 const ROUTE_NAMES = Object.keys(ROUTES) as Array<keyof typeof ROUTES>;
 
+/** The per-site bucket's config, by its endpoint name. */
+function perSiteConfig(name: keyof typeof ROUTES) {
+  const call = checkLimit.mock.calls.find(
+    ([config]) => config.endpoint === `ab-tests/${name}`,
+  );
+  if (!call) throw new Error(`no per-site limiter call for ${name}`);
+  return call[0];
+}
+
 describe("the A/B service-role routes are metered per site", () => {
   let client: { from: jest.Mock };
 
@@ -182,18 +191,29 @@ describe("the A/B service-role routes are metered per site", () => {
     it("buckets the limit by site, never by IP", async () => {
       await call();
 
-      const config = checkLimit.mock.calls[0][0];
+      // Since s77 a per-IP guard runs first (s69 L7,
+      // ip-guard-before-auth.test.ts); this is the per-site bucket behind it.
+      const config = perSiteConfig(name);
       expect(config.identifier).toBe(SITE_ID);
       expect(config.identifierType).not.toBe("ip");
     });
 
     it("refuses over the limit without touching its tables", async () => {
-      checkLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetTime: Date.now() + 30_000,
-        totalRequests: 1001,
-      });
+      checkLimit.mockImplementation(async (config) =>
+        config.identifierType === "ip"
+          ? {
+              allowed: true,
+              remaining: 199,
+              resetTime: Date.now(),
+              totalRequests: 1,
+            }
+          : {
+              allowed: false,
+              remaining: 0,
+              resetTime: Date.now() + 30_000,
+              totalRequests: 1001,
+            },
+      );
 
       const response = await call();
 
@@ -207,7 +227,18 @@ describe("the A/B service-role routes are metered per site", () => {
     });
 
     it("refuses when the limiter store is unreachable", async () => {
-      checkLimit.mockRejectedValue(new Error("Redis unreachable"));
+      // Only the per-site bucket's store call fails, so the refusal is its own.
+      checkLimit.mockImplementation(async (config) => {
+        if (config.identifierType === "ip") {
+          return {
+            allowed: true,
+            remaining: 199,
+            resetTime: Date.now(),
+            totalRequests: 1,
+          };
+        }
+        throw new Error("Redis unreachable");
+      });
 
       const response = await call();
 

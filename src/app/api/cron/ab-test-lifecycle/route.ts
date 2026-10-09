@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { checkTestCompletion } from "@/lib/ab-testing/lifecycle";
+import { isAuthorizedCronRequest } from "@/lib/security/cron-auth";
 
 // Cron endpoint: checks all active A/B tests for completion.
 // Configured to run every 5 minutes via Vercel cron.
 // vercel.json crons config: path="/api/cron/ab-test-lifecycle", schedule="every 5 min"
 export async function GET(request: NextRequest) {
   try {
-    // Verify cron secret to prevent unauthorized access
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-
-    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    // Constant-time and fail-closed: see isAuthorizedCronRequest (s77, s69 L4).
+    if (!isAuthorizedCronRequest(request)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

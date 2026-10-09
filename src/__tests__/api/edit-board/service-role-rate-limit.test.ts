@@ -78,7 +78,9 @@ import {
   POST as restoreVersion,
 } from "@/app/api/edit-board/history/[versionId]/route";
 
-const SITE_ID = "11111111-1111-1111-1111-111111111111";
+// RFC 4122 v4, as gen_random_uuid() issues: since s77 (s69 R1) these routes
+// refuse an id `requireUuid` rejects before any work.
+const SITE_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-2222-2222-222222222222";
 const TOKEN = "staging-token";
 const BASE = "https://www.recopyfa.st/api/edit-board";

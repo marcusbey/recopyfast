@@ -20,12 +20,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { webhookManager } from "@/lib/webhooks/manager";
+import { isAuthorizedCronRequest } from "@/lib/security/cron-auth";
 
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  // Constant-time and fail-closed: see isAuthorizedCronRequest (s77, s69 L4).
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

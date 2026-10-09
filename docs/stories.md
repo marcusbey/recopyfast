@@ -3506,8 +3506,8 @@ at that commit, to be re-verified at research time):
   analytics export has one.
 - [ ] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
   and the region (`src/app/api/health/route.ts:93,130`; `health/ready/route.ts:41,78,104,159`).
-- [ ] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
-  use `timingSafeEqual` over SHA-256 digests.
+- [x] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
+  use `timingSafeEqual` over SHA-256 digests. → closed by s77.
 - [ ] L5 — Raw Stripe errors returned to authenticated callers (payment-method existence oracle);
   payment-methods has no limiter (`billing/payment-methods/route.ts:121,206`;
   `subscription/route.ts:106,143`).
@@ -3515,7 +3515,8 @@ at that commit, to be re-verified at research time):
   scope.
 - [ ] L7 — Public routes with no limiter before authorization, against AGENTS.md:
   `ab-tests/{bucket,active,track}`, `staging/content` GET, `staging/publish`,
-  `staging/validate`, `edit-sessions/{validate,extend}`.
+  `staging/validate`, `edit-sessions/{validate,extend}`. → s77 closes the A/B and
+  `staging/{content,publish}` part; `staging/validate` and `edit-sessions/*` → s77b.
 - [ ] L8 — `public/embed/__fidelity__/index.html` test harness is served in production (live
   200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`.
 - [ ] L9 — `analytics/track` is a service-role write with `onStoreFailure:"allow"` (`:91-97`); a
@@ -3554,20 +3555,21 @@ at that commit, to be re-verified at research time):
 
 **Lows the s68 research verified itself** (R-series, overlapping L7/L17 where noted):
 
-- [ ] R1 — Per-site limiters keyed on the raw site id on authenticated editor routes
+- [x] R1 — Per-site limiters keyed on the raw site id on authenticated editor routes
   (`staging/publish/route.ts:153`, `staging/content/[siteId]/route.ts:280`,
   `ai/translate/route.ts:218`, five `edit-board/*` routes): spelling variants multiply buckets.
-- [ ] R2 — `bulk/update` accepts an unbounded `operations` array (`route.ts:31-38`); linear
-  database cost per request once s68b removes regex mode.
+  → closed by s77 (`ai/translate` was already canonical).
+- [x] R2 — `bulk/update` accepts an unbounded `operations` array (`route.ts:31-38`); linear
+  database cost per request once s68b removes regex mode. → closed by s77 (100 per request).
 - [ ] R3 — `staging_access` keeps admin-only INSERT/UPDATE policies for `authenticated`
   (`20251230000000_staging_workflow.sql:120-142`); an admin can write rows that bypass route
   validation (ADR 047 "Watch").
 - [ ] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
   (`src/lib/auth/editor-directory.ts:271-299`); s68c makes it non-load-bearing, the dashboard still
   lists them as live.
-- [ ] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
-  covers `PUT` only.
-- [ ] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter.
+- [x] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
+  covers `PUT` only. → closed by s77 (with `PUT`'s IP guard, s68b review minor 3).
+- [x] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter. → closed by s77.
 - [ ] R7 — The webhook URL guard narrows DNS rebinding but does not close it
   (`src/lib/security/webhook-url-safety.ts:19-26`, a recorded decision); pinning the resolved IP in
   a custom dispatcher would.
@@ -3906,31 +3908,32 @@ Cause (verified on `origin/main` `c0c40bf`):
 
 Acceptance criteria:
 
-- [ ] L4: the four routes decide `Authorization: Bearer <CRON_SECRET>` through one helper that
+- [x] L4: the four routes decide `Authorization: Bearer <CRON_SECRET>` through one helper that
   compares in constant time over equal-length digests, refuses an unset or empty secret, and never
   throws on a length mismatch. Test: `src/__tests__/api/cron/cron-secret.test.ts`.
-- [ ] L7: the three A/B routes and the staging publish/content routes refuse a flood per IP
+- [x] L7: the three A/B routes and the staging publish/content routes refuse a flood per IP
   (200/min, fail closed) before any authorization or database work; the per-site limiters stay
   behind authorization; the two staging GETs gain a fail-closed per-site limiter (100/min). Tests:
   `src/__tests__/api/ab-tests/ip-guard-before-auth.test.ts`,
   `src/__tests__/api/staging/limiter-order.test.ts`.
-- [ ] R1: every handler that takes a `siteId` from the caller on the staging and edit-board routes
+- [x] R1: every handler that takes a `siteId` from the caller on the staging and edit-board routes
   canonicalises it before any work: an upper-case id is served and metered as the lower-case id; a
   malformed id is 400 before any authorization, limiter or query. Tests:
   `src/__tests__/api/staging/limiter-order.test.ts`,
   `src/__tests__/api/edit-board/canonical-site-id.test.ts`.
-- [ ] R2: more than 100 operations in one `bulk/update` request is 400 before authentication, and
+- [x] R2: more than 100 operations in one `bulk/update` request is 400 before authentication, and
   nothing is written. Test: `src/__tests__/api/bulk/update-operations-cap.test.ts`.
-- [ ] R5 / s68b #3 / R6: every verb of `domains/verify` and `sites/[siteId]/share` runs IP guard →
+- [x] R5 / s68b #3 / R6: every verb of `domains/verify` and `sites/[siteId]/share` runs IP guard →
   `getUser` → fail-closed per-user limiter → permission read → service role (writes 10/min,
   reads 100/min per user). Tests: `src/__tests__/api/domains/verify-limiters.test.ts`,
   `src/__tests__/api/sites/share-limiters.test.ts`.
-- [ ] s42 m3: an eleventh key on a site is 409 and a key name over 100 characters is 400, nothing
+- [x] s42 m3: an eleventh key on a site is 409 and a key name over 100 characters is 400, nothing
   written; ADR 056 records per-key metering with the cap (s44 m2). Test:
   `src/__tests__/api/api-keys/key-cap.test.ts`.
 - [ ] No migration, nothing under `server/` or `public/embed/`, no new dependency; existing suites
   whose fixtures or call-order assertions change are listed in the PR. Required gates pass; one
-  story commit.
+  story commit. (Local: gates green, 27 mutations red; `content-write-privileges` needs PostgREST —
+  open until CI's DB step and the PR list.)
 
 Complexity: 3 (eight small, well-precedented route changes; the breadth — ~15 route handlers and
 the suites that drive them — is the risk). Dependencies: none. Branch
