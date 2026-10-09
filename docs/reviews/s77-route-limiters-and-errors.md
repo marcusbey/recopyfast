@@ -101,6 +101,10 @@ Flag **Concurrent creates exceed site key cap** (investigate): the check-then-in
 admin burst at 10 writes/min) and recorded in ADR 056; an atomic cap needs a database constraint — follow-up with the
 s80 grant-hygiene migration lane.
 
+Flags on head `45deeff`: **PR description names the wrong cache policy** — the PR body now says `private, no-cache`.
+**Staging ID contract conflicts with guard order** — R1's criterion said a malformed id is refused "before any …
+limiter", but the per-IP flood guard (L7) runs first by design; the criterion now says so.
+
 ## Not verified
 
 DB suites (`content-write-privileges`) and core e2e under the new 200/min guards → CI. Real Redis on a preview: 201

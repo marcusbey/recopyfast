@@ -3917,8 +3917,9 @@ Acceptance criteria:
   `src/__tests__/api/ab-tests/ip-guard-before-auth.test.ts`,
   `src/__tests__/api/staging/limiter-order.test.ts`.
 - [x] R1: every handler that takes a `siteId` from the caller on the staging and edit-board routes
-  canonicalises it before any work: an upper-case id is served and metered as the lower-case id; a
-  malformed id is 400 before any authorization, limiter or query. Tests:
+  canonicalises it before any work but the per-IP flood guard (L7, which runs first): an upper-case
+  id is served and metered as the lower-case id; a malformed id is 400 before any authorization,
+  per-site or per-user limiter, or query. Tests:
   `src/__tests__/api/staging/limiter-order.test.ts`,
   `src/__tests__/api/edit-board/canonical-site-id.test.ts`.
 - [x] R2: more than 100 operations in one `bulk/update` request is 400 before authentication, and
