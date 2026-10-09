@@ -115,8 +115,20 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 //   45828 / 33062  measured on feature/s72-edit-board-history-xss
 // The middle lines carry the banner hash's ±2 B; only the two ends are
 // measurements of shipped bytes (build-embed.mjs, same note).
-const SEEDED_MAX_BUNDLE_GZ = 45828;
-const SEEDED_MAX_WIDGET_GZ = 33062;
+// RATCHETED 2026-10-09 (s76-grant-and-edit-token-hardening), DOWNWARD:
+// 45828 → 45827, 33062 → 33059. The owner's edit link carries a one-time code
+// in its fragment, paid for in the same file (itemised in build-embed.mjs):
+//
+//   45828 / 33062  ceilings before s76 = measured on main at 72f4cff
+//   +45 / +40      the code read from `#rcf_edit=`, stripped, swapped for the
+//                  boot check's answer, through one keepEditLink()
+//   −48 / −44      offsets: `kind` fallback, refresh `rememberDevice`, the
+//                  init() condition, `|| undefined` ×4, a destructured restore
+//   +2 / +1        the story's comments (banner hash only)
+//   45827 / 33059  measured on feature/s76-grant-and-edit-token-hardening
+// Only the two ends are measurements of shipped bytes.
+const SEEDED_MAX_BUNDLE_GZ = 45827;
+const SEEDED_MAX_WIDGET_GZ = 33059;
 
 interface CheckRun {
   status: number;

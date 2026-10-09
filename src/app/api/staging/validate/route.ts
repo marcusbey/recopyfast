@@ -9,6 +9,8 @@ import {
   validateEditorAccess,
 } from "@/lib/auth/editor-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
+import { isEditLinkCode } from "@/lib/auth/edit-link";
+import { redeemEditLink } from "@/lib/auth/edit-link-redeem";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 
 export async function POST(request: NextRequest) {
@@ -23,7 +25,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const editorToken =
+    let editorToken =
       extractEditorToken(request, body as Record<string, unknown>) ||
       (token ? { kind: "staging" as const, token } : null);
 
@@ -32,6 +34,34 @@ export async function POST(request: NextRequest) {
         NextResponse.json({ error: "Missing token" }, { status: 400 }),
         request,
       );
+    }
+
+    // The owner's edit link (s76, ADR 055): the widget sends the code from
+    // `#rcf_edit=` as its edit token, once, on its first load. Spent here and
+    // nowhere else; the session it names is then validated like any other,
+    // and its token goes back in this response body for the tab to keep
+    // (ADR 036). The code is worthless from here on.
+    let redeemedToken: string | null = null;
+    if (
+      editorToken.kind === "edit-session" &&
+      isEditLinkCode(editorToken.token)
+    ) {
+      const redemption = await redeemEditLink({
+        code: editorToken.token,
+        siteId,
+        origin: request.headers.get("origin"),
+      });
+      if (!redemption.ok) {
+        return withPublicCors(
+          NextResponse.json(
+            { valid: false, error: redemption.error },
+            { status: redemption.status },
+          ),
+          request,
+        );
+      }
+      redeemedToken = redemption.token;
+      editorToken = { kind: "edit-session", token: redemption.token };
     }
 
     const result = await validateEditorAccess({
@@ -67,6 +97,7 @@ export async function POST(request: NextRequest) {
         expiresAt: result.access?.expiresAt?.toISOString(),
         requiresEmail: result.requiresEmail,
         requiresVerification: result.requiresVerification,
+        ...(redeemedToken ? { editToken: redeemedToken } : {}),
       }),
       request,
     );

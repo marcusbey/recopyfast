@@ -74,17 +74,33 @@
   const urlParams = new URLSearchParams(window.location.search);
   let STAGING_MODE = urlParams.get('rcf_staging') === '1';
   let STAGING_TOKEN = urlParams.get('rcf_token');
-  let EDIT_SESSION_TOKEN = urlParams.get('rcf_edit_token');
+  // The owner's "Edit website" link: `#rcf_edit=<code>` (s76, ADR 055).
+  //
+  // TOMBSTONE — A-29. This read `urlParams.get('rcf_edit_token')`: the edit
+  // session itself, a bearer token good for up to 24 h with no origin or device
+  // binding, in the QUERY — in the customer's access logs and CDN, in every
+  // Referer this page sent before the strip below could run, in history. The
+  // link now carries a code that dies in 60 s and is spent once, in the
+  // FRAGMENT, which no browser sends to a server or puts in a Referer. It sits
+  // in this slot only until the boot check spends it and answers the session's
+  // token (initStagingMode), which replaces it here and in storage.
+  //
+  // `rcf_edit_token` is deliberately NOT read any more, not even as a
+  // fallback: an old or crafted query link is a visitor load, so a long-lived
+  // token can no longer be pushed on someone through a URL (fixation), and no
+  // landing URL's query is ever a credential again (downgrade). Undefined, not
+  // null, when absent: JSON stores it as null all the same (bytes).
+  let EDIT_SESSION_TOKEN = location.hash.split('#rcf_edit=')[1];
 
   // Immediately strip staging params from the visible URL so they don't persist
-  // in browser history, bookmarks, or copy-pasted links.
+  // in browser history, bookmarks, or copy-pasted links — and the fragment when
+  // it carried the edit-link code (any other fragment is the page's own).
+  // `urlParams` is reused: its reads are done.
   if (STAGING_MODE || STAGING_TOKEN || EDIT_SESSION_TOKEN) {
-    const cleanParams = new URLSearchParams(window.location.search);
-    cleanParams.delete('rcf_staging');
-    cleanParams.delete('rcf_token');
-    cleanParams.delete('rcf_edit_token');
-    const cleanSearch = cleanParams.toString();
-    const cleanUrl = window.location.pathname + (cleanSearch ? '?' + cleanSearch : '') + window.location.hash;
+    urlParams.delete('rcf_staging');
+    urlParams.delete('rcf_token');
+    const cleanSearch = urlParams.toString();
+    const cleanUrl = window.location.pathname + (cleanSearch ? '?' + cleanSearch : '') + (EDIT_SESSION_TOKEN ? '' : location.hash);
     history.replaceState(history.state, '', cleanUrl);
   }
 
@@ -118,13 +134,17 @@
   function forgetEditLink() {
     try { sessionStorage.removeItem(EDIT_LINK_KEY); } catch (e) {}
   }
-  try {
-    if ((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN) {
-      sessionStorage.setItem(EDIT_LINK_KEY, JSON.stringify([STAGING_MODE ? STAGING_TOKEN : null, EDIT_SESSION_TOKEN]));
-    } else {
-      const kept = JSON.parse(sessionStorage.getItem(EDIT_LINK_KEY));
-      if (kept) { STAGING_TOKEN = kept[0]; STAGING_MODE = !!STAGING_TOKEN; EDIT_SESSION_TOKEN = kept[1]; }
-    }
+  // Written at parse time for a URL credential, and again when the boot check
+  // swaps an edit-link code for the session's token (s76).
+  function keepEditLink() {
+    try { sessionStorage.setItem(EDIT_LINK_KEY, JSON.stringify([STAGING_MODE ? STAGING_TOKEN : null, EDIT_SESSION_TOKEN])); } catch (e) {}
+  }
+  if ((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN) keepEditLink();
+  else try {
+    // Destructured: a stored value that is not iterable throws here, inside
+    // the try, and leaves this a visitor load.
+    const kept = JSON.parse(sessionStorage.getItem(EDIT_LINK_KEY));
+    if (kept) { [STAGING_TOKEN, EDIT_SESSION_TOKEN] = kept; STAGING_MODE = !!STAGING_TOKEN; }
   } catch (e) {}
 
   // Boolean, not `(STAGING_MODE && STAGING_TOKEN) || ...`: that expression
@@ -349,8 +369,10 @@
     async function refresh(record) {
       const result = await post('refresh-grant', {
         grant: record.grant,
-        siteId: siteId,
-        rememberDevice: record.remembered === true
+        siteId: siteId
+        // TOMBSTONE (s76, A-28): `rememberDevice` rode here and picked the
+        // replacement's lifetime. The server reads the lineage instead and
+        // ignores the field, so it is no longer sent.
       });
       const body = result.body;
 
@@ -980,7 +1002,8 @@
         this.pagePath = normalizedPagePath();
         this.setupMutationObserver();
 
-        if (this.stagingMode && (this.stagingToken || this.editSessionToken)) {
+        // stagingMode is EDITOR_MODE, which already requires a credential.
+        if (this.stagingMode) {
           await this.initStagingMode();
         } else {
           this.editMode = false;
@@ -1065,14 +1088,24 @@
         const response = await fetch(RECOPYFAST_API + '/staging/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          // No `|| undefined` (bytes): an absent credential goes as null, and
+          // the server takes a credential only when it is a string.
           body: JSON.stringify({
-            token: this.stagingToken || undefined,
-            editToken: this.editSessionToken || undefined,
+            token: this.stagingToken,
+            editToken: this.editSessionToken,
             siteId: SITE_ID
           })
         });
 
         const result = await response.json();
+
+        // An edit-link code was spent by this very request (s76, ADR 055):
+        // the answer carries the session's token, which replaces the code in
+        // memory and in the tab's storage. Only a valid answer carries one.
+        if (result.editToken) {
+          EDIT_SESSION_TOKEN = this.editSessionToken = result.editToken;
+          keepEditLink();
+        }
 
         if (!result.valid) {
           // A stored edit link (ADR 036) was valid on the page that stored it,
@@ -1101,7 +1134,8 @@
         }
 
         this.stagingAccess = {
-          kind: result.kind || (this.editSessionToken ? 'edit-session' : 'staging'),
+          // The server sends `kind` with every valid answer (bytes, s76).
+          kind: result.kind,
           verified: true,
           email: result.email,
           permissions: result.permissions,
@@ -1337,9 +1371,10 @@
     /** Body fields carrying a staging credential; none when a grant is in play. */
     editorTokenBody() {
       if (this.editorGrant()) return {};
+      // Nulls, not omitted keys (bytes, s76): servers read strings only.
       return {
-        stagingToken: this.stagingToken || undefined,
-        editToken: this.editSessionToken || undefined
+        stagingToken: this.stagingToken,
+        editToken: this.editSessionToken
       };
     }
 

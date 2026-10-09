@@ -32,6 +32,28 @@ export type EditorPermission = "view" | "edit" | "publish" | "admin";
  */
 export const EDITOR_GRANT_HEADER = "X-RCF-Editor-Grant";
 
+/**
+ * What every editor validator answers when the database, not the credential,
+ * failed (s76, the s41 review's follow-up). 503 with this fixed sentence, never
+ * the driver's own words.
+ *
+ * TOMBSTONE. supabase-js RETURNS its errors instead of throwing them, and each
+ * validator below used to fold "the database did not answer" into "no such
+ * credential": a `.single()` that errored looked exactly like one that found
+ * nothing, so an outage answered 401. The widget forgets an edit link, locks a
+ * session's writes and throws away a device grant on exactly that status — one
+ * database blip signed every link editor out of every site. 401 is a verdict
+ * on the credential; it is only ever answered when the database said so.
+ */
+export const EDITOR_ACCESS_UNAVAILABLE =
+  "Editor access could not be checked. Try again.";
+
+const unavailable = (): EditorAccessValidation => ({
+  valid: false,
+  error: EDITOR_ACCESS_UNAVAILABLE,
+  status: 503,
+});
+
 export interface EditorToken {
   kind: EditorAccessKind;
   token: string;
@@ -327,6 +349,10 @@ async function validateDeviceGrantAccess(
     device: deviceContext,
   });
 
+  // `error` is the grant row's read failing, not a verdict on the grant: 503,
+  // so the widget keeps it and the write is retried (see unavailable()).
+  if (!result.valid && result.reason === "error") return unavailable();
+
   if (!result.valid) {
     console.warn(
       `[editor-access] device grant refused (${result.reason}) for site ${siteId} from ${deviceContext.origin}`,
@@ -365,6 +391,8 @@ async function validateStagingEditorAccess(
     siteId,
     device,
   );
+
+  if (result.unavailable) return unavailable();
 
   if (!result.valid) {
     return {
@@ -468,6 +496,8 @@ async function validateEditSessionAccess(
   };
   const supabase = createServiceRoleClient();
 
+  // `maybeSingle`, not `single`: `single` reports "no row" as an error, which
+  // made an outage indistinguishable from an unknown token (see unavailable()).
   const { data: session, error } = await supabase
     .from("edit_sessions")
     .select("*")
@@ -475,9 +505,13 @@ async function validateEditSessionAccess(
     .eq("site_id", siteId)
     .eq("is_active", true)
     .gte("expires_at", new Date().toISOString())
-    .single();
+    .maybeSingle();
 
-  if (error || !session) {
+  if (error) {
+    console.error("[editor-access] edit session lookup failed:", error.message);
+    return unavailable();
+  }
+  if (!session) {
     return refused;
   }
 
@@ -519,7 +553,14 @@ async function validateEditSessionAccess(
     .eq("user_id", session.user_id)
     .maybeSingle<{ permission: string }>();
 
-  if (grantError || !liveGrant) {
+  if (grantError) {
+    console.error(
+      "[editor-access] live grant lookup failed:",
+      grantError.message,
+    );
+    return unavailable();
+  }
+  if (!liveGrant) {
     return refused;
   }
 

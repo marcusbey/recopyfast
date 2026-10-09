@@ -14,6 +14,13 @@
  * again from the top. sessionStorage is cleared only in `beforeEach`, so it
  * survives between boots in one test exactly as it survives between page loads
  * in one tab. That is the level the bug lives at.
+ *
+ * s76 (ADR 055): the owner's link no longer carries the token. It lands as
+ * `#rcf_edit=<code>`; the widget sends the code as its boot check's
+ * `editToken`, and the answer carries the session's token, which is what the
+ * tab keeps. The stand-in server below answers a code `rcfl1.<t>` with the
+ * token `<t>`, so `link("real")` lands a tab holding "real". `?rcf_edit_token=`
+ * is not read at all any more: see "the legacy query link".
  */
 
 import { readFileSync } from "node:fs";
@@ -30,6 +37,11 @@ const ORIGIN = "https://app.recopyfast.test";
 const API = `${ORIGIN}/api`;
 const EXPIRES_AT = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
 const EDIT_LINK_KEY = `rcf_edit_link:${SITE_ID}`;
+
+/** The owner's edit link as the dashboard opens it since s76. */
+function link(token: string, path = "/") {
+  return `${path}#rcf_edit=rcfl1.${token}`;
+}
 
 type Reply = { status: number; body: unknown } | "network";
 
@@ -74,7 +86,7 @@ function installScriptTag() {
 }
 
 function installFetch(validate: Reply) {
-  const impl = jest.fn(async (url: string) => {
+  const impl = jest.fn(async (url: string, options?: { body?: string }) => {
     if (url.includes("editor/validate-grant")) {
       return response(200, {
         valid: true,
@@ -86,6 +98,19 @@ function installFetch(validate: Reply) {
     }
     if (url.includes("/staging/validate")) {
       if (validate === "network") throw new Error("network unavailable");
+      // The boot check spends an edit-link code (POST /api/staging/validate,
+      // s76): a valid answer carries the session's token.
+      const sent = JSON.parse(options?.body ?? "{}");
+      if (
+        validate.status === 200 &&
+        typeof sent.editToken === "string" &&
+        sent.editToken.startsWith("rcfl1.")
+      ) {
+        return response(200, {
+          ...(validate.body as object),
+          editToken: sent.editToken.slice("rcfl1.".length),
+        });
+      }
       return response(validate.status, validate.body);
     }
     if (url.includes("/staging/content/"))
@@ -229,18 +254,20 @@ describe("the retired email-capture step", () => {
 
 describe("an edit link survives full-page loads in the same tab", () => {
   it("keeps the owner's edit session in sessionStorage, and nowhere else", async () => {
-    await boot("/?rcf_edit_token=real");
+    await boot(link("real"));
 
     expect(widget().editMode).toBe(true);
-    // The strip still runs first: the credential leaves the address bar.
+    // The strip still runs first: the code leaves the address bar.
     expect(window.location.search).toBe("");
+    expect(window.location.hash).toBe("");
+    // What the tab keeps is the token the boot check answered, not the code.
     expect(storedEditLink()).toEqual([null, "real"]);
     // Never localStorage: an unbound bearer token must not outlive the tab.
     expect(window.localStorage.length).toBe(0);
   });
 
   it("boots the next page of the site in edit mode with the same credential", async () => {
-    const first = await boot("/?rcf_edit_token=real");
+    const first = await boot(link("real"));
     const second = await boot("/about");
 
     expect(widget().stagingMode).toBeTruthy();
@@ -248,8 +275,9 @@ describe("an edit link survives full-page loads in the same tab", () => {
     expect(validateBodies(second)).toEqual([
       expect.objectContaining({ editToken: "real", siteId: SITE_ID }),
     ]);
-    // Exactly as on the first page: the credential still travels in the
-    // query, and nothing new was added to the address bar.
+    // Exactly as on the first page: the widget's own reads still carry the
+    // token to RecopyFast's API (s76 follow-up), and nothing was added to the
+    // address bar.
     expect(stagingReads(first)[0]).toContain("rcf_edit_token=real");
     expect(stagingReads(second)[0]).toContain("rcf_edit_token=real");
     expect(window.location.search).toBe("");
@@ -267,13 +295,13 @@ describe("an edit link survives full-page loads in the same tab", () => {
     ]);
   });
 
-  it("lets a token in the URL replace the stored one", async () => {
-    await boot("/?rcf_edit_token=old");
-    const replaced = await boot("/?rcf_edit_token=new");
+  it("lets a new link replace the stored session", async () => {
+    await boot(link("old"));
+    const replaced = await boot(link("new"));
 
     expect(storedEditLink()).toEqual([null, "new"]);
     expect(validateBodies(replaced)).toEqual([
-      expect.objectContaining({ editToken: "new" }),
+      expect.objectContaining({ editToken: "rcfl1.new" }),
     ]);
 
     const next = await boot("/about");
@@ -357,7 +385,7 @@ describe("storage that is blocked, throws or holds garbage", () => {
       const host = watchHostPage();
 
       try {
-        await boot("/?rcf_edit_token=real");
+        await boot(link("real"));
         expect(widget().editMode).toBe(true);
 
         const second = await boot("/about");
@@ -376,7 +404,7 @@ describe("storage that is blocked, throws or holds garbage", () => {
     const host = watchHostPage();
 
     try {
-      await boot("/?rcf_edit_token=real");
+      await boot(link("real"));
       await boot("/about", { status: 401, body: { valid: false } });
     } finally {
       host.stop();
@@ -392,7 +420,7 @@ describe("storage that is blocked, throws or holds garbage", () => {
   });
 
   it("keeps a throwing removeItem inside the widget when a save is refused", async () => {
-    await boot("/?rcf_edit_token=real");
+    await boot(link("real"));
     breakStorage("removeItem");
     (window.fetch as jest.Mock).mockImplementation(async () =>
       response(401, { error: "Expired" }),
@@ -455,7 +483,7 @@ describe("forgetting the edit link when the server refuses it, and only then", (
   it.each([401, 403])(
     "forgets it on a %s from validate, says why once, then boots a visitor",
     async (status) => {
-      await boot("/?rcf_edit_token=real");
+      await boot(link("real"));
       expect(storedEditLink()).toEqual([null, "real"]);
 
       await boot("/about", {
@@ -482,9 +510,20 @@ describe("forgetting the edit link when the server refuses it, and only then", (
 
   it.each([
     ["a 500", { status: 500, body: { error: "Internal server error" } }],
+    // What the server answers for a database outage since s76.
+    [
+      "a 503",
+      {
+        status: 503,
+        body: {
+          valid: false,
+          error: "Editor access could not be checked. Try again.",
+        },
+      },
+    ],
     ["a network failure", "network"],
   ] as const)("keeps it through %s: that is our outage", async (_, reply) => {
-    await boot("/?rcf_edit_token=real");
+    await boot(link("real"));
 
     await boot("/about", reply as Reply);
 
@@ -495,6 +534,82 @@ describe("forgetting the edit link when the server refuses it, and only then", (
       expect.objectContaining({ editToken: "real" }),
     ]);
     expect(widget().editMode).toBe(true);
+  });
+});
+
+describe("s76 — the owner's link carries a one-time code in its fragment", () => {
+  it("sends the code once, to the boot check, and never anywhere else", async () => {
+    const fetch = await boot(link("real", "/pricing"));
+
+    expect(validateBodies(fetch)).toEqual([
+      expect.objectContaining({ editToken: "rcfl1.real", siteId: SITE_ID }),
+    ]);
+    // Every other request of the page load carries the token it was answered,
+    // never the code.
+    const others = fetch.mock.calls.filter(
+      ([url]) => !String(url).includes("/staging/validate"),
+    );
+    expect(others.length).toBeGreaterThan(0);
+    expect(JSON.stringify(others)).not.toContain("rcfl1.");
+    expect(stagingReads(fetch)[0]).toContain("rcf_edit_token=real");
+  });
+
+  it("strips the code and only the code from the address bar", async () => {
+    await boot("/pricing?utm_source=mail#rcf_edit=rcfl1.real");
+
+    expect(window.location.pathname).toBe("/pricing");
+    expect(window.location.search).toBe("?utm_source=mail");
+    expect(window.location.hash).toBe("");
+    expect(widget().editMode).toBe(true);
+  });
+
+  it("leaves an ordinary fragment alone", async () => {
+    const fetch = await boot("/pricing#plans");
+
+    expect(window.location.hash).toBe("#plans");
+    expect(widget().editMode).toBe(false);
+    expect(validateBodies(fetch)).toEqual([]);
+  });
+
+  it("forgets a refused code and says why once", async () => {
+    await boot(link("spent"), {
+      status: 401,
+      body: { valid: false, error: "Invalid or expired edit link" },
+    });
+
+    expect(storedEditLink()).toBeNull();
+    expect(widget().editMode).toBe(false);
+    expect(document.body.textContent).toContain(
+      "Invalid or expired staging link.",
+    );
+
+    const next = await boot("/about");
+    expect(validateBodies(next)).toEqual([]);
+  });
+});
+
+describe("s76 — the legacy query link is a visitor load", () => {
+  // Downgrade and fixation: `?rcf_edit_token=` put a 2–24 h token in a URL,
+  // and a crafted one could push somebody else's session on whoever opened
+  // it. The widget no longer reads the parameter at all.
+  it("does not edit, validate or store anything from ?rcf_edit_token=", async () => {
+    const fetch = await boot("/?rcf_edit_token=real");
+
+    expect(widget().stagingMode).toBeFalsy();
+    expect(widget().editMode).toBe(false);
+    expect(validateBodies(fetch)).toEqual([]);
+    expect(editLinkKeys()).toEqual([]);
+    expect(JSON.stringify(fetch.mock.calls)).not.toContain("real");
+  });
+
+  it("does not let a legacy link displace the session the tab holds", async () => {
+    await boot(link("held"));
+    const next = await boot("/?rcf_edit_token=planted");
+
+    expect(storedEditLink()).toEqual([null, "held"]);
+    expect(validateBodies(next)).toEqual([
+      expect.objectContaining({ editToken: "held" }),
+    ]);
   });
 });
 

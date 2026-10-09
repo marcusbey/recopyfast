@@ -458,7 +458,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     console.warn(
-      `[editor-auth] editor ${siteEditorId} revoked by ${auth.caller.userId}; ${result.grantsKilled} device grant(s) killed`,
+      `[editor-auth] editor ${siteEditorId} revoked by ${auth.caller.userId}; ${result.grantsKilled} device grant(s) killed, ${result.stagingInvitesRevoked} staging invite(s) ended`,
     );
 
     return NextResponse.json({

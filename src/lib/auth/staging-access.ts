@@ -68,6 +68,11 @@ export interface ValidateStagingAccessResult {
   requiresEmail?: boolean;
   requiresVerification?: boolean;
   error?: string;
+  /**
+   * The database failed, so there is no verdict (s76). Callers answer 503, never
+   * 401: see EDITOR_ACCESS_UNAVAILABLE in editor-access.ts.
+   */
+  unavailable?: boolean;
 }
 
 export interface VerifyEmailParams {
@@ -210,7 +215,8 @@ export class StagingAccessManager {
       // Use service role client to bypass RLS for public token validation
       const supabase = createServiceRoleClient();
 
-      // Find the staging access record
+      // Find the staging access record. `maybeSingle`: `single` answers "no
+      // row" as an error, and an error here must mean the database failed.
       const { data: access, error } = await supabase
         .from("staging_access")
         .select("*")
@@ -218,9 +224,13 @@ export class StagingAccessManager {
         .eq("site_id", siteId)
         .eq("is_active", true)
         .gte("expires_at", new Date().toISOString())
-        .single();
+        .maybeSingle();
 
-      if (error || !access) {
+      if (error) {
+        throw new Error(`staging_access lookup failed: ${error.message}`);
+      }
+
+      if (!access) {
         return {
           valid: false,
           verified: false,
@@ -341,6 +351,8 @@ export class StagingAccessManager {
         expiresAt: new Date(access.expires_at),
       };
     } catch (error) {
+      // Every throw on this path is a read that did not answer (the lookup
+      // above, `isEditorRevoked`): no verdict, so `unavailable` (s76).
       console.error("Error validating staging access:", error);
       return {
         valid: false,
@@ -349,6 +361,7 @@ export class StagingAccessManager {
         email: null,
         expiresAt: null,
         error: "Validation failed",
+        unavailable: true,
       };
     }
   }

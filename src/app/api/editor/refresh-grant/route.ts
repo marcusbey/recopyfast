@@ -36,7 +36,10 @@ export async function POST(request: NextRequest) {
     const body = await readJsonBody(request);
     const grant = readString(body, "grant");
     const siteId = readString(body, "siteId");
-    const rememberDevice = body?.rememberDevice === true;
+    // TOMBSTONE (s76, A-28): `rememberDevice` was read here, off the body, and
+    // picked the replacement's lifetime — one extra JSON field turned a
+    // twelve-hour grant into a seven-day one. The lineage decides now
+    // (refreshDeviceGrant); the field is not read, whatever a widget sends.
 
     if (!grant || !siteId) {
       return withPublicCors(
@@ -90,12 +93,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const result = await refreshDeviceGrant({
-      grant,
-      siteId,
-      device,
-      rememberDevice,
-    });
+    const result = await refreshDeviceGrant({ grant, siteId, device });
 
     if (!result.ok) {
       console.warn(

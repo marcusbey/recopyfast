@@ -281,19 +281,46 @@ export async function activateSiteEditor(params: {
 }
 
 /**
- * Revoke an editor and, in the same breath, every device grant beneath them.
+ * Revoke an editor and, in the same breath, every device grant beneath them
+ * and every staging invite to their address on that site.
  *
  * The grant sweep is the point. Marking the editor revoked alone would leave
  * live grants that stop working only at their own expiry, which is up to seven
  * days of access after the owner clicked "remove". Validation re-checks the
  * parent row on every call as a second line of defence, so an interrupted sweep
  * still fails closed — but the sweep is what makes existing sessions die now.
+ *
+ * The invite sweep (s76, s69 R4) is the same idea for `staging_access`. Every
+ * staging validator already refuses an address with a revoked directory row
+ * (s68c, `isEditorRevoked`), so it is not load-bearing for access; it is what
+ * makes the dashboard, and the table, stop calling those invites live. Read
+ * before the update so a retry — clicking remove again after an interrupted
+ * sweep — still finds the editor's site and address and finishes the job.
  */
 export async function revokeSiteEditor(params: {
   siteEditorId: string;
-}): Promise<{ revoked: boolean; grantsKilled: number }> {
+}): Promise<{
+  revoked: boolean;
+  grantsKilled: number;
+  stagingInvitesRevoked: number;
+}> {
   const supabase = createServiceRoleClient();
   const now = new Date().toISOString();
+
+  const { data: editor, error: readError } = await supabase
+    .from("site_editors")
+    .select("site_id, email")
+    .eq("id", params.siteEditorId)
+    .maybeSingle<{ site_id: string; email: string | null }>();
+
+  if (readError) {
+    // Not fatal: revoking the row below is what denies access. Only the
+    // invite sweep needs the address, and it is skipped.
+    console.error(
+      "[editor-directory] editor read before revoke failed:",
+      readError.message,
+    );
+  }
 
   const { error: editorError } = await supabase
     .from("site_editors")
@@ -303,7 +330,7 @@ export async function revokeSiteEditor(params: {
 
   if (editorError) {
     console.error("[editor-directory] revoke failed:", editorError.message);
-    return { revoked: false, grantsKilled: 0 };
+    return { revoked: false, grantsKilled: 0, stagingInvitesRevoked: 0 };
   }
 
   // Delegated rather than repeated inline: this is the same sweep
@@ -317,7 +344,68 @@ export async function revokeSiteEditor(params: {
     "editor_revoked",
   );
 
-  return { revoked: true, grantsKilled };
+  const stagingInvitesRevoked =
+    editor?.site_id && editor.email
+      ? await revokeStagingInvites(editor.site_id, editor.email, now)
+      : 0;
+
+  return { revoked: true, grantsKilled, stagingInvitesRevoked };
+}
+
+/**
+ * Deactivate the active `staging_access` invites to one address on one site.
+ * Best effort, like the grant sweep: logs and reports 0 when it does not land.
+ *
+ * Matched in code with `normalizeEmail`, never with a PostgREST `ilike`:
+ * `staging_access.email` keeps the case it was typed in, and in a LIKE pattern
+ * `_` and `%` are wildcards — `bob_x@…` would match, and end, `bobzx@…`'s
+ * access. One read of the site's active invites, then an update by id.
+ */
+async function revokeStagingInvites(
+  siteId: string,
+  email: string,
+  now: string,
+): Promise<number> {
+  const supabase = createServiceRoleClient();
+  const address = normalizeEmail(email);
+
+  const { data: invites, error } = await supabase
+    .from("staging_access")
+    .select("id, email")
+    .eq("site_id", siteId)
+    .eq("is_active", true);
+
+  if (error) {
+    console.error("[editor-directory] invite read failed:", error.message);
+    return 0;
+  }
+
+  const ids = (invites ?? [])
+    .filter(
+      (invite: { email: string | null }) =>
+        typeof invite.email === "string" &&
+        normalizeEmail(invite.email) === address,
+    )
+    .map((invite: { id: string }) => invite.id);
+
+  if (ids.length === 0) return 0;
+
+  const { data: revoked, error: updateError } = await supabase
+    .from("staging_access")
+    .update({ is_active: false, revoked_at: now })
+    .in("id", ids)
+    .eq("is_active", true)
+    .select("id");
+
+  if (updateError) {
+    console.error(
+      "[editor-directory] invite sweep failed:",
+      updateError.message,
+    );
+    return 0;
+  }
+
+  return revoked?.length ?? 0;
 }
 
 /** Editors of a site, for the dashboard. Includes revoked rows for audit. */

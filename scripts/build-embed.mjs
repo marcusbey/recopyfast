@@ -312,8 +312,41 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * across eight comment salts. Only the two ends are measurements of shipped
  * bytes. build-size-gate.test.ts pins the same pair.
  */
-const MAX_BUNDLE_GZ = 45828;
-const MAX_WIDGET_GZ = 33062;
+/*
+ * RATCHETED DOWN 2026-10-09 (s76-grant-and-edit-token-hardening), from
+ * 45828 / 33062.
+ *
+ * The owner's "Edit website" link stopped carrying the edit session in its
+ * query string (A-29, ADR 055): it lands as `#rcf_edit=<code>`, a 60-second,
+ * single-use code the widget sends to its boot check, which answers the
+ * session's token. Zero headroom on main, so the story paid in this file,
+ * measured on prototypes in sequence (research table):
+ *
+ *   45828 / 33062  ceilings before s76 = measured on main at 72f4cff
+ *   +50 / +56      the code in the edit-token slot: read from the fragment,
+ *                  stripped from the address bar, swapped for the answered
+ *                  token in memory and storage (a dedicated redeem request
+ *                  measured +88 / +79 and was not built)
+ *   −5 / −16       one keepEditLink() for parse time and the swap
+ *   −18 / −16      `kind: result.kind` — the server sends it with every valid
+ *                  answer, so the client-side fallback was dead
+ *   −4 / −3        no `rememberDevice` in the refresh body — the server reads
+ *                  the lineage and ignores it (A-28)
+ *   −10 / −8       init() tests `this.stagingMode` alone; it implies a token
+ *   −4 / −5        no `|| null` on the new read; `location.hash`
+ *   −12 / −12      `|| undefined` dropped from the boot check's body and
+ *                  `editorTokenBody()` (servers read strings only), and a
+ *                  destructured restore
+ *   +2 / +1        the story's tombstone comments (banner hash only; the
+ *                  lines above were measured without them, 45825 / 33058)
+ *   45827 / 33059  measured on the branch — the new ceilings
+ *
+ * Only the two ends are measurements of shipped bytes: every source edit moves
+ * the banner hash, and with it gzip, by up to ±2 B, so the middle lines (each
+ * a prototype run) carry that noise. build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45827;
+const MAX_WIDGET_GZ = 33059;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

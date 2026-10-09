@@ -51,7 +51,7 @@ banners and modals are unchanged.
 ## Tasks (ordered, test-first)
 
 0. [x] **Baseline.** Targeted suites green on `72f4cff`; `build:embed -- --check` = 45828 / 33062.
-1. [ ] **503, not 401, on an outage.**
+1. [x] **503, not 401, on an outage.**
    - RED `src/lib/auth/__tests__/editor-access-outage.test.ts`: `validateEditorAccess` answers
      `{valid:false, status:503}` when the `edit_sessions` read errors, when the `site_permissions`
      read errors, when the `staging_access` read errors, when the revoked-editor read errors, and
@@ -63,50 +63,50 @@ banners and modals are unchanged.
      `staging-access.ts` (`unavailable` flag), `validate-grant/route.ts`.
    - PIN (green before and after, mutation-checked): `edit-link-persistence.test.ts` keeps the link
      through a 503 from validate; `editor-auth.test.ts` keeps the grant through a 503.
-2. [ ] **L12.** RED `src/lib/auth/__tests__/editor-request-origin.test.ts`: exact host (scheme,
+2. [x] **L12.** RED `src/lib/auth/__tests__/editor-request-origin.test.ts`: exact host (scheme,
    port, case variants) true; `evil.example.com`, `example.com.evil.test`, `notexample.com`, the
    parent of a `www.` registration false; localhost true outside production only; a failed or
    empty site read false. GREEN `editor-request.ts`.
-3. [ ] **A-28.** Flip the four `test.failing` in `editor-grants-ttl.test.ts`; adjust the two guards
+3. [x] **A-28.** Flip the four `test.failing` in `editor-grants-ttl.test.ts`; adjust the two guards
    that described the defect (declared); add: a lineage 25 days old mints no later than its
    ceiling; a minted grant's payload carries the lineage start forward; a pre-s76 token (no `l`)
    anchors on its row's `created_at`; a row with no `created_at` and no `l` is refused;
    `validateDeviceGrant` refuses a lineage at the ceiling with `expired`. Route test: the body's
    `rememberDevice` is not forwarded. GREEN `editor-grants.ts`, `refresh-grant/route.ts`. Fixtures
    that build grant rows gain `created_at` (declared).
-4. [ ] **R4.** RED `src/lib/auth/__tests__/editor-directory-revoke.test.ts`: revoking deactivates
+4. [x] **R4.** RED `src/lib/auth/__tests__/editor-directory-revoke.test.ts`: revoking deactivates
    the address's active invites on that site in any case, not another address's (`_` in the name),
    not another site's; a failed sweep still reports the editor revoked. GREEN `editor-directory.ts`;
    the DELETE route logs the count.
-5. [ ] **Edit link — format.** RED `src/lib/auth/__tests__/edit-link.test.ts`: mint/read round
+5. [x] **Edit link — format.** RED `src/lib/auth/__tests__/edit-link.test.ts`: mint/read round
    trip; a tampered payload, a grant-domain signature, a wrong prefix and garbage read as null;
    `buildEditUrl` for `example.com`, `https://example.com`, `https://example.com/path`,
    `example.com:8443`, unparseable → null. GREEN new `src/lib/auth/edit-link.ts` (no Supabase, no
    `@/` imports), `CRYPTO_DOMAIN.editLink`.
-6. [ ] **Edit link — issuance.** Flip the three A-29 pins in `create-token-leak.test.ts` (signing
+6. [x] **Edit link — issuance.** Flip the three A-29 pins in `create-token-leak.test.ts` (signing
    key set in the file, declared) and add: the fragment's code names this session and site and
    expires in ≤ 60 s. GREEN `create/route.ts`.
-7. [ ] **Edit link — redemption.** RED `src/__tests__/api/staging/validate-edit-link.test.ts`
+7. [x] **Edit link — redemption.** RED `src/__tests__/api/staging/validate-edit-link.test.ts`
    (stateful fake): a fresh code → 200, `editToken` = the session's token, `last_used_at` set; the
    same code again → 401, no token; expired, other site, forged → 401 with no database call; other
    origin / subdomain → 403, session unspent; consume error → 503; holder lost the grant → 401; a
    stored raw token still validates with no `editToken` in the answer. GREEN new
    `src/lib/auth/edit-link-redeem.ts`, `staging/validate/route.ts`.
-8. [ ] **Edit link — widget.** RED in `edit-link-persistence.test.ts`: `/#rcf_edit=<code>` → the
+8. [x] **Edit link — widget.** RED in `edit-link-persistence.test.ts`: `/#rcf_edit=<code>` → the
    boot check carries the code, the answer's token replaces it in memory and storage, the address
    bar keeps no fragment; the next page validates with the token; a legacy `?rcf_edit_token=` boots
    a visitor and stores nothing; an ordinary `#section` is untouched; a refused code is forgotten
    and explained once. Convert the suite's other landings, and `ai-suggest-credentials`,
    `editor-terminal-session`, `plan-ended-message` (a tab already holding the session), and
    `editor-auth.test.ts`'s refresh body (declared). GREEN `recopyfast.src.js` (decision 3), rebuild.
-9. [ ] **Bytes.** Ratchet `MAX_*` and `SEEDED_MAX_*` to the measurement with an itemised ledger.
+9. [x] **Bytes.** Ratchet `MAX_*` and `SEEDED_MAX_*` to the measurement with an itemised ledger.
    Stop rule: above 45828 / 33062 → stop and report.
-10. [ ] **e2e.** `share-edit-publish.spec.ts` mints a code for its seeded session and lands on
+10. [x] **e2e.** `share-edit-publish.spec.ts` mints a code for its seeded session and lands on
     `#rcf_edit=`; `realtime-parity.spec.ts` starts both contexts from a tab holding the session.
     `--list` count unchanged.
-11. [ ] **Docs and truth.** `docs/stories.md` s69 L12/R4 → closed by s76; comments that describe
+11. [x] **Docs and truth.** `docs/stories.md` s69 L12/R4 → closed by s76; comments that describe
     `rcf_edit_token` landings (`useEditSession.ts`, `Benefits.tsx`) say what is true.
-12. [ ] **Gates, mutations, commit.** Full jest, type-check (both), lint, format, `build:embed
+12. [x] **Gates, mutations, commit.** Full jest, type-check (both), lint, format, `build:embed
     --check`, Playwright `--list`. Mutation per guard (report table). One story commit.
 
 ## Rollout

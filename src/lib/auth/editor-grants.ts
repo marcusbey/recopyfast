@@ -50,6 +50,31 @@ export const SESSION_GRANT_TTL_MS = 12 * 60 * 60 * 1000;
 export const GRANT_REFRESH_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * No grant lineage outlives this, measured from its FIRST issue — not from the
+ * last rotation (s76, A-28). Past it, validation answers `expired` and the
+ * widget asks for an emailed code; within it, a replacement never expires after
+ * it. Both kinds: a remembered lineage slides seven days at a time up to here,
+ * a session one twelve hours at a time.
+ *
+ * TOMBSTONE. Every rotation used to re-anchor expiry on `Date.now()`, so a
+ * grant refreshed on schedule never retired — a token captured once and kept
+ * warm was good forever. The origin pin "stops a copied token, not a forged
+ * header" (validateDeviceGrant), which leaves elapsed time as the one control
+ * that reliably retires one. MAX_SESSION_LIFETIME_HOURS is the same rule for
+ * edit sessions.
+ */
+export const MAX_GRANT_LINEAGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * A row whose own `expires_at − created_at` exceeds this was minted
+ * remembered: seven days against twelve hours, with a day between them for
+ * the two clocks that stamp those columns (the database stamps `created_at`,
+ * this server computes `expires_at`). The widget's REMEMBERED_FLOOR_MS draws
+ * the same line.
+ */
+const REMEMBERED_SPAN_FLOOR_MS = 24 * 60 * 60 * 1000;
+
+/**
  * How long a superseded grant keeps working after a refresh.
  *
  * Two tabs on the same site share one localStorage entry, and only one of them
@@ -77,6 +102,13 @@ interface GrantPayload {
   x: number;
   /** uniqueness, so two grants minted in the same second differ */
   n: string;
+  /**
+   * When the lineage was first issued, epoch seconds (s76). Carried forward
+   * unchanged by every rotation — the row of a rotated grant is new, so only
+   * the signed token can say when its lineage began. Absent on tokens minted
+   * before s76: their row's `created_at` stands in, once.
+   */
+  l?: number;
 }
 
 export type GrantRejection =
@@ -101,6 +133,10 @@ export interface ValidatedGrant {
   expiresAt: Date;
   /** True once the grant is close enough to expiry that the widget should refresh. */
   shouldRefresh: boolean;
+  /** First issue of this grant's lineage — what MAX_GRANT_LINEAGE_MS counts from. */
+  lineageStartedAt: Date;
+  /** Whether the row was minted remembered, read off its own span. */
+  remembered: boolean;
 }
 
 export type GrantValidation =
@@ -156,13 +192,20 @@ export async function issueDeviceGrant(params: {
   device: DeviceContext;
   rememberDevice: boolean;
   rotatedFrom?: string | null;
+  /** The lineage being continued; absent for a new one, which starts now. */
+  lineageStartedAt?: Date;
 }): Promise<{ grant: string; expiresAt: Date } | null> {
   const supabase = createServiceRoleClient();
 
+  const now = Date.now();
   const ttl = params.rememberDevice
     ? REMEMBERED_GRANT_TTL_MS
     : SESSION_GRANT_TTL_MS;
-  const expiresAt = new Date(Date.now() + ttl);
+  const lineageStartedAtMs = params.lineageStartedAt?.getTime() ?? now;
+  // Never past the lineage's ceiling, however much TTL the kind would give.
+  const expiresAt = new Date(
+    Math.min(now + ttl, lineageStartedAtMs + MAX_GRANT_LINEAGE_MS),
+  );
   const originHash = hashOrigin(params.device.origin);
 
   // Insert first to obtain the row id, then sign a token that names it. The row
@@ -196,6 +239,7 @@ export async function issueDeviceGrant(params: {
     o: originHash,
     x: Math.floor(expiresAt.getTime() / 1000),
     n: generateOpaqueSecret(18),
+    l: Math.floor(lineageStartedAtMs / 1000),
   };
   const grant = encodeSignedToken(GRANT_PREFIX, CRYPTO_DOMAIN.grant, payload);
 
@@ -261,7 +305,7 @@ export async function validateDeviceGrant(params: {
   const { data: row, error } = await supabase
     .from("editor_device_grants")
     .select(
-      "id, site_editor_id, grant_hash, user_agent_hash, origin_hash, expires_at, revoked_at, revoked_reason, site_editors!inner(id, site_id, email, permissions, revoked_at)",
+      "id, site_editor_id, grant_hash, user_agent_hash, origin_hash, expires_at, created_at, revoked_at, revoked_reason, site_editors!inner(id, site_id, email, permissions, revoked_at)",
     )
     .eq("id", payload.g)
     .maybeSingle();
@@ -328,6 +372,18 @@ export async function validateDeviceGrant(params: {
     return { valid: false, reason: "expired" };
   }
 
+  // The lineage ceiling (s76, A-28), enforced where the grant is USED, not
+  // only where it is extended. Written as "not within": a lineage that cannot
+  // be dated (no `l`, no parseable `created_at`) makes this NaN, and NaN must
+  // refuse — a grant that cannot be dated cannot be bounded.
+  const lineageStartedAtMs =
+    typeof payload.l === "number"
+      ? payload.l * 1000
+      : new Date(row.created_at).getTime();
+  if (!(Date.now() - lineageStartedAtMs < MAX_GRANT_LINEAGE_MS)) {
+    return { valid: false, reason: "expired" };
+  }
+
   type EditorJoin = {
     id: string;
     site_id: string;
@@ -381,6 +437,10 @@ export async function validateDeviceGrant(params: {
       expiresAt,
       shouldRefresh:
         expiresAt.getTime() - Date.now() <= GRANT_REFRESH_THRESHOLD_MS,
+      lineageStartedAt: new Date(lineageStartedAtMs),
+      remembered:
+        expiresAt.getTime() - new Date(row.created_at).getTime() >
+        REMEMBERED_SPAN_FLOOR_MS,
     },
   };
 }
@@ -397,7 +457,16 @@ export async function refreshDeviceGrant(params: {
   grant: string;
   siteId: string;
   device: DeviceContext;
-  rememberDevice: boolean;
+  /**
+   * IGNORED (s76, A-28). The replacement's lifetime comes from the lineage
+   * being rotated — the span the server chose for its row — never from the
+   * caller. TOMBSTONE: this was read off the refresh-grant body and picked the
+   * TTL, so a session-only grant became a remembered one with one extra JSON
+   * field. Still accepted so a widget built before s76, which sends it, and
+   * the A-28 suite, which proves no value of it moves the lifetime, both
+   * type-check. Do not start honouring it again, not even "narrow-only".
+   */
+  rememberDevice?: boolean;
 }): Promise<
   | { ok: true; grant: string; expiresAt: Date }
   | { ok: false; reason: GrantRejection }
@@ -451,8 +520,9 @@ export async function refreshDeviceGrant(params: {
     siteEditorId: validation.grant.siteEditorId,
     siteId: validation.grant.siteId,
     device: params.device,
-    rememberDevice: params.rememberDevice,
+    rememberDevice: validation.grant.remembered,
     rotatedFrom: validation.grant.grantId,
+    lineageStartedAt: validation.grant.lineageStartedAt,
   });
 
   if (!issued) {

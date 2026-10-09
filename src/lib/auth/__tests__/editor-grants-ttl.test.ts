@@ -31,19 +31,30 @@
  *
  * Every assertion below reads the `expires_at` actually written to
  * `editor_device_grants`, not the function's return value.
+ *
+ * FIXED in s76. The four `test.failing` pins are plain tests now: a rotation
+ * inherits the lifetime the server chose for the row it replaces (the row's
+ * own `expires_at − created_at`), whatever the body says, and no lineage
+ * outlives MAX_GRANT_LINEAGE_MS from its first issue — carried forward in the
+ * signed token as `l`, or read off the row for a token minted before s76. Two
+ * guards that described the defect ("an old lineage refreshes") changed with
+ * it; the tests after them pin the ceiling where it would otherwise be vacuous.
  */
 
 process.env.EDITOR_GRANT_SECRET =
   "test-editor-grant-secret-at-least-32-chars-long";
 
 import {
+  MAX_GRANT_LINEAGE_MS,
   REMEMBERED_GRANT_TTL_MS,
   SESSION_GRANT_TTL_MS,
   refreshDeviceGrant,
+  validateDeviceGrant,
   type DeviceContext,
 } from "../editor-grants";
 import {
   CRYPTO_DOMAIN,
+  decodeSignedToken,
   encodeSignedToken,
   hashOpaqueSecret,
   hashOrigin,
@@ -138,6 +149,10 @@ function grantRow(
     createdAtMs?: number;
     expiresInMs?: number;
     rotatedFrom?: string | null;
+    /** The lineage start a post-s76 token carries (`l`, epoch ms here). */
+    lineageStartMs?: number;
+    /** A row read without its `created_at`. */
+    withoutCreatedAt?: boolean;
   } = {},
 ) {
   const createdAtMs = opts.createdAtMs ?? Date.now();
@@ -149,6 +164,9 @@ function grantRow(
     o: hashOrigin(ORIGIN),
     x: Math.floor((Date.now() + HOUR_MS) / 1000),
     n: "nonce",
+    ...(opts.lineageStartMs === undefined
+      ? {}
+      : { l: Math.floor(opts.lineageStartMs / 1000) }),
   });
 
   return {
@@ -159,7 +177,9 @@ function grantRow(
       grant_hash: hashOpaqueSecret(token),
       user_agent_hash: hashUserAgent(USER_AGENT),
       origin_hash: hashOrigin(ORIGIN),
-      created_at: new Date(createdAtMs).toISOString(),
+      created_at: opts.withoutCreatedAt
+        ? undefined
+        : new Date(createdAtMs).toISOString(),
       expires_at: new Date(createdAtMs + expiresInMs).toISOString(),
       revoked_at: null,
       revoked_reason: null,
@@ -247,32 +267,29 @@ describe("A-28 — who decides how long a rotated grant lives", () => {
     expect(Number.isFinite(mintedExpiryMs(ops))).toBe(true);
   });
 
-  test.failing(
-    "does not let the request body upgrade a session grant to a remembered one",
-    async () => {
-      // The row being rotated was issued for 12 hours — the user did not tick
-      // "remember this device". The caller sends `rememberDevice: true`, which
-      // `refresh-grant/route.ts:31` reads verbatim off the JSON body.
-      const { token, row } = grantRow({ expiresInMs: SESSION_GRANT_TTL_MS });
-      const { client, ops } = clientFor(row);
-      mockCreateServiceRoleClient.mockReturnValue(client);
+  it("does not let the request body upgrade a session grant to a remembered one", async () => {
+    // The row being rotated was issued for 12 hours — the user did not tick
+    // "remember this device". The caller sends `rememberDevice: true`, which
+    // `refresh-grant/route.ts:31` reads verbatim off the JSON body.
+    const { token, row } = grantRow({ expiresInMs: SESSION_GRANT_TTL_MS });
+    const { client, ops } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
 
-      const before = Date.now();
-      await refreshDeviceGrant({
-        grant: token,
-        siteId: SITE_ID,
-        device,
-        rememberDevice: true,
-      });
+    const before = Date.now();
+    await refreshDeviceGrant({
+      grant: token,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: true,
+    });
 
-      // The replacement must be bounded by what the lineage was actually
-      // granted, not by what the request asked for. Allowing a minute of slack
-      // for clock and execution time.
-      expect(mintedExpiryMs(ops) - before).toBeLessThanOrEqual(
-        SESSION_GRANT_TTL_MS + 60_000,
-      );
-    },
-  );
+    // The replacement must be bounded by what the lineage was actually
+    // granted, not by what the request asked for. Allowing a minute of slack
+    // for clock and execution time.
+    expect(mintedExpiryMs(ops) - before).toBeLessThanOrEqual(
+      SESSION_GRANT_TTL_MS + 60_000,
+    );
+  });
 
   it("mints a grant for both values of rememberDevice", async () => {
     // Guard for the assertion below, which compares two numbers: if either
@@ -295,41 +312,37 @@ describe("A-28 — who decides how long a rotated grant lives", () => {
     }
   });
 
-  test.failing(
-    "keeps the lifetime stable no matter what the body says",
-    async () => {
-      // Framed without prescribing a fix: two requests differing only in an
-      // attacker-controlled field must not produce two different lifetimes for
-      // the same underlying grant.
-      const expiries: number[] = [];
+  it("keeps the lifetime stable no matter what the body says", async () => {
+    // Framed without prescribing a fix: two requests differing only in an
+    // attacker-controlled field must not produce two different lifetimes for
+    // the same underlying grant.
+    const expiries: number[] = [];
 
-      for (const rememberDevice of [false, true]) {
-        const { token, row } = grantRow({ expiresInMs: SESSION_GRANT_TTL_MS });
-        const { client, ops } = clientFor(row);
-        mockCreateServiceRoleClient.mockReturnValue(client);
+    for (const rememberDevice of [false, true]) {
+      const { token, row } = grantRow({ expiresInMs: SESSION_GRANT_TTL_MS });
+      const { client, ops } = clientFor(row);
+      mockCreateServiceRoleClient.mockReturnValue(client);
 
-        await refreshDeviceGrant({
-          grant: token,
-          siteId: SITE_ID,
-          device,
-          rememberDevice,
-        });
+      await refreshDeviceGrant({
+        grant: token,
+        siteId: SITE_ID,
+        device,
+        rememberDevice,
+      });
 
-        expiries.push(mintedExpiryMs(ops));
-      }
+      expiries.push(mintedExpiryMs(ops));
+    }
 
-      expect(Math.abs(expiries[0] - expiries[1])).toBeLessThan(60_000);
-    },
-  );
+    expect(Math.abs(expiries[0] - expiries[1])).toBeLessThan(60_000);
+  });
 });
 
 describe("A-28 — the lineage has no ceiling", () => {
-  it("accepts a 30-day-old lineage as a live, valid grant", async () => {
-    // Guard for the assertion below. That test's fixture is unusual — a row
-    // created 30 days ago that is still live — so it is worth proving the
-    // fixture is actually valid before reading anything into the result. If
-    // the token failed to validate, `test.failing` would report "no ceiling"
-    // when the real story was "the test built a grant the code rejects".
+  it("returns a verdict for a 30-day-old lineage", async () => {
+    // Guard for the assertion below. Its fixture is unusual — a row created 30
+    // days ago that is still live — so this proves the call completes and
+    // answers. (Named "accepts … as a live, valid grant" before s76, when the
+    // answer was yes; the refusal itself is asserted, with its reason, below.)
     const { token, row } = grantRow({
       createdAtMs: Date.now() - 30 * DAY_MS,
       expiresInMs: REMEMBERED_GRANT_TTL_MS + 30 * DAY_MS,
@@ -349,67 +362,80 @@ describe("A-28 — the lineage has no ceiling", () => {
     expect(typeof result.ok).toBe("boolean");
   });
 
-  test.failing(
-    "refuses to extend a lineage that began 30 days ago",
-    async () => {
-      // A token captured once and refreshed on schedule. `created_at` and
-      // `rotated_from` are both on the row and both go unread, so this mints a
-      // fresh 7-day grant on the 30th day exactly as it did on the first.
-      const lineageStart = Date.now() - 30 * DAY_MS;
-      const { token, row } = grantRow({
-        createdAtMs: lineageStart,
-        expiresInMs: REMEMBERED_GRANT_TTL_MS + 30 * DAY_MS,
-        rotatedFrom: "grant-row-0",
-      });
-      const { client, ops } = clientFor(row);
-      mockCreateServiceRoleClient.mockReturnValue(client);
+  it("refuses to extend a lineage that began 30 days ago", async () => {
+    // A token captured once and refreshed on schedule. `created_at` and
+    // `rotated_from` are both on the row and both go unread, so this mints a
+    // fresh 7-day grant on the 30th day exactly as it did on the first.
+    const lineageStart = Date.now() - 30 * DAY_MS;
+    const { token, row } = grantRow({
+      createdAtMs: lineageStart,
+      expiresInMs: REMEMBERED_GRANT_TTL_MS + 30 * DAY_MS,
+      rotatedFrom: "grant-row-0",
+    });
+    const { client, ops } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
 
-      const result = await refreshDeviceGrant({
-        grant: token,
-        siteId: SITE_ID,
-        device,
-        rememberDevice: true,
-      });
+    const result = await refreshDeviceGrant({
+      grant: token,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: true,
+    });
 
-      // Either outcome is an acceptable fix: refuse the refresh outright, or
-      // mint something that does not outlive the ceiling the lineage started
-      // with. What is not acceptable is a full new TTL anchored on today.
-      if (result.ok) {
-        expect(mintedExpiryMs(ops)).toBeLessThanOrEqual(
-          lineageStart + REMEMBERED_GRANT_TTL_MS,
-        );
-      }
-      expect(result.ok).toBe(false);
-    },
-  );
-
-  it("mints a grant for both a new and an old lineage", async () => {
-    // Guard for the assertion below, which compares two minted expiries. It is
-    // the one most exposed to a vacuous pass: the failing test returns early
-    // if either refresh is refused, so this pins that both refreshes actually
-    // happen and both produce a real expiry today.
-    for (const age of [HOUR_MS, 300 * DAY_MS]) {
-      const { token, row } = grantRow({
-        createdAtMs: Date.now() - age,
-        expiresInMs: age + REMEMBERED_GRANT_TTL_MS,
-        rotatedFrom: "grant-row-0",
-      });
-      const { client, ops } = clientFor(row);
-      mockCreateServiceRoleClient.mockReturnValue(client);
-
-      const result = await refreshDeviceGrant({
-        grant: token,
-        siteId: SITE_ID,
-        device,
-        rememberDevice: true,
-      });
-
-      expect(result.ok).toBe(true);
-      expect(Number.isFinite(mintedExpiryMs(ops))).toBe(true);
+    // Either outcome is an acceptable fix: refuse the refresh outright, or
+    // mint something that does not outlive the ceiling the lineage started
+    // with. What is not acceptable is a full new TTL anchored on today.
+    if (result.ok) {
+      expect(mintedExpiryMs(ops)).toBeLessThanOrEqual(
+        lineageStart + REMEMBERED_GRANT_TTL_MS,
+      );
     }
+    expect(result.ok).toBe(false);
   });
 
-  test.failing("mints a shorter grant for an older lineage", async () => {
+  it("refreshes an hour-old lineage and refuses a 300-day-old one as expired", async () => {
+    // Guard for the assertion below, which compares two minted expiries and
+    // returns early when the old lineage is refused. Before s76 this pinned
+    // that BOTH refreshed — which was the defect. It now pins the two halves
+    // the comparison stands on: the young lineage really mints, and the old
+    // one is refused for its age (not for a broken fixture). The ceiling is
+    // pinned without the early return by the tests that follow.
+    const young = grantRow({
+      createdAtMs: Date.now() - HOUR_MS,
+      expiresInMs: HOUR_MS + REMEMBERED_GRANT_TTL_MS,
+      rotatedFrom: "grant-row-0",
+    });
+    const youngClient = clientFor(young.row);
+    mockCreateServiceRoleClient.mockReturnValue(youngClient.client);
+    const youngResult = await refreshDeviceGrant({
+      grant: young.token,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: true,
+    });
+    expect(youngResult.ok).toBe(true);
+    expect(Number.isFinite(mintedExpiryMs(youngClient.ops))).toBe(true);
+
+    const old = grantRow({
+      createdAtMs: Date.now() - 300 * DAY_MS,
+      expiresInMs: 300 * DAY_MS + REMEMBERED_GRANT_TTL_MS,
+      rotatedFrom: "grant-row-0",
+    });
+    const oldClient = clientFor(old.row);
+    mockCreateServiceRoleClient.mockReturnValue(oldClient.client);
+    await expect(
+      refreshDeviceGrant({
+        grant: old.token,
+        siteId: SITE_ID,
+        device,
+        rememberDevice: true,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "expired" });
+    // Refused before the rotation claim: nothing was written.
+    expect(oldClient.ops.filter((op) => op.kind !== "select")).toEqual([]);
+  });
+
+  it("mints a shorter grant for an older lineage", async () => {
     // The finding stated as a difference rather than a threshold, so it holds
     // whatever ceiling is eventually chosen: two grants alike in every respect
     // except age must not be worth the same amount of future time.
@@ -446,5 +472,129 @@ describe("A-28 — the lineage has no ceiling", () => {
     }
 
     expect(minted[1]).toBeLessThan(minted[0]);
+  });
+});
+
+describe("s76 — the lineage ceiling, where a refusal cannot hide it", () => {
+  it("a 25-day-old lineage mints a replacement that ends at its ceiling", async () => {
+    // Inside the ceiling, so the refresh succeeds and the comparison cannot
+    // return early: what is minted must stop at first issue + the ceiling,
+    // five days from now, not a fresh seven days.
+    const lineageStart = Date.now() - 25 * DAY_MS;
+    const { token, row } = grantRow({
+      createdAtMs: lineageStart,
+      expiresInMs: 25 * DAY_MS + REMEMBERED_GRANT_TTL_MS,
+      rotatedFrom: "grant-row-0",
+    });
+    const { client, ops } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    const result = await refreshDeviceGrant({
+      grant: token,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mintedExpiryMs(ops)).toBeLessThanOrEqual(
+      lineageStart + MAX_GRANT_LINEAGE_MS,
+    );
+    expect(mintedExpiryMs(ops)).toBeLessThan(
+      Date.now() + REMEMBERED_GRANT_TTL_MS - DAY_MS,
+    );
+  });
+
+  it("the replacement carries the lineage start forward, signed", async () => {
+    // The row of a rotated grant is new; only the token can say when its
+    // lineage began. If the replacement dropped `l`, the next rotation would
+    // read the new row's `created_at` and the ceiling would restart.
+    const lineageStart = Date.now() - 10 * DAY_MS;
+    const { token, row } = grantRow({
+      createdAtMs: lineageStart,
+      expiresInMs: 10 * DAY_MS + REMEMBERED_GRANT_TTL_MS,
+    });
+    const { client } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    const result = await refreshDeviceGrant({
+      grant: token,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: true,
+    });
+
+    expect(result.ok).toBe(true);
+    const payload = decodeSignedToken<{ l?: number }>(
+      "rcfg1",
+      CRYPTO_DOMAIN.grant,
+      result.ok ? result.grant : null,
+    );
+    expect(payload?.l).toBe(Math.floor(lineageStart / 1000));
+  });
+
+  it("a token's own lineage start wins over its freshly rotated row", async () => {
+    // A post-s76 token whose row was written a minute ago (a rotation) but
+    // whose lineage began 31 days ago: refused, whatever the row says.
+    const { token, row } = grantRow({
+      createdAtMs: Date.now() - 60_000,
+      expiresInMs: REMEMBERED_GRANT_TTL_MS,
+      lineageStartMs: Date.now() - 31 * DAY_MS,
+    });
+    const { client } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    await expect(
+      refreshDeviceGrant({
+        grant: token,
+        siteId: SITE_ID,
+        device,
+        rememberDevice: true,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "expired" });
+  });
+
+  it("validation itself refuses a lineage at its ceiling, as expired", async () => {
+    // Enforced where the grant is USED, not only where it is extended: a
+    // content write with a grant past the ceiling is refused too.
+    const { token, row } = grantRow({
+      createdAtMs: Date.now() - MAX_GRANT_LINEAGE_MS,
+      expiresInMs: MAX_GRANT_LINEAGE_MS + HOUR_MS,
+    });
+    const { client } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    await expect(
+      validateDeviceGrant({ grant: token, siteId: SITE_ID, device }),
+    ).resolves.toEqual({ valid: false, reason: "expired" });
+  });
+
+  it("a grant whose lineage cannot be dated is refused", async () => {
+    // No `l` in the token and no `created_at` on the row: a lineage that
+    // cannot be dated cannot be bounded (the edit-session rule, ADR 047).
+    const { token, row } = grantRow({ withoutCreatedAt: true });
+    const { client } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    await expect(
+      validateDeviceGrant({ grant: token, siteId: SITE_ID, device }),
+    ).resolves.toEqual({ valid: false, reason: "expired" });
+  });
+
+  it("the body cannot shorten a remembered lineage either: it is not read", async () => {
+    // Ignored, not "narrow-only": the lineage decides in both directions.
+    const { token, row } = grantRow({ expiresInMs: REMEMBERED_GRANT_TTL_MS });
+    const { client, ops } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    const before = Date.now();
+    await refreshDeviceGrant({
+      grant: token,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: false,
+    });
+
+    expect(mintedExpiryMs(ops) - before).toBeGreaterThan(6 * DAY_MS);
   });
 });

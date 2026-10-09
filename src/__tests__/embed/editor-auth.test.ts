@@ -377,10 +377,12 @@ describe("editor auth client — returning with a stored grant", () => {
     const identity = await client.boot(null);
 
     expect(calls[1].url).toBe(`${API}/editor/refresh-grant`);
+    // No `rememberDevice` since s76 (A-28): the server reads the replacement's
+    // lifetime off the lineage and ignores the field, so the widget stopped
+    // sending it. The stored record still says where the grant lives.
     expect(calls[1].body).toEqual({
       grant: "rcfg1.stored",
       siteId: SITE_ID,
-      rememberDevice: true,
     });
 
     expect(identity).toMatchObject({
@@ -600,6 +602,23 @@ describe("editor auth client — refusals that must stick", () => {
     seed(local, STORED_GRANT);
 
     const { impl } = makeFetch([{ status: 500, body: { valid: false } }]);
+    const { client } = makeClient({ fetch: impl, local });
+
+    await expect(client.boot(null)).resolves.toEqual({ status: "offline" });
+    expect(storedRecord(local)).toMatchObject({ grant: "rcfg1.stored" });
+  });
+
+  it("keeps the grant on the 503 validate-grant answers for an outage (s76)", async () => {
+    // Exactly what `POST /api/editor/validate-grant` sends when the grant row
+    // could not be read: a reason, and a 5xx. The reason must not be read as
+    // a verdict — before s76 it went out with 401 and this client cleared the
+    // grant and asked for an emailed code.
+    const local = makeStorage();
+    seed(local, STORED_GRANT);
+
+    const { impl } = makeFetch([
+      { status: 503, body: { valid: false, reason: "error" } },
+    ]);
     const { client } = makeClient({ fetch: impl, local });
 
     await expect(client.boot(null)).resolves.toEqual({ status: "offline" });
