@@ -26,14 +26,14 @@ file. Nothing a customer or an operator sees is different afterwards.
 
 ## Tasks (ordered)
 
-- [ ] **1. Two origins, both local, neither of them Next.** `e2e/embed-fixture/servers.ts`:
+- [x] **1. Two origins, both local, neither of them Next.** `e2e/embed-fixture/servers.ts`:
   a *serving origin* (`node:http`) that returns `public/embed/recopyfast.js` and
   `socket.io-client.min.js` **read from disk** with `content-type: application/javascript`, and a
   *host origin* on a second port serving the fixture page. Ports default to 4181/4182 (4173 is
   taken by `share-edit-publish.spec.ts`) and are env-overridable. Modelled on the proven
   `startTargetServer` at `e2e/share-edit-publish.spec.ts:355-385`, minus its Supabase dependency.
   First spec: the page loads and the widget boots — fails if the artifact path or MIME is wrong.
-- [ ] **2. Stub the API surface, from the routes.** `e2e/embed-fixture/stub-api.ts`, mounted on
+- [x] **2. Stub the API surface, from the routes.** `e2e/embed-fixture/stub-api.ts`, mounted on
   the serving origin under `/api`. The widget calls ~15 endpoints (`grep "RECOPYFAST_API + '"`):
   `/content/:siteId` GET+POST, `/staging/content/:siteId`, `/staging/validate`, `/staging/verify`,
   `/staging/publish`, `/edit-board/history` GET+POST+`/:versionId`, `/edit-board/languages`
@@ -70,6 +70,33 @@ file. Nothing a customer or an operator sees is different afterwards.
   confirm the harness goes red on the History spec and green on the others. Record the command
   and the observed failure in the PR description. A safety net never tested against a real break
   is a claim, not evidence.
+
+## Recovery implementation state (2026-09-12)
+
+- Tasks 1–2 are implemented and verified without a browser. A Node contract pass started both
+  origins, fetched the built artifact with `application/javascript`, loaded the host page from
+  the other origin, and exercised validation, staging GET/PUT, publish preview/POST,
+  history/restore, language GET/POST and multipart image upload. Ten requests were recorded; the
+  edited value published, restore reported the three elements in the seeded snapshot, and the
+  language and upload state updated.
+- The four flow specs, isolated Playwright config, package script and unguarded CI job are written,
+  type-check, lint and enumerate as six Chromium tests. They have **not** been run by Playwright
+  locally: the user's running Chrome exposes no remote-debugging endpoint, and launching the
+  separate Chrome for Testing build is disallowed for this run. A manual pass in that existing
+  Chrome did verify built-artifact boot, staging banner, text edit, publish, History rendering and
+  restore, Languages rendering, and image-URL persistence. That observation does not substitute
+  for the automated flow assertions or CLS measurement, so tasks 3–7 remain unchecked.
+- Two plan sentences cannot be implemented against the real routes/widget without crossing the
+  product-code interdict. `POST /api/staging/publish` carries `siteId` plus the editor credential;
+  the edited content correctly travels in the preceding staging `PUT`, then the publish route
+  consumes staged rows. The spec pins that two-step contract instead of inventing content in the
+  publish body. The current Languages tab can add a language and re-render its own panel, but it
+  has no page-language switch and `sendContentMap()` carries no language. The spec covers the real
+  add-language branch and image upload; the requested switch/content-map assertion remains a
+  product finding and keeps task 5 open.
+- `RECOPYFAST_FIXTURE_ARTIFACT` is wired for task 8 to serve a scratch artifact. The mutation run
+  and the CLS delta still require the CI browser (or a later attachable regular-Chrome session);
+  neither result is claimed here.
 
 ## Run interdicts
 

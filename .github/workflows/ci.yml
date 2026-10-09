@@ -117,6 +117,35 @@ jobs:
       - name: Test (Jest – CI mode, blocking)
         run: npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB
 
+  # This job is intentionally separate from `e2e`. That job self-skips when a
+  # disposable Supabase project is absent; this harness owns both local origins
+  # and every API response, so credentials must never become a condition for it.
+  embed-fixture:
+    name: Built Embed Fixture (Playwright)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build embed artifact
+        run: npm run build:embed
+
+      - name: Run built-artifact fixture harness
+        run: npm run test:embed:fixture
+
   # ─── Playwright end-to-end tests ───────────────────────────────────────────
   # Verified green locally: 29 passed, 2 skipped, 0 failed (2026-07-31).
   #
