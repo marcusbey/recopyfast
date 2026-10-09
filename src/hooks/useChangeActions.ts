@@ -10,6 +10,7 @@ import {
   type ContentChange,
   type DraftAttribute,
 } from "./useContentChanges";
+import { timeoutSignal } from "@/lib/utils/timeout-signal";
 
 /**
  * A row's writes from the Changes page (s70b), through the two routes the
@@ -246,7 +247,7 @@ async function send(
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+      signal: timeoutSignal(WRITE_TIMEOUT_MS),
     });
   } catch {
     return { error: lostMessage, isUncertain: true };

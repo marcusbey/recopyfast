@@ -866,6 +866,28 @@ describe("useContentChanges", () => {
     beforeEach(() => jest.useFakeTimers());
     afterEach(() => jest.useRealTimers());
 
+    // Devin on PR #77: Safari before 16 has no AbortSignal.timeout; calling it
+    // threw before the request was sent, so the page could not load at all.
+    it("still sends the read in a browser without AbortSignal.timeout", async () => {
+      const nativeTimeout = AbortSignal.timeout;
+      // @ts-expect-error -- removing the API to model a browser without it
+      delete AbortSignal.timeout;
+      try {
+        global.fetch = jest.fn(HUNG) as unknown as typeof fetch;
+        let settled: "pending" | "rejected" = "pending";
+        void readElementChanges(SITE_A, "rcf-e").catch(
+          () => (settled = "rejected"),
+        );
+        await jest.advanceTimersByTimeAsync(0);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+
+        await jest.advanceTimersByTimeAsync(READ_TIMEOUT_MS);
+        expect(settled).toBe("rejected");
+      } finally {
+        AbortSignal.timeout = nativeTimeout;
+      }
+    });
+
     it("gives up after 30 s, so the element read fails instead of hanging", async () => {
       global.fetch = jest.fn(HUNG) as unknown as typeof fetch;
       let settled: "pending" | "resolved" | "rejected" = "pending";

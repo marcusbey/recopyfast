@@ -154,6 +154,16 @@ first: "Expected rejected, Received pending" at 30 s): a read that never answers
 Flag **Discard remains vulnerable to concurrent edits** (investigate): the read-to-PUT window recorded since the
 `e3098b6` verification; the compare-and-set in the staging PUT is follow-up s81-version-restore-integrity.
 
+## Devin re-run on PR #77 (head `112b775`) — fixed (orchestrator)
+
+The hung-read bug is resolved. New 🟡 **Older browsers cannot load changes** (valid): `AbortSignal.timeout` is missing in
+Safari before 16 (the embed already treats it as optional), and calling it threw before any request was sent — the page
+could not load and every re-read reported stale data. New `src/lib/utils/timeout-signal.ts` uses the native API when
+present, else an `AbortController` that aborts with the same `TimeoutError`; both hooks (reads and writes) use it. Tests
+(red first: "Expected number of calls: 1, Received 0"): with `AbortSignal.timeout` removed, the element read is still
+sent and still gives up at 30 s; the helper aborts at 30 s and not before, with and without the native API. Hooks,
+utils and Changes suites 225/225; type-check and lint clean.
+
 ## Not verified
 
 The DB suite's GoTrue block (real signup JWTs) and the full 86-test Playwright run — CI. A real browser at 375

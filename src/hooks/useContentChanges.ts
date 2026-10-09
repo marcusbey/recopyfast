@@ -5,6 +5,7 @@ import {
   CHANGES_LIST_CEILING,
   CHANGES_PAGE_SIZE,
 } from "@/lib/content/changes-paging";
+import { timeoutSignal } from "@/lib/utils/timeout-signal";
 
 /**
  * The Changes page's server state (s70b): one `GET /api/content/changes` per
@@ -171,7 +172,7 @@ async function fetchChanges(
   if (filters.q) params.set("q", filters.q);
 
   const response = await fetch(`/api/content/changes?${params.toString()}`, {
-    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+    signal: timeoutSignal(READ_TIMEOUT_MS),
   });
   if (!response.ok) {
     let message = `${FALLBACK_ERROR} (${response.status})`;
