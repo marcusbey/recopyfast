@@ -271,6 +271,14 @@ export function BillingDashboard({
     const isPlanHeldForLife =
       lifetimeGrant.kind === "granted" &&
       lifetimeGrant.planIds.includes(plan.id);
+    // s96, folded into s82 (Devin Review on PR #81, finding 3): when every
+    // grant of the plan in force is dated, when the latest ends. The card and
+    // the dialog then say "Included until <date>" — a dated grant ends, and it
+    // was called "Lifetime". Undefined for a plan held for life.
+    const heldUntil =
+      isPlanHeldForLife && lifetimeGrant.kind === "granted"
+        ? lifetimeGrant.endsAt?.[plan.id]
+        : undefined;
     // The plan a still-live subscription bills, named from the catalogue the
     // page already holds. Undefined when the row's plan is not in it.
     const subscriptionPlanName = findSubscriptionPlan(
@@ -311,6 +319,7 @@ export function BillingDashboard({
                 subscription={dashboardData.subscription}
                 plan={plan}
                 isLifetime={isPlanHeldForLife}
+                heldUntil={heldUntil}
                 subscriptionPlanName={subscriptionPlanName}
                 // The allowance the server resolved for this account, not the
                 // catalogue row's: they differ for a lifetime Founding Agency owner
@@ -373,6 +382,7 @@ export function BillingDashboard({
                     planId: plan.id,
                     monthlyCredits:
                       dashboardData.creditWallet?.included ?? null,
+                    endsAt: heldUntil,
                   }
                 : undefined
             }
@@ -389,6 +399,13 @@ export function BillingDashboard({
             grantEndsAt={
               lifetimeGrant.kind === "granted"
                 ? lifetimeGrant.endsAt
+                : undefined
+            }
+            // Devin Review on PR #81, finding 2: a plan change keeps a
+            // subscription set to end, and the dialog says so.
+            subscriptionEndsAt={
+              dashboardData.subscription?.cancel_at_period_end
+                ? dashboardData.subscription.current_period_end
                 : undefined
             }
             onSuccess={handleSubscriptionUpdate}

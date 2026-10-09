@@ -393,6 +393,167 @@ Change: `readGrantedPlans` + `GrantedPlan` in `effective-plan.ts` (`readGrantedP
 - Two pins beyond the brief (latest end across dated grants; the query asks for `expires_at`),
   added because mutations M6 and M10 would otherwise have survived.
 
+## Devin fix pass — Devin Review on PR #81 (2026-10-09)
+
+Three findings on `d08b967`: a Checkout opened before a lifetime grant still bills the owner
+(red), an allowed plan change keeps a scheduled cancellation (yellow), and the plan in force held
+only by a dated grant is called lifetime (yellow — the queued follow-up s96, folded in here).
+
+> CTO decision under the owner's 2026-10-09 directive.
+
+### CTO decisions (Devin fix pass)
+
+17. **A Checkout opened before a lifetime grant never bills the owner: belt and braces.**
+    - (a) When a lifetime grant lands (`grantLifetime`, a fresh grant only — not a duplicate, not a
+      refunded second Founding Agency), the customer's open subscription-mode Checkout Sessions
+      whose `metadata.plan_id` the new grant covers (`isPlanCoveredByGrants(plan, [grantsPlanId])`,
+      so an Agency Checkout beside Lifetime Pro stays open) are expired through the race-safe
+      `expireCheckoutSession` Checkout already uses; every page of open sessions is read. The
+      Stripe customer is the `billing_customers` row of the user. Never throws, like
+      `stopBillingForLifetimeOwner` and for its reason (a retry would never come back: the grant
+      short-circuits on its duplicate); failures go to `logger.error` (Sentry). A session without
+      our `plan_id` was not opened by this app and is left to (b). The expiry fires
+      `checkout.session.expired`, which releases the checkout reservation as for any abandoned
+      Checkout.
+    - (b) A subscription that starts while an **undated**, non-trial, non-revoked grant covers its
+      plan is refused: cancelled now (`prorate: false`, `invoice_now: false`,
+      `cancellation_details.comment = "covered_by_lifetime"`), every payment its latest — for so new
+      a subscription, its first — invoice collected refunded in full, recorded cancelled (never
+      live, so it confers nothing), and reported through `logger.error` with ids only. Both event
+      orderings:
+      - recorded after the grant → `handleSubscriptionCreated` (reached from
+        `customer.subscription.created` and from `checkout.session.completed` in subscription
+        mode) refuses before writing the row. Retryable, as that handler always is: a grant-read,
+        cancellation or refund failure throws → 500 → Stripe redelivers, nothing recorded live
+        meanwhile, and each failure is reported to Sentry so a stuck refusal is never silent.
+      - recorded before the grant's event → `stopBillingForLifetimeOwner`: a live subscription on a
+        covered plan that Stripe created at or after the lifetime payment intent
+        (`subscription.created >= paymentIntent.created`, the intent read once, only when needed)
+        was bought with the plan already paid for and is refused the same way; one created before
+        keeps the existing cancel-at-period-end (its period was paid for before the grant). A
+        failed refusal falls back to that period-end cancellation so it never renews, and is
+        reported. Failures there stay logged, never thrown (unchanged convention), now through
+        `logger.error` so a customer billed for a plan they own reaches Sentry.
+    - Idempotency: the `billing_events` ledger short-circuits a replayed event; a redelivery after a
+      partial failure finds its own cancellation by the marker and only finishes the refund; a
+      refund is found by metadata (`reason_code: covered_by_lifetime`, `subscription_id`) before one
+      is created, and created under an idempotency key — so two events recording the same
+      subscription (Checkout completion and `customer.subscription.created`) refund once. A
+      subscription the webhook set to cancel for a lifetime purchase
+      (`metadata.cancelled_reason = lifetime_purchase`) predates the grant and is never refused
+      afterwards.
+    - Dated grants and trials never trigger (b): a dated grant ends and the subscription is what
+      keeps the plan after it. Checkout and the plan change still refuse a plan a live dated grant
+      covers (decision 10) — the purchase guard is unchanged.
+    - A payment still in flight on that invoice (an `open` invoice payment, e.g. a bank debit)
+      cannot be refunded yet; the cancellation stops collection of what is not yet attempted, and
+      the report says to refund it by hand once it settles.
+    - No migration: the record is Stripe's (cancellation comment, refund metadata), the cancelled
+      `billing_subscriptions` row, the `billing_events` row and the Sentry event.
+18. **A plan change applied to a subscription scheduled to cancel keeps it.** Buying another plan
+    means keeping it: `updateSubscription` sends `cancel_at_period_end: false` when Stripe's
+    subscription is set to cancel at period end, and `cancel_at: ""` when a cancellation date was set
+    elsewhere (the Stripe dashboard) — the card and the dialog read both as "scheduled to cancel"
+    (`cancel_at` on the row), so clearing only one would make the dialog's promise untrue. The
+    dialog says it before the click: "Your subscription is set to end on <date>. Switching plans
+    keeps it: it will renew instead of ending." The date is the period end the card already prints.
+19. **A dated grant on the plan in force says until when, never "for life" (s96, folded in).** The
+    page already reads each granted plan's end (`lifetimeGrant.endsAt`, decision 15);
+    `BillingDashboard` passes the plan in force's end to the card (`heldUntil`) and to the dialog
+    (`heldForLife.endsAt`). The card: badge "Included" (not "Lifetime"), price slot "Included until
+    <date>", running-out row "<plan> is included until <date>." (never "you no longer need it" —
+    the subscription is what keeps the plan after the grant), cancel confirmation "<plan> stays
+    included until <date>, and you will not be charged again." The dialog's held tile: badge
+    "Included", price "Included until <date>", submit "Included in your plan until <date>" — the
+    included tiles' wording. The purchase guard is unchanged: the tile stays disabled, Reactivate
+    stays hidden, and the server refuses both while the dated grant is live.
+
+### Task 19 — a subscription a lifetime grant covers is refused when it starts (finding 1b)
+
+New `src/__tests__/api/billing/stripe-webhook-lifetime-covered.test.ts`: the real route, grant
+reader and grant writer over a filtering fake; Stripe mocked. Recorded after the grant: cancelled at
+once without proration, first invoice refunded in full (no amount, idempotency key), row
+cancelled, reported with ids; same from a completed subscription Checkout (reservation still
+completes); Founding Agency + Agency subscription refused. Idempotency: replayed event, a second
+event for the same subscription, refund failure → 500 then the retry finishes only the refund,
+cancellation failure → 500 and nothing recorded, grant read failure → 500. Not triggered: Agency
+beside Lifetime Pro, dated grant, trial, revoked grant, another account's grant, a subscription the
+lifetime purchase set to end. Recorded before the grant: refused when Stripe created it after the
+lifetime payment, period-end cancellation kept when it predates it, Agency beside Lifetime Pro
+untouched, a failed refusal keeps the grant and is reported.
+
+- [x] Task 19
+
+### Task 20 — a lifetime grant expires the open Checkouts it covers (finding 1a)
+
+Same file: Lifetime Pro expires an open Pro subscription Checkout; a Starter one too, not an Agency
+one nor a one-off payment; Founding Agency expires Pro and Agency; every page is read; a session
+that cannot be expired keeps the grant and is reported; a redelivered grant does not run it again.
+
+- [x] Task 20
+
+### Task 21 — a plan change keeps a subscription scheduled to cancel (finding 2)
+
+Failing tests first:
+- `subscription-rls.test.ts`: Stripe set to cancel at period end → the update sends
+  `cancel_at_period_end: false` and the row's `cancel_at` is cleared; a cancellation date set
+  elsewhere → `cancel_at: ""`; a subscription not scheduled → neither key (unchanged).
+- `BillingDashboard.plan-change.test.tsx`: a subscriber set to cancel reads "Your subscription is
+  set to end on October 10, 2026. Switching plans keeps it: it will renew instead of ending."; one
+  renewing reads the description unchanged.
+
+- [x] Task 21
+
+### Task 22 — a dated grant on the plan in force says until when (finding 3, s96)
+
+Failing tests first:
+- `SubscriptionCard.badge.test.tsx`: a plan held through a dated grant → badge "Included", price
+  "Included until November 19, 2026", no "Lifetime"; running-out row and cancel confirmation say
+  until when, never "for life"; no Reactivate. Undated → unchanged.
+- `UpgradeDialog.agency.test.tsx`: the held tile with an end → "Included", "Included until November
+  19, 2026", submit "Included in your plan until November 19, 2026", disabled; undated unchanged.
+- `BillingDashboard.plan-card.test.tsx`: Pro in force through a dated Pro grant → the card and the
+  dialog say until when; undated Lifetime Pro unchanged.
+
+- [x] Task 22
+
+### Devin fix pass — existing tests changed (declared)
+
+- `stripe-webhook-ordering.test.ts`, `stripe-webhook-stale-writes.test.ts`: the fake client gains
+  `is` / `neq` (applied as filters) and `or` (pass-through) — the grant read's methods, now sent by
+  `customer.subscription.created`. No grant row is seeded there, so it answers none. No assertion
+  changed.
+- `stripe-webhook-write-failures.test.ts`: the fake answers `plan_entitlements` with no rows (the
+  `subscription-rls.test.ts` pattern). No assertion changed.
+- New cases appended to existing files (no existing case touched): `subscription-rls.test.ts`
+  (one describe), `BillingDashboard.plan-change.test.tsx`, `SubscriptionCard.badge.test.tsx`,
+  `UpgradeDialog.agency.test.tsx`, `BillingDashboard.plan-card.test.tsx` (one describe each).
+
+### Devin fix pass — execution notes (deviations, declared)
+
+- The refusal and the Checkout expiry live in a new `src/lib/stripe/lifetime-covered-billing.ts`
+  (the route is already 1,800+ lines); the route keeps the decisions (when to refuse, how to
+  report, retry or swallow).
+- `handleSubscriptionCreated` resolves the plan before the upsert instead of inside it: the
+  refusal needs it. Same call, after the customer read as before.
+- `stopBillingForLifetimeOwner`'s two existing `console.error` reports now go through
+  `logger.error` (Sentry), and a failed refusal falls back to the existing period-end
+  cancellation. Neither was spelled out by the brief; both follow "never leave the user billed
+  silently".
+- In the grant-first ordering the refused subscription's row is written cancelled at once; in the
+  subscription-first ordering it is left to `customer.subscription.deleted` (which the
+  cancellation emits) to mark it cancelled, as `stopBillingForChargeback` does — so for those
+  seconds a row Stripe has already cancelled still reads live.
+- Decision 18 clears a dashboard-set `cancel_at` too, beyond the brief's `cancel_at_period_end`,
+  for the reason given there.
+- The dated-grant wording of the card's running-out row ("<plan> is included until <date>.") and
+  cancel confirmation ("<plan> stays included until <date>, …") is mine; the brief asked for
+  "Included until <date>" style without fixing those two sentences.
+- `UpgradeDialog`'s local `formatGrantEnd` is renamed `formatLongDate`: it now formats the
+  subscription's end as well.
+- One pin beyond the brief: the one-off session in the expiry case names a plan, because mutation
+  M15 (session mode ignored) survived when it did not.
+
 ## Follow-ups (not this story)
 
 - Translate and A/B generate refunds report failures to `console.error` only (decision 5).
@@ -406,10 +567,8 @@ Change: `readGrantedPlans` + `GrantedPlan` in `effective-plan.ts` (`readGrantedP
   recovery portal). If the portal lets a customer switch plans, a lifetime owner could switch down
   into a plan their grant covers there, past every guard of this story. Not checked here: no
   Stripe access from this environment.
-- A plan held through a *dated* grant is still shown as held for life where it is the plan in
-  force: the card's "Lifetime" badge and "Lifetime access" (`SubscriptionCard`, `isLifetime`) and
-  the dialog's held tile ("Lifetime", "Lifetime access", "You hold <plan> for life"). The end date
-  now reaches `BillingDashboard` (`lifetimeGrant.endsAt`); m3 covered the included tiles only.
+- ~~A plan held through a *dated* grant is still shown as held for life where it is the plan in
+  force~~ — done in the Devin fix pass (decision 19; queued as s96, folded into s82).
 
 ## Execution notes (deviations, declared)
 

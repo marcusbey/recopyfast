@@ -23,6 +23,14 @@ interface SubscriptionCardProps {
    */
   isLifetime: boolean;
   /**
+   * s96, folded into s82 (Devin Review on PR #81, finding 3): when the grant
+   * holding the plan in force is dated, when it ends (ISO). The card then says
+   * "Included until <date>" where it would say lifetime: a dated grant ends,
+   * and a subscription beside it is what keeps the plan afterwards. Read only
+   * with `isLifetime`; absent for a plan held for life.
+   */
+  heldUntil?: string;
+  /**
    * Display name of the plan `subscription` bills, from the catalogue the page
    * already holds. Read only while the plan in force is held for life, to name
    * the subscription still running out beside it (s71 review M-2); undefined
@@ -49,9 +57,15 @@ interface SubscriptionCardProps {
  * that had just stopped saying it. "Free" names a retired plan nobody is on;
  * a zero price is stated as a price, like any other.
  */
-function priceLabel(plan: SubscriptionPlan, isLifetime: boolean): string {
+function priceLabel(
+  plan: SubscriptionPlan,
+  isLifetime: boolean,
+  heldUntilDate: string | null,
+): string {
   if (isLifetime) {
-    return "Lifetime access";
+    return heldUntilDate
+      ? `Included until ${heldUntilDate}`
+      : "Lifetime access";
   }
   return `$${plan.price}/month`;
 }
@@ -96,11 +110,16 @@ function runningOutSubscriptionText(
   subscriptionPlanName: string | undefined,
   heldPlanName: string,
   periodEnd: string,
+  heldUntilDate: string | null,
 ): string {
   const subject = subscriptionPlanName
     ? `Your ${subscriptionPlanName} subscription`
     : UNNAMED_SUBSCRIPTION;
-  const noLongerNeeded = `you hold ${heldPlanName} for life, so you no longer need it.`;
+  // s96 (Devin finding 3): beside a dated grant the subscription is what keeps
+  // the plan once the grant ends, so it is never "no longer needed".
+  const noLongerNeeded = heldUntilDate
+    ? `${heldPlanName} is included until ${heldUntilDate}.`
+    : `you hold ${heldPlanName} for life, so you no longer need it.`;
   // A live row is active, trialing or past_due (getUserSubscription); only
   // "active" goes without saying.
   if (subscription.status === "active") {
@@ -123,6 +142,7 @@ export function SubscriptionCard({
   subscription,
   plan,
   isLifetime,
+  heldUntil,
   subscriptionPlanName,
   monthlyCredits,
   includedAfterSubscription,
@@ -192,7 +212,12 @@ export function SubscriptionCard({
   // plan in force, and the subscription's status moves to its named row. With
   // neither (a trial has no row), no badge beats a wrong one.
   const getStatusBadge = () => {
-    if (isLifetime) return <Badge variant="default">Lifetime</Badge>;
+    // s96: a dated grant is "Included", as the dialog calls it — never Lifetime.
+    if (isLifetime) {
+      return (
+        <Badge variant="default">{heldUntil ? "Included" : "Lifetime"}</Badge>
+      );
+    }
     if (!subscription) return null;
 
     const variant =
@@ -227,8 +252,12 @@ export function SubscriptionCard({
     });
   };
 
+  // The plan in force's grant end, when the grant is dated (s96).
+  const heldUntilDate = isLifetime && heldUntil ? formatDate(heldUntil) : null;
+
   // s71: under a plan held for life, cancelling the lower subscription ends
   // nothing the owner keeps — "You keep access until <period end>" was untrue.
+  // s96: under a dated grant it ends nothing before the grant does.
   const cancelConfirmText = !subscription
     ? ""
     : isLifetime
@@ -236,7 +265,11 @@ export function SubscriptionCard({
           subscriptionPlanName
             ? `your ${subscriptionPlanName} subscription`
             : UNNAMED_SUBSCRIPTION.toLowerCase()
-        }? You keep ${plan.name} for life, and you will not be charged again.${allowanceWithoutSubscriptionText(
+        }? ${
+          heldUntilDate
+            ? `${plan.name} stays included until ${heldUntilDate}`
+            : `You keep ${plan.name} for life`
+        }, and you will not be charged again.${allowanceWithoutSubscriptionText(
           includedAfterSubscription,
         )}`
       : `Cancel your subscription? You keep access until ${formatDate(
@@ -263,7 +296,7 @@ export function SubscriptionCard({
         <div>
           <h4 className="font-medium text-lg">{plan.name} plan</h4>
           <p className="text-2xl font-semibold text-primary tabular">
-            {priceLabel(plan, isLifetime)}
+            {priceLabel(plan, isLifetime, heldUntilDate)}
           </p>
         </div>
 
@@ -274,6 +307,7 @@ export function SubscriptionCard({
               subscriptionPlanName,
               plan.name,
               formatDate(subscription.current_period_end),
+              heldUntilDate,
             ) + allowanceWithoutSubscriptionText(includedAfterSubscription)}
           </p>
         )}

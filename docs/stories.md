@@ -3964,6 +3964,16 @@ Cause (verified on `origin/main` `72f4cff`):
   "Failed to read plan entitlements: <database text>". The plan dialog says "Included for life" and
   "Included in your lifetime <plan>" for a plan included only by a dated grant
   (`UpgradeDialog.tsx:127-130,340-345`), and its naming of the highest grant is unpinned.
+- (Found by Devin Review on PR #81, on `d08b967`.) A subscription Checkout Session opened before a
+  lifetime grant lands stays payable: `stopBillingForLifetimeOwner`
+  (`webhooks/stripe/route.ts:941-1002`) only cancels subscriptions already live, and
+  `handleSubscriptionCreated` (`:486-534`) records a later one without reading grants — open Pro
+  Checkout, buy Lifetime Pro in another tab, pay the old session, and Pro bills monthly for a plan
+  owned. An allowed plan change on a subscription set to cancel (`subscription.ts:378,399-413`)
+  charges the proration and still cancels at period end. The plan in force held only through a
+  dated grant reads "Lifetime" / "Lifetime access" / "for life" on the card and its dialog tile
+  (`SubscriptionCard.tsx:52-55,194-195`, `BillingDashboard.tsx:378`) — the queued follow-up **s96,
+  folded into s82** (it has no story of its own).
 - A Founding Agency owner still running out an Agency subscription reads "1,000 AI credits /
   month" with nothing saying it drops to 250 when the subscription ends (s71 review N-1;
   `SubscriptionCard.tsx:102-128`, ADR 038).
@@ -4017,8 +4027,26 @@ Acceptance criteria:
   included, which is never told as "No active subscription found" (fix pass); a missing and a
   foreign payment method answer the same 404; `payment-methods` is rate limited per IP before
   authorisation, and the card shows the limiter's sentence and when to try again (fix pass).
+- [ ] (Devin fix pass) When a lifetime grant lands, the customer's open subscription Checkouts for a
+  plan it covers are expired (an Agency Checkout beside Lifetime Pro stays open); a failure keeps
+  the grant and is reported to Sentry.
+- [ ] (Devin fix pass) A subscription that starts while an undated, non-trial grant covers its plan
+  is cancelled at once without proration, what its first invoice collected is refunded in full, it
+  is recorded cancelled (never live), and the refusal is reported to Sentry — whether its event
+  arrives after the grant's or before it (then only when Stripe created it after the lifetime was
+  paid; an older subscription keeps the period-end cancellation). Replays and retries refund once;
+  a failure is retried or reported, never silent. An Agency subscription beside Lifetime Pro, a
+  dated grant and a trial never trigger it.
+- [ ] (Devin fix pass) A plan change on a subscription scheduled to cancel clears the scheduled
+  cancellation, and the dialog says before the click that the subscription will renew.
+- [ ] (Devin fix pass, s96 folded in) The plan in force held only through a dated grant reads
+  "Included" and "Included until <date>" on the card and in its dialog tile — never "Lifetime" or
+  "for life", and the running-out row never calls the subscription beside it unneeded; it stays
+  unbuyable and Reactivate stays hidden while the grant is live.
 - [ ] Every non-lifetime billing behaviour is unchanged, pinned by regression tests.
 
 Complexity: 3. Dependencies: s71 (merged, #74). Branch `feature/s82-billing-lifetime-guards`.
+Folds in s96 (dated grant on the plan in force), which was queued from this story's review and has
+no entry of its own.
 
 Embed allocation: 0 bytes (ceilings only go down).

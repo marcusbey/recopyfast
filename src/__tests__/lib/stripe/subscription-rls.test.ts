@@ -518,3 +518,74 @@ describe("s82: deliberate refusals are BillingRefusals", () => {
     expect(error).not.toBeInstanceOf(BillingRefusal);
   });
 });
+
+/**
+ * s82, Devin Review on PR #81 (finding 2): a plan change applied to a
+ * subscription scheduled to cancel kept the cancellation. An owner whose
+ * subscription was set to end — by them, or by a lifetime purchase — switched
+ * up to Agency, paid the prorated difference, and still lost Agency at period
+ * end. Buying another plan means keeping it: the change clears the scheduled
+ * cancellation in the same Stripe update, and the row stops saying it ends.
+ */
+describe("s82: a plan change keeps a subscription scheduled to cancel", () => {
+  const PERIOD_END = 1788163200; // 2026-09-01T00:00:00Z
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    stored = { ...seedRow(), cancel_at: "2026-09-01T00:00:00.000Z" };
+    effects = [];
+    allWritesBlocked = false;
+    rowMissing = false;
+    readFails = false;
+    armStripeDefaults();
+  });
+
+  function scheduledInStripe(fields: Record<string, unknown>) {
+    mockStripeRetrieve.mockResolvedValue({
+      id: STRIPE_SUBSCRIPTION_ID,
+      metadata: { user_id: "user-1" },
+      items: { data: [{ id: "si_1", price: { id: CURRENT_PRICE_ID } }] },
+      ...fields,
+    });
+  }
+
+  it("clears a cancellation at period end in the same update that changes the price", async () => {
+    scheduledInStripe({ cancel_at_period_end: true, cancel_at: PERIOD_END });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    expect(mockStripeUpdate).toHaveBeenCalledTimes(1);
+    expect(mockStripeUpdate).toHaveBeenCalledWith(
+      STRIPE_SUBSCRIPTION_ID,
+      expect.objectContaining({
+        items: [{ id: "si_1", price: TARGET_PRICE_ID }],
+        cancel_at_period_end: false,
+      }),
+    );
+    // Stripe answers with no cancellation; the row stops saying it ends.
+    expect(stored.cancel_at).toBeNull();
+  });
+
+  it("clears a cancellation date set elsewhere (the Stripe dashboard)", async () => {
+    scheduledInStripe({
+      cancel_at_period_end: false,
+      cancel_at: PERIOD_END + 86400,
+    });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    const [, params] = mockStripeUpdate.mock.calls[0];
+    expect(params).toEqual(expect.objectContaining({ cancel_at: "" }));
+    expect(params).not.toHaveProperty("cancel_at_period_end");
+  });
+
+  it("sends no cancellation field for a subscription that renews", async () => {
+    scheduledInStripe({ cancel_at_period_end: false, cancel_at: null });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    const [, params] = mockStripeUpdate.mock.calls[0];
+    expect(params).not.toHaveProperty("cancel_at_period_end");
+    expect(params).not.toHaveProperty("cancel_at");
+  });
+});

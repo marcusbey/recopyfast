@@ -116,6 +116,43 @@ against production: no Supabase connector, no Stripe call (live or test), no cre
     trial's end only (`dashboard/route.ts:192-193`), and trials are excluded from the grants.
     Selecting `expires_at` in that same query is the only source that needs no new fetch.
 
+15. **A subscription Checkout opened before the grant stays payable (Devin Review on PR #81,
+    finding 1, verified on `d08b967`).** Checkout's subscription guard runs when the session is
+    created; the session itself lives until its `expires_at` — one hour after it opened
+    (`SUBSCRIPTION_CHECKOUT_TTL_MS` in `checkout-reservation.ts`, passed as `expiresAt`). Paying it emits `checkout.session.completed` (subscription mode,
+    with `checkout_intent_id`) and `customer.subscription.created`, both of which reach
+    `handleSubscriptionCreated`, which upserted the row with no grant read.
+    `stopBillingForLifetimeOwner` reads only `billing_subscriptions` rows live when the grant
+    lands, and `grantLifetime` returns before it on a duplicate grant, so nothing ever revisits a
+    subscription recorded later. Stripe does not order events, so the subscription's event can
+    also be processed first, the grant's second.
+16. **What Stripe offers for the two guards (SDK 18.4.0, API `2025-07-30.basil`, read from
+    `node_modules/stripe/types`).** `checkout.sessions.list({ customer, status: "open" })` lists a
+    customer's open sessions (paged by `starting_after`); `createCheckoutSession` writes
+    `metadata.plan_id` on every subscription session, and `expireCheckoutSession`
+    (`src/lib/stripe/checkout.ts`) already expires one race-safely. `subscriptions.cancel(id,
+    { prorate, invoice_now, cancellation_details: { comment } })` cancels now; the comment stays on
+    the subscription (`cancellation_details.comment`). In this API version an invoice's payments
+    are `invoicePayments.list({ invoice })` (`payment.type` `payment_intent` | `charge`, `status`
+    `open` | `paid` | `canceled`) — `invoice.charge` / `invoice.payment_intent` no longer exist.
+    `refunds.list({ payment_intent | charge })` and `refunds.create(…, { idempotencyKey })` are what
+    the Founding Agency duplicate refund already uses. A Checkout payment intent is created when
+    the session is confirmed, so its `created` is when the lifetime was paid; a Checkout
+    subscription's `created` is when it was paid. Refunding a subscription invoice's payment intent
+    revokes nothing in `handleMoneyReturned` (keyed on lifetime and credit payment intents only).
+17. **A plan change kept the scheduled cancellation (finding 2).** `updateSubscription` sent
+    `items`, `proration_behavior` and `metadata` only, so a subscription with
+    `cancel_at_period_end: true` (or a dashboard-set `cancel_at`) was charged the proration and
+    still ended. The card and the dialog read either as "scheduled to cancel" (the row's
+    `cancel_at`, `toSubscription`). Stripe's update clears them with `cancel_at_period_end: false`
+    and `cancel_at: ""` respectively. The dialog's description is the only confirmation the plan
+    change has (`UpgradeDialog.tsx`, `DialogDescription`).
+18. **The plan in force's grant end already reaches the dashboard (finding 3, s96).** The page's
+    `readLifetimeGrant` passes `endsAt` for every plan held only through dated grants (decision 15),
+    but `BillingDashboard` used it for the dialog's included tiles only; `isPlanHeldForLife` drove
+    the card's "Lifetime" badge, "Lifetime access" and "for life" copy and the dialog's held tile
+    whatever the date.
+
 ## Traps
 
 - **The RLS harness for subscription writes models one table.**
@@ -140,6 +177,13 @@ against production: no Supabase connector, no Stripe call (live or test), no cre
 - **`reactivateSubscription` reads the newest row whatever its status** (`:483-489`), so a fully
   `canceled` row with `cancel_at` set would reach Stripe and fail. Pre-existing, out of scope; the
   generic error hygiene keeps Stripe's text off the page in that case.
+- **Three webhook fakes predate the grant read** (`stripe-webhook-ordering`, `-stale-writes`,
+  `-write-failures`): their builders have no `is` / `neq` / `or`, so `customer.subscription.created`
+  500s there once it reads grants. They gain those methods (no grant row seeded — fixture only).
+- **A refusal's retry must not stop at "already cancelled".** The first delivery can cancel and
+  then fail to refund; the retry then sees a `canceled` subscription. Recognising its own
+  cancellation by `cancellation_details.comment` is what lets it finish the refund, and the refund
+  is found by metadata first because Stripe's idempotency keys expire.
 - **ADR 035's "Watch" names translate as a follow-up** ("keeps its cookie auth"). Auth stays the
   cookie session; only the payer changes, which is what the ADR decides.
 

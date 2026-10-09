@@ -1,3 +1,4 @@
+import type Stripe from "stripe";
 import { stripe } from "./config";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -312,6 +313,30 @@ function toSubscription(row: SubscriptionRow): Subscription {
   };
 }
 
+/**
+ * The update fields that undo a scheduled cancellation, or none.
+ *
+ * s82, Devin Review on PR #81 (finding 2): a plan change on a subscription set
+ * to cancel left the cancellation in place. An owner whose subscription was
+ * set to end — by them, or by a lifetime purchase (`stopBillingForLifetimeOwner`)
+ * — switched up to Agency, was charged the prorated difference straight away,
+ * and still lost Agency at period end. Buying another plan means keeping it,
+ * and the dialog now says so before the click.
+ *
+ * Both forms are cleared, because the card and the dialog read either as
+ * "scheduled to cancel" (the row's `cancel_at`): the app's own cancellation is
+ * `cancel_at_period_end`, and a date set in the Stripe dashboard is `cancel_at`
+ * alone (`""` unsets it). Clearing one and not the other would leave the
+ * dialog's "it will renew" untrue.
+ */
+function keepScheduledToCancel(
+  subscription: Pick<Stripe.Subscription, "cancel_at_period_end" | "cancel_at">,
+): Pick<Stripe.SubscriptionUpdateParams, "cancel_at_period_end" | "cancel_at"> {
+  if (subscription.cancel_at_period_end) return { cancel_at_period_end: false };
+  if (subscription.cancel_at) return { cancel_at: "" };
+  return {};
+}
+
 /** s82: said when a permanent grant already includes the plan switched to. */
 const LIFETIME_PLAN_CHANGE_REFUSAL =
   "Your lifetime plan already includes this one. Cancel your subscription instead of switching to it.";
@@ -400,6 +425,7 @@ export async function updateSubscription(
     currentSubscription.stripe_subscription_id,
     {
       items: [{ id: currentItem.id, price: priceId }],
+      ...keepScheduledToCancel(existingSubscription),
       proration_behavior: "always_invoice",
       // Keep metadata in sync so webhook-driven writes record the new plan.
       metadata: {

@@ -64,6 +64,41 @@ catalogue's wording stays.
 | The plan in force, billed monthly | Current (unchanged) | $49/month (unchanged) | catalogue (unchanged) | disabled (unchanged) |
 | Any other | Selected when selected (unchanged) | $price/month, annual line (unchanged) | catalogue (unchanged) | enabled (unchanged) |
 
+## Devin fix pass — a dated grant on the plan in force, and a plan change that keeps
+
+Still no new screen, component or token: the same badge, price slot, running-out row, confirmation
+line and dialog description print different words in two states (plan decisions 18 and 19; s96
+folded in). Dates in the card's long US form.
+
+### The card when the plan in force is held only through a dated grant (ends November 19, 2026)
+
+| Slot | Undated grant (unchanged) | Dated grant |
+|---|---|---|
+| Header badge | Lifetime | **Included** |
+| Price slot | Lifetime access | **Included until November 19, 2026** |
+| Running-out row, subscription renewing | "Your Pro subscription renews October 10, 2026 — you hold Agency for life, so you no longer need it." | "Your Pro subscription renews October 10, 2026 — **Agency is included until November 19, 2026.**" (never "no longer need it": the subscription keeps the plan after the grant) |
+| Running-out row, set to cancel | "… ends October 10, 2026 — you won't be charged again." | unchanged |
+| Cancel confirmation | "Cancel your Pro subscription? You keep Agency for life, and you will not be charged again." | "Cancel your Pro subscription? **Agency stays included until November 19, 2026**, and you will not be charged again." |
+| Reactivate | hidden | hidden (the server refuses it while the grant is live) |
+
+### The dialog's tile for that plan
+
+| | Undated grant (unchanged) | Dated grant |
+|---|---|---|
+| Badge | Lifetime | **Included** |
+| Price slot | Lifetime access | **Included until November 19, 2026** |
+| Submit when selected | disabled, "You hold Agency for life" | disabled, "**Included in your plan until November 19, 2026**" (the dated included tile's wording) |
+
+### The dialog's description for a subscriber
+
+| Subscription | Description |
+|---|---|
+| Renews (unchanged) | "Switch plans at any time. Stripe prorates the difference and charges your card on file straight away." |
+| Set to end (October 10, 2026) | the same, then "**Your subscription is set to end on October 10, 2026. Switching plans keeps it: it will renew instead of ending.**" — the plan change clears the scheduled cancellation |
+
+A subscription refused by the webhook as covered by a lifetime grant (cancelled and refunded) is
+recorded cancelled, so it never reaches this page as live; nothing on the page announces it.
+
 ## Server messages that reach this page
 
 | Situation | Status | Message |

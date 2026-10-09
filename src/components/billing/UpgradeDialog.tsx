@@ -63,8 +63,16 @@ interface UpgradeDialogProps {
    * credits the account actually gets (the wallet's `included`). Its tile
    * reads "Lifetime access" with that allowance, never a monthly price, and
    * cannot be bought. Absent for every account without one.
+   *
+   * `endsAt` (ISO) when the grant is dated (s96, folded into s82 — Devin Review
+   * on PR #81, finding 3): the tile then reads as a dated included tile,
+   * "Included until <date>", never lifetime, and still cannot be bought.
    */
-  heldForLife?: { planId: string; monthlyCredits: number | null };
+  heldForLife?: {
+    planId: string;
+    monthlyCredits: number | null;
+    endsAt?: string;
+  };
   /**
    * Every plan the account holds through a live, non-revoked, non-trial grant
    * (the page's `readGrantedPlanIds`). A plan one of them includes — the same
@@ -79,6 +87,13 @@ interface UpgradeDialogProps {
    * reads it with `grantedPlanIds`, in the same query (`readGrantedPlans`).
    */
   grantEndsAt?: Readonly<Partial<Record<string, string>>>;
+  /**
+   * When the live subscription is set to cancel, the date it ends (ISO — the
+   * period end the card prints); absent when it renews. A plan change clears
+   * the scheduled cancellation (s82, Devin Review on PR #81, finding 2), and
+   * the dialog says so before the click.
+   */
+  subscriptionEndsAt?: string;
   onSuccess: () => void;
 }
 
@@ -130,7 +145,7 @@ function grantInclusion(
 }
 
 /** The same long US date the subscription card prints. */
-function formatGrantEnd(isoDate: string): string {
+function formatLongDate(isoDate: string): string {
   return new Date(isoDate).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
@@ -150,6 +165,7 @@ export function UpgradeDialog({
   heldForLife,
   grantedPlanIds = [],
   grantEndsAt = {},
+  subscriptionEndsAt,
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
@@ -245,7 +261,7 @@ export function UpgradeDialog({
   // dated grants is refused with their end instead.
   const includedLabel = (inclusion: GrantInclusion) => {
     if (inclusion.kind === "until")
-      return `Included in your plan until ${formatGrantEnd(inclusion.endsAt)}`;
+      return `Included in your plan until ${formatLongDate(inclusion.endsAt)}`;
     const lifetimePlanName = findSubscriptionPlan(
       catalogue,
       inclusion.planId,
@@ -260,7 +276,9 @@ export function UpgradeDialog({
     if (isChangingPlan) return "Updating your plan…";
     if (!selectedPlanData) return "Select a plan";
     if (isSelectedHeldForLife)
-      return `You hold ${selectedPlanData.name} for life`;
+      return heldForLife?.endsAt
+        ? `Included in your plan until ${formatLongDate(heldForLife.endsAt)}`
+        : `You hold ${selectedPlanData.name} for life`;
     if (selectedInclusion) return includedLabel(selectedInclusion);
     return hasSubscription
       ? `Switch to ${selectedPlanData.name}`
@@ -278,6 +296,15 @@ export function UpgradeDialog({
             {hasSubscription
               ? "Switch plans at any time. Stripe prorates the difference and charges your card on file straight away."
               : "Pick a plan and complete payment on Stripe's secure checkout page."}
+            {/* s82, Devin Review on PR #81 (finding 2): switching keeps a
+                subscription set to end — the server clears the scheduled
+                cancellation with the change, so a renewal is never a
+                surprise. */}
+            {hasSubscription && subscriptionEndsAt
+              ? ` Your subscription is set to end on ${formatLongDate(
+                  subscriptionEndsAt,
+                )}. Switching plans keeps it: it will renew instead of ending.`
+              : null}
           </DialogDescription>
         </DialogHeader>
 
@@ -384,7 +411,10 @@ export function UpgradeDialog({
                       </p>
                     </div>
                     {isHeldForLife ? (
-                      <Badge variant="secondary">Lifetime</Badge>
+                      // s96: a dated grant is "Included", never Lifetime.
+                      <Badge variant="secondary">
+                        {heldForLife.endsAt ? "Included" : "Lifetime"}
+                      </Badge>
                     ) : isIncluded ? (
                       <Badge variant="secondary">Included</Badge>
                     ) : isCurrent ? (
@@ -402,14 +432,16 @@ export function UpgradeDialog({
                   {isHeldForLife ? (
                     <div className="mb-4">
                       <span className="text-xl font-semibold">
-                        Lifetime access
+                        {heldForLife.endsAt
+                          ? `Included until ${formatLongDate(heldForLife.endsAt)}`
+                          : "Lifetime access"}
                       </span>
                     </div>
                   ) : inclusion ? (
                     <div className="mb-4">
                       <span className="text-xl font-semibold">
                         {inclusion.kind === "until"
-                          ? `Included until ${formatGrantEnd(inclusion.endsAt)}`
+                          ? `Included until ${formatLongDate(inclusion.endsAt)}`
                           : "Included for life"}
                       </span>
                     </div>

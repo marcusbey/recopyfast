@@ -442,3 +442,52 @@ describe("the empty payment-methods state on the billing page", () => {
     ).toBeInTheDocument();
   });
 });
+
+/**
+ * s96, folded into s82 (Devin Review on PR #81, finding 3): the page already
+ * reads when a dated grant ends (`lifetimeGrant.endsAt`); the plan in force
+ * held only through one is never called lifetime, on the card or in its own
+ * dialog tile.
+ */
+describe("the plan in force held through a dated grant", () => {
+  const datedPro = (): LifetimeGrantStatus => ({
+    kind: "granted",
+    planIds: ["pro"],
+    // Midday, so the date reads November 19 in any test timezone.
+    endsAt: { pro: "2026-11-19T12:00:00.000Z" },
+  });
+
+  it("says Included until its end on the card, never Lifetime", async () => {
+    await renderPlanCard(
+      payload({ effectivePlanId: "pro", creditWallet: wallet(500) }),
+      datedPro(),
+    );
+
+    expect(
+      screen.getByText("Included until November 19, 2026"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Included")).toBeInTheDocument();
+    expect(screen.queryByText("Lifetime")).toBeNull();
+    expect(screen.queryByText("Lifetime access")).toBeNull();
+  });
+
+  it("says until when in its own dialog tile, which stays unbuyable", async () => {
+    await renderPlanCard(
+      payload({ effectivePlanId: "pro", creditWallet: wallet(500) }),
+      datedPro(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    const dialog = await screen.findByRole("dialog");
+    const pro = within(dialog).getByRole("radio", { name: /^Pro/ });
+    fireEvent.click(pro);
+
+    expect(pro).toHaveTextContent("Included until November 19, 2026");
+    expect(pro).not.toHaveTextContent(/lifetime/i);
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Included in your plan until November 19, 2026",
+      }),
+    ).toBeDisabled();
+  });
+});

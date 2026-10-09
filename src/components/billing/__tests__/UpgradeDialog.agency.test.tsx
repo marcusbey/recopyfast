@@ -496,3 +496,77 @@ describe("UpgradeDialog, plans a lifetime grant already includes", () => {
     });
   });
 });
+
+/**
+ * s96, folded into s82 (Devin Review on PR #81, finding 3): the tile of the
+ * plan in force held only through a dated grant read "Lifetime" / "Lifetime
+ * access" / "You hold Agency for life". It reads as the included tiles do for
+ * a dated grant, and stays unbuyable while the grant is live.
+ */
+describe("UpgradeDialog, the plan in force held through a dated grant", () => {
+  const AGENCY_WITH_ALLOWANCE: SubscriptionPlan = {
+    ...plan("agency", "Agency", 49, 40.83, 490),
+    features: ["Everything in Agency", "1,000 AI credits / month"],
+  };
+
+  function renderHeld(endsAt?: string) {
+    render(
+      <UpgradeDialog
+        open
+        onOpenChange={jest.fn()}
+        currentPlan="agency"
+        hasSubscription={false}
+        catalogue={{
+          ...CATALOGUE,
+          subscriptions: [
+            plan("starter", "Starter", 9, 7.5, 90),
+            plan("pro", "Pro", 19, 15.75, 189),
+            AGENCY_WITH_ALLOWANCE,
+          ],
+        }}
+        lifetimeOffers={[]}
+        foundingAgencyAvailability={null}
+        agencyCheckoutEnabled
+        heldForLife={{ planId: "agency", monthlyCredits: 250, endsAt }}
+        onSuccess={jest.fn()}
+      />,
+    );
+    return screen.getByRole("radio", { name: /^Agency/ });
+  }
+
+  it("says Included until the grant's end, never Lifetime", () => {
+    // Midday, so the date reads November 19 in any test timezone.
+    const tile = renderHeld("2026-11-19T12:00:00.000Z");
+
+    expect(tile).toHaveTextContent("Included");
+    expect(tile).toHaveTextContent("Included until November 19, 2026");
+    expect(tile).not.toHaveTextContent(/lifetime/i);
+    expect(tile).not.toHaveTextContent("$49");
+    expect(tile).toHaveTextContent("250 AI credits / month");
+  });
+
+  it("cannot be bought, and its submit says until when", async () => {
+    const user = userEvent.setup();
+    const tile = renderHeld("2026-11-19T12:00:00.000Z");
+
+    await user.click(tile);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Included in your plan until November 19, 2026",
+      }),
+    ).toBeDisabled();
+    expect(screen.queryByText(/for life/)).toBeNull();
+  });
+
+  it("is unchanged for a grant with no end", async () => {
+    const user = userEvent.setup();
+    const tile = renderHeld();
+
+    expect(tile).toHaveTextContent("Lifetime access");
+    await user.click(tile);
+    expect(
+      screen.getByRole("button", { name: "You hold Agency for life" }),
+    ).toBeDisabled();
+  });
+});
