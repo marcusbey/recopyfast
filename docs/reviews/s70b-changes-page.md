@@ -141,6 +141,19 @@ non-advancing-offset mutation fails by assertion, not a heap crash. Residual: re
 Rebased onto main `2357871` (s74): the Playwright strict contract is now 81 + 5 = **86** in `playwright.config.ts`,
 every place in `ci.yml` and `playwright-ci-contract.test.ts`; `--list` 86 / expected 86; contract test 11/11.
 
+## Devin re-review on PR #77 (head `0d95001`) — fixed (orchestrator)
+
+The four first-round findings are marked resolved by Devin. New 🔴 **Hung reads lock every sibling action** (valid —
+the residual the final fix pass recorded): writes gave up after 30 s, but `fetchChanges` had no deadline, so a re-read
+after a write, or Discard's read before its PUT, that never answered kept the element lock until reload. Every list read
+now carries `AbortSignal.timeout(READ_TIMEOUT_MS)` (30 s, the write timeout's value) and a timed-out read fails like any
+failed read: the re-read resolves false ("may be out of date"), Discard sends nothing, the lock is released. Test (red
+first: "Expected rejected, Received pending" at 30 s): a read that never answers makes `readElementChanges` reject at
+30 s and not before. Hooks + Changes + dashboard suites 314/314.
+
+Flag **Discard remains vulnerable to concurrent edits** (investigate): the read-to-PUT window recorded since the
+`e3098b6` verification; the compare-and-set in the staging PUT is follow-up s81-version-restore-integrity.
+
 ## Not verified
 
 The DB suite's GoTrue block (real signup JWTs) and the full 86-test Playwright run — CI. A real browser at 375

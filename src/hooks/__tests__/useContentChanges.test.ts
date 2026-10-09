@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import {
+  readElementChanges,
   useContentChanges,
   type ChangesFilters,
   type ContentChange,
@@ -845,6 +846,39 @@ describe("useContentChanges", () => {
       expect(shown(result.current.data?.rows)).toEqual([
         ["e-en", "published", "Hello again"],
       ]);
+    });
+  });
+
+  // Devin on PR #77: writes gave up after 30 s, but a read never did. A
+  // re-read after a write (or Discard's read before its PUT) that never
+  // answered kept the element locked — every language and variant row
+  // disabled — until the page was reloaded.
+  describe("a read that never answers", () => {
+    const READ_TIMEOUT_MS = 30_000;
+    /** No answer ever; an aborted request rejects, as `fetch` does. */
+    const HUNG = (_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(init.signal?.reason),
+        );
+      });
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("gives up after 30 s, so the element read fails instead of hanging", async () => {
+      global.fetch = jest.fn(HUNG) as unknown as typeof fetch;
+      let settled: "pending" | "resolved" | "rejected" = "pending";
+      void readElementChanges(SITE_A, "rcf-e").then(
+        () => (settled = "resolved"),
+        () => (settled = "rejected"),
+      );
+
+      await jest.advanceTimersByTimeAsync(READ_TIMEOUT_MS - 1);
+      expect(settled).toBe("pending");
+
+      await jest.advanceTimersByTimeAsync(1);
+      expect(settled).toBe("rejected");
     });
   });
 });

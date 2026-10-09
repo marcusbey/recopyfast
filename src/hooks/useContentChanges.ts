@@ -150,6 +150,14 @@ interface ChangesRead extends ChangesFilters {
   element?: string;
 }
 
+/**
+ * A list read still unanswered after this is aborted and fails like any other
+ * failed read. Writes already gave up after 30 s (`WRITE_TIMEOUT_MS`), but the
+ * re-read after a write and Discard's read before its PUT did not, and the
+ * element stayed locked while they hung (Devin on PR #77).
+ */
+const READ_TIMEOUT_MS = 30_000;
+
 async function fetchChanges(
   filters: ChangesRead,
   offset: number,
@@ -162,7 +170,9 @@ async function fetchChanges(
   if (filters.element) params.set("element", filters.element);
   if (filters.q) params.set("q", filters.q);
 
-  const response = await fetch(`/api/content/changes?${params.toString()}`);
+  const response = await fetch(`/api/content/changes?${params.toString()}`, {
+    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+  });
   if (!response.ok) {
     let message = `${FALLBACK_ERROR} (${response.status})`;
     try {
