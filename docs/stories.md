@@ -3566,15 +3566,10 @@ at that commit, to be re-verified at research time):
   validation (ADR 047 "Watch").
 - [x] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
   (`src/lib/auth/editor-directory.ts:271-299`); s68c makes it non-load-bearing, the dashboard still
-  lists them as live.
+  lists them as live. → closed by s76.
 - [x] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
   covers `PUT` only. → closed by s77 (with `PUT`'s IP guard, s68b review minor 3).
 - [x] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter. → closed by s77.
-
-  lists them as live. → closed by s76.
-- [ ] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
-  covers `PUT` only.
-- [ ] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter.
 - [ ] R7 — The webhook URL guard narrows DNS rebinding but does not close it
   (`src/lib/security/webhook-url-safety.ts:19-26`, a recorded decision); pinning the resolved IP in
   a custom dispatcher would.
