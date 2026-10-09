@@ -258,7 +258,27 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * review is s67 code, so the floor does not move. build-size-gate.test.ts pins
  * the same pair and quotes the same gross.
  */
-const MAX_BUNDLE_GZ = 45841;
+/*
+ * RATCHETED DOWN 2026-10-08 (s70a-embed-ui-not-content), from 45841 / 33073.
+ *
+ * The embed recorded its own Edit Board, AI suggestions modal and form-field
+ * popover as site copy, the editor's "by <email>" included
+ * (docs/research/s70-content-changes.md, fact 1). The fix is byte-negative,
+ * measured in sequence on the branch:
+ *
+ *   45841 / 33073  ceilings before s70a = measured on main at 828970c, where
+ *                  s70a branched (its base adds docs only)
+ *   +5 / +7        two markers (`data-rcf-ignore` on the AI suggestions overlay
+ *                  and on the form-field popover) and the corrected id
+ *                  (`#rcf-edit-board-panel`), the six skip checks kept
+ *   −6 / −7        one `closest()` for the six skip checks, no behaviour change
+ *   45840 / 33073  measured on the branch — the new ceilings
+ *
+ * (Research measured 45839 / 33072, −7 / −8 for the consolidation, on a copy
+ * of the tree; only this branch's own measurement is recorded as the ceiling.)
+ * build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45840;
 const MAX_WIDGET_GZ = 33073;
 
 /**

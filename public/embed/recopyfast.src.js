@@ -2701,15 +2701,31 @@
       });
     }
 
+    /**
+     * THE RULE: every root the embed appends to `body` carries
+     * `data-rcf-ignore` or matches the `closest()` selector below. Discovery
+     * scans the whole document, so a root that does neither has its labels
+     * mapped, stamped `data-rcf-id` and POSTed as the customer's authored copy
+     * — and the upsert ignores duplicates, so a junk row, once written, stays.
+     * A new modal, panel or popover gets `data-rcf-ignore` on its root; it is
+     * the cheapest of the two.
+     */
     shouldSkipElement(element) {
       const skipTags = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED'];
       if (skipTags.includes(element.tagName)) return true;
-      if (element.hasAttribute('data-rcf-ignore')) return true;
-      if (element.closest('[contenteditable="true"]')) return true;
-      if (element.closest('#rcf-staging-banner')) return true;
-      if (element.closest('#rcf-edit-board')) return true;
-      if (element.closest('.rcf-overlay')) return true;
-      if (element.closest('[data-rcf-ignore]')) return true;
+      // TOMBSTONE (s70a). Six checks used to sit here, and three surfaces got
+      // through them anyway: the owner's Content page listed "🪄" and "Failed
+      // to generate suggestions. Please try again." as site copy (production,
+      // 2026-10-08). `#rcf-edit-board` named no element — the panel
+      // is `#rcf-edit-board-panel` — so the whole Edit Board was content,
+      // including the History tab's "by <editor email>", which then sat in a
+      // row `GET /api/published/<site>` serves to anyone with the site id. The
+      // AI suggestions modal and the form-field popover had no marker at all;
+      // they carry `data-rcf-ignore` now. A separate
+      // `hasAttribute('data-rcf-ignore')` also sat here: `closest()` matches
+      // the element itself, so it was redundant. One selector, which also paid
+      // for the fix in bytes. Pinned by embed-ui-not-content.test.ts.
+      if (element.closest('[data-rcf-ignore],[contenteditable="true"],#rcf-staging-banner,#rcf-edit-board-panel,.rcf-overlay')) return true;
 
       // Images carry no text, so the "has real text" test below would reject
       // every one of them. Filter on rendered size instead: tracking pixels,
@@ -5402,6 +5418,8 @@
       const rect = element.getBoundingClientRect();
       const popover = document.createElement('div');
       popover.className = 'rcf-form-popover';
+      // Editor chrome, never site copy (s70a; see shouldSkipElement).
+      popover.setAttribute('data-rcf-ignore', '');
       const popoverBg = isLightBg ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
       const popoverBorder = isLightBg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
       popover.style.cssText = 'position: fixed; left: ' + rect.left + 'px; top: ' + (rect.bottom + 8) + 'px; background: ' + popoverBg + '; border-radius: 12px; padding: 16px; box-shadow: 0 12px 36px rgba(0,0,0,0.4); border: 1px solid ' + popoverBorder + '; backdrop-filter: blur(20px); z-index: 10000; min-width: 280px;';
@@ -5558,6 +5576,8 @@
     showAISuggestions(inputElement, elementId) {
       const self = this;
       const overlay = document.createElement('div');
+      // Editor chrome, never site copy (s70a; see shouldSkipElement).
+      overlay.setAttribute('data-rcf-ignore', '');
       overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 10001; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
 
       const modal = document.createElement('div');
