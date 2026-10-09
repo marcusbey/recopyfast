@@ -3760,3 +3760,51 @@ Acceptance criteria:
   story commit.
 
 Complexity: 2. Branch `feature/s73-button-as-child`. Embed allocation: 0 bytes.
+
+## Story s74-deflake-landing-pricing — the landing page stays responsive in a browser that draws WebGL without a GPU
+
+Orchestrator triage, 2026-10-09: `main` CI at `72f4cff` (run 37902163949) went red on the E2E job.
+`e2e/landing.spec.ts` "E2E-012: Pricing shows both lifetime offers" waited 10 s for the Starter
+card (`landing.spec.ts:56-58`), found no element at all, then passed on retry in 35.5 s. The strict
+contract counts a flaky test as a failure (`.github/workflows/ci.yml:401-411`), and branch
+protection requires the job. Research: `docs/research/s74-deflake-landing-pricing.md`.
+
+Cause (verified on `origin/main` `72f4cff`): the landing page's sky (`src/app/page.tsx:22-29,47`)
+mounts a full-screen WebGL `<Canvas>` with `frameloop="always"`
+(`src/components/three/sky/SkyBackground.tsx:257-269`) whatever renders it. CI's Chromium has no
+GPU, and Playwright launches it with `--enable-unsafe-swiftshader`
+(`node_modules/playwright-core/lib/server/chromium/chromium.js:280`), so the raymarcher and the
+six-layer noise sky are shaded on the CPU by SwiftShader. Measured on this repo's production build
+with the same Playwright Chromium (renderer string "SwiftShader driver"): 2–34 frames in 3 s, p95
+frame 1.0–2.1 s, and 1.2–4.8 s of main-thread long tasks in every 3 s window. Every step
+`#pricing` waits on — hydration, the `/api/pricing` response handler
+(`src/components/sections/Pricing.tsx:93-111`), the cards' render (`:231`) — and every Playwright
+probe queues behind those frames, on a 4-vCPU runner shared with the Next server and the Supabase
+stack. With WebGL disabled the same page runs at 120 fps with 0–71 ms of long tasks. The CI logs
+show the cost is not pricing-specific: E2E-017 mocks `/api/offers/founding`, needs no plan card
+and still takes 30–56 s in green runs. Locally the baseline spec failed E2E-017 once in 27 runs
+(`page.reload` never reached `load` in 45 s). Not the cause: the cold `/api/pricing` build with the
+placeholder Stripe key takes 0.33 s, then 3–6 ms from cache.
+
+Production: `/` is a CDN-served static prerender (`x-vercel-cache: HIT`, 0.24–0.88 s); a visitor
+with a GPU is unaffected. A visitor whose browser draws WebGL in software (GPU blocklisted,
+hardware acceleration off, a VM or remote desktop) gets the same saturated page CI gets.
+
+Acceptance criteria:
+- [ ] When the browser can only draw WebGL with a major performance caveat (software rendering),
+  or not at all, the landing page mounts no WebGL canvas and shows the static sky gradient it
+  already uses as its loading and no-WebGL fallback.
+- [ ] A browser with a GPU keeps the shader sky exactly as today: volumetric above the fold,
+  layered below it, reduced motion drawing on demand.
+- [ ] The capability probe releases its context and never throws; a probe failure means no shader.
+- [ ] Unit tests cover the probe (software-only, hardware, no WebGL, throwing) and the sky's two
+  branches.
+- [ ] A new landing E2E test proves, in CI's own Chromium, that a software renderer gets no WebGL
+  canvas — red on main. The strict count goes 80 → 81 in `playwright.config.ts`, every place in
+  `.github/workflows/ci.yml`, and `src/__tests__/e2e/playwright-ci-contract.test.ts`.
+- [ ] No existing test's timeout or assertion is relaxed. The landing spec runs clean with
+  `--repeat-each` against a production build, with before/after timings in the research.
+
+Complexity: 2. Dependencies: none. Branch `feature/s74-deflake-landing-pricing`.
+
+Embed allocation: 0 bytes (nothing under `public/embed/` changes).
