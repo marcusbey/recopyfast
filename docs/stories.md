@@ -4049,38 +4049,39 @@ Cause (verified on `origin/main` `fc5968b`, and against production with read-onl
 
 Acceptance criteria:
 
-- [ ] Every page under `/dashboard`, `/login`, `/signup` and `/edit` is served with a per-request
+- [x] Every page under `/dashboard`, `/login`, `/signup` and `/edit` is served with a per-request
   nonce policy: `script-src` (and `script-src-elem`) `'nonce-<fresh>' 'strict-dynamic'`, the
   root layout's theme script by its SHA-256, and `'self' 'unsafe-inline'` as the CSP1/CSP2
   fallback that CSP3 browsers ignore; the same policy reaches Next on the request so every Next
   script and script preload carries the nonce; two requests never share a nonce; those segments
   render dynamically. Tests: `src/lib/security/__tests__/content-security-policy.test.ts`,
   `src/__tests__/middleware-csp.test.ts`, `src/__tests__/security/nonce-routes-render-dynamically.test.tsx`.
-- [ ] Marketing pages (`/`, `/compare/*`, `/blog`, `/docs/install`, `/privacy`, `/terms`, `/demo`,
+- [x] Marketing pages (`/`, `/compare/*`, `/blog`, `/docs/install`, `/privacy`, `/terms`, `/demo`,
   `/try`) stay statically prerendered with today's `script-src 'self' 'unsafe-inline'` — ADR 059.
 - [ ] A production build loads `/`, `/pricing` (→ `/#pricing`), `/login`, `/signup`, `/edit` and a
   signed-in `/dashboard` with no CSP violation and hydrated, and the nonce pages' served HTML
   carries the header's nonce on every script but the hashed theme script. Test: `e2e/csp.spec.ts`
-  (+5; Playwright contract 80 → 85). The signed-in case runs in CI's disposable stack.
-- [ ] Every response sends `Strict-Transport-Security: max-age=63072000; includeSubDomains`
+  (+5; Playwright contract 80 → 85). The four public cases pass locally against `next build` +
+  `next start`; the signed-in case needs CI's disposable Supabase stack and has not run yet.
+- [x] Every response sends `Strict-Transport-Security: max-age=63072000; includeSubDomains`
   (no `preload`); no response sends `X-XSS-Protection`. Tests: `src/__tests__/next-config-hsts.test.ts`,
   `middleware-csp.test.ts`, `e2e/csp.spec.ts`.
-- [ ] The fidelity harness lives in `e2e/fixtures/embed-fidelity/`, served only by the local
+- [x] The fidelity harness lives in `e2e/fixtures/embed-fidelity/`, served only by the local
   `scripts/serve-embed-fidelity.mjs` (loopback); nothing under `public/` is named `__fidelity__`.
   Test: `src/__tests__/embed/fidelity-harness-not-public.test.ts`.
-- [ ] The realtime service sends no `X-Powered-By` and no `Access-Control-Allow-Origin` on its HTTP
+- [x] The realtime service sends no `X-Powered-By` and no `Access-Control-Allow-Origin` on its HTTP
   surface, sends `nosniff`, `X-Frame-Options: DENY`, `default-src 'none'`, `no-referrer`, HSTS and
   `Cross-Origin-Resource-Policy: same-origin`, and `/health` answers `200 {"status":"ok"}` with
   `no-store` and no connection count. Test: `src/__tests__/websocket/server.integration.test.ts`.
-- [ ] A handshake is metered per client address before any database work, and spends the per-site
+- [x] A handshake is metered per client address before any database work, and spends the per-site
   bucket only once its token and origin verified: unauthenticated handshakes beyond the per-site
   cap leave a real editor's connection admitted; the per-address cap bounds the `sites` lookups;
   `Fly-Client-IP` keys the address only on Fly. Test: `server.integration.test.ts`.
-- [ ] Rotating a site's key closes every open socket holding the old token within one sweep, at
+- [x] Rotating a site's key closes every open socket holding the old token within one sweep, at
   the next `content-update`/`join-dashboard` for an editor, and a socket signed with the new key
   connects; one `sites` read per site per sweep. Test: `server.integration.test.ts`.
-- [ ] No live-key account prefix in the repository. Test: `src/__tests__/security/no-live-key-prefixes.test.ts`.
-- [ ] Docs: ADR 059, `docs/architecture.md` (security headers), `server/README.md`. Required gates
+- [x] No live-key account prefix in the repository. Test: `src/__tests__/security/no-live-key-prefixes.test.ts`.
+- [x] Docs: ADR 059, `docs/architecture.md` (security headers), `server/README.md`. Required gates
   pass; docs commit plus one story commit.
 
 Complexity: 4. Dependencies: none. Coordination: s84 drops the app's relay of the realtime

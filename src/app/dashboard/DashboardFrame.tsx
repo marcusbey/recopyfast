@@ -22,8 +22,10 @@ import { User, LogOut, Settings } from "lucide-react";
 /**
  * The dashboard's frame: sidebar, sticky header, and the main column's width
  * and gutters (ADR 053). It is the body of `layout.tsx`, moved here verbatim in
- * s88's review so the layout itself can be a server component and export the
- * segment's metadata — a client module cannot.
+ * s88's review so the layout itself can be a server component: it exports the
+ * segment's metadata, and it awaits `connection()` so every dashboard page
+ * renders per request under the nonce policy (s79, ADR 059). A client module
+ * can do neither.
  */
 export function DashboardFrame({ children }: { children: React.ReactNode }) {
   const { user, loading, signOut } = useAuth();

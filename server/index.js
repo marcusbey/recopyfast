@@ -1,7 +1,6 @@
 const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors');
 const path = require('path');
 const createDOMPurify = require('dompurify');
 const { JSDOM } = require('jsdom');
@@ -17,6 +16,7 @@ const {
   createRateLimiter,
   createRedisRateLimitStore,
 } = require('./rate-limit');
+const { securityHeaders } = require('./security-headers');
 
 const window = new JSDOM('').window;
 const DOMPurify = createDOMPurify(window);
@@ -48,6 +48,27 @@ function isValidUrl(string) {
 const DEFAULT_REVALIDATION_INTERVAL_MS = 60 * 1000;
 
 /**
+ * The client's address, for the per-address rate-limit buckets.
+ *
+ * On Fly every connection reaches the machine from fly-proxy, so the TCP peer
+ * (`handshake.address`) is the proxy's address for every client and a bucket
+ * keyed on it is one bucket for the world. Fly's proxy reports the client in
+ * `Fly-Client-IP` — set by the proxy, and the header Fly recommends over the
+ * spoofable `X-Forwarded-For` (docs/research/s79-headers-csp-ws.md §4). Off
+ * Fly, any client could send that header, so it is read only when
+ * `trustFlyClientIp` says this process sits behind the proxy.
+ */
+function resolveClientAddress(handshake, { trustFlyClientIp }) {
+  if (trustFlyClientIp) {
+    const reported = handshake.headers['fly-client-ip'];
+    if (typeof reported === 'string' && reported.trim() !== '') {
+      return reported.trim();
+    }
+  }
+  return handshake.address || 'unknown';
+}
+
+/**
  * Build the realtime service.
  *
  * A factory rather than module-load side effects. `startServer(PORT)` used to
@@ -67,6 +88,9 @@ function createRealtimeServer(options = {}) {
     rateLimitStore = createMemoryRateLimitStore(),
     rateLimit = {},
     revalidationIntervalMs = DEFAULT_REVALIDATION_INTERVAL_MS,
+    // True only behind Fly's proxy (startFromCli: FLY_APP_NAME is set on
+    // every Fly Machine). See resolveClientAddress.
+    trustFlyClientIp = false,
   } = options;
 
   const supabaseEnabled = Boolean(supabase);
@@ -121,27 +145,78 @@ function createRealtimeServer(options = {}) {
     transports: ['websocket']
   });
 
-  // Middleware
-  app.use(cors());
+  // TOMBSTONE — s79 (s69 L13). `app.use(cors())` stood here: every HTTP
+  // response, `/health` included, answered `Access-Control-Allow-Origin: *`,
+  // and Express added `X-Powered-By: Express`. Nothing browser-side reads this
+  // surface, so it answers no CORS at all (the handshake's own CORS, above, is
+  // engine.io's and unchanged). See ./security-headers.js.
+  app.disable('x-powered-by');
+  app.use(securityHeaders);
   app.use(express.json());
 
-  // Health check endpoint
+  // Liveness, and nothing else. Fly's check (fly.toml), the uptime workflow
+  // and the app's realtime probe (src/app/api/health/route.ts) need a 2xx.
+  //
+  // TOMBSTONE — s79 (s69 L13). This answered, unauthenticated,
+  // `connections: io.engine.clientsCount` plus the Supabase mode and a
+  // message: a live count of open editing sessions for anyone to poll. The
+  // Supabase mode told an operator nothing either — in production the process
+  // refuses to boot without Supabase (assertProductionEnvironment).
   app.get('/health', (req, res) => {
-    res.json({
-      status: 'ok',
-      connections: io.engine.clientsCount,
-      supabase: supabaseEnabled ? 'connected' : 'disabled',
-      message: supabaseEnabled ? 'All systems operational' : 'Running in development mode - set up Supabase for full functionality'
-    });
+    res.set('Cache-Control', 'no-store');
+    res.json({ status: 'ok' });
+  });
+
+  // Everything else is a 404 answered here rather than by Express's
+  // finalhandler, which replaces the Content-Security-Policy set above with
+  // its own and renders an HTML page naming the method and path.
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Not found' });
   });
 
   // Store active connections by site
   const siteConnections = new Map();
   const userConnections = new Map();
 
+  function refuse(socket, error) {
+    socket.emit('auth-error', { error });
+    socket.disconnect();
+  }
+
   /**
-   * Re-resolve the grant a socket is holding, and drop the socket if it no
-   * longer stands.
+   * The site row a socket's token is checked against, as it stands now.
+   * `{ site }` (null when the row is gone) or `{ failed: true }` — never
+   * throws, so one lookup can be shared by every socket of a site in a sweep.
+   */
+  async function readSiteKey(siteId) {
+    try {
+      const { data, error } = await supabase
+        .from('sites')
+        .select('id, api_key')
+        .eq('id', siteId)
+        .maybeSingle();
+      if (error) {
+        console.error('[revalidation] site lookup failed:', error.message);
+        return { failed: true };
+      }
+      return { site: data };
+    } catch (error) {
+      console.error('[revalidation] site lookup failed:', error.message);
+      return { failed: true };
+    }
+  }
+
+  /**
+   * Re-check what a socket was admitted on, and drop it if it no longer stands:
+   * first its site token against the site's CURRENT key, then, for an editor,
+   * its grant.
+   *
+   * TOMBSTONE — s79, ADR 027's follow-up. This returned early for every socket
+   * but a staging one, and nothing else re-read the key, so "Regenerate
+   * snippet" refused reconnects while every socket already open with the old
+   * token stayed open for as long as its tab did. A missing row reads as
+   * revoked; a lookup that FAILED is refused too ("has not answered yes", as
+   * resolveGrant and s68c's review hold for grants).
    *
    * TOMBSTONE — `validateStagingAccess` and `validateEditSessionAccess` used to
    * live here as two near-identical local functions called exactly once each,
@@ -155,7 +230,24 @@ function createRealtimeServer(options = {}) {
    * listens for `auth-error` (recopyfast.src.js:2745) and that is how a revoked
    * editor finds out rather than simply going quiet.
    */
-  async function revalidateSocket(socket) {
+  async function revalidateSocket(socket, { lookupSite = readSiteKey } = {}) {
+    // Degraded mode verified nothing at the handshake, so there is nothing to
+    // re-verify; `siteToken` is only ever set after a verified handshake.
+    if (!supabaseEnabled || !socket.data.siteToken) return true;
+
+    const lookup = await lookupSite(socket.data.siteId);
+    if (lookup.failed) {
+      refuse(socket, 'Site verification failed');
+      return false;
+    }
+    if (
+      !lookup.site ||
+      !verifySiteToken(socket.data.siteId, lookup.site.api_key, socket.data.siteToken)
+    ) {
+      refuse(socket, 'Site token revoked');
+      return false;
+    }
+
     if (!socket.data.isStaging) return true;
 
     const grant = await resolveGrant({
@@ -167,8 +259,7 @@ function createRealtimeServer(options = {}) {
     });
 
     if (!grant.valid) {
-      socket.emit('auth-error', { error: grant.error || 'Editor access revoked' });
-      socket.disconnect();
+      refuse(socket, grant.error || 'Editor access revoked');
       return false;
     }
 
@@ -181,25 +272,48 @@ function createRealtimeServer(options = {}) {
   }
 
   /**
-   * The sweep exists for the socket that says NOTHING.
+   * One pass over every socket that was admitted on a verified token.
    *
-   * Per-message re-resolution only fires for a socket that talks. Once the
-   * socket stopped writing (ADR 004 rule 1) the residual exposure of a revoked
-   * but silent connection is disclosure — it is still in `site:{id}:staging`
-   * and still receiving every other editor's unpublished copy — and this is
-   * what closes it.
+   * The sweep exists for the socket that says NOTHING. Per-message
+   * re-resolution only fires for a socket that talks: a revoked but silent
+   * editor is still in `site:{id}:staging`, receiving every other editor's
+   * unpublished copy, and a socket opened with a rotated key would stay open
+   * for as long as its tab did. This is what closes both.
    *
+   * Every socket, not only editors, since s79 — and so the key is read ONCE
+   * per site per pass and shared by that site's sockets: the widget opens a
+   * socket for every visitor of a page carrying `data-ws-url`, so a read per
+   * socket would scale with traffic. Grants stay per socket (each is its own
+   * row). Returned by the factory so a test can run one pass deterministically.
+   */
+  async function revalidateAll() {
+    const siteLookups = new Map();
+    const lookupSite = (siteId) => {
+      if (!siteLookups.has(siteId)) siteLookups.set(siteId, readSiteKey(siteId));
+      return siteLookups.get(siteId);
+    };
+
+    const checks = [];
+    for (const socket of io.sockets.sockets.values()) {
+      if (!socket.data.siteToken) continue;
+      checks.push(
+        revalidateSocket(socket, { lookupSite }).catch((error) => {
+          console.error('[revalidation] sweep failed for socket:', error.message);
+        })
+      );
+    }
+    await Promise.all(checks);
+  }
+
+  /**
    * `unref()` so a running sweep never keeps the process (or a test worker)
    * alive on its own.
    */
   const revalidationTimer = supabaseEnabled
     ? setInterval(() => {
-        for (const socket of io.sockets.sockets.values()) {
-          if (!socket.data.isStaging) continue;
-          revalidateSocket(socket).catch((error) => {
-            console.error('[revalidation] sweep failed for socket:', error.message);
-          });
-        }
+        revalidateAll().catch((error) => {
+          console.error('[revalidation] sweep failed:', error.message);
+        });
       }, revalidationIntervalMs)
     : null;
   if (revalidationTimer && typeof revalidationTimer.unref === 'function') {
@@ -221,21 +335,47 @@ function createRealtimeServer(options = {}) {
       return;
     }
 
+    const clientAddress = resolveClientAddress(socket.handshake, {
+      trustFlyClientIp,
+    });
+
+    function refuseOverLimit() {
+      socket.emit('auth-error', { error: 'Rate limit exceeded' });
+      socket.disconnect();
+    }
+
     // RATE LIMIT BEFORE AUTHORIZATION (AGENTS.md).
     //
     // Authorization here is a `sites` lookup — a database round trip — so a
     // limiter placed behind it never sees the flood it exists to stop; it just
-    // makes the flood expensive. The only thing needed to compute the bucket is
-    // the handshake's own site id, which is why this sits immediately after the
-    // presence check and before everything else.
-    const connectionVerdict = await rateLimiter.checkConnection({
-      siteId,
-      address: socket.handshake.address,
+    // makes the flood expensive. This one is keyed on the CALLER.
+    //
+    // TOMBSTONE — s79 (s69 L14). The bucket spent here used to be the
+    // per-SITE one, keyed on the handshake's own site id, before the token was
+    // even present-checked. 121 handshakes carrying nothing therefore locked
+    // every real editor of that site out of realtime for a minute. The per-site
+    // bucket is now spent only by a handshake that verified (admitToSiteBuckets
+    // below); a flood from one address exhausts that address's bucket alone.
+    const handshakeVerdict = await rateLimiter.checkHandshake({
+      address: clientAddress,
     });
-    if (!connectionVerdict.allowed) {
-      socket.emit('auth-error', { error: 'Rate limit exceeded' });
-      socket.disconnect();
+    if (!handshakeVerdict.allowed) {
+      refuseOverLimit();
       return;
+    }
+
+    /**
+     * The per-site buckets (ADR 002 rule 4), for a handshake whose token and
+     * origin verified. Before verification they would be spendable by anyone
+     * who knows a site id.
+     */
+    async function admitToSiteBuckets() {
+      const verdict = await rateLimiter.checkConnection({
+        siteId,
+        address: clientAddress,
+      });
+      if (!verdict.allowed) refuseOverLimit();
+      return verdict.allowed;
     }
 
     if (!token) {
@@ -270,6 +410,10 @@ function createRealtimeServer(options = {}) {
           socket.disconnect();
           return;
         }
+
+        // Verified: only now may this handshake spend the site's bucket —
+        // and before the grant lookup below, which is a second round trip.
+        if (!(await admitToSiteBuckets())) return;
 
         socket.data.siteToken = token;
         socket.data.siteId = siteId;
@@ -328,6 +472,7 @@ function createRealtimeServer(options = {}) {
       console.warn(
         'Supabase not configured - running degraded: no token verification, no staging rooms'
       );
+      if (!(await admitToSiteBuckets())) return;
     }
 
     // Join appropriate room based on staging mode
@@ -647,7 +792,7 @@ function createRealtimeServer(options = {}) {
     });
   }
 
-  return { app, io, httpServer, listen, close };
+  return { app, io, httpServer, listen, close, revalidateAll };
 }
 
 // ---------------------------------------------------------------------------
@@ -789,7 +934,14 @@ function startFromCli() {
   }
 
   const port = Number(process.env.WS_PORT) || 4001;
-  const server = createRealtimeServer({ port, supabase, rateLimitStore });
+  const server = createRealtimeServer({
+    port,
+    supabase,
+    rateLimitStore,
+    // Every Fly Machine has FLY_APP_NAME, and every request to one came
+    // through fly-proxy, which sets Fly-Client-IP. See resolveClientAddress.
+    trustFlyClientIp: Boolean(process.env.FLY_APP_NAME),
+  });
 
   server.listen().then(
     (boundPort) => {

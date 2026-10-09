@@ -49,7 +49,8 @@ plus custom fetch hooks. See [ADR 005](./decisions/005-client-state-context-and-
 - **Vercel** — the Next.js app. One cron in `vercel.json` (`/api/cron/generate-blog-post`, daily 14:00).
 - **Fly.io** — `server/index.js`, an Express + Socket.io process, deployed 2026-08-17 as
   `recopyfast-ws` in `iad`, **one** `shared-cpu-1x@512MB` machine.
-  `https://recopyfast-ws.fly.dev/health` returns `status: ok`, `supabase: connected`.
+  `https://recopyfast-ws.fly.dev/health` returns `{"status":"ok"}` — liveness only since s79: no
+  connection count, no CORS, security headers on every response (`server/security-headers.js`).
   Vercel cannot host a long-lived process, which is why it is here.
   **Live since `s07b`:** `NEXT_PUBLIC_WS_URL = wss://recopyfast-ws.fly.dev`, set in the Vercel
   **production** environment only — a preview pointed at it would share `site:{id}` rooms with
@@ -375,7 +376,7 @@ noise; a comment that says *what broke last time* is the asset.
 | **AI** | `src/lib/ai/`, `/api/ai/suggest`, `/api/ai/translate` | OpenAI, credit-metered. Credits cover **AI only**, and only once the site owner holds a plan — a wallet balance is never a quota, and credits are sold to plan holders only ([ADR 041](./decisions/041-editing-needs-the-site-owners-plan.md)). `/api/ai/suggest` is the widget's: authorised by editor credentials (`validateEditorTokenFromRequest`, graded `edit`), never the site token, and charged to the site owner through the service role ([ADR 035](./decisions/035-widget-ai-charged-to-site-owner.md)). `/api/ai/translate` has no widget caller |
 | **Email** | `src/lib/email/resend.ts` | Resend |
 | **Images** | `src/lib/images/`, `src/lib/storage/`, `/api/upload/image` | Supabase Storage, `20260801000000_storage_assets_bucket.sql`. Replace an existing `<img>` only |
-| **Realtime** | `server/index.js` (Socket.io) on Fly, one machine | `NEXT_PUBLIC_WS_URL` set in production ⇒ new snippets carry `data-ws-url` ⇒ the widget connects **in an editing session only**. HTTP stays authoritative and realtime is additive: unset the variable and redeploy and the product is its pre-`s07b` self. Reported as a `realtime` check in `GET /api/health` that can degrade the app but never make it unhealthy (ADR 004 "Watch"). See [ADR 004](./decisions/004-embed-transport-split.md), [ADR 022](./decisions/022-realtime-parity-is-editors-only.md), [`server/README.md`](../server/README.md) |
+| **Realtime** | `server/index.js` (Socket.io) on Fly, one machine | `NEXT_PUBLIC_WS_URL` set in production ⇒ new snippets carry `data-ws-url` ⇒ the widget connects **in an editing session only**. HTTP stays authoritative and realtime is additive: unset the variable and redeploy and the product is its pre-`s07b` self. Reported as a `realtime` check in `GET /api/health` that can degrade the app but never make it unhealthy (ADR 004 "Watch"). A handshake is metered per client address (`Fly-Client-IP`) before any database read and spends the per-site bucket only once verified; rotating a site's key closes its old-token sockets within one 60 s sweep (s79, `server/README.md`). See [ADR 004](./decisions/004-embed-transport-split.md), [ADR 022](./decisions/022-realtime-parity-is-editors-only.md), [`server/README.md`](../server/README.md) |
 | **Rate limit / cache** | Redis via `src/lib/api/rate-limit.ts` | `npm run check:redis` |
 | **Errors** | Sentry. Browser: `src/instrumentation-client.ts`. Server: `src/instrumentation.ts` loads `sentry.server.config.ts` (Node) or `sentry.edge.config.ts` (Edge) and exports `onRequestError`. Browser events post same-origin to the `/monitoring` tunnel (`src/lib/monitoring/sentry-tunnel.ts`), rewritten to Sentry's ingest | `next.config.ts` only wraps when the DSN is set, so CI builds without it. No root `instrumentation.ts` or `sentry.client.config.ts`: under Turbopack a root copy shadows `src/`, and the client config is never bundled (s46) |
 | **Cron** | `vercel.json` → `/api/cron/generate-blog-post`; `/api/cron/ab-test-lifecycle` exists but is unscheduled | Cron platforms retry — every job must be idempotent |
@@ -383,9 +384,27 @@ noise; a comment that says *what broke last time* is the asset.
 
 ### CSP is a first-class constraint, in both directions
 
-Ours (`middleware.ts:196-256`) derives `connect-src` from env rather than widening to
-`https:`/`wss:`. Adding an outbound origin means adding it there or the browser blocks it
-silently.
+**Ours is two policies** ([ADR 059](./decisions/059-nonce-csp-on-the-app-surface.md)), built in
+`src/lib/security/content-security-policy.ts` and chosen per request by `src/middleware.ts`:
+
+- **App surface** — `/dashboard`, `/login`, `/signup`, `/edit` and below
+  (`NONCE_POLICY_PATH_PREFIXES`): a fresh nonce per request, `script-src 'nonce-…'
+  'strict-dynamic' '<theme script hash>' 'self' 'unsafe-inline'` (the last two are the CSP1/CSP2
+  fallback CSP3 browsers ignore). The middleware puts the same policy on the forwarded request,
+  which is where Next reads the nonce it stamps on its scripts. Each of those segments has a server
+  layout that awaits `connection()`, so every page below it renders per request — a prerendered
+  page has no nonce and does not hydrate under this policy. The root layout's theme script
+  (`src/lib/theme/theme-init-script.ts`) is allowed by its hash.
+- **Everything else** — the static marketing pages, `/blog`, `/docs/install`, `/try`, the embed,
+  the API — keeps `script-src 'self' 'unsafe-inline'` and stays prerendered. Never add a nonce or
+  hash to it: either makes browsers ignore `'unsafe-inline'`, which is what lets a prerendered
+  page's inline scripts run.
+
+Both derive `connect-src` from env rather than widening to `https:`/`wss:`. Adding an outbound
+origin means adding it there or the browser blocks it silently. HSTS
+(`max-age=63072000; includeSubDomains`, no `preload`) is set once, in `next.config.ts`
+`headers()`, so `_next/static` sends it too; `X-XSS-Protection` is gone (s79).
+`e2e/csp.spec.ts` loads both surfaces from a production build and fails on any script violation.
 
 **Theirs matters more.** The widget runs under the customer's CSP. `script-src 'self'` on
 their domain forbids fetching anything from our origin — which is why socket.io is compiled

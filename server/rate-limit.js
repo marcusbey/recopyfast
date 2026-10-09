@@ -21,8 +21,20 @@ const ON_STORE_FAILURE = 'deny';
 const DEFAULT_RATE_LIMIT = {
   windowMs: 60 * 1000,
   /**
-   * Connections per site per window. A busy customer page is one connection per
-   * open editing session, not per visitor: the widget returns early unless the
+   * Handshakes per client address per window, counted BEFORE anything is
+   * verified (s79, s69 L14). This is the limiter AGENTS.md asks for in front
+   * of authorization — the `sites` lookup is a database round trip — and it is
+   * keyed on the caller, so a flood exhausts the flooder's own bucket and
+   * nobody else's. 60 is a reconnect storm from one office with room to spare.
+   * The address is the client's as Fly's proxy reports it (index.js
+   * `resolveClientAddress`); keyed on the TCP peer behind the proxy it would
+   * be one bucket for every client in the world.
+   */
+  maxHandshakesPerAddress: 60,
+  /**
+   * Connections per site per window, counted only once a handshake's token and
+   * origin VERIFIED (s79). A busy customer page is one connection per open
+   * editing session, not per visitor: the widget returns early unless the
    * snippet carries `data-ws-url`, and (from s08) unless an editing session is
    * open. 120 is generous for that and still bounds a copied token.
    */
@@ -252,9 +264,23 @@ function createRateLimiter(options = {}) {
     config,
 
     /**
+     * The pre-authorization bucket: one per client address, across all sites.
+     * Called before the `sites` lookup. See `maxHandshakesPerAddress`.
+     */
+    async checkHandshake({ address }) {
+      return consume(
+        'conn-pre',
+        address || 'unknown',
+        config.maxHandshakesPerAddress
+      );
+    },
+
+    /**
      * Two buckets, both of which must pass. The per-site one is the ADR's
-     * requirement and cannot be evaded; the per-address one is finer but
-     * collapses behind a proxy, so it is never the only guard.
+     * requirement and cannot be evaded by a token holder; the per-address one
+     * is finer. Called only for a handshake that verified (s79): spent before
+     * verification, the per-site bucket was the cheapest lock-out on a named
+     * customer — 121 bare handshakes and every editor was refused.
      */
     async checkConnection({ siteId, address }) {
       const perSite = await consume('conn-site', siteId, config.maxConnectionsPerSite);

@@ -60,7 +60,7 @@ match Next's nonce regex, differ across calls; prefix matching respects segment 
 (`/login` yes, `/loginx`, `/editor`, `/edit-x`, `/api/edit` no); the theme script reads
 `THEME_STORAGE_KEY`; connect-src keeps its env-derived origins.
 
-- [ ] Task 1
+- [x] Task 1
 
 ## Task 2 — the middleware applies it
 
@@ -75,7 +75,7 @@ has `X-XSS-Protection`. Declared test change: `middleware-matcher.test.ts` drops
 `X-XSS-Protection` from its two "same header set" lists (the header no longer exists);
 `security/headers-cors.test.ts` drops it from its literal list.
 
-- [ ] Task 2
+- [x] Task 2
 
 ## Task 3 — the nonce segments render per request
 
@@ -89,7 +89,7 @@ for every `NONCE_POLICY_PATH_PREFIXES` entry, the segment's layout module exists
 `DashboardFrame.tsx` (the skip link moved with the frame). Build: the route table shows the four
 segments as `ƒ` and `/` still `○`.
 
-- [ ] Task 3
+- [x] Task 3
 
 ## Task 4 — HSTS with includeSubDomains
 
@@ -97,7 +97,7 @@ segments as `ƒ` and `/` still `○`.
 Red first in `src/__tests__/next-config-hsts.test.ts`: the catch-all block carries it, with
 `includeSubDomains`, `max-age` ≥ one year, and no `preload`.
 
-- [ ] Task 4
+- [x] Task 4
 
 ## Task 5 — no live-key account prefix
 
@@ -106,7 +106,7 @@ Red first: `src/__tests__/security/no-live-key-prefixes.test.ts` scans tracked t
 real key; placeholders such as `pk_live_placeholder…` do not match). Then
 `docs/operations/deployment-checklist.md:24-25` → `sk_live_...` / `pk_live_...`.
 
-- [ ] Task 5
+- [x] Task 5
 
 ## Task 6 — the fidelity harness leaves `public/`
 
@@ -120,7 +120,7 @@ under `public/` is named `__fidelity__` and no file there builds a script from a
 parameter; the fixture exists at its new path; the script, started on port 0, serves the three
 paths, refuses a traversal and listens on loopback only.
 
-- [ ] Task 6
+- [x] Task 6
 
 ## Task 7 — the realtime HTTP surface
 
@@ -134,7 +134,7 @@ Red first in `server.integration.test.ts` ("the HTTP surface"): with a socket op
 200 `{"status":"ok"}` exactly and `no-store`; no `x-powered-by`; no ACAO on GET or OPTIONS with
 a foreign `Origin`; each header present; an unknown path's 404 carries them too.
 
-- [ ] Task 7
+- [x] Task 7
 
 ## Task 8 — verify before the per-site bucket
 
@@ -150,7 +150,7 @@ before any `sites` read, and another `Fly-Client-IP` is admitted when trusted; u
 a connection it has already refused" now caps `maxHandshakesPerAddress: 0` — the per-site cap
 moved behind verification by design.
 
-- [ ] Task 8
+- [x] Task 8
 
 ## Task 9 — rotation closes live sockets
 
@@ -164,7 +164,7 @@ refused and not broadcast; a deleted site drops its sockets; a failing `sites` r
 (fail closed); ten sockets on one site cost one `sites` read per sweep; a valid viewer survives
 sweeps (existing test).
 
-- [ ] Task 9
+- [x] Task 9
 
 ## Task 10 — the browser proof
 
@@ -179,7 +179,7 @@ every place in `.github/workflows/ci.yml` and `src/__tests__/e2e/playwright-ci-c
 Run (1)–(4) locally against `next build` + `next start` (`CI=1`, `PLAYWRIGHT_BASE_URL`); (5) is
 CI's.
 
-- [ ] Task 10
+- [x] Task 10
 
 ## Task 11 — docs
 
@@ -188,7 +188,7 @@ HSTS, pointers by symbol), `server/README.md` (Verify `/health`, HTTP surface, h
 rotation sweep, `FLY_APP_NAME`), `server/fly.toml` header pointers by symbol, ADR 059,
 s69 stub marks.
 
-- [ ] Task 11
+- [x] Task 11
 
 ## Task 12 — gates, mutations, cleanup
 
@@ -199,7 +199,7 @@ fidelity guard. Gates: full jest (CI env), `type-check`, `type-check:build`, `li
 `format:check`, `build:embed -- --check`, `next build` (route table), Playwright `--list` = 85.
 Delete `.next`, `test-results/`, `playwright-report/`.
 
-- [ ] Task 12
+- [x] Task 12
 
 ## Rollout
 

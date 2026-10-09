@@ -95,8 +95,9 @@ const FLOATING_SHADOW_VARIANTS: Readonly<Record<string, string>> = {
 
 /**
  * R5: the skip link's `focus:shadow-md`, drawn only while it is focused. It
- * sits in the layout's client frame: s88's review made `layout.tsx` a server
- * component (it exports the segment's `robots`) that renders this file.
+ * sits in the layout's client frame: `layout.tsx` is a server component
+ * (s88 review: it exports the segment's `robots`; s79: it awaits
+ * `connection()` for the nonce CSP, ADR 059) that renders this file.
  */
 const FOCUS_SHADOW_FILE = "src/app/dashboard/DashboardFrame.tsx";
 

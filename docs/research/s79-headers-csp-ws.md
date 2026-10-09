@@ -97,9 +97,9 @@ generic fallback) is not needed — every script is same-origin — so it is not
   wins over the config's for the same key, so the HSTS key must live in exactly one place).
 - `X-XSS-Protection` (`src/middleware.ts:234`) is deprecated; `1; mode=block` can introduce
   cross-site leaks in old engines. Removing it is the current guidance.
-- `docs/operations/deployment-checklist.md:24-25`: `sk_live_51RyZ33RhSIDUA9ar...` and the same
-  prefix on `pk_live_`. The prefix is the account id (also inside every publishable key served
-  to browsers), so it is hygiene, not a leak; no other occurrence in the tree.
+- `docs/operations/deployment-checklist.md:24-25`: the first 17 characters after `sk_live_` and
+  `pk_live_` of the real keys. That prefix is the account id (also inside every publishable key
+  served to browsers), so it is hygiene, not a leak; no other occurrence in the tree.
 
 ## 3. The fidelity harness (L8)
 

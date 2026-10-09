@@ -30,9 +30,9 @@
 # variable is not consulted anywhere in this service — `grep -rn ALLOWED_ORIGINS
 # server/*.js` returns nothing since s07a rewrote the connection handler, so
 # there is no line to read and nothing to reinstate. Authorisation is the
-# per-site HMAC token check at index.js:256 (`verifySiteToken`, auth.js:50)
-# followed by the registered-domain pin at :263 (`isOriginAllowed`, auth.js:101),
-# both inside the connection handler. That pair is strictly stronger than an
+# per-site HMAC token check (`verifySiteToken`, auth.js) followed by the
+# registered-domain pin (`isOriginAllowed`, auth.js), both inside the
+# connection handler in index.js. That pair is strictly stronger than an
 # origin allowlist and needs no redeploy per customer. Setting ALLOWED_ORIGINS
 # would create false confidence about where the security boundary is.
 #
@@ -99,7 +99,7 @@ primary_region = "iad"
   NODE_ENV = "production"
 
 [http_service]
-  internal_port       = 4001       # MUST match WS_PORT above and index.js:740
+  internal_port       = 4001       # MUST match WS_PORT above (read in index.js startFromCli)
   force_https         = true
   processes           = ["app"]
 
@@ -121,7 +121,7 @@ primary_region = "iad"
     timeout      = "5s"
     grace_period = "10s"
     method       = "GET"
-    path         = "/health"
+    path         = "/health"       # liveness only since s79: 200 {"status":"ok"}
 
 [[vm]]
   size   = "shared-cpu-1x"
