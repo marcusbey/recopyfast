@@ -24,7 +24,7 @@ jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(),
 }));
 
-const SITE_ID = "site-123";
+const SITE_ID = "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f";
 const TOKEN = "staging-token-abc";
 
 describe("stagingRefusalStatus", () => {

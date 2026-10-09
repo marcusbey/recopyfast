@@ -94,8 +94,9 @@ main 122ad2e (s74, s75): contract 81 unchanged, ceilings re-measured 45818 / 330
 suites / 5,140; coverage 69.68 / 62.59 / 66.45 / 70.29 above s75's floors; type-check (both) 0; lint 0 errors;
 format:check clean.
 
-Merge note: when s77 lands first, `staging-outage.test.ts` must use an RFC v4 UUID instead of `"site-123"`
-(`canonicalSiteId` → 400).
+Merge note (applied): s77 landed first, so `staging-outage.test.ts` now uses an RFC v4 UUID instead of `"site-123"`
+(`canonicalSiteId` answers 400 to anything else). Rebased on main `0dea1c0` (s70b, s88, s77): contract 86, embed
+45818 / 33059; edit-board, staging, auth and embed suites 835/835.
 
 ## Devin Review on PR #84 — fixed (`fa820c1`)
 
