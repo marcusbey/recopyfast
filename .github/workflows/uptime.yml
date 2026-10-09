@@ -1,0 +1,51 @@
+name: Uptime
+
+# Production uptime monitor (s84). Probes the app's /api/health and the realtime
+# service's /health; on failure opens (or comments on) the open `uptime` issue
+# "Production down: <target>", on recovery comments and closes it. All the
+# decisions live in scripts/uptime-check.mjs and are tested by
+# scripts/__tests__/uptime-check.test.mjs (a blocking step in ci.yml).
+#
+# Why here and not Sentry: the Sentry plan's one uptime seat belongs to another
+# project. Runbook and caveats (best-effort schedule, the 60-day inactivity
+# disable on public repositories): docs/operations/monitoring.md.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# Two runs at once could both see "no open issue" and open two.
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Probe production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout the uptime script
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/uptime-check.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Node.js 24.14.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.14.0"
+
+      - name: Probe production and update uptime issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/uptime-check.mjs

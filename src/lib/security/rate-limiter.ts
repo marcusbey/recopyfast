@@ -436,6 +436,9 @@ export const RATE_LIMIT_CONFIGS = {
   IP_GENERAL: { windowMs: 60 * 1000, maxRequests: 200 }, // 200 requests per minute per IP
   IP_AUTH: { windowMs: 15 * 60 * 1000, maxRequests: 10 }, // 10 auth attempts per 15 minutes per IP
   IP_REGISTRATION: { windowMs: 60 * 60 * 1000, maxRequests: 5 }, // 5 registrations per hour per IP
+  // 60 health probes per minute per IP (s84) — see `src/lib/api/health-rate-limit.ts`
+  // for why this number can never meet an uptime monitor.
+  IP_HEALTH: { windowMs: 60 * 1000, maxRequests: 60 },
 
   // API key-based limits
   API_KEY_DEFAULT: { windowMs: 60 * 1000, maxRequests: 1000 }, // 1000 requests per minute

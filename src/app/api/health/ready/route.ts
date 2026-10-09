@@ -1,16 +1,21 @@
 /**
  * Readiness Check API Endpoint
  * Verifies if the application is ready to serve traffic
+ *
+ * Anonymous, like `/api/health`, so each check answers pass/fail and nothing
+ * else (s84, s69 L3). It used to name the missing environment variables, echo
+ * the raw database and storage errors and print the Vercel region. The detail
+ * is logged here instead; never add a `message` back to `ReadinessCheck`.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { limitHealthProbe } from "@/lib/api/health-rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/monitoring/logger";
 
 interface ReadinessCheck {
   name: string;
   status: "pass" | "fail";
-  message?: string;
   critical: boolean;
 }
 
@@ -21,7 +26,6 @@ interface ReadinessResponse {
   details?: {
     version: string;
     environment: string;
-    region?: string;
   };
 }
 
@@ -35,10 +39,17 @@ async function checkEnvironmentVariables(): Promise<ReadinessCheck> {
   const missingVars = requiredVars.filter((varName) => !process.env[varName]);
 
   if (missingVars.length > 0) {
+    // The names are for the operator. On the wire they would tell anyone which
+    // credential this deployment is running without.
+    logger.error(
+      "Readiness: required environment variables are missing",
+      undefined,
+      undefined,
+      { component: "readiness-check", missing: missingVars },
+    );
     return {
       name: "environment_variables",
       status: "fail",
-      message: `Missing required environment variables: ${missingVars.join(", ")}`,
       critical: true,
     };
   }
@@ -71,11 +82,15 @@ async function checkDatabaseConnection(): Promise<ReadinessCheck> {
       critical: true,
     };
   } catch (error) {
+    logger.error(
+      "Readiness: database check failed",
+      error as Error,
+      undefined,
+      { component: "readiness-check", check: "database_connection" },
+    );
     return {
       name: "database_connection",
       status: "fail",
-      message:
-        error instanceof Error ? error.message : "Database connection failed",
       critical: true,
     };
   }
@@ -98,10 +113,13 @@ async function checkStorageAccess(): Promise<ReadinessCheck> {
       critical: false,
     };
   } catch (error) {
+    logger.error("Readiness: storage check failed", error as Error, undefined, {
+      component: "readiness-check",
+      check: "storage_access",
+    });
     return {
       name: "storage_access",
       status: "fail",
-      message: error instanceof Error ? error.message : "Storage access failed",
       critical: false,
     };
   }
@@ -123,7 +141,6 @@ async function checkCriticalPaths(): Promise<ReadinessCheck> {
     return {
       name: "critical_paths",
       status: "fail",
-      message: "Critical paths check failed",
       critical: true,
     };
   }
@@ -131,6 +148,11 @@ async function checkCriticalPaths(): Promise<ReadinessCheck> {
 
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
+
+  // Same per-IP bucket as `/api/health`, before any check. Fails open: see
+  // `limitHealthProbe`.
+  const limited = await limitHealthProbe(request);
+  if (limited) return limited;
 
   try {
     // Run all readiness checks
@@ -156,7 +178,6 @@ export async function GET(request: NextRequest) {
         version: process.env.npm_package_version || "1.0.0",
         environment:
           process.env.VERCEL_ENV || process.env.NODE_ENV || "development",
-        region: process.env.VERCEL_REGION,
       },
     };
 

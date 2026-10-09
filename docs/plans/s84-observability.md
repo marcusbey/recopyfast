@@ -56,44 +56,66 @@ No Design step: no screen changes. No migration, no embed change (0 bytes).
 
 ## Tasks (ordered, test-first)
 
-1. [ ] **Cache check + critical severity (A-30).** RED: flip the three `test.failing` pins in
+1. [x] **Cache check + critical severity (A-30).** RED: flip the three `test.failing` pins in
    `cache-check.test.ts` to plain tests; add "database alone ⇒ 503" there. GREEN: `checkCache()` via
    `rateLimiter.checkLimit`, in `GET` and `HEAD`; database/cache errors ⇒ `unhealthy`.
-2. [ ] **Generic public bodies.** RED: new `src/__tests__/api/health/no-leak.test.ts` — leaky DB,
+2. [x] **Generic public bodies.** RED: new `src/__tests__/api/health/no-leak.test.ts` — leaky DB,
    storage, env and realtime failures; asserts exact `{status, latency}` key sets, no leaked string,
    no region, no env var name, no connection count, no `metrics`; the logger received the detail.
    GREEN: strip `error`/`details`/`metrics` from `/api/health`, `message`/`region` from `/ready`,
    log server-side. Adjust `realtime-check.test.ts` assertions that pinned `details`/`error`
    (declared in the PR).
-3. [ ] **Per-IP fail-open limiter.** RED: new `src/__tests__/api/health/rate-limit.test.ts` — the
+3. [x] **Per-IP fail-open limiter.** RED: new `src/__tests__/api/health/rate-limit.test.ts` — the
    61st request in a minute from one IP is 429 before any dependency is touched (GET, HEAD,
    ready), another IP is unaffected, one request every 5 minutes for a day is never limited, store
    down ⇒ served. GREEN: `IP_HEALTH` preset, `enforceRateLimit` first in the three handlers; `HEAD`
    takes the request (test call sites pass one — declared).
-4. [ ] **Tunnel allow-list.** RED: new `src/__tests__/sentry-tunnel-guard.test.ts` through the real
+4. [x] **Tunnel allow-list.** RED: new `src/__tests__/sentry-tunnel-guard.test.ts` through the real
    middleware — foreign org/project/region, duplicated params, foreign header DSN (host or
    project), malformed/oversized/absent header, `GET`, no DSN ⇒ 400 with headers and no GoTrue;
    ours ⇒ passes. GREEN: `src/lib/monitoring/sentry-tunnel-guard.ts` + the middleware branch.
    `middleware-matcher.test.ts` sends a valid envelope on the tunnel path (declared).
-5. [ ] **One release.** RED: `next-config-sentry.test.ts` (env + `_sentryRelease` agree with
+5. [x] **One release.** RED: `next-config-sentry.test.ts` (env + `_sentryRelease` agree with
    `VERCEL_GIT_COMMIT_SHA`, beating a stray `GITHUB_SHA`), `instrumentation-client.test.ts` and new
    `src/__tests__/sentry-runtime-configs.test.ts` (release from `NEXT_PUBLIC_SENTRY_RELEASE`, no
    `release` key when unset). GREEN: `src/lib/monitoring/sentry-release.ts`, next.config, three inits.
-6. [ ] **Realtime server Sentry.** RED: new `src/__tests__/websocket/sentry.test.ts` — scrubber unit
+6. [x] **Realtime server Sentry.** RED: new `src/__tests__/websocket/sentry.test.ts` — scrubber unit
    cases; `initSentry` is a no-op without `SENTRY_DSN`; the real CLI (`node server/index.js`, a
    preloaded crash) delivers a scrubbed envelope to a local fake ingest and still exits 1, for both
    an uncaught exception and an unhandled rejection; without a DSN it exits 1 and sends nothing.
    GREEN: `server/sentry.js`, crash handlers, `@sentry/node` in `server/package.json` + lock
    (`--package-lock-only`); `cd server && npm audit --omit=dev` clean.
-7. [ ] **Uptime workflow.** RED: `scripts/__tests__/uptime-check.test.mjs` — probe (2xx, 503,
+7. [x] **Uptime workflow.** RED: `scripts/__tests__/uptime-check.test.mjs` — probe (2xx, 503,
    timeout, retry recovers), decision table (open / comment / close / nothing), exact-title issue
    lookup, `gh` argument arrays, issue body carries no response body, exit code, workflow pins
    (schedule, dispatch, permissions, SHA pins, concurrency, timeouts). GREEN:
    `scripts/uptime-check.mjs`, `.github/workflows/uptime.yml`, CI step in `ci.yml`.
-8. [ ] **Operations docs.** `docs/operations/backups.md`, `docs/operations/monitoring.md`;
+8. [x] **Operations docs.** `docs/operations/backups.md`, `docs/operations/monitoring.md`;
    `SENTRY_DSN` in `server/README.md`'s deploy secrets.
-9. [ ] **Mutations and gates.** Neutralize each guard, see its test go red, restore with
+9. [x] **Mutations and gates.** Neutralize each guard, see its test go red, restore with
    `git checkout --`. Full jest, type-checks, lint, format, embed check, Playwright list, server audit.
+
+## Execution notes (implementer, 2026-10-09)
+
+Existing tests changed, and why (AGENTS.md § Tests):
+
+- `cache-check.test.ts`: the three `test.failing` pins are plain `it`s; the rate-limiter mock now
+  dereferences `mockCheckLimit` lazily (the route imports `rateLimiter` at load, which ran the
+  factory before the double existed); `HEAD()` calls pass a request. Two cases added.
+- `realtime-check.test.ts`: assertions on `checks.realtime.details` and the fixed `error` strings
+  now assert their absence (decision 2); one test renamed (HEAD reads the cache too now); the
+  memo comment no longer says a limiter is the wrong answer; `HEAD()` passes a request.
+- `route.test.ts`: `HEAD()` passes a request; the vacuous "memory metrics when detailed=true"
+  test (it never called the route) is deleted — the behaviour it named no longer exists.
+- `middleware-matcher.test.ts`: the tunnel path is sent as an accepted envelope (POST, our DSN in
+  query and header); its assertions are unchanged.
+
+Beyond the plan: the realtime scrubber also filters `handoff` and `grant` (the edit link's
+`rcf_handoff` code has no "token" in its name); `docs/operations/database-setup.md` no longer
+claims Supabase Free keeps seven days of backups. A production build with a fake DSN and Sentry's
+`_SENTRY_TUNNEL_DESTINATION_OVERRIDE`, served by `next start`, forwarded a 20 KB envelope intact
+through the guarded tunnel to a local ingest and refused every foreign variant with 400 —
+self-hosted Next only; Vercel's forwarding is the after-merge check below.
 
 ## After merge (orchestrator; nothing here touches production)
 

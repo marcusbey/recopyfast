@@ -39,6 +39,8 @@ const env = process.env as Record<string, string | undefined>;
 const original = {
   NODE_ENV: env.NODE_ENV,
   NEXT_PUBLIC_SENTRY_DSN: env.NEXT_PUBLIC_SENTRY_DSN,
+  NEXT_PUBLIC_SENTRY_RELEASE: env.NEXT_PUBLIC_SENTRY_RELEASE,
+  NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA: env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA,
 };
 
 function setEnv(name: string, value: string | undefined): void {
@@ -51,6 +53,7 @@ function setEnv(name: string, value: string | undefined): void {
 
 interface InitOptions {
   dsn?: string;
+  release?: string;
   enabled?: boolean;
   tracesSampleRate?: number;
   sendDefaultPii?: boolean;
@@ -131,6 +134,31 @@ describe("instrumentation-client", () => {
     const { options } = await loadUnder("production");
 
     expect(options).not.toHaveProperty("tunnel");
+  });
+
+  it("reports the build's release: the commit SHA next.config inlines", async () => {
+    // s84. `next.config.ts` puts the build's VERCEL_GIT_COMMIT_SHA into
+    // NEXT_PUBLIC_SENTRY_RELEASE, the one value browser, server and edge all
+    // read. This file used to read NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA, which
+    // only exists when Vercel exposes system variables to the bundle.
+    setEnv("NEXT_PUBLIC_SENTRY_RELEASE", "8f2c1e0d9b7a");
+    setEnv("NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA", undefined);
+
+    const { options } = await loadUnder("production");
+
+    expect(options.release).toBe("8f2c1e0d9b7a");
+  });
+
+  it("passes no release key when the build has none, so the SDK keeps its own", async () => {
+    // @sentry/nextjs spreads these options AFTER its own build-injected
+    // release, so `release: undefined` is not "no opinion" — it erases the
+    // value the SDK would otherwise have sent.
+    setEnv("NEXT_PUBLIC_SENTRY_RELEASE", undefined);
+    setEnv("NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA", undefined);
+
+    const { options } = await loadUnder("production");
+
+    expect(options).not.toHaveProperty("release");
   });
 
   it("never opts into default PII", async () => {

@@ -6,6 +6,7 @@ import {
   resolveEntitlement,
 } from "@/lib/billing/effective-plan";
 import { SENTRY_TUNNEL_ROUTE } from "@/lib/monitoring/sentry-tunnel";
+import { isForwardableTunnelRequest } from "@/lib/monitoring/sentry-tunnel-guard";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -117,6 +118,27 @@ function isSessionlessPath(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   // This middleware now focuses on auth and page-level security
   // API-level security is handled within individual API routes
+
+  // The Sentry tunnel forwards only our own browser's envelopes (s84). Until
+  // then the rewrite behind this path relayed to ANY Sentry project named in
+  // its query string — see `sentry-tunnel-guard.ts`. This runs before that
+  // rewrite, so a refusal here means nothing leaves for Sentry. Still served
+  // with the security headers, still no session work.
+  if (request.nextUrl.pathname === SENTRY_TUNNEL_ROUTE) {
+    const isForwardable = await isForwardableTunnelRequest(
+      {
+        method: request.method,
+        searchParams: request.nextUrl.searchParams,
+        readBody: () => request.text(),
+      },
+      process.env.NEXT_PUBLIC_SENTRY_DSN,
+    );
+    if (!isForwardable) {
+      return withSecurityHeaders(
+        NextResponse.json({ error: "Invalid tunnel request" }, { status: 400 }),
+      );
+    }
+  }
 
   // Headers, but no session work. Deliberately before the Supabase client is
   // even constructed: the point is that nothing on this path can reach GoTrue.

@@ -57,7 +57,9 @@ describe("/api/health", () => {
 
     it("keeps the anonymous HEAD uptime probe off tenant tables", async () => {
       const { HEAD } = await import("@/app/api/health/route");
-      const response = await HEAD();
+      const response = await HEAD(
+        new NextRequest("http://localhost:3000/api/health"),
+      );
 
       expect(response.status).toBe(200);
       expect(mockFrom).toHaveBeenCalledWith("plans");
@@ -74,20 +76,6 @@ describe("/api/health", () => {
 
       expect(healthResponse.status).toBe("healthy");
       expect(healthResponse.timestamp).toBeDefined();
-    });
-
-    it("should include memory metrics when detailed=true", () => {
-      const detailedResponse = {
-        status: "healthy",
-        memory: {
-          rss: process.memoryUsage().rss,
-          heapUsed: process.memoryUsage().heapUsed,
-          heapTotal: process.memoryUsage().heapTotal,
-        },
-      };
-
-      expect(detailedResponse.memory.rss).toBeGreaterThan(0);
-      expect(detailedResponse.memory.heapUsed).toBeGreaterThan(0);
     });
   });
 

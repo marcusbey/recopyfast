@@ -156,6 +156,13 @@ jobs:
       - name: Test published-snapshot measurement tooling (Node, blocking)
         run: node --test scripts/__tests__/measure-published-snapshot.test.mjs
 
+      # s84: every decision the scheduled uptime workflow makes (probe, retry,
+      # open/comment/close an issue, what a public issue may say) and the
+      # workflow's own pins (schedule, permissions, SHA-pinned actions). Local
+      # HTTP servers and a recording `gh` only — no network, no token.
+      - name: Test uptime monitor decisions (Node, blocking)
+        run: node --test scripts/__tests__/uptime-check.test.mjs
+
   # ─── Playwright end-to-end tests ───────────────────────────────────────────
   # This job owns a disposable stack. No hosted Supabase/Redis/Fly credential is
   # accepted: the mutating specs also enforce the exact loopback ports before
