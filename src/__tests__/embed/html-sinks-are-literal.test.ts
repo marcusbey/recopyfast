@@ -10,8 +10,10 @@
  * tab's "by <author>", where the author was a staging invite's address a site
  * admin chose unchecked (s70a review, F1) — was enough to run an attacker's
  * markup there. edit-board-history-xss.test.ts pins that line and the restore
- * panel's two; this guard is the regression test for the class, so the next
- * dynamic `innerHTML` is a red test rather than a review finding.
+ * panel's two; this guard makes the next dynamic `innerHTML` a red test rather
+ * than a review finding. It reads the forms below; a key built at run time
+ * (`el['inner' + 'HTML']`) or `document['write']` would slip past it — none
+ * exists, and review is the backstop for those (s72 review, minor 1).
  *
  * The rule: the right-hand side of every `.innerHTML =` / `+=` is string
  * literals joined by `+`. The one exception is `svg.innerHTML = ICONS[name]`,
@@ -45,7 +47,20 @@ const OTHER_HTML_SINKS = [
   "document.write",
   "createContextualFragment",
   "DOMParser",
+  // s72 review minor 1: an iframe's markup, and the HTML Sanitizer API's
+  // setHTML / setHTMLUnsafe.
+  "srcdoc",
+  "setHTML",
 ];
+
+/** Assignments that hand their right-hand side to `innerHTML`. */
+const SINK_ASSIGNMENTS = new Set([
+  ts.SyntaxKind.EqualsToken,
+  ts.SyntaxKind.PlusEqualsToken,
+  ts.SyntaxKind.BarBarEqualsToken,
+  ts.SyntaxKind.QuestionQuestionEqualsToken,
+  ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+]);
 
 interface Sink {
   line: number;
@@ -89,7 +104,7 @@ function isInnerHtmlTarget(node: ts.Expression): boolean {
   );
 }
 
-/** Every `innerHTML =` / `+=` assignment in `text`, comments excluded. */
+/** Every `innerHTML =` / `+=` / `||=` / `??=` / `&&=` in `text`, comments excluded. */
 function htmlSinks(text: string): Sink[] {
   const file = parse(text);
   const sinks: Sink[] = [];
@@ -97,8 +112,7 @@ function htmlSinks(text: string): Sink[] {
   const visit = (node: ts.Node) => {
     if (
       ts.isBinaryExpression(node) &&
-      (node.operatorToken.kind === ts.SyntaxKind.EqualsToken ||
-        node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken) &&
+      SINK_ASSIGNMENTS.has(node.operatorToken.kind) &&
       isInnerHtmlTarget(node.left)
     ) {
       sinks.push({
@@ -113,6 +127,31 @@ function htmlSinks(text: string): Sink[] {
   visit(file);
 
   return sinks;
+}
+
+/**
+ * Every place the name `innerHTML` occurs in code (comments excluded): a
+ * property access, an element access by literal, an object-literal key
+ * (`Object.assign(el, { innerHTML: x })`), a destructuring target, a literal
+ * handed to `Reflect.set`. Each must be one of the sinks above — a mention
+ * that is not is a sink this scanner cannot judge (s72 review, minor 1).
+ */
+function innerHtmlMentions(text: string): number {
+  const file = parse(text);
+  let count = 0;
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) &&
+      node.text === "innerHTML"
+    ) {
+      count += 1;
+    } else if (ts.isStringLiteralLike(node) && node.text === "innerHTML") {
+      count += 1;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return count;
 }
 
 interface IconMember {
@@ -160,6 +199,24 @@ describe("the scanner sees what it guards (vacuity guards)", () => {
     expect(htmlSinks(SOURCE).length).toBeGreaterThanOrEqual(25);
   });
 
+  it("reads ||=, ??= and &&= as sinks, and counts a mention it cannot judge", () => {
+    const fixture = [
+      "el.innerHTML ||= name;",
+      "el.innerHTML ??= name;",
+      "el.innerHTML &&= name;",
+    ].join("\n");
+    expect(htmlSinks(fixture).map((sink) => sink.isLiteral)).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(
+      innerHtmlMentions(
+        "Object.assign(el, { innerHTML: name }); Reflect.set(el, 'innerHTML', name);",
+      ),
+    ).toBe(2);
+  });
+
   it("flags a dynamic fixture as dynamic", () => {
     const [fixture] = htmlSinks("el.innerHTML = '<b>' + name + '</b>';");
 
@@ -189,6 +246,10 @@ describe("the embed hands the HTML parser literals only", () => {
     expect(
       members.filter((member) => !member.isLiteral).map((m) => m.text),
     ).toEqual([]);
+  });
+
+  it("innerHTML occurs only as the target of a sink this guard judges", () => {
+    expect(innerHtmlMentions(SOURCE)).toBe(htmlSinks(SOURCE).length);
   });
 
   it.each(OTHER_HTML_SINKS)("%s does not occur", (name) => {

@@ -27,6 +27,8 @@ const mockDirectory: { rows: MockRow[]; readFails: boolean } = {
   readFails: false,
 };
 const mockInserts: Array<{ table: string; payload: MockRow }> = [];
+/** Every table the route reads or writes, in order (s72: refusal reads none). */
+const mockTablesRead: string[] = [];
 
 function mockReadDirectory(filters: Array<[string, unknown]>) {
   if (mockDirectory.readFails) {
@@ -63,6 +65,7 @@ jest.mock("@/lib/supabase/server", () => ({
           }),
       },
       from: (table: string) => {
+        mockTablesRead.push(table);
         const filters: Array<[string, unknown]> = [];
         let inserted: MockRow | null = null;
         const chain: Record<string, unknown> = {
@@ -426,6 +429,7 @@ describe("s72 — POST /api/staging/access email rule", () => {
       access: { token: "staging-token", email: "editor@example.com" },
       verificationCode: "482913",
     });
+    mockTablesRead.length = 0;
   });
 
   it.each([
@@ -447,6 +451,8 @@ describe("s72 — POST /api/staging/access email rule", () => {
       expect(JSON.stringify(body)).not.toContain(sent);
       expect(createStagingAccess).not.toHaveBeenCalled();
       expect(sendStagingVerificationEmail).not.toHaveBeenCalled();
+      // Refused before the site is read (review minor 2): no table touched.
+      expect(mockTablesRead).toEqual([]);
     },
   );
 
