@@ -3938,3 +3938,64 @@ overlay — accepted as is, plan decision 7):
 Complexity: 3. Dependencies: none (s37 comparison pages and s59 install guide are on `main`).
 
 Embed allocation: 0 bytes (ceilings only go down).
+
+## Story s82-billing-lifetime-guards — a lifetime owner is never billed again for what they own, and billing says only what is true
+
+Follow-ups of s71 (PR #74) and s45, plus s69 L5, scheduled by the orchestrator on 2026-10-09 under
+the owner's directive. Research: `docs/research/s82-billing-lifetime-guards.md`. Design:
+`docs/designs/s82-billing-lifetime-guards.md` (no new screen). Plan:
+`docs/plans/s82-billing-lifetime-guards.md`.
+
+Cause (verified on `origin/main` `72f4cff`):
+- `POST /api/billing/subscription/reactivate` (`route.ts:9-37`) calls `reactivateSubscription`
+  (`src/lib/stripe/subscription.ts:477-527`), which has no lifetime check: a lifetime owner whose
+  subscription the Stripe webhook set to cancel (`stopBillingForLifetimeOwner`,
+  `webhooks/stripe/route.ts:941-1000`) can restart monthly billing for a plan the grant replaced.
+  The card hides the button since s71 (`SubscriptionCard.tsx:221-227`); the endpoint does not.
+- A Founding Agency owner still running out an Agency subscription reads "1,000 AI credits /
+  month" with nothing saying it drops to 250 when the subscription ends (s71 review N-1;
+  `SubscriptionCard.tsx:102-128`, ADR 038).
+- The card finds the allowance bullet by its exact text (`SubscriptionCard.tsx:38-40,61-63`, s45
+  review #2). Pro's live bullet is "AI rewrite suggestions, 500 credits a month"
+  (`20260928130000_catalogue_copy_truth.sql:56`), which "500 AI credits" never matches, so a
+  founding-offer holder metered at 100 reads 500.
+- The plan dialog marks a lifetime owner's plan "Current" at "$49/month" with the catalogue's
+  allowance (`UpgradeDialog.tsx:234-285`, s45 review #1).
+- `POST /api/ai/suggest` answers "You were not charged" even when the refund failed
+  (`src/app/api/ai/suggest/route.ts:153-162,333-341`); the failure reaches only `console.error`,
+  which nothing forwards to Sentry.
+- `POST /api/ai/translate` charges the caller (`route.ts:261`), against ADR 035 (the site owner
+  pays).
+- Billing routes return raw exception text, Stripe's included, to the client
+  (`payment-methods/route.ts:119-122,204-207`; `subscription/route.ts:104-107,141-144`;
+  `subscription/reactivate/route.ts:28-33`), and a missing payment-method id answers 500 with
+  Stripe's "No such PaymentMethod" while a foreign one answers 404 — an existence oracle.
+  `payment-methods` has no limiter (s69 L5).
+
+Acceptance criteria:
+- [ ] Reactivating a subscription whose plan a non-trial permanent grant covers (same plan or a
+  higher one) answers 409 with a clear message and never reaches Stripe. A Founding Agency owner
+  cannot restart an Agency subscription either (CTO decision, plan). A subscription above every
+  grant (Lifetime Pro + Agency subscription), a trial-only account and an account with no grant
+  reactivate exactly as before.
+- [ ] Under a plan held for life, the running-out row and the cancel confirmation say what the
+  monthly AI-credit allowance becomes without the subscription, when the subscription is what
+  raises it (resolved server-side). Every other state's copy is unchanged.
+- [ ] The plan card restates the allowance bullet found from the plan's own
+  `limits.monthlyCredits`, not one spelling of it: Pro's real wording is restated, a reworded
+  bullet is restated, unrelated numbers are untouched, no resolved allowance drops it.
+- [ ] The plan dialog shows a plan held for life as "Lifetime" with "Lifetime access" and the
+  account's own allowance — no price, no "Current", no annual line, not purchasable.
+- [ ] `ai/suggest` says "You were not charged" only when the refund succeeded in full; otherwise a
+  truthful message, and the failure is logged through `@/lib/monitoring/logger` (Sentry in
+  production) with ids only, no secrets.
+- [ ] `ai/translate` charges the site owner's wallet through the service client (ADR 035), for the
+  owner and for a non-owner editor alike; a non-owner editor's refusal tells them to ask the owner.
+- [ ] Subscription, reactivate and payment-method routes answer a generic message for anything
+  that is not a deliberate billing refusal and log the detail; a missing and a foreign payment
+  method answer the same 404; `payment-methods` is rate limited per IP before authorisation.
+- [ ] Every non-lifetime billing behaviour is unchanged, pinned by regression tests.
+
+Complexity: 3. Dependencies: s71 (merged, #74). Branch `feature/s82-billing-lifetime-guards`.
+
+Embed allocation: 0 bytes (ceilings only go down).
