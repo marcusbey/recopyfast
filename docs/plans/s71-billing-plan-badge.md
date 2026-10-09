@@ -5,8 +5,10 @@ validated: yes
 
 > Owner decision (2026-10-08): plan validated; ship now, alongside s66c2 and s70.
 
-Research: inline (the story's cause section, verified on `origin/main` `828970c`). No API, data,
-embed or migration change. Two components, two tasks.
+Research: inline at validation (the story's cause section, verified on `origin/main` `828970c`);
+written up after the build as `docs/research/s71-billing-plan-badge.md`, with the state matrix in
+`docs/designs/s71-billing-plan-badge.md` (Devin Review flag, PR #74). No API, data, embed or
+migration change. Two components, two tasks.
 
 Inputs already on the page: `BillingDashboard` computes `isPlanHeldForLife`
 (`BillingDashboard.tsx:265-267`) and passes it to `SubscriptionCard` as `isLifetime`.
