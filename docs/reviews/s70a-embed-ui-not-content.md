@@ -62,5 +62,20 @@ author): migration statement unchanged, header accurate against ADR 046 and the 
 Real browser (jsdom only). CI's Supabase replay for the DB suite (CI runs it). Production: after merge, apply the
 migration, re-count (`will_delete = 0`), and after ≥60 s check `GET /api/published/<site>` for both sites.
 
+## Devin Review on PR #75 — fix `5c90de6`
+
+🔴 **Customer copy deleted by cleanup** (valid): `ce.selector LIKE '#rcf-%'` matched any customer element whose
+own id starts with `rcf-` (generateSelector stops at any id), e.g. an untouched `<h1 id="rcf-hero">`. The clause
+is now an allowlist of the 26 ids the embed has ever assigned (full history of both embed files), matched as the
+whole leading id followed by whitespace or end. Red first on a throwaway PG14: `#rcf-hero`, `#rcf-editor-banner-x
+> p`, `#rcf-savings > span` were deleted; green after, with every earlier embed row still deleted; restoring
+`LIKE '#rcf-%'` → red. SQL check 52/52 allowlisted forms match, 8 lookalikes don't. Migration and both plans stay
+byte-identical for the predicate. Production read-only re-count with the new predicate (orchestrator,
+2026-10-09): unchanged — 25 to delete (13 www.aicompoz.com, 12 QA site), 0 edited kept, 0 review tier; the only
+`#rcf-` root in production is `#rcf-editor-banner` (4 rows, in the allowlist).
+
+Flag "Embed-root rule excludes a live exception" (`recopyfast.src.js:2704-2711`) is F4(a) above — moved to s72
+for the byte ceiling.
+
 Max severity: minor
 Ship allowed: yes
