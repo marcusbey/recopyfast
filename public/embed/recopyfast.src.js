@@ -100,15 +100,25 @@
   // A legacy `?rcf_edit_token=` is stripped too, and only stripped — tested
   // for presence, never read (s76 review minor 4). A link minted before s76
   // holds a token live for hours; not using it is not enough when it sits in
-  // the address bar to be copied, bookmarked or screen-shared. Byte offset:
-  // `window.` dropped from globals that always exist (never from one that may
-  // be missing — a bare `visualViewport` throws where it is undefined).
+  // the address bar to be copied, bookmarked or screen-shared.
+  //
+  // TOMBSTONE — s76 review fix pass 2. `window.` was dropped from `history`,
+  // `open`, `addEventListener`, `removeEventListener`, `localStorage` and
+  // `sessionStorage` to pay for the line above, as "globals that always
+  // exist". A BARE name is looked up in the page's global lexical scope
+  // first: a customer script's top-level `let open = false` or
+  // `const history = []` is what `open(…)` / `history.replaceState` reached,
+  // and the TypeError landed in the host page (non-negotiable #4). Those names
+  // go through `window.`, which no page can shadow (host-page-globals.test.ts
+  // censuses them). `location` alone stays bare: it is unforgeable, so a
+  // top-level `let`/`const`/`class location` is a SyntaxError and
+  // `var location` binds nothing new (measured in Chromium and WebKit).
   if (STAGING_MODE || STAGING_TOKEN || EDIT_SESSION_TOKEN || urlParams.has('rcf_edit_token')) {
     urlParams.delete('rcf_staging');
     urlParams.delete('rcf_token');
     urlParams.delete('rcf_edit_token');
     const cleanSearch = urlParams + '';
-    history.replaceState(history.state, '', location.pathname + (cleanSearch ? '?' + cleanSearch : '') + (EDIT_SESSION_TOKEN ? '' : location.hash));
+    window.history.replaceState(window.history.state, '', location.pathname + (cleanSearch ? '?' + cleanSearch : '') + (EDIT_SESSION_TOKEN ? '' : location.hash));
   }
 
   // An edit link has to survive the next page load (s41, ADR 036).
@@ -139,18 +149,18 @@
   // visitor load; a dead token meets a 401 and is forgotten (forgetEditLink).
   const EDIT_LINK_KEY = 'rcf_edit_link:' + SITE_ID;
   function forgetEditLink() {
-    try { sessionStorage.removeItem(EDIT_LINK_KEY); } catch (e) {}
+    try { window.sessionStorage.removeItem(EDIT_LINK_KEY); } catch (e) {}
   }
   // Written at parse time for a URL credential, and again when the boot check
   // swaps an edit-link code for the session's token (s76).
   function keepEditLink() {
-    try { sessionStorage.setItem(EDIT_LINK_KEY, JSON.stringify([STAGING_MODE ? STAGING_TOKEN : null, EDIT_SESSION_TOKEN])); } catch (e) {}
+    try { window.sessionStorage.setItem(EDIT_LINK_KEY, JSON.stringify([STAGING_MODE ? STAGING_TOKEN : null, EDIT_SESSION_TOKEN])); } catch (e) {}
   }
   if ((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN) keepEditLink();
   else try {
     // Destructured: a stored value that is not iterable throws here, inside
     // the try, and leaves this a visitor load.
-    const kept = JSON.parse(sessionStorage.getItem(EDIT_LINK_KEY));
+    const kept = JSON.parse(window.sessionStorage.getItem(EDIT_LINK_KEY));
     if (kept) { [STAGING_TOKEN, EDIT_SESSION_TOKEN] = kept; STAGING_MODE = !!STAGING_TOKEN; }
   } catch (e) {}
 
@@ -224,8 +234,11 @@
      * Anything with more than a day left can only be the former — the one bit
      * actually needed here, because it decides localStorage versus
      * sessionStorage. `submit-code` states it outright and is believed instead.
+     *
+     * 864e5 ms = 24 h, written folded: esbuild keeps `24 * 60 * 60 * 1000` as
+     * `1440*60*1e3` (bytes, s76 review fix pass 2).
      */
-    const REMEMBERED_FLOOR_MS = 24 * 60 * 60 * 1000;
+    const REMEMBERED_FLOOR_MS = 864e5;
 
     // Storage throws rather than returns null in a partitioned iframe or with
     // cookies blocked outright, and an editor with storage disabled should be a
@@ -600,10 +613,10 @@
     apiUrl: RECOPYFAST_API,
     siteId: SITE_ID,
     fetch: function(url, options) { return window.fetch(url, options); },
-    localStorage: (function() { try { return localStorage; } catch (e) { return null; } })(),
-    sessionStorage: (function() { try { return sessionStorage; } catch (e) { return null; } })(),
+    localStorage: (function() { try { return window.localStorage; } catch (e) { return null; } })(),
+    sessionStorage: (function() { try { return window.sessionStorage; } catch (e) { return null; } })(),
     location: location,
-    history: history,
+    history: window.history,
     warn: function(message) { console.warn(message); }
   });
 
@@ -1085,7 +1098,7 @@
             verified: true,
             email: 'demo@recopyfast.local',
             permissions: ['view', 'edit', 'publish', 'admin'],
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24h
+            expiresAt: new Date(Date.now() + 864e5).toISOString() // 24 h
           };
           this.editMode = true;
           this.showStagingBanner();
@@ -1287,7 +1300,7 @@
       this.isMutationLocked = true;
       const keepDraft = function(id, text) {
         try {
-          if (id) sessionStorage.setItem('rcf_unsaved_draft:' + SITE_ID + ':' + id, text);
+          if (id) window.sessionStorage.setItem('rcf_unsaved_draft:' + SITE_ID + ':' + id, text);
         } catch (e) { /* The visible DOM remains the recovery copy. */ }
       };
       keepDraft(elementId, content);
@@ -1335,7 +1348,7 @@
           : 'rcf-banner-btn rcf-banner-btn-ghost';
         recovery.onclick = function() {
           const path = self.editorGrant() ? '/edit' : '/dashboard/sites';
-          open(new URL(path, RECOPYFAST_API).toString(), '_blank', 'noopener');
+          window.open(new URL(path, RECOPYFAST_API).toString(), '_blank', 'noopener');
         };
         banner.appendChild(recovery);
       }
@@ -2351,7 +2364,7 @@
       // is why the two searchParams.delete calls that used to sit here, both
       // no-ops, are gone.
       previewBtn.onclick = function() {
-        open(location.href, '_blank', 'noopener');
+        window.open(location.href, '_blank', 'noopener');
       };
     }
 
@@ -4788,8 +4801,8 @@
 
       reposition();
 
-      addEventListener('scroll', scheduleReposition, true);
-      addEventListener('resize', scheduleReposition, active);
+      window.addEventListener('scroll', scheduleReposition, true);
+      window.addEventListener('resize', scheduleReposition, active);
       if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', scheduleReposition, active);
         window.visualViewport.addEventListener('scroll', scheduleReposition, active);
@@ -4867,7 +4880,7 @@
       let isSaving = false;
 
       const cleanup = function() {
-        removeEventListener('scroll', scheduleReposition, true);
+        window.removeEventListener('scroll', scheduleReposition, true);
         if (resizeObserver) resizeObserver.disconnect();
         if (frame) cancelAnimationFrame(frame);
         ['contenteditable', 'spellcheck', 'role', 'aria-multiline', 'data-rcf-editing', 'data-rcf-edit-session'].forEach(function(attr) {
@@ -4903,7 +4916,7 @@
        * confirmation is the only thing that can interrupt a navigation, and it
        * only fires if a handler is registered while the work is actually dirty.
        */
-      addEventListener('beforeunload', function(event) {
+      window.addEventListener('beforeunload', function(event) {
         if (sanitizeContent() === originalText && !fieldsDirty()) return undefined;
         event.preventDefault();
         // Legacy browsers require returnValue to be set for the prompt to show.

@@ -357,9 +357,36 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *                  `localStorage`, `history` — and `urlParams + ''` for
  *                  `.toString()` with the one-use `cleanUrl` inlined
  *   45813 / 33052  measured on the branch — the new ceilings
+ *
+ * CORRECTED in the s76 review fix pass 2, 45813 / 33052 → 45818 / 33059. Up
+ * from fix pass 1's pair, which never reached main; still DOWN from main's
+ * 45828 / 33062, the last ceilings that shipped. Fix pass 1's offset was a
+ * defect (review major): a bare `open` / `history` / `addEventListener` /
+ * `removeEventListener` / `localStorage` / `sessionStorage` resolves to a
+ * host page's own top-level `let`/`const` first, and the TypeError lands in
+ * the host page (non-negotiable #4, host-page-globals.test.ts).
+ *
+ *   45813 / 33052  fix pass 1 (branch only)
+ *   +10 / +12      `window.` on every use of those names: `open` ×2,
+ *                  `history` ×3, `addEventListener` ×3, `removeEventListener`,
+ *                  `localStorage`, `sessionStorage` ×5 — five of them (the
+ *                  parse-time strip's `history` ×2, the edit link's
+ *                  `sessionStorage` ×3) were bare on main too — and the
+ *                  tombstone saying why
+ *   −5 / −5        `864e5` for the two `24 * 60 * 60 * 1000` products, which
+ *                  esbuild keeps as `1440*60*1e3`
+ *   45818 / 33059  measured on the branch — the new ceilings
+ *
+ * `location` ×11 stays bare: it is unforgeable, so a page's top-level
+ * `let`/`const`/`class location` is a SyntaxError and `var location` binds
+ * nothing new (measured in Chromium 145 and WebKit 26). Tried and rejected,
+ * each larger: the scroll listener on the editor's AbortSignal (+6 / +5), a
+ * local for `window.visualViewport` (+16 / +10), one storage helper for the
+ * auth client (+9 / +5), one captured sessionStorage (+0 / +1). The middle
+ * lines carry the banner hash's ±2 B; only the two ends are measurements.
  */
-const MAX_BUNDLE_GZ = 45813;
-const MAX_WIDGET_GZ = 33052;
+const MAX_BUNDLE_GZ = 45818;
+const MAX_WIDGET_GZ = 33059;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

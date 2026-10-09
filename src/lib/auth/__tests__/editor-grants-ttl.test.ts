@@ -153,6 +153,10 @@ function grantRow(
     lineageStartMs?: number;
     /** A row read without its `created_at`. */
     withoutCreatedAt?: boolean;
+    /** The token's signed expiry `x`, verbatim (default: an hour from now). */
+    signedExpiry?: unknown;
+    /** The row's `expires_at`, verbatim (default: `createdAtMs + expiresInMs`). */
+    rowExpiresAt?: unknown;
   } = {},
 ) {
   const createdAtMs = opts.createdAtMs ?? Date.now();
@@ -162,7 +166,10 @@ function grantRow(
     g: GRANT_ROW_ID,
     s: SITE_ID,
     o: hashOrigin(ORIGIN),
-    x: Math.floor((Date.now() + HOUR_MS) / 1000),
+    x:
+      "signedExpiry" in opts
+        ? opts.signedExpiry
+        : Math.floor((Date.now() + HOUR_MS) / 1000),
     n: "nonce",
     ...(opts.lineageStartMs === undefined
       ? {}
@@ -180,7 +187,10 @@ function grantRow(
       created_at: opts.withoutCreatedAt
         ? undefined
         : new Date(createdAtMs).toISOString(),
-      expires_at: new Date(createdAtMs + expiresInMs).toISOString(),
+      expires_at:
+        "rowExpiresAt" in opts
+          ? opts.rowExpiresAt
+          : new Date(createdAtMs + expiresInMs).toISOString(),
       revoked_at: null,
       revoked_reason: null,
       rotated_from: opts.rotatedFrom ?? null,
@@ -596,5 +606,81 @@ describe("s76 — the lineage ceiling, where a refusal cannot hide it", () => {
     });
 
     expect(mintedExpiryMs(ops) - before).toBeGreaterThan(6 * DAY_MS);
+  });
+});
+
+describe("s76 review fix pass 2 — a date that cannot be believed is refused", () => {
+  // Every time check on a grant is written "not unexpired" / "not within":
+  // a date that does not parse makes the comparison NaN, and NaN must refuse.
+  // The lineage start is bounded from above as well as below, as an edit
+  // session's `created_at` is (s68a M1): a start in the future would push the
+  // 30-day ceiling out by as much.
+
+  it.each([
+    ["a string", "never"],
+    ["an object", { at: "later" }],
+  ])(
+    "a token whose signed expiry is %s is refused before any database read",
+    async (_, signedExpiry) => {
+      const { token, row } = grantRow({ signedExpiry });
+      const { client, ops } = clientFor(row);
+      mockCreateServiceRoleClient.mockReturnValue(client);
+
+      await expect(
+        validateDeviceGrant({ grant: token, siteId: SITE_ID, device }),
+      ).resolves.toEqual({ valid: false, reason: "expired" });
+      expect(ops).toHaveLength(0);
+    },
+  );
+
+  it.each([
+    ["missing", undefined],
+    ["not a date", "soon"],
+  ])("a row whose expires_at is %s is refused", async (_, rowExpiresAt) => {
+    const { token, row } = grantRow({ rowExpiresAt });
+    const { client } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    await expect(
+      validateDeviceGrant({ grant: token, siteId: SITE_ID, device }),
+    ).resolves.toEqual({ valid: false, reason: "expired" });
+  });
+
+  it("a token whose lineage starts in the future is refused", async () => {
+    const { token, row } = grantRow({
+      lineageStartMs: Date.now() + 2 * 60_000,
+    });
+    const { client } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    await expect(
+      validateDeviceGrant({ grant: token, siteId: SITE_ID, device }),
+    ).resolves.toEqual({ valid: false, reason: "expired" });
+  });
+
+  it("a pre-s76 token whose row is dated in the future is refused", async () => {
+    // No `l`: the row's `created_at` stands in, and is bounded the same way.
+    const { token, row } = grantRow({ createdAtMs: Date.now() + 2 * 60_000 });
+    const { client } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    await expect(
+      validateDeviceGrant({ grant: token, siteId: SITE_ID, device }),
+    ).resolves.toEqual({ valid: false, reason: "expired" });
+  });
+
+  it("a lineage start within the clock skew still validates (control)", async () => {
+    // The database stamps `created_at` and this server stamps `l`: two
+    // clocks. Half a minute ahead is drift, not a written date.
+    const { token, row } = grantRow({ lineageStartMs: Date.now() + 30_000 });
+    const { client } = clientFor(row);
+    mockCreateServiceRoleClient.mockReturnValue(client);
+
+    const result = await validateDeviceGrant({
+      grant: token,
+      siteId: SITE_ID,
+      device,
+    });
+    expect(result.valid).toBe(true);
   });
 });

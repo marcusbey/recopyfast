@@ -129,6 +129,7 @@ order). The review found no critical or major; six minors were fixed, test-first
 11. **A legacy `?rcf_edit_token=` is stripped, never read** (minor 4): tested for presence only.
    Paid for in the same file by dropping `window.` from globals that always exist (never from
    one that may be missing, e.g. `visualViewport`); ceilings ratchet 45827 / 33059 → 45813 / 33052.
+   **Offset superseded by decision 13 (review fix pass 2): it was a defect.**
 12. **Edit Board outages** (minor 6): one helper, `stagingRefusalStatus`, at all fifteen call
    sites, census-pinned like A-10.
 
@@ -153,7 +154,64 @@ order). The review found no critical or major; six minors were fixed, test-first
     sites, `GET /api/edit-board/styles` → 503 on a failed token read, 401 for an unknown token.
 19. [x] **Gates, mutations, one commit.**
 
-Follow-ups (not s76): **s95** — `site-auth.normalizeDomain` throws for a registered domain that
+## Review fix pass 2 (2026-10-09)
+
+The re-review found one major and three minors; all four fixed, test-first. CTO decisions:
+
+13. **`window.` on every name a host page can shadow** (major; supersedes decision 11's offset).
+   A bare `open` / `history` / `addEventListener` / `removeEventListener` / `localStorage` /
+   `sessionStorage` resolves to the page's own top-level `let` / `const` / `class` first: a page's
+   `let open = false` made the widget's `open(…)` throw into the host window (non-negotiable #4).
+   `window` itself is unforgeable, so `window.open` cannot be shadowed. Restored on all fifteen
+   uses, five of which were bare on main too (the parse-time strip's `history` ×2, the edit link's
+   `sessionStorage` ×3 — "every name", not only the ones fix pass 1 touched). `location` ×11 stays
+   bare: measured with Playwright in Chromium 145 and WebKit 26, a page's top-level
+   `let` / `const` / `class location` is a SyntaxError, `function location(){}` throws, and
+   `var location` leaves `location === window.location` (it is [LegacyUnforgeable]). jsdom does not
+   model this (its `let location` succeeds), so the new suite never declares it.
+   Bytes: restoring measured 45823 / 33064, over main's widget ceiling by 2. Paid by writing the two
+   `24 * 60 * 60 * 1000` products as `864e5` (esbuild keeps them as `1440*60*1e3`): −5 / −5.
+   Ceilings 45813 / 33052 → **45818 / 33059**: up from fix pass 1's pair, which never reached main,
+   and down from main's 45828 / 33062. Tried and rejected, each larger: the scroll listener on the
+   editor's AbortSignal (+6 / +5), a local for `window.visualViewport` (+16 / +10), one storage
+   helper (+9 / +5), one captured sessionStorage (+0 / +1).
+14. **`recordUse` defaults to true, pinned** (minor). The redemption's check-before-spend is its only
+   `false` caller; every other validation must stamp `last_used_at`.
+15. **Grant dates that cannot be believed are refused** (minor). Both expiry checks — the signed `x`
+   and the row's `expires_at` — are written "not unexpired", so a NaN refuses. The lineage start is
+   bounded from above: an age below −60 s (`LINEAGE_CLOCK_SKEW_MS`) is refused as `expired`, as an
+   undatable lineage is. `l` is stamped by this application and a pre-s76 row's `created_at` by the
+   database, two NTP-synced clocks; a minute is the drift allowed, the reviewer's figure. Rejected:
+   the edit sessions' five minutes, which agree with a migration's backfill this path does not have.
+16. **The handoff/redeem comment tells the truth** (minor): on a 503 the code is left unspent, but
+   nothing presents it again — the widget strips `?rcf_handoff=` at parse time and redeems once.
+
+20. [x] **Major — host-page globals.** RED `src/__tests__/embed/host-page-globals.test.ts` (new): a
+    page script declares `let open = false; let history = 1; let addEventListener = 0; let
+    removeEventListener = 0; let localStorage = null; let sessionStorage = null;` (the fixture is
+    checked to bite); a share link leaves the address bar and is kept; the next load restores it and
+    a refusal forgets it; a handoff code leaves the address bar; a grant in either storage boots the
+    editor; the inline editor guards navigation on the real window and stops when it closes;
+    Re-authenticate keeps the draft and opens sign-in; Preview Live opens the page; nothing escapes
+    into the host window; and a census finds no bare use of the six names. GREEN
+    `recopyfast.src.js`, `864e5`, rebuild, ceilings and ledgers (`build-embed.mjs`,
+    `build-size-gate.test.ts`).
+21. [x] **Minor — `recordUse` default.** `validate-edit-link.test.ts`: the validator every other route
+    uses stamps a stored token's `last_used_at`.
+22. [x] **Minor — grant dates.** `editor-grants-ttl.test.ts`: a signed expiry that is a string or an
+    object is refused before any database read; a row `expires_at` missing or unparseable is
+    refused; a lineage start two minutes ahead (signed `l`, or a pre-s76 row's `created_at`) is
+    refused; thirty seconds ahead still validates (control). The file's `grantRow` helper gains
+    `signedExpiry` and `rowExpiresAt` overrides (declared). GREEN `editor-grants.ts`.
+23. [x] **Minor — handoff/redeem comment.**
+24. [x] **Gates, mutations, one commit.**
+
+Follow-ups (not s76): **the same shadowing class predates s76** — names bare on main before this
+story: `fetch` ×17, `setTimeout` ×15, `clearTimeout` ×4, `alert` ×4, `confirm` ×3, `crypto` ×3,
+`navigator` ×2, `requestAnimationFrame` ×2, `cancelAnimationFrame`, `setInterval`,
+`queueMicrotask`, constructors (`URL`, `Image`, `ResizeObserver`, …). A page's `let alert` or
+`let fetch` breaks the widget the same way; widening the census and paying ~1 gz B per site is a
+story of its own. **s95** — `site-auth.normalizeDomain` throws for a registered domain that
 starts with "http" (e.g. `httpbin.org`), review finding 8, its own story. `submit-code` spends the
 emailed code before its origin check, so a 503 there costs the editor a new code (the order
 predates s76; worth its own look).

@@ -4096,14 +4096,17 @@ Acceptance criteria:
 - [ ] Embed bytes do not grow: the ceilings (45828 / 33062) ratchet down to the branch's
   measurement. No migration, nothing under `server/`, no new dependency. Required gates pass; e2e
   specs that landed with `?rcf_edit_token=` use the new link; Playwright count unchanged.
-  (Local: measured 45813 / 33052 after the review fix pass, gates green, `--list` 80. Open until
-  CI runs the two e2e specs.)
+  (Local: measured 45818 / 33059 after review fix pass 2 — `window.` restored on every name a
+  host page can shadow, `src/__tests__/embed/host-page-globals.test.ts` — below main's
+  45828 / 33062; gates green, `--list` 80. Open until CI runs the two e2e specs.)
 
 Complexity: 4. Dependencies: none (s72 merged). Branch `feature/s76-grant-and-edit-token-hardening`.
 Follow-ups (not s76): the widget's own API reads still carry `?rcf_edit_token=` to RecopyFast's API
 (`recopyfast.src.js:1333`) and the realtime handshake carries `editToken` in its query
 (`server/index.js:211`, s79's file) — RecopyFast's own logs, not a third party's; the editor hub's
 `?rcf_handoff=` (60 s, one-time) could move to the fragment too; Share Preview Links
-(`?rcf_staging=1&rcf_token=`) belong to s72b.
+(`?rcf_staging=1&rcf_token=`) belong to s72b; globals the widget used bare before s76 (`fetch`,
+`setTimeout`, `alert`, `confirm`, `crypto`, …) can be shadowed by a host page's top-level `let`
+exactly as the six names s76 now reaches through `window.` (plan, review fix pass 2).
 
 Embed allocation: ≤ 0 bytes (ceilings only go down; research measured −3 / −4 for the whole edit).

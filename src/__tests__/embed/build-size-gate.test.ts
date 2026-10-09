@@ -131,8 +131,16 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // 33059 → 33052. A legacy `?rcf_edit_token=` leaves the address bar (+13 /
 // +15), paid for by dropping `window.` from always-present globals (−27 / −22,
 // itemised in build-embed.mjs).
-const SEEDED_MAX_BUNDLE_GZ = 45813;
-const SEEDED_MAX_WIDGET_GZ = 33052;
+// CORRECTED in the s76 review fix pass 2: 45813 → 45818, 33052 → 33059. Up
+// from fix pass 1's pair, which never reached main; still DOWN from main's
+// 45828 / 33062. Fix pass 1's offset was a defect (review major): a bare
+// `open` / `history` / `addEventListener` / `removeEventListener` /
+// `localStorage` / `sessionStorage` reaches a host page's own top-level `let`
+// first (host-page-globals.test.ts). `window.` is back on every use (+10 /
+// +12), part-paid by `864e5` for two 24 h products (−5 / −5); itemised in
+// build-embed.mjs.
+const SEEDED_MAX_BUNDLE_GZ = 45818;
+const SEEDED_MAX_WIDGET_GZ = 33059;
 
 interface CheckRun {
   status: number;

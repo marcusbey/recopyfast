@@ -467,4 +467,21 @@ describe("no other route spends a code", () => {
     expect(result.status).toBe(401);
     expect(world.session().last_used_at).toBeNull();
   });
+
+  it("the same validator records each use of a stored token by default", async () => {
+    // `recordUse: false` exists for the redemption's check-before-spend alone
+    // (s76 review fix pass); every other caller passes nothing and must stamp
+    // `last_used_at` (review fix pass 2 minor: the default was unpinned). A
+    // default flipped to false would leave every session looking unopened —
+    // and its edit link spendable after the tab had already used the token.
+    const world = makeWorld();
+
+    const result = await validateEditorAccess({
+      siteId: SITE_ID,
+      token: { kind: "edit-session", token: TOKEN },
+    });
+
+    expect(result.valid).toBe(true);
+    expect(typeof world.session().last_used_at).toBe("string");
+  });
 });

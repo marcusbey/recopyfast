@@ -66,6 +66,15 @@ export const GRANT_REFRESH_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 export const MAX_GRANT_LINEAGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
+ * How far ahead of this server's clock a lineage start may sit and still be
+ * believed. `l` is stamped by this application and a pre-s76 row's
+ * `created_at` by the database: two NTP-synced clocks, so a minute is ample
+ * drift. Tighter than an edit session's five minutes on purpose — nothing
+ * here backfills dates, so there is no migration to agree with.
+ */
+const LINEAGE_CLOCK_SKEW_MS = 60 * 1000;
+
+/**
  * A row whose own `expires_at − created_at` exceeds this was minted
  * remembered: seven days against twelve hours, with a day between them for
  * the two clocks that stamp those columns (the database stamps `created_at`,
@@ -282,7 +291,11 @@ export async function validateDeviceGrant(params: {
     return { valid: false, reason: "malformed" };
   }
 
-  if (payload.x * 1000 <= Date.now()) {
+  // Written "not unexpired", not "expired" (s76 review fix pass 2): an `x`
+  // that is no number makes the comparison NaN, and NaN must refuse. The
+  // truthiness check above lets any non-empty string or object through to
+  // here; `<=` answered false for them and the grant was never expired.
+  if (!(payload.x * 1000 > Date.now())) {
     return { valid: false, reason: "expired" };
   }
 
@@ -368,7 +381,9 @@ export async function validateDeviceGrant(params: {
     }
   }
 
-  if (new Date(row.expires_at).getTime() <= Date.now()) {
+  // "Not unexpired", for the same NaN as the payload's `x` above: a row whose
+  // `expires_at` does not parse was admitted by `<=`.
+  if (!(new Date(row.expires_at).getTime() > Date.now())) {
     return { valid: false, reason: "expired" };
   }
 
@@ -376,11 +391,22 @@ export async function validateDeviceGrant(params: {
   // only where it is extended. Written as "not within": a lineage that cannot
   // be dated (no `l`, no parseable `created_at`) makes this NaN, and NaN must
   // refuse — a grant that cannot be dated cannot be bounded.
+  //
+  // Bounded from above too (s76 review fix pass 2), as an edit session's
+  // `created_at` is (s68a M1): a lineage start in the future gives a negative
+  // age, passes the ceiling, and pushes it out by as much. Past the clock
+  // skew, the start was written, not stamped.
   const lineageStartedAtMs =
     typeof payload.l === "number"
       ? payload.l * 1000
       : new Date(row.created_at).getTime();
-  if (!(Date.now() - lineageStartedAtMs < MAX_GRANT_LINEAGE_MS)) {
+  const lineageAgeMs = Date.now() - lineageStartedAtMs;
+  if (
+    !(
+      lineageAgeMs >= -LINEAGE_CLOCK_SKEW_MS &&
+      lineageAgeMs < MAX_GRANT_LINEAGE_MS
+    )
+  ) {
     return { valid: false, reason: "expired" };
   }
 
