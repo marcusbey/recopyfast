@@ -2,28 +2,25 @@ import { act } from "react";
 import { renderToString } from "react-dom/server";
 import { hydrateRoot, type Root } from "react-dom/client";
 import { within } from "@testing-library/react";
-import { BlogPostList, type BlogPost } from "../BlogPostList";
+import { BlogPostList } from "../BlogPostList";
+import type { PublishedPostSummary } from "@/lib/blog/published-posts";
 
-const POSTS: BlogPost[] = [
+const POSTS: PublishedPostSummary[] = [
   {
-    id: 1,
-    title: "Featured post",
-    slug: "featured-post",
-    excerpt: "The one on top.",
+    id: "post-1",
+    title: "Newer post",
+    slug: "newer-post",
+    excerpt: "The newest one.",
     category: "Guides",
     publishedAt: "2024-01-15",
-    readTime: "5 min read",
-    featured: true,
   },
   {
-    id: 2,
-    title: "Grid post",
-    slug: "grid-post",
-    excerpt: "One of the rest.",
+    id: "post-2",
+    title: "Older post",
+    slug: "older-post",
+    excerpt: "The one before.",
     category: "Guides",
     publishedAt: "2024-01-14",
-    readTime: "4 min read",
-    featured: false,
   },
 ];
 

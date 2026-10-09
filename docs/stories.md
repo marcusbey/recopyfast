@@ -3920,6 +3920,16 @@ Acceptance criteria:
   the legal pages, all as absolute URLs on the configured origin.
 - [x] Tests for each criterion; required gates pass; one story commit (after this docs commit).
 
+Review fixes (minors 1, 2, 4, 5; minor 3 — JSON-LD offers from `plans.price`, not the Stripe
+overlay — accepted as is, plan decision 7):
+- [x] The anon client is recorded: ADR 058, and its row in the "Data access" tables of `AGENTS.md`
+  and `docs/architecture.md`.
+- [x] `/blog` lists the posts `blog_posts` publishes (anon, published only, newest first,
+  regenerated hourly like the sitemap), with an empty state when there are none and an error —
+  never the empty state — when the read fails; the three hard-coded 2024 posts are gone.
+- [x] Every dashboard page's HTML says `noindex, nofollow`, the same as its `X-Robots-Tag` header.
+- [x] The sitemap no longer says the cron publishes: it only writes drafts (s89).
+
 Complexity: 3. Dependencies: none (s37 comparison pages and s59 install guide are on `main`).
 
 Embed allocation: 0 bytes (ceilings only go down).

@@ -5,10 +5,11 @@ import { createClient } from "@supabase/supabase-js";
  * session — nothing read from cookies, nothing persisted, nothing refreshed.
  *
  * For server code that has no user and reads only rows RLS already makes
- * public. Its one caller is `src/app/sitemap.ts`, reading published blog posts
- * under the `"Published blog posts are public"` policy (`FOR SELECT USING
- * (status = 'published')`, migration 20260818000000), which is exactly the set
- * the sitemap may list.
+ * public — ADR 058 says when, and when never. Its callers are
+ * `src/app/sitemap.ts` and the `/blog` index (`src/lib/blog/published-posts.ts`),
+ * both reading published blog posts under the `"Published blog posts are
+ * public"` policy (`FOR SELECT USING (status = 'published')`, migration
+ * 20260818000000), which is exactly the set either may show.
  *
  * Why not the other three (s88):
  * - `supabase/server.ts` reads the caller's cookies. The sitemap ran on it

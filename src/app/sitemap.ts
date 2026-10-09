@@ -9,8 +9,9 @@ import { resolveSiteUrl } from "@/lib/seo/site-url";
  * Until s88 this route read through the cookie client, and `cookies()` made it
  * render — and query Supabase — on every crawler fetch. Reading as `anon` makes
  * it static, and a static sitemap with no `revalidate` is built once per deploy:
- * a post published after the deploy would never appear. The blog cron publishes
- * at most daily, so an hour of lag costs nothing a crawler would notice.
+ * a post published after the deploy would never appear. The blog cron only
+ * writes drafts (s89); a platform admin publishes them by hand, so an hour of
+ * lag costs nothing a crawler would notice.
  */
 export const revalidate = 3600;
 

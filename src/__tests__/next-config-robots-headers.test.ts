@@ -4,11 +4,11 @@ import nextConfig from "../../next.config";
 /**
  * s88 — the dashboard tells crawlers not to index it.
  *
- * Every page under /dashboard is client-rendered (its layout is a client
- * component), so none of them can export `metadata`; the only place a noindex
- * can come from is a response header. The auth redirect already keeps crawlers
- * out and robots.txt disallows the path, so this is the third line: a crawler
- * that ignores robots.txt and reaches a rendered page still reads noindex.
+ * The auth redirect already keeps crawlers out and robots.txt disallows the
+ * path, so this is the third line: a crawler that ignores robots.txt and
+ * reaches a dashboard response still reads noindex. Since s88's review the
+ * layout's `robots` metadata says the same in the HTML; that the two agree is
+ * pinned in `src/__tests__/app/seo-canonicals.test.ts`.
  *
  * Sources are compiled with `getPathMatch`, the helper Next itself uses for
  * `headers()` sources, so `/dashboard/:path*` is checked against the real

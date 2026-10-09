@@ -20,20 +20,21 @@ migration, no embed change, no new dependency, no Playwright count change.
    rendering). A named module rather than an inline client so the rule ("public, RLS-readable data
    in server code with no user") sits in one commented place. Follow-up for the architecture owner:
    the "Data access" table in AGENTS.md / `architecture.md` lists three clients; this is a fourth
-   row to record there (I do not edit the rules).
+   row to record there (I do not edit the rules). (Done in review, minor 1: ADR 058 and the two
+   tables — R1.)
 2. **`/login` and `/signup` are `noindex, follow`** and leave the sitemap. They are bare auth forms
    with no content of their own; brand searches land on `/`; every conversion path links to
    `/signup`. They stay crawlable so the `noindex` is read.
 3. **No fabricated `lastModified`.** Static pages carry none (no page records when its content last
    changed, and `now` on every request is false). A post carries `updated_at ?? published_at`, and
    nothing when both are null. `changeFrequency`/`priority` stay as they are.
-4. **The sitemap revalidates hourly** (`export const revalidate = 3600`). The blog cron publishes at
-   most daily; an hour of lag is invisible to search engines and turns a per-request database read
-   into one read an hour. On a database failure it logs and serves the static entries (the
+4. **The sitemap revalidates hourly** (`export const revalidate = 3600`). The blog cron only creates
+   drafts (s89) and a platform admin publishes them (corrected in review, minor 5); an hour of lag
+   is invisible to search engines and turns a per-request database read into one read an hour. On a database failure it logs and serves the static entries (the
    existing degrade contract, pinned by `comparison-discovery.test.tsx`).
 5. **Dashboard `noindex` is a response header**, `X-Robots-Tag: noindex, nofollow` on
    `/dashboard/:path*` in `next.config.ts` — the segment is client-rendered and cannot export
-   metadata. robots.txt keeps disallowing it (now `/dashboard`, covering the bare path) as the brief
+   metadata. (Review minor 4 adds the matching `robots` metadata through a server layout: R4.) robots.txt keeps disallowing it (now `/dashboard`, covering the bare path) as the brief
    asks; the header covers any crawler that fetches it anyway.
 6. **The homepage becomes a server wrapper** (`app/page.tsx`: metadata, `revalidate = 300`, JSON-LD)
    around its unchanged client body, moved verbatim to `src/components/landing/HomePage.tsx`. 300 s
@@ -177,3 +178,100 @@ Change: `src/lib/seo/llms-txt.ts`, `src/app/llms.txt/route.ts` (new); `src/middl
   and the homepage's restatement share it); the moved body's export is renamed `Home` →
   `HomePage` to match its file (AGENTS.md naming); the llms.txt suite also pins the crawler
   caveat.
+
+## Review fixes (minors 1–5)
+
+> CTO decision under the owner's 2026-10-09 directive. Rebased on `origin/main` `fc5968b` first
+> (one `docs/stories.md` append conflict, resolved in id order: s73 then s88).
+
+CTO decisions for this pass:
+
+- **R1 (minor 1).** The anon client is recorded as
+  [ADR 058](../decisions/058-cookie-less-anon-client-for-public-reads.md) and gets its row in the
+  "Data access" tables of `AGENTS.md` and `docs/architecture.md`. 058 because 055 (s76), 056 (s77)
+  and 057 (s89) are claimed on open branches. This replaces decision 1's "follow-up for the
+  architecture owner": the reviewer asked for it in this story.
+- **R2 (minor 2).** `/blog` lists what `blog_posts` publishes, read through the same anon client and
+  the same `status = 'published'` filter as the sitemap, newest `published_at` first, regenerated
+  hourly (`revalidate = 3600`, the sitemap's). The card shows only what the table holds — title,
+  excerpt, category, publication date. The **"Featured" hero and the read time leave the list**:
+  no column backs "featured" (it was a claim in the fake data), and a read time would mean hauling
+  every article's full `content` into the index; `/blog/<slug>` keeps its own read time. Three
+  states, distinct components (`docs/design-system.md` § States): the list; `EmptyState` when
+  nothing is published; a destructive `Alert`, logged, when the read fails — never the empty state.
+  A failed read renders (it does not throw), so ISR keeps that render until the next revalidation,
+  at most an hour — the sitemap's degrade contract; throwing instead would fail every offline
+  `next build` (CI builds with placeholder Supabase values).
+  `src/app/blog/[slug]` and every blog API/admin route are left alone (s89 owns them). The
+  states are recorded in `docs/designs/s88-seo-canonicals-sitemap.md` (no new screen, no mockup). A post an
+  admin publishes reaches the index within the hour; an on-publish `revalidatePath("/blog")` is a
+  follow-up for s89's admin route, not this story.
+- **R3 (minor 3).** Accepted as is: the JSON-LD offers read `plans.price` (the catalogue, Non-
+  negotiable 7) while `/api/pricing` overlays live Stripe prices. Decision 7 above stands;
+  `check:stripe` guards drift between the two.
+- **R4 (minor 4).** The dashboard's HTML said `index, follow` (inherited from the root) while its
+  response header said `noindex, nofollow`. `src/app/dashboard/layout.tsx` becomes a minimal server
+  layout that exports `robots: { index: false, follow: false }` and renders the unchanged client
+  frame, moved verbatim (`git mv`) to `src/app/dashboard/DashboardFrame.tsx`. The guard's
+  `FOCUS_SHADOW_FILE` follows the move (declared test change); ADR 053's path pointer gets an
+  errata entry — the layout still owns width and gutters, through the frame it renders.
+- **R5 (minor 5).** `src/app/sitemap.ts`'s comment and decision 4 above: the cron only creates
+  drafts (s89); a platform admin publishes.
+
+## Task R1 — ADR 058 and the client tables
+
+- `docs/decisions/058-cookie-less-anon-client-for-public-reads.md` (new): why a fourth, cookie-less
+  anon client exists (least privilege for public reads with no user, vs the cookie client and the
+  service role), when to use it and when never to.
+- `AGENTS.md` § Data access and `docs/architecture.md` § Data access: a fourth row.
+
+- [x] Task R1
+
+## Task R2 — `/blog` reads the published posts
+
+Failing tests first, `src/__tests__/app/blog-index.test.tsx` (the anon client mocked with the
+schema-strict `blog_posts` double, cookie and service clients throwing):
+1. published posts render, newest first; a draft and an archived post do not; none of the three
+   hard-coded 2024 titles renders;
+2. no post published → the empty state, and no list; a failed read → the error alert, logged,
+   and neither the list nor the empty state; a thrown client → the same;
+3. `revalidate` equals the sitemap's;
+4. neither the cookie client nor the service role is constructed.
+`src/components/blog/__tests__/BlogPostList.test.tsx`: fixtures follow the new card type (string
+ids, nullable excerpt and date, no `featured`/`readTime`) — declared test change.
+
+Change: `src/lib/blog/published-posts.ts` (new); `src/app/blog/page.tsx`;
+`src/components/blog/BlogPostList.tsx`.
+
+- [x] Task R2
+
+## Task R4 — the dashboard's robots meta agrees with its header
+
+Failing test first, `src/__tests__/app/seo-canonicals.test.ts`: `/dashboard` resolved through the
+root → dashboard layout chain gives `robots` `noindex, nofollow`, equal to the `X-Robots-Tag`
+`next.config.ts` sends for `/dashboard`.
+
+Change: `src/app/dashboard/layout.tsx` (server, metadata), `src/app/dashboard/DashboardFrame.tsx`
+(moved client body); `src/__tests__/design/page-shell-guard.test.ts` `FOCUS_SHADOW_FILE`;
+`docs/decisions/errata.md` (ADR 053 pointer).
+
+- [x] Task R4
+
+## Task R5 — the sitemap comment tells the truth about publishing
+
+Change: `src/app/sitemap.ts` comment; decision 4 above.
+
+- [x] Task R5
+
+### Review-fix execution notes
+
+- Offline `next build` (Supabase URL on a closed port, `NEXT_PUBLIC_APP_URL=https://recopyfa.st`):
+  `/blog` is ISR 1 h; its prerendered HTML carries `<link rel="canonical" href=".../blog">`, the
+  error state ("The blog could not be loaded", read failed, logged) and none of the 2024 titles;
+  `/dashboard` and `/dashboard/sites` carry `<meta name="robots" content="noindex, nofollow"/>`.
+  `.next` deleted.
+- 11 mutations, each red, each restored (`git checkout --` from the index).
+- Declared test changes: `BlogPostList.test.tsx` fixtures follow the card type (string ids, no
+  `featured`/`readTime`); `page-shell-guard.test.ts` `FOCUS_SHADOW_FILE` follows the frame's move;
+  `next-config-robots-headers.test.ts` docblock no longer says the dashboard cannot export
+  metadata. No test deleted.

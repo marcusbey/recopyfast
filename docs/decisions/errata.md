@@ -114,3 +114,16 @@ PR #32 reached main with billing ADR 031 while s38 was being verified. Before me
 its branch-only column-privilege ADR moved from 031 to 033, and its follow-up portability/
 least-privilege ADR moved from 033 to 034. Only numbers and references changed; decisions
 are preserved. The immutable uncommitted s38 review refers to its historical 031 filename.
+
+## ADR 053 — the frame's markup moved out of `dashboard/layout.tsx` (s88 review, 2026-10-09)
+
+**Says:** *"`src/app/dashboard/layout.tsx` already draws a frame"* and, in Decision 1,
+*"`src/app/dashboard/layout.tsx` owns width and gutters"*.
+
+**Correction.** s88's review made `layout.tsx` a server component so the segment can export
+`robots: { index: false, follow: false }` (a client module cannot export metadata). Its client
+body moved verbatim to `src/app/dashboard/DashboardFrame.tsx` (`DashboardFrame`), which
+`layout.tsx` renders and nothing else does. The sidebar, the 56 px header, `max-w-[1180px]` and
+the gutters are now written there. The decision is unchanged: the layout — through the one frame
+it renders — owns width and gutters, and no page may. The page-shell guard's skip-link exemption
+(`FOCUS_SHADOW_FILE`) names the new file.

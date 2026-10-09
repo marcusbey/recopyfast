@@ -162,6 +162,7 @@ markup and is not sanitized as markup.
 | `supabase/client.ts` | browser, inside effects/handlers only | on |
 | `supabase/server.ts` | route acting as the signed-in user | on |
 | `supabase/service.ts` | widget paths where the caller is a site token | **off** |
+| `supabase/anon.ts` | server code with no user reading rows RLS makes public to `anon` (sitemap, `/blog`); read-only, never user data — [ADR 058](./docs/decisions/058-cookie-less-anon-client-for-public-reads.md) | on |
 
 Service-role is an exception that must be earned per route: an explicit
 `authorizeSiteRequest` / `authorizeFirstPartySiteRequest` / `authorizeIngestRequest` call

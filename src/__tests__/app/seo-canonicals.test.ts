@@ -30,6 +30,8 @@ jest.mock("@/components/landing/HomePage", () => ({
 import type { Metadata } from "next";
 import type { ResolvedMetadata } from "next/dist/lib/metadata/types/metadata-interface";
 import { accumulateMetadata } from "next/dist/lib/metadata/resolve-metadata";
+import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
+import nextConfig from "../../../next.config";
 import { metadata as rootMetadata } from "@/app/layout";
 import { comparisonList } from "@/lib/compare/comparisons";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
@@ -222,6 +224,43 @@ describe("pages that must not be indexed", () => {
       const resolved = await resolve(path, await route.layers());
 
       expect(resolved.robots?.basic).toMatch(/\bnoindex\b/);
+      expect(canonicalOf(resolved)).toBeNull();
+    },
+  );
+});
+
+/**
+ * s88 review (minor 4) — the dashboard's HTML and its response header agree.
+ *
+ * `next.config.ts` sends `X-Robots-Tag: noindex, nofollow` on every
+ * `/dashboard` response, but the segment's layout was a client component and
+ * exported no metadata, so the HTML inherited the root layout's
+ * `<meta name="robots" content="index, follow">`: two contradicting
+ * instructions on one page. The header is read through Next's own `headers()`
+ * matcher, so the comparison is with what the server really sends.
+ */
+type HeaderRule = { source: string; headers: { key: string; value: string }[] };
+
+async function robotsHeaderFor(pathname: string): Promise<string[]> {
+  const rules = ((await nextConfig.headers?.()) ?? []) as HeaderRule[];
+  return rules
+    .filter((rule) => getPathMatch(rule.source)(pathname) !== false)
+    .flatMap((rule) => rule.headers)
+    .filter((header) => header.key.toLowerCase() === "x-robots-tag")
+    .map((header) => header.value);
+}
+
+describe("the dashboard", () => {
+  it.each(["/dashboard", "/dashboard/sites/6f1c2b9e"])(
+    "%s resolves the same noindex, nofollow its response header sends",
+    async (pathname) => {
+      const resolved = await resolve(pathname, [
+        layerOf(await import("@/app/dashboard/layout")),
+        null,
+      ]);
+
+      expect(resolved.robots?.basic).toBe("noindex, nofollow");
+      expect(await robotsHeaderFor(pathname)).toEqual([resolved.robots?.basic]);
       expect(canonicalOf(resolved)).toBeNull();
     },
   );
