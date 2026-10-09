@@ -4017,3 +4017,57 @@ own right now (`staging/validate`, `edit-sessions/*` including s68a review m9, a
 front of `edit-board/*`), listed in the plan.
 
 Embed allocation: 0 bytes.
+
+## Story s89-blog-drafts-only — the blog cron drafts, a human publishes
+
+CTO decision under the owner's 2026-10-09 directive. Source: the PRD's SEO "Publishing discipline"
+(`docs/prd.md:320-322`: *"it drafts, a human publishes … Gate it."*) and the live finding recorded in
+s17's agentic notes (this file, "`cron/generate-blog-post` already auto-publishes, today, daily").
+Research: `docs/research/s89-blog-drafts-only.md`. Decision: [ADR 056](./decisions/056-ai-blog-posts-are-drafts-platform-admin-publishes.md).
+No new screen, so no Design step (recorded in `docs/designs/README.md`).
+
+Cause (verified on `origin/main` `c0c40bf`): `vercel.json:3-5` runs `/api/cron/generate-blog-post`
+daily at 14:00 UTC. That route self-fetches `POST /api/blog/generate` with the cron bearer
+(`src/app/api/cron/generate-blog-post/route.ts:27-41`), which asks OpenAI for a post and inserts it
+with `status: "published"` and `published_at: now()` (`src/app/api/blog/generate/route.ts:273-283`) —
+no human anywhere in the path. The insert goes through the RLS client (`:270`), which in the cron
+path has no session, so since the schema repair it runs as `anon` and RLS refuses it
+(`supabase/migrations/20260818000000_repair_aborted_migrations.sql:1169-1173`, "ACTION REQUIRED") —
+after OpenAI has already been called and billed (`:210-242`). The interactive admin path accepts
+`ADMIN_EMAILS` (`generate/route.ts:35-43`) but the only write policy keys on `app_metadata.role`
+(`20260818000000…sql:1174-1180`), so an allow-listed owner is refused by the database too. There is no publish path
+and no blog admin tooling at all. A retried or duplicated cron run would write a second post.
+
+Acceptance criteria:
+- [ ] The daily cron writes `status = 'draft'` with `published_at` null, never `published` — even
+  when the model's output carries `status: published` front matter and the request carries
+  publish-shaped parameters. Tests: `src/lib/blog/__tests__/drafts.test.ts`,
+  `src/__tests__/api/cron/generate-blog-post.test.ts`.
+- [ ] The cron is idempotent per UTC day: a second (retried, duplicated or concurrent) run the same
+  day returns the same draft with `created: false` and does not call OpenAI; the database refuses a
+  second cron row for the day (`blog_posts.generated_on`, unique). It answers which draft it created
+  or found (`{ created, draft: { id, title, slug, category, status, generated_on } }`). Tests: the two
+  above and `src/__tests__/db/blog-daily-draft.test.ts` (named in the CI database step).
+- [ ] `POST /api/blog/generate` (on-demand generation) is platform-admin only — the cron bearer no
+  longer opens it — and it too writes drafts only. Test: `src/__tests__/api/blog/generate.test.ts`.
+- [ ] A platform admin (`ADMIN_EMAILS` allow-list or server-managed `app_metadata.role = "admin"`;
+  never `user_metadata`) lists drafts or published posts (`GET /api/admin/blog/posts`) and publishes
+  or unpublishes one (`POST /api/admin/blog/posts/<id>`, `{ "action": "publish" | "unpublish" }`),
+  which sets or clears `published_at`. Anyone else gets 401/403 and changes nothing; a cross-origin or
+  Origin-less POST gets 403 before authentication. Test: `src/__tests__/api/admin/blog-posts.test.ts`.
+- [ ] Published read paths show `status = 'published'` only: `/blog/<slug>` 404s on a draft even for a
+  session that RLS lets read drafts. Test: `src/app/blog/[slug]/__tests__/page.test.tsx`.
+  `src/app/sitemap.ts` already filters (`:53-57`) and is owned by s88 — not edited here.
+- [ ] `docs/operations/blog.md` documents how drafts are created, reviewed and published, and that
+  `ADMIN_EMAILS` must hold the owner's address in Vercel.
+- [ ] Orchestrator, before ship: a read-only production count of `blog_posts` by `status` (and the
+  published rows' titles/`created_at`) — any post that went live without review is reviewed by the
+  owner and unpublished through the new route if it fails review. Then the migration is applied
+  (migration-first: it only adds a nullable column and an index), then `ADMIN_EMAILS` is set.
+
+Complexity: 3. Dependencies: none; coordinate with s88 (`src/app/sitemap.ts`, untouched here).
+Branch `feature/s89-blog-drafts-only`. Follow-up: the `/blog` index is a hardcoded list
+(`src/app/blog/page.tsx:8-42`), not the published posts — a published draft is reachable at its URL
+and in the sitemap but not listed there (separate story).
+
+Embed allocation: 0 bytes (ceilings only go down).
