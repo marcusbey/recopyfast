@@ -400,6 +400,29 @@ describe("Devin fix pass — revoking reaches every invite, past PostgREST's max
     }
   });
 
+  // s76 verification of fa820c1 (minors 1, 2): each batched update is fenced
+  // by the site as well as the ids it read, and touches active rows only, so
+  // an invite already ended keeps its revoked_at and is not counted again.
+  it("scopes every batched update to the site and to active invites", async () => {
+    const mine = Array.from({ length: 150 }, (_, n) => n * 2);
+    const world = seeded({ maxRows: 1000, invites: 400, mine });
+
+    await revokeSiteEditor({ siteEditorId: EDITOR_ID });
+
+    const updates = world.db
+      .queriesOn("staging_access")
+      .filter((query) => query.operation === "update");
+    expect(updates.length).toBeGreaterThan(1);
+    for (const update of updates) {
+      expect(update.filters).toEqual(
+        expect.arrayContaining([
+          { column: "site_id", operator: "eq", value: SITE_ID },
+          { column: "is_active", operator: "eq", value: true },
+        ]),
+      );
+    }
+  });
+
   it("reports the invites already ended when a later batch fails", async () => {
     // Best effort: a dropped connection mid-sweep stops it, and the count
     // the DELETE route logs is what actually landed, not 0.

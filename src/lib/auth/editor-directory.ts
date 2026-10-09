@@ -400,6 +400,8 @@ async function revokeStagingInvites(
       .from("staging_access")
       .update({ is_active: false, revoked_at: now })
       .in("id", ids.slice(start, start + INVITE_UPDATE_BATCH))
+      // The ids come from a site-scoped read; the fence keeps it so.
+      .eq("site_id", siteId)
       .eq("is_active", true)
       .select("id");
 

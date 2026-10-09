@@ -97,6 +97,33 @@ format:check clean.
 Merge note: when s77 lands first, `staging-outage.test.ts` must use an RFC v4 UUID instead of `"site-123"`
 (`canonicalSiteId` → 400).
 
+## Devin Review on PR #84 — fixed (`fa820c1`)
+
+🔴 **Remembered grants expire early near ceiling** (valid): `remembered` was inferred from the row's span, but a
+replacement is capped at the 30-day lineage ceiling, so a remembered grant refreshed in its final day got a < 24 h row
+and the next refresh fell to the 12 h session TTL. CTO decision (plan decision 20): `issueDeviceGrant` signs `r: 1 | 0`
+inside the HMAC payload next to `l`; `validateDeviceGrant` reads `remembered` from it (`=== 1`); a token minted before
+the flag falls back once to the row span (those rows were never capped); rewriting or stripping `r` breaks the
+signature. 🟡 **Editor revocation misses later invites** (valid): the sweep read the site's active invites in one
+request, capped at `max_rows`. CTO decision (21): no PostgREST filter reproduces `normalizeEmail`, so the sweep pages
+`id, email` in a total order (`id`), advancing by rows returned until an empty page, reads every page before writing,
+and deactivates matches in batches of 100 ids, reporting what landed on a partial failure. 15 mutations red.
+
+## Verification of `fa820c1` — fresh-context reviewer (sonnet): minor, ship allowed
+
+`r` is inside `encodeSignedToken`'s HMAC'd payload; `decodeSignedToken` recomputes it timing-safely, so rewriting or
+stripping `r` yields `null` → `malformed`; the legacy fallback applies only to `r === undefined`, which a forger cannot
+produce from a token that carried `r`; the 30-day ceiling binds both kinds at issue and at use; rotation inherits the
+signed choice and ignores the caller's `rememberDevice`. Revocation matches with `normalizeEmail` in code (no `ilike`),
+ids come only from the site-scoped read. 14 mutations, 13 red; `src/lib/auth` 219 passed; type-check (both), lint,
+format:check, build:embed 45818 / 33059, Playwright `--list` 81. Minors: (1) the update's `.eq("is_active", true)` was
+unpinned; (2) the batched update was scoped by id only.
+
+## Final fix — orchestrator
+
+The batched update also carries `.eq("site_id", siteId)`; test "scopes every batched update to the site and to active
+invites" (red first without the site fence; dropping the `is_active` fence turns it red too). `src/lib/auth` 220/220.
+
 ## Not verified
 
 The two edited e2e specs (CI core e2e job; watch the 60 s code vs first-compile of /api/staging/validate). A real
