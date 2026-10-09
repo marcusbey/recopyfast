@@ -85,3 +85,13 @@ and a DB test pins that both agree on the attribute case.
   "published" through the text comparison. A/B winners land as "pending" with no "who".
 - Watch: a future column on `content_elements` does not reach the view unless named, which is the
   intent; a widened view is a widened read for every member.
+- The view exists on PostgreSQL 15+ only (added at s70b review, m2; the decision is unchanged).
+  `security_invoker` arrived in PostgreSQL 15, so the migration (`20261009120000`) creates the view
+  only on 15+. Production runs 17.4 and the local Supabase stack 15 (`supabase/config.toml`), so
+  both have it. CI's bare PostgreSQL 14 replay runner (`scripts/run-db-invariants.mjs`) rejects
+  the option ("unrecognized parameter"), so there the migration creates no view and warns. It never
+  falls back to a definer view, which would be a cross-tenant read on any version. A database
+  without the view fails closed: the list read errors and the Changes page shows its error state,
+  never another tenant's rows and never an empty list. Long term, the replay runner should move to
+  production's major version, so every migration is replayed on the version it ships to and the
+  gate can go.

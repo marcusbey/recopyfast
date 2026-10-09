@@ -15,7 +15,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * - "Show 50 more" appends and drops a row it already holds (the server pages
  *   by `changed_at`, so a row that changed between two reads can come back);
  * - a refused read is an error, never an empty list (`useSites.ts`): an empty
- *   list tells an owner "nothing changed" when the truth is "we failed".
+ *   list tells an owner "nothing changed" when the truth is "we failed";
+ * - a reload empties the rows, never the frame around them: `sites` and
+ *   `counts` keep the last answer's values until the next one lands.
+ *   Tombstone (s70b review M1): `load()` once emptied everything, and the
+ *   filter bar draws its site select and status counts from the answer, so
+ *   picking a site unmounted the select under the owner's hand (focus lost)
+ *   and every search blanked the counts.
  */
 
 export type ChangeState = "pending" | "published" | "original";
@@ -117,10 +123,10 @@ async function fetchChanges(
 }
 
 function appendPage(previous: ChangesPage, next: ChangesPage): ChangesPage {
-  const held = new Set(previous.rows.map((row) => row.id));
+  const known = new Set(previous.rows.map((row) => row.id));
   return {
     ...next,
-    rows: [...previous.rows, ...next.rows.filter((row) => !held.has(row.id))],
+    rows: [...previous.rows, ...next.rows.filter((row) => !known.has(row.id))],
   };
 }
 
@@ -137,10 +143,25 @@ function moveCount(
   };
 }
 
+/** What the filter bar draws from an answer: it outlives a reload. */
+type Frame = Pick<ChangesPage, "sites" | "counts">;
+
+interface Held {
+  /** The list on screen; null while a first page loads, and after it failed. */
+  data: ChangesPage | null;
+  /** The last answer's frame, held only while `data` is null. */
+  frame: Frame | null;
+}
+
+const frameOf = (page: ChangesPage): Frame => ({
+  sites: page.sites,
+  counts: page.counts,
+});
+
 export function useContentChanges({ site, state, q }: ChangesFilters) {
   const query = q.trim();
   const [debouncedQuery, setDebouncedQuery] = useState(query);
-  const [data, setData] = useState<ChangesPage | null>(null);
+  const [held, setHeld] = useState<Held>({ data: null, frame: null });
   const [loading, setLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -161,11 +182,14 @@ export function useContentChanges({ site, state, q }: ChangesFilters) {
     setLoading(true);
     setIsLoadingMore(false);
     setError(null);
-    setData(null);
+    setHeld((previous) => ({
+      data: null,
+      frame: previous.data ? frameOf(previous.data) : previous.frame,
+    }));
     try {
       const page = await fetchChanges({ site, state, q: debouncedQuery }, 0);
       if (current !== generation.current) return;
-      setData(page);
+      setHeld({ data: page, frame: null });
     } catch (caught) {
       if (current !== generation.current) return;
       setError(caught instanceof Error ? caught.message : FALLBACK_ERROR);
@@ -178,6 +202,7 @@ export function useContentChanges({ site, state, q }: ChangesFilters) {
     void load();
   }, [load]);
 
+  const data = held.data;
   const loadMore = useCallback(async () => {
     if (!data || data.nextOffset === null || isLoadingMore) return;
     const current = generation.current;
@@ -189,7 +214,10 @@ export function useContentChanges({ site, state, q }: ChangesFilters) {
         data.nextOffset,
       );
       if (current !== generation.current) return;
-      setData((previous) => (previous ? appendPage(previous, page) : page));
+      setHeld((previous) => ({
+        ...previous,
+        data: previous.data ? appendPage(previous.data, page) : page,
+      }));
     } catch (caught) {
       if (current !== generation.current) return;
       setError(caught instanceof Error ? caught.message : FALLBACK_ERROR);
@@ -205,23 +233,34 @@ export function useContentChanges({ site, state, q }: ChangesFilters) {
    */
   const updateRow = useCallback(
     (rowId: string, patch: Partial<ContentChange>) => {
-      setData((previous) => {
-        if (!previous) return previous;
-        const before = previous.rows.find((row) => row.id === rowId);
+      setHeld((previous) => {
+        const current = previous.data;
+        if (!current) return previous;
+        const before = current.rows.find((row) => row.id === rowId);
         if (!before) return previous;
         const after = { ...before, ...patch };
         return {
           ...previous,
-          rows: previous.rows.map((row) => (row.id === rowId ? after : row)),
-          counts: moveCount(previous.counts, before.state, after.state),
+          data: {
+            ...current,
+            rows: current.rows.map((row) => (row.id === rowId ? after : row)),
+            counts: moveCount(current.counts, before.state, after.state),
+          },
         };
       });
     },
     [],
   );
 
+  const frame = data ? frameOf(data) : held.frame;
+
   return {
+    /** The rows' page: null while a first page loads, and after it failed. */
     data,
+    /** The caller's sites, kept while the list reloads; null before the first answer. */
+    sites: frame?.sites ?? null,
+    /** The status counts, kept while the list reloads; null before the first answer. */
+    counts: frame?.counts ?? null,
     loading,
     error,
     refetch: load,

@@ -117,6 +117,18 @@ function groupRows(page: ChangesPage): SiteGroup[] {
   return groups;
 }
 
+/**
+ * "on 2 sites": the sites the list holds, once all of it is loaded. With more
+ * rows to come a site further down is not known yet, so no count is given.
+ * Tombstone (s70b review m5): this counted every site the caller has, so one
+ * changed site out of three read "2 changes on 3 sites".
+ */
+function sitesWithChanges(data: ChangesPage): string | null {
+  if (data.nextOffset !== null) return null;
+  const siteIds = new Set(data.rows.map((row) => row.siteId));
+  return siteIds.size > 0 ? plural(siteIds.size, "site", "sites") : null;
+}
+
 function resultLine(
   data: ChangesPage,
   state: ChangesStateFilter,
@@ -127,12 +139,11 @@ function resultLine(
     return `Showing ${count(data.rows.length)} of ${plural(data.total, "text element", "text elements")}`;
   }
   if (query && data.total === 0) return `0 changes match “${query}”`;
-  const where = siteName ?? plural(data.sites.length, "site", "sites");
-  if (state === "pending") return `${count(data.total)} pending on ${where}`;
-  if (state === "published") {
-    return `${count(data.total)} published on ${where}`;
-  }
-  return `${plural(data.total, "change", "changes")} on ${where}`;
+  const where = siteName ?? sitesWithChanges(data);
+  const on = where ? ` on ${where}` : "";
+  if (state === "pending") return `${count(data.total)} pending${on}`;
+  if (state === "published") return `${count(data.total)} published${on}`;
+  return `${plural(data.total, "change", "changes")}${on}`;
 }
 
 function LoadingPanel({ showHeader }: { showHeader: boolean }) {
@@ -184,6 +195,8 @@ export function ChangesView({ siteId }: ChangesViewProps) {
   const site = siteId ?? pickedSite;
   const {
     data,
+    sites,
+    counts,
     loading,
     error,
     refetch,
@@ -221,7 +234,7 @@ export function ChangesView({ siteId }: ChangesViewProps) {
     setState("all");
   };
   const siteName = site
-    ? (data?.sites.find((candidate) => candidate.id === site)?.name ?? null)
+    ? (sites?.find((candidate) => candidate.id === site)?.name ?? null)
     : null;
 
   const renderBody = () => {
@@ -307,15 +320,18 @@ export function ChangesView({ siteId }: ChangesViewProps) {
 
   return (
     <>
+      {/* Sites and counts come from the hook's frame, which outlives a
+          reload: drawn from the reloading `data`, the site select unmounted
+          under the owner's hand on every pick (s70b review M1). */}
       <ChangesFilterBar
         query={query}
         onQueryChange={filtersChanged(setQuery)}
-        sites={siteId ? undefined : data?.sites}
+        sites={siteId ? undefined : (sites ?? undefined)}
         siteId={pickedSite}
         onSiteChange={filtersChanged(setPickedSite)}
         state={state}
         onStateChange={filtersChanged(setState)}
-        counts={data?.counts ?? null}
+        counts={counts}
       />
 
       {(data || loading) && (

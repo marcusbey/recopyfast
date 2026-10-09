@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { likePattern } from "@/lib/content/search-pattern";
 import { createClient } from "@/lib/supabase/server";
 
 const PAGE_SIZE = 50;
@@ -73,7 +74,8 @@ interface FilterChain {
 interface ChangesQuery {
   site: string | null;
   state: StateFilter;
-  q: string;
+  /** The escaped LIKE pattern of `q`; null when there is no search. */
+  pattern: string | null;
   offset: number;
 }
 
@@ -95,28 +97,22 @@ function parseQuery(params: URLSearchParams): Parsed {
   if (q.length > MAX_QUERY_LENGTH) {
     return { ok: false, error: "Search is too long" };
   }
+  // No escape exists for `*` in a PostgREST like value (search-pattern.ts):
+  // "5*" would match every row containing a 5 (s70b review m1).
+  const pattern = q ? likePattern(q) : null;
+  if (q && pattern === null) {
+    return { ok: false, error: "Search cannot contain *" };
+  }
 
   return {
     ok: true,
     value: {
       site: params.get("site"),
       state: rawState as StateFilter,
-      q,
+      pattern,
       offset: Number(rawOffset),
     },
   };
-}
-
-/**
- * `%`, `_` and `\` are LIKE syntax, so typed text is escaped before it becomes
- * a pattern: "50%_off" must find "50%_off", not "50 anything off". The pattern
- * reaches PostgREST through `.ilike()`, which encodes it as one filter value.
- * Never through `.or()`: that takes a raw filter string, and request text
- * spliced into one is filter injection (the s27 page-path read refused the
- * same thing, see paged-elements.ts).
- */
-function likePattern(q: string): string {
-  return `%${q.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
 }
 
 /**
@@ -182,7 +178,7 @@ export async function GET(request: NextRequest) {
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
-    const { site, state, q, offset } = parsed.value;
+    const { site, state, pattern, offset } = parsed.value;
 
     // The caller's sites, read here rather than from GET /api/sites (the
     // ~4 s route). Only safe columns of `sites` are named (ADR 033).
@@ -235,8 +231,13 @@ export async function GET(request: NextRequest) {
       const bySite = site
         ? chain.eq("site_id", site)
         : chain.in("site_id", siteIds);
-      return (q
-        ? bySite.ilike("search_text", likePattern(q))
+      // The pattern (search-pattern.ts: `%`, `_`, `\` escaped, `*` refused)
+      // reaches PostgREST through `.ilike()`, which encodes it as one filter
+      // value. Never through `.or()`: that takes a raw filter string, and
+      // request text spliced into one is filter injection (the s27 page-path
+      // read refused the same thing, see paged-elements.ts).
+      return (pattern
+        ? bySite.ilike("search_text", pattern)
         : bySite) as unknown as T;
     };
 

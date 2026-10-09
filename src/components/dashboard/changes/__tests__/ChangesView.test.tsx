@@ -334,6 +334,28 @@ describe("ChangesView — grouping", () => {
 
     expect(screen.getByText("7 changes on 3 sites")).toBeInTheDocument();
   });
+
+  // Review m5: "on M sites" counted every site the caller has, changed or
+  // not. It now counts the sites the list holds, and only once the whole list
+  // is loaded: with more rows to come, a site further down is not known yet.
+  it("counts only the sites that hold a change", async () => {
+    mockApi({ list: () => json(listBody([HERO, PRICING])) });
+
+    await renderLoaded();
+
+    expect(screen.getByText("2 changes on 1 site")).toBeInTheDocument();
+  });
+
+  it("names no site count while more changes are still to load", async () => {
+    mockApi({
+      list: () => json(listBody([HERO], { total: 40, nextOffset: 1 })),
+    });
+
+    await renderLoaded();
+
+    expect(screen.getByText("40 changes")).toBeInTheDocument();
+    expect(screen.queryByText(/ on \d+ sites?/)).not.toBeInTheDocument();
+  });
 });
 
 describe("ChangesView — a row", () => {
@@ -422,6 +444,60 @@ describe("ChangesView — a row", () => {
       expect(open.getAttribute("rel")).toContain("noopener");
     },
   );
+
+  // Review m3: the link was `https://${domain}${path}` with no check, and
+  // `page_path` is recorded by the embed. ".evil.example/" made it
+  // https://acme.example.evil.example/; a URL built from "//evil.example/x"
+  // leaves the site outright, and the URL parser drops a tab, so "/\t/…" is
+  // "//…" once parsed. A path that is not one same-site absolute path gets no
+  // Open at all, on the row or in ⋮.
+  it.each([
+    [".evil.example/"],
+    ["//evil.example/x"],
+    ["/\\evil.example/x"],
+    ["/\t/evil.example/x"],
+  ])(
+    "offers no Open for a stored path %p that is not a same-site path",
+    async (pagePath) => {
+      mockApi({
+        list: () =>
+          json(listBody([HERO, row("bad", { pagePath, live: "Off-site" })])),
+      });
+      const user = await renderLoaded();
+      const bad = rowOf("Off-site");
+
+      expect(
+        within(bad).queryByRole("link", { name: /^Open / }),
+      ).not.toBeInTheDocument();
+      await user.click(
+        within(bad).getByRole("button", { name: /^More actions for / }),
+      );
+      expect(
+        await screen.findByRole("menuitem", { name: "Compare and history" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("menuitem", { name: "Open on page" }),
+      ).not.toBeInTheDocument();
+      // The open menu hides the page from the accessibility tree.
+      for (const link of screen.getAllByRole("link", { hidden: true })) {
+        expect(link.getAttribute("href")).not.toMatch(/evil\.example/);
+      }
+    },
+  );
+
+  it("opens the page from ⋮ too, on the row's own site", async () => {
+    const user = await renderLoaded();
+
+    await user.click(
+      within(rowOf("Simple pricing for every team")).getByRole("button", {
+        name: /^More actions for /,
+      }),
+    );
+
+    expect(
+      await screen.findByRole("menuitem", { name: "Open on page" }),
+    ).toHaveAttribute("href", "https://acme.example/pricing");
+  });
 
   it("keeps ⋮ visible at rest on every row", async () => {
     await renderLoaded();
@@ -957,6 +1033,89 @@ describe("ChangesView — filters", () => {
       "Published (5)",
       "All text (1,245)",
     ]);
+  });
+
+  // s70b review M1: a reload emptied the hook's data, and the site select and
+  // the status counts are drawn from it, so picking a site unmounted the
+  // select under the owner's hand and focus fell to <body>.
+  const statusOptions = () =>
+    within(screen.getByRole("combobox", { name: "Filter by status" }))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+
+  it("keeps the site select, its focus and the counts while the picked site loads", async () => {
+    let answer!: () => void;
+    mockApi({
+      list: (url) =>
+        url.searchParams.get("site") === NORTHWIND
+          ? new Promise<Response>((resolve) => {
+              answer = () => resolve(json(listBody([NW_STEP, NW_TITLE])));
+            })
+          : json(listBody()),
+    });
+    const user = await renderLoaded();
+    const siteSelect = screen.getByRole("combobox", { name: "Filter by site" });
+    const countsBefore = statusOptions();
+
+    await user.selectOptions(siteSelect, NORTHWIND);
+    await waitFor(() =>
+      expect(
+        requests("/api/content/changes").filter(([input]) =>
+          String(input).includes(`site=${NORTHWIND}`),
+        ),
+      ).toHaveLength(1),
+    );
+
+    // The rows reload; the filter row does not.
+    expect(
+      screen.getByRole("status", { name: "Loading changes" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Filter by site" })).toBe(
+      siteSelect,
+    );
+    expect(document.activeElement).toBe(siteSelect);
+    expect(siteSelect).toHaveValue(NORTHWIND);
+    expect(statusOptions()).toEqual(countsBefore);
+
+    answer();
+    expect(
+      await screen.findByText("Get started in five minutes"),
+    ).toBeInTheDocument();
+    expect(document.activeElement).toBe(siteSelect);
+  });
+
+  it("keeps the filter row mounted while a search reloads the list", async () => {
+    mockApi({
+      list: (url) =>
+        url.searchParams.get("q")
+          ? new Promise<Response>(() => {})
+          : json(listBody()),
+    });
+    const user = await renderLoaded();
+    const search = screen.getByRole("searchbox", {
+      name: "Search text or page",
+    });
+    const siteSelect = screen.getByRole("combobox", { name: "Filter by site" });
+    const countsBefore = statusOptions();
+
+    await user.type(search, "pricing");
+    // After the 250 ms debounce, the search is asked for and left pending.
+    await waitFor(() =>
+      expect(
+        requests("/api/content/changes").filter(([input]) =>
+          String(input).includes("q=pricing"),
+        ),
+      ).toHaveLength(1),
+    );
+
+    expect(
+      screen.getByRole("status", { name: "Loading changes" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Filter by site" })).toBe(
+      siteSelect,
+    );
+    expect(document.activeElement).toBe(search);
+    expect(statusOptions()).toEqual(countsBefore);
   });
 
   it("asks the server for one site when one is picked", async () => {

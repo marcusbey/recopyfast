@@ -158,6 +158,55 @@ describe("useContentChanges", () => {
     ]);
   });
 
+  // s70b review M1: the reload emptied everything, and the filter bar draws
+  // its site select and status counts from it, so picking a site unmounted
+  // the select under the owner's hand (focus lost) and blanked the counts.
+  it("keeps the sites and the status counts while a filter change reloads the list", async () => {
+    let answerNew!: (value: Response) => void;
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(response(page([change("a")])))
+      .mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          answerNew = resolve;
+        }),
+      ) as typeof fetch;
+    const { result, rerender } = renderHook(
+      (filters: ChangesFilters) => useContentChanges(filters),
+      { initialProps: DEFAULT_FILTERS },
+    );
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    const sitesBefore = page([]).sites;
+
+    rerender({ ...DEFAULT_FILTERS, site: SITE_A });
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+
+    // The rows reload; the frame around them does not.
+    expect(result.current.loading).toBe(true);
+    expect(result.current.data).toBeNull();
+    expect(result.current.sites).toEqual(sitesBefore);
+    expect(result.current.counts).toEqual({
+      pending: 1,
+      published: 2,
+      original: 3,
+    });
+
+    await act(async () => {
+      answerNew(
+        response({
+          ...page([change("b")]),
+          counts: { pending: 0, published: 1, original: 0 },
+        }),
+      );
+    });
+    expect(result.current.counts).toEqual({
+      pending: 0,
+      published: 1,
+      original: 0,
+    });
+    expect(result.current.data?.rows.map((row) => row.id)).toEqual(["b"]);
+  });
+
   it.each([
     [500, { error: "Failed to load changes" }, "Failed to load changes"],
     [401, {}, "Failed to load changes (401)"],

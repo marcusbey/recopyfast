@@ -1,6 +1,13 @@
 import React from "react";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useChangeHistory } from "@/hooks/useChangeHistory";
 import { AuthProvider, useAuth } from "../AuthContext";
 
 const mockAuth = {
@@ -201,5 +208,53 @@ describe("AuthContext — magic link", () => {
         "later@example.com",
       ),
     );
+  });
+});
+
+// s70b review m6: a row's history (who changed what, admin-only) is cached
+// for the page's lifetime in module scope, and a client-side sign-out keeps
+// the module. The next account signed in on the same tab must not be served
+// the last one's trail.
+describe("AuthContext — sign-out", () => {
+  const HISTORY = {
+    historyVisible: true,
+    discoveredAt: "2026-09-28T09:00:00+00:00",
+    events: [],
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAuth.getSession.mockResolvedValue({ data: { session: null } });
+    global.fetch = jest.fn(
+      async () =>
+        ({ ok: true, status: 200, json: async () => HISTORY }) as Response,
+    ) as typeof fetch;
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it("forgets every cached change history when the user signs out", async () => {
+    let emit: (event: string, session: unknown) => void = () => {};
+    mockAuth.onAuthStateChange.mockImplementation(
+      (cb: (event: string, session: unknown) => void) => {
+        emit = cb;
+        return { data: { subscription: { unsubscribe: jest.fn() } } };
+      },
+    );
+    renderProbe();
+    const first = renderHook(() => useChangeHistory("row-signout", "v1"));
+    await waitFor(() => expect(first.result.current.data).toEqual(HISTORY));
+    first.unmount();
+    const cached = renderHook(() => useChangeHistory("row-signout", "v1"));
+    expect(cached.result.current.data).toEqual(HISTORY);
+    cached.unmount();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    act(() => emit("SIGNED_OUT", null));
+
+    const after = renderHook(() => useChangeHistory("row-signout", "v1"));
+    expect(after.result.current.data).toBeNull();
+    await waitFor(() => expect(after.result.current.data).toEqual(HISTORY));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 });

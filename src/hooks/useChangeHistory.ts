@@ -34,6 +34,18 @@ const FALLBACK_ERROR = "Failed to load history";
 /** Module scope, so a remounted row (collapsed, then expanded) reuses it. */
 const cache = new Map<string, ChangeHistory>();
 
+/**
+ * Forgets every cached trail. AuthContext calls it on SIGNED_OUT.
+ *
+ * Tombstone (s70b review m6): module scope outlives a client-side sign-out
+ * (`signOut()` is a `router.push`, not a page load), and a trail carries who
+ * changed what, which only a site admin may read. Without this, the next
+ * account signed in on the same tab was served the last one's trails.
+ */
+export function clearChangeHistory(): void {
+  cache.clear();
+}
+
 const cacheKey = (rowId: string, version: string | null) =>
   `${rowId}@${version ?? ""}`;
 

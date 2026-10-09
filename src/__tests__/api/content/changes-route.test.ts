@@ -312,6 +312,18 @@ describe("GET /api/content/changes", () => {
     expect(carryingQ.every(([method]) => method === "ilike")).toBe(true);
   });
 
+  // Review m1: PostgREST rewrites `*` to `%` in a like value and has no escape
+  // for it, so "5*" listed every row containing a 5.
+  it("refuses a search holding *, so 5* never matches every row containing 5", async () => {
+    const response = await get(`?q=${encodeURIComponent("5*")}`);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Search cannot contain *",
+    });
+    expect(contentQueries()).toEqual([]);
+  });
+
   it.each([
     ["offset=-1"],
     ["offset=10001"],

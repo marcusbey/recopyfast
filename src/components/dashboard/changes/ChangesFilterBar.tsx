@@ -19,7 +19,10 @@ interface ChangesFilterBarProps {
   onSiteChange: (siteId: string | null) => void;
   state: ChangesStateFilter;
   onStateChange: (state: ChangesStateFilter) => void;
-  /** The server's counts for the current site and search; null while loading. */
+  /**
+   * The server's counts for the last answered site and search: kept while the
+   * list reloads, null only before the first answer.
+   */
   counts: ChangesCounts | null;
 }
 

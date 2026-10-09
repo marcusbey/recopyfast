@@ -163,6 +163,8 @@ export const EMBED_ELEMENT_IDS = rows()
 export const SELECTORS = rows().map((row) => row.selector);
 
 export interface ChangesFixtureLog {
+  /** Every list read's `site` parameter (null: all sites), in order. */
+  listSites: Array<string | null>;
   /** Every history read, by row id. */
   historyReads: string[];
   /** Every draft PUT body, parsed. */
@@ -188,6 +190,7 @@ export async function routeChangesFixtures(
   page: Page,
 ): Promise<ChangesFixtureLog> {
   const log: ChangesFixtureLog = {
+    listSites: [],
     historyReads: [],
     draftBodies: [],
     publishBodies: [],
@@ -198,6 +201,9 @@ export async function routeChangesFixtures(
     (url) => url.pathname === "/api/content/changes",
     async (route) => {
       if (route.request().method() !== "GET") return route.continue();
+      log.listSites.push(
+        new URL(route.request().url()).searchParams.get("site"),
+      );
       await route.fulfill(
         json({
           sites: SITES,

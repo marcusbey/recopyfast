@@ -208,6 +208,59 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
 
 ---
 
+## Deviations
+
+Recorded at the s70b review (finding m2): where the code departs from this plan, and why, then
+the choices the plan left open.
+
+### From the plan
+
+- **The view migration is gated on PostgreSQL 15+** (Task 1). The plan's migration is a plain
+  `CREATE VIEW … WITH (security_invoker = true)`. CI's bare PostgreSQL 14 replay
+  (`scripts/run-db-invariants.mjs`, the s38 privilege suites) rejects that option, and every
+  migration must apply there too. So the DDL is `EXECUTE`d inside a `server_version_num >= 150000`
+  check; on 14 nothing is created and a WARNING says why. There is no definer-view fallback on any
+  version. Production (17.4) and the Supabase stack the DB suite runs on (15) create the view.
+  Recorded as a consequence in ADR 054.
+- **`SiteSelectorBar.tsx` is kept** (Task 8). The plan deletes it as having "no importer today",
+  but `src/app/dashboard/_ab-tests/page.tsx` imports it, so deleting it breaks that page's build.
+  The other deletions went ahead as planned.
+- **Links styled with `buttonVariants`, not `<Button asChild>`** (Tasks 7–8: Open, Site page, Add
+  site). `button.tsx:106-117` wraps `children` in a Fragment, so Radix `Slot` clones the Fragment
+  and drops every class the link should get (grid area and justification included). That is a bug
+  in a `src/components/ui/` primitive, which this story may not touch beyond the status registry.
+  The same bug affects the 10 other files that use `<Button asChild>` today. It needs a follow-up
+  story.
+- **Search refuses `*`** (review m1). The plan escapes `%`, `_`, `\` and applies `.ilike`. PostgREST
+  rewrites every `*` in a like value to `%` and has no escape for it. Measured on PostgREST 14.16:
+  `\*` arrives as `\%`, a literal percent sign. So `q` holding `*` is a 400 with the error
+  `Search cannot contain *`. The pattern builder moved to `src/lib/content/search-pattern.ts` so
+  it can be unit-tested (a route file may export only its handlers).
+- **The 375 row layout differs from the design** (review m4). The design's narrow row puts ⋮ on the
+  first line and Open on the who · when line. Both sat in one shared last track, and Open's width
+  cut the location to a few characters. Now status and location fill the first line, and
+  who · when, Open and ⋮ share the last line.
+- **"N changes on M sites" counts the sites the list holds** (review m5), and only once every row
+  is loaded. With more to load, the line reads "N changes" alone, because a site further down is
+  not known yet. The design's example ("15 changes on 2 sites") counted every site.
+- **`AuthContext` changes** (review m6), a file outside "Files touched". It clears the change
+  history cache on `SIGNED_OUT`.
+
+### Choices the plan left open
+
+- `useContentChanges` returns more than `{ data, loading, error, refetch }`: `loadMore`,
+  `isLoadingMore`, `updateRow`, `appliedQuery`, and (review M1) `sites` and `counts`, which keep
+  the last answer's values while the list reloads, so the filter row never unmounts.
+- History is cached per row and per change: the key is the row id plus its `changedAt`, so a row
+  reverted or published from this page reads its trail again.
+- "Success in place" mirrors the view's rules for one row. After Discard draft, a row that was
+  published back to its original text reads Original until the next read, because the client
+  cannot know `published_at`.
+- The list route sorts the caller's sites by name, with the domain standing in for a blank name.
+  `changedBy` goes through the same `@`-only filter as the history route's `by`.
+- Captures are opt-in: `e2e/changes.spec.ts` writes `docs/designs/s70-content-changes/after/` only
+  with `RCF_LAYOUT_SCREENSHOTS=1`, so CI runs the spec as assertions only.
+
 ## Run interdicts
 
 - **Ceilings only go down.** `MAX_BUNDLE_GZ`/`MAX_WIDGET_GZ` and the seeded pair never rise;

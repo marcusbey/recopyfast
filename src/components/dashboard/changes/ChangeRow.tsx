@@ -41,16 +41,24 @@ const EDIT_SESSION_HOURS = 2;
 /**
  * One line at ≥ 768 (design, "Row anatomy"): expand · status · location ·
  * text · who/when · Open · ⋮. Below it the row stacks: status and location,
- * then the text on two lines, then who/when beside Open. The narrow layout's
- * last track is `auto`, not the ⋮'s 2rem: Open is wider than ⋮, and in a
- * 2rem track it overflowed leftwards over the who/when line. Every child is
- * `min-w-0`, so a long string truncates inside its track instead of pushing
- * the panel sideways (the dialog rule, one level down).
+ * the location running to the row's right edge; then the text on two lines;
+ * then who/when, Open and ⋮ together on the last line.
+ *
+ * Tombstone (s70b review m4): ⋮ sat on the first line, in the same last track
+ * as Open on the third. A track is as wide as its widest item, so Open's width
+ * was taken from the location's line and cut it to a few characters at 375.
+ * Open and ⋮ now have a track each, both on the last line, and the location
+ * spans them on the first. The spanning items (location, who, text) each
+ * cross the flexible track, which keeps them out of the `auto` tracks' sizing:
+ * the status track is the badge's width and the Open track is Open's. (Before
+ * that, a 2rem last track made Open overflow leftwards over who/when.) Every
+ * child is `min-w-0`, so a long string truncates inside its area instead of
+ * pushing the panel sideways (the dialog rule, one level down).
  */
 const ROW_GRID = [
   "grid items-center gap-x-3 gap-y-1 px-4 py-3 md:min-h-11 md:py-1.5",
-  "grid-cols-[2rem_auto_minmax(0,1fr)_auto]",
-  "[grid-template-areas:'expand_status_location_menu'_'._text_text_text'_'._who_who_open']",
+  "grid-cols-[2rem_auto_minmax(0,1fr)_auto_2rem]",
+  "[grid-template-areas:'expand_status_location_location_location'_'._text_text_text_text'_'._who_who_open_menu']",
   "md:grid-cols-[2rem_6rem_minmax(10rem,1.1fr)_minmax(0,2fr)_11rem_auto_2rem]",
   "md:[grid-template-areas:'expand_status_location_text_who_open_menu']",
 ].join(" ");
@@ -63,6 +71,36 @@ function shownText(row: ContentChange): string | null {
   if (row.state === "pending") return row.draft;
   if (row.state === "published") return row.live;
   return row.original;
+}
+
+/**
+ * The row's page on its own site, or null when the stored path is not one
+ * same-site absolute path: then the row offers no Open at all.
+ *
+ * Tombstone (s70b review m3): this was `https://${domain}${path}`, and
+ * `page_path` is recorded by the embed on the customer's page. A path of
+ * ".evil.example/" made the link https://acme.example.evil.example/. Built
+ * with `new URL(path, origin)` instead, "//evil.example/x" leaves the site
+ * outright, so the leading-slash rule comes first; and the URL parser drops
+ * tabs and newlines and reads `\` as `/`, so "/\t/evil.example" is
+ * "//evil.example" once parsed: the host is compared after parsing too.
+ */
+function pageUrlFor(domain: string, pagePath: string | null): string | null {
+  const path = pagePath ?? "/";
+  if (
+    !path.startsWith("/") ||
+    path.startsWith("//") ||
+    path.startsWith("/\\")
+  ) {
+    return null;
+  }
+  try {
+    const origin = new URL(`https://${domain}`);
+    const url = new URL(path, origin);
+    return url.host === origin.host ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function fileName(value: string): string {
@@ -119,7 +157,7 @@ export function ChangeRow({
     pageLabel,
   });
   const path = row.pagePath ?? "/";
-  const pageUrl = `https://${site.domain}${path}`;
+  const pageUrl = pageUrlFor(site.domain, row.pagePath);
   const status = contentStatuses[row.state];
   const text = shownText(row) ?? "";
   const isImage =
@@ -238,19 +276,21 @@ export function ChangeRow({
         {/* Styled with `buttonVariants`, not `<Button asChild>`: Button wraps
             its children in a Fragment, so Slot clones the Fragment and every
             class (the grid area included) is dropped. */}
-        <a
-          href={pageUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`Open ${location} on ${site.domain}${path} in a new tab`}
-          className={cn(
-            buttonVariants({ variant: "ghost", size: "sm" }),
-            "justify-self-end [grid-area:open]",
-          )}
-        >
-          Open
-          <ExternalLink aria-hidden="true" />
-        </a>
+        {pageUrl && (
+          <a
+            href={pageUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${location} on ${site.domain}${path} in a new tab`}
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "sm" }),
+              "justify-self-end [grid-area:open]",
+            )}
+          >
+            Open
+            <ExternalLink aria-hidden="true" />
+          </a>
+        )}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -265,17 +305,19 @@ export function ChangeRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuItem asChild>
-              <a
-                href={pageUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="gap-2"
-              >
-                <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                Open on page
-              </a>
-            </DropdownMenuItem>
+            {pageUrl && (
+              <DropdownMenuItem asChild>
+                <a
+                  href={pageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="gap-2"
+                >
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  Open on page
+                </a>
+              </DropdownMenuItem>
+            )}
             {canEdit && (
               <DropdownMenuItem
                 className="gap-2"
