@@ -8,6 +8,9 @@ import {
   type PaidPlanId,
 } from "./plans";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
+import { BillingRefusal } from "@/lib/billing/billing-refusal";
+import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
+import { isPlanCoveredByGrants } from "./plan-types";
 import type { Subscription } from "@/types/billing";
 
 /**
@@ -326,7 +329,7 @@ export async function updateSubscription(
     .single<SubscriptionRow>();
 
   if (fetchError || !currentSubscription) {
-    throw new Error("No active subscription found");
+    throw new BillingRefusal("No active subscription found", 404);
   }
 
   const billingPeriod = updates.billingPeriod ?? "monthly";
@@ -345,7 +348,7 @@ export async function updateSubscription(
   }
 
   if (currentItem.price.id === priceId) {
-    throw new Error("You are already on this plan");
+    throw new BillingRefusal("You are already on this plan", 409);
   }
 
   const stripeSubscription = await stripe.subscriptions.update(
@@ -429,7 +432,7 @@ export async function cancelSubscription(
     .single<SubscriptionRow>();
 
   if (fetchError || !currentSubscription) {
-    throw new Error("No active subscription found");
+    throw new BillingRefusal("No active subscription found", 404);
   }
 
   // Cancel subscription in Stripe
@@ -471,8 +474,19 @@ export async function cancelSubscription(
   return toSubscription(updatedSubscription);
 }
 
+/** s82: said when a lifetime grant already covers the subscription's plan. */
+const LIFETIME_REACTIVATION_REFUSAL =
+  "Your lifetime plan already includes this one, so this subscription can't be restarted.";
+
 /**
- * Reactivate a canceled subscription
+ * Reactivate a subscription that is set to cancel at period end.
+ *
+ * Refused when a permanent grant covers the subscription's plan (s82). Buying a
+ * lifetime plan sets the subscriptions it replaces to cancel at period end
+ * (`stopBillingForLifetimeOwner` in the Stripe webhook); this endpoint used to
+ * restart them on request, billing the customer every month for a plan they
+ * already own. The card stopped offering the button in s71 — a rendering
+ * decision — and this is the money decision behind it.
  */
 export async function reactivateSubscription(
   userId: string,
@@ -489,11 +503,27 @@ export async function reactivateSubscription(
     .single<SubscriptionRow>();
 
   if (fetchError || !currentSubscription) {
-    throw new Error("No subscription found");
+    throw new BillingRefusal("No subscription found", 404);
   }
 
   if (!currentSubscription.cancel_at) {
-    throw new Error("Subscription is not scheduled for cancellation");
+    throw new BillingRefusal(
+      "Subscription is not scheduled for cancellation",
+      409,
+    );
+  }
+
+  // The same grant read the billing page and the lifetime checkout guard use
+  // (non-trial, non-revoked), through the caller's own RLS client, so the page,
+  // checkout and this endpoint cannot disagree about who holds what. A
+  // Founding Agency owner's Agency subscription is refused too, although it
+  // lifts their allowance while it runs (ADR 038): the product never sells
+  // that pairing, and restarting it is the invisible $49 a month the webhook
+  // exists to stop (s82 plan, decision 1). A read failure throws — before
+  // Stripe — rather than guessing that nothing is held.
+  const grantedPlanIds = await readGrantedPlanIds(supabase, userId);
+  if (isPlanCoveredByGrants(currentSubscription.plan, grantedPlanIds)) {
+    throw new BillingRefusal(LIFETIME_REACTIVATION_REFUSAL, 409);
   }
 
   // Reactivate subscription in Stripe

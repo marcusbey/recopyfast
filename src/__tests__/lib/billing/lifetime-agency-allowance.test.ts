@@ -45,7 +45,10 @@ jest.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
-import { resolveEntitlement } from "@/lib/billing/effective-plan";
+import {
+  resolveEntitlement,
+  resolveMonthlyCreditsWithoutSubscription,
+} from "@/lib/billing/effective-plan";
 import { getUserCreditBalance } from "@/lib/credits/system";
 import { clearPlanCatalogueCache } from "@/lib/stripe/plans";
 
@@ -578,4 +581,85 @@ describe("the lifetime cap never lowers an allowance the owner already gets", ()
 
     expect(balance.included).toBe(300);
   });
+});
+
+/**
+ * s82 (s71 review N-1): what the allowance becomes once the live subscription
+ * is gone. A Founding Agency owner running out an Agency subscription holds
+ * 1,000 now and 250 after (ADR 038), and the billing card said nothing about
+ * the drop. This is the number its running-out row states; it is the same
+ * resolver with the subscription read skipped, so every other rule — Agency
+ * precedence, purchase-only, the floor — answers exactly as it does above.
+ */
+describe("the allowance without the live subscription", () => {
+  async function inForceAndAfter() {
+    const client = payerClient();
+    const inForce = (await getUserCreditBalance(OWNER, client)).included;
+    const after = await resolveMonthlyCreditsWithoutSubscription(client, OWNER);
+    return { inForce, after };
+  }
+
+  it.each<{
+    who: string;
+    grants: Row[];
+    subscriptions: Row[];
+    inForce: number;
+    after: number | null;
+  }>([
+    {
+      who: "a Founding Agency owner running out an Agency subscription",
+      grants: [foundingGrant()],
+      subscriptions: [subscriptionRow("active")],
+      inForce: 1000,
+      after: 250,
+    },
+    {
+      who: "a Pro subscriber who bought Founding Agency",
+      grants: [foundingGrant()],
+      subscriptions: [subscriptionRow("active", "pro")],
+      inForce: 500,
+      after: 250,
+    },
+    {
+      who: "an Agency comp running out an Agency subscription",
+      grants: [
+        foundingGrant({
+          source: "support_comp",
+          stripe_payment_intent_id: null,
+        }),
+      ],
+      subscriptions: [subscriptionRow("active")],
+      inForce: 1000,
+      after: 1000,
+    },
+    {
+      who: "a Lifetime Pro owner running out a Pro subscription",
+      grants: [LIFETIME_PRO],
+      subscriptions: [subscriptionRow("active", "pro")],
+      inForce: 500,
+      after: 500,
+    },
+    {
+      who: "a Lifetime Pro and Founding Agency owner running out Agency",
+      grants: [LIFETIME_PRO, foundingGrant()],
+      subscriptions: [subscriptionRow("active")],
+      inForce: 1000,
+      after: 500,
+    },
+    {
+      who: "a plain Agency subscriber (the subscription was everything)",
+      grants: [],
+      subscriptions: [subscriptionRow("active")],
+      inForce: 1000,
+      after: null,
+    },
+  ])(
+    "$who: $inForce now, $after after",
+    async ({ grants, subscriptions, inForce, after }) => {
+      db.plan_entitlements = grants;
+      db.billing_subscriptions = subscriptions;
+
+      await expect(inForceAndAfter()).resolves.toEqual({ inForce, after });
+    },
+  );
 });

@@ -55,7 +55,7 @@ catalogue's wording stays.
 
 | Tile's plan | Badge | Price slot | Bullets | Submit when selected |
 |---|---|---|---|---|
-| Held for life (grant covers the plan in force) | **Lifetime** | **Lifetime access** (no "/month", no annual line) | allowance restated to the account's own | disabled |
+| Held for life (grant covers the plan in force) | **Lifetime** | **Lifetime access** (no "/month", no annual line) | allowance restated to the account's own | disabled, labelled "You hold Agency for life" (added at build: the default label "Continue to payment — $49" would have put the removed price back on the button) |
 | The plan in force, billed monthly | Current (unchanged) | $49/month (unchanged) | catalogue (unchanged) | disabled (unchanged) |
 | Any other | Selected when selected (unchanged) | $price/month, annual line (unchanged) | catalogue (unchanged) | enabled (unchanged) |
 

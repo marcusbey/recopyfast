@@ -145,3 +145,92 @@ describe("UpgradeDialog Agency plan", () => {
     expect(screen.getByText("Permanent Pro access")).toBeInTheDocument();
   });
 });
+
+/**
+ * s82 (s45 review #1): a lifetime owner opening "Change plan" saw the plan
+ * they hold for life marked "Current" at "$49/month" with Agency's "1,000 AI
+ * credits / month" — a subscription's price and semantics, beside a card that
+ * says "Lifetime access" and 250. The tile now reads the way the card does.
+ */
+describe("UpgradeDialog, a plan held for life", () => {
+  const AGENCY_WITH_ALLOWANCE: SubscriptionPlan = {
+    ...plan("agency", "Agency", 49, 40.83, 490),
+    features: ["Everything in Agency", "1,000 AI credits / month"],
+  };
+  const HELD_CATALOGUE: PlanCatalogue = {
+    ...CATALOGUE,
+    subscriptions: [
+      plan("starter", "Starter", 9, 7.5, 90),
+      plan("pro", "Pro", 19, 15.75, 189),
+      AGENCY_WITH_ALLOWANCE,
+    ],
+  };
+
+  function renderDialog(heldForLife?: {
+    planId: string;
+    monthlyCredits: number | null;
+  }) {
+    render(
+      <UpgradeDialog
+        open
+        onOpenChange={jest.fn()}
+        currentPlan="agency"
+        hasSubscription={false}
+        catalogue={HELD_CATALOGUE}
+        lifetimeOffers={[]}
+        foundingAgencyAvailability={null}
+        agencyCheckoutEnabled
+        heldForLife={heldForLife}
+        onSuccess={jest.fn()}
+      />,
+    );
+    return screen.getByRole("radio", { name: /^Agency/ });
+  }
+
+  it("shows it as Lifetime access with the owner's own allowance, no price", async () => {
+    const user = userEvent.setup();
+    const tile = renderDialog({ planId: "agency", monthlyCredits: 250 });
+
+    expect(tile).toHaveTextContent("Lifetime");
+    expect(tile).toHaveTextContent("Lifetime access");
+    expect(tile).not.toHaveTextContent("Current");
+    expect(tile).not.toHaveTextContent("$49");
+    expect(tile).not.toHaveTextContent("/month");
+    expect(tile).toHaveTextContent("250 AI credits / month");
+    expect(tile).not.toHaveTextContent("1,000 AI credits");
+
+    await user.click(screen.getByRole("radio", { name: /Yearly/i }));
+
+    expect(tile).not.toHaveTextContent("Billed $490 once a year");
+    expect(tile).not.toHaveTextContent("$40.83");
+  });
+
+  it("cannot be bought: selecting it disables the submit, which names no price", async () => {
+    const user = userEvent.setup();
+    const tile = renderDialog({ planId: "agency", monthlyCredits: 250 });
+
+    await user.click(tile);
+
+    const submit = screen.getByRole("button", {
+      name: "You hold Agency for life",
+    });
+    expect(submit).toBeDisabled();
+    expect(startCheckout).not.toHaveBeenCalled();
+  });
+
+  it("leaves every other tile priced as before", () => {
+    renderDialog({ planId: "agency", monthlyCredits: 250 });
+
+    expect(screen.getByRole("radio", { name: /^Pro/ })).toHaveTextContent(
+      "$19",
+    );
+  });
+
+  it("keeps Current and the price for a plan billed monthly", () => {
+    const tile = renderDialog();
+
+    expect(tile).toHaveTextContent("Current");
+    expect(tile).toHaveTextContent("$49");
+    expect(tile).toHaveTextContent("1,000 AI credits / month");
+  });
+});

@@ -5,7 +5,10 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
-import type { SubscriptionPlan } from "@/lib/stripe/plan-types";
+import {
+  featuresWithMonthlyCredits,
+  type SubscriptionPlan,
+} from "@/lib/stripe/plan-types";
 import type { Subscription } from "@/types/billing";
 
 interface SubscriptionCardProps {
@@ -31,42 +34,14 @@ interface SubscriptionCardProps {
    * wallet's `included`, resolved server-side — or null when it is not known.
    */
   monthlyCredits: number | null;
+  /**
+   * s82: the allowance this account keeps once `subscription` ends, sent by
+   * the server only when it is lower than `monthlyCredits` — the subscription
+   * is what raises it. Read only on the running-out row under a plan held for
+   * life.
+   */
+  includedAfterSubscription?: number | null;
   onUpdate: () => void;
-}
-
-/** How a plan's bullet states a monthly allowance: "1,000 AI credits". */
-function allowanceText(credits: number): string {
-  return `${credits.toLocaleString("en-US")} AI credits`;
-}
-
-/**
- * The plan's feature bullets, with the catalogue's allowance restated as the
- * one this account gets.
- *
- * s45 review, finding 3: a lifetime Founding Agency owner holds `agency` with
- * 250 monthly credits (ADR 038) — more if another plan they hold lifts it — but
- * this card printed the Agency row's bullets verbatim, "1,000 AI credits /
- * month" beside a wallet saying 250. The number now comes from the resolved
- * allowance; the wording stays the catalogue's. A bullet claiming the catalogue
- * allowance is dropped rather than left standing when the resolved one is not
- * known.
- */
-function featuresWithAllowance(
-  plan: SubscriptionPlan,
-  monthlyCredits: number | null,
-): readonly string[] {
-  if (monthlyCredits === plan.limits.monthlyCredits) {
-    return plan.features;
-  }
-  const claimed = allowanceText(plan.limits.monthlyCredits);
-  return plan.features.flatMap((feature) => {
-    if (!feature.includes(claimed)) {
-      return [feature];
-    }
-    return monthlyCredits === null
-      ? []
-      : [feature.replace(claimed, allowanceText(monthlyCredits))];
-  });
 }
 
 /**
@@ -83,6 +58,23 @@ function priceLabel(plan: SubscriptionPlan, isLifetime: boolean): string {
 
 /** Who the running-out row is about when the catalogue cannot name its plan. */
 const UNNAMED_SUBSCRIPTION = "Your previous subscription";
+
+/**
+ * s82 (s71 review N-1): appended to the running-out row and the cancel
+ * confirmation when the subscription is what raises the allowance. A Founding
+ * Agency owner running out an Agency subscription reads "1,000 AI credits /
+ * month" — true while it runs — and nothing said it drops to 250 after
+ * (ADR 038). Empty when the server sent no lower number.
+ */
+function allowanceWithoutSubscriptionText(
+  includedAfterSubscription: number | null | undefined,
+): string {
+  return typeof includedAfterSubscription === "number"
+    ? ` Without it, your plan includes ${includedAfterSubscription.toLocaleString(
+        "en-US",
+      )} AI credits a month.`
+    : "";
+}
 
 /**
  * The one row a subscription still running out under a plan held for life
@@ -133,6 +125,7 @@ export function SubscriptionCard({
   isLifetime,
   subscriptionPlanName,
   monthlyCredits,
+  includedAfterSubscription,
   onUpdate,
 }: SubscriptionCardProps) {
   const [loading, setLoading] = useState(false);
@@ -243,7 +236,9 @@ export function SubscriptionCard({
           subscriptionPlanName
             ? `your ${subscriptionPlanName} subscription`
             : UNNAMED_SUBSCRIPTION.toLowerCase()
-        }? You keep ${plan.name} for life, and you will not be charged again.`
+        }? You keep ${plan.name} for life, and you will not be charged again.${allowanceWithoutSubscriptionText(
+          includedAfterSubscription,
+        )}`
       : `Cancel your subscription? You keep access until ${formatDate(
           subscription.current_period_end,
         )}, and you will not be charged again.`;
@@ -279,7 +274,7 @@ export function SubscriptionCard({
               subscriptionPlanName,
               plan.name,
               formatDate(subscription.current_period_end),
-            )}
+            ) + allowanceWithoutSubscriptionText(includedAfterSubscription)}
           </p>
         )}
 
@@ -306,7 +301,13 @@ export function SubscriptionCard({
         <div>
           <h5 className="font-medium mb-2">Plan features</h5>
           <ul className="space-y-1 text-sm text-muted-foreground">
-            {featuresWithAllowance(plan, monthlyCredits).map(
+            {/* s45 review, finding 3: a lifetime Founding Agency owner holds
+                `agency` with 250 monthly credits (ADR 038), but this card
+                printed the Agency row's bullets verbatim — "1,000 AI credits /
+                month" beside a wallet saying 250. The number comes from the
+                resolved allowance; the bullet is found by the plan's own
+                limit, never by its wording (s82). */}
+            {featuresWithMonthlyCredits(plan, monthlyCredits).map(
               (feature, index) => (
                 <li key={index} className="flex items-center">
                   <svg
