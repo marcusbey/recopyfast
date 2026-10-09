@@ -258,7 +258,35 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * review is s67 code, so the floor does not move. build-size-gate.test.ts pins
  * the same pair and quotes the same gross.
  */
-const MAX_BUNDLE_GZ = 45841;
+/*
+ * RATCHETED DOWN 2026-10-08 (s70a-embed-ui-not-content), from 45841 / 33073.
+ *
+ * The embed recorded its own Edit Board, AI suggestions modal and form-field
+ * popover as site copy, the editor's "by <email>" included
+ * (docs/research/s70-content-changes.md, fact 1). The fix is byte-negative,
+ * measured in sequence on the branch:
+ *
+ *   45841 / 33073  ceilings before s70a = measured on main at 828970c, where
+ *                  s70a branched (its base adds docs only)
+ *   +6 / +7        two markers (`data-rcf-ignore` on the AI suggestions overlay
+ *                  and on the form-field popover) and the corrected id
+ *                  (`#rcf-edit-board-panel`), the six skip checks kept
+ *   −7 / −7        one `closest()` for the six skip checks, no behaviour change
+ *   45840 / 33073  measured on the branch — the new ceilings
+ *
+ * The two middle lines are not exact to the byte, and no split of them is.
+ * The artifact's banner carries the sha256 of the source, so any source edit,
+ * a comment included, changes 64 hex characters that gzip packs differently:
+ * three comment-only edits of this source measured −2 to +2 (bundle) and 0 to
+ * +2 (widget) at the s70a review. The same intermediate tree measured +5 / +7
+ * without the branch's comments; the review measured +6 / +8 then −7 / −8, and
+ * research −7 / −8 for the consolidation on a copy of the tree. Only the two
+ * ends are measurements of shipped bytes. With no headroom, a comment-only
+ * edit can fail this gate: one tried in the s70a review fix pass, above
+ * shouldSkipElement, measured 45840 / 33074 and was not shipped.
+ * build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45840;
 const MAX_WIDGET_GZ = 33073;
 
 /**

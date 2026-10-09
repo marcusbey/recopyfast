@@ -3580,6 +3580,54 @@ at that commit, to be re-verified at research time):
 
 Embed allocation: 0 bytes.
 
+## Story s70-content-changes — the Content page shows what changed, where, in words an owner understands
+
+As a site owner, the Content page tells me what copy changed on my sites — edited, pending and
+published — grouped by site and page, in human-readable locations, so I can review, compare,
+revert or open it on the page without scrolling through hundreds of untouched strings.
+
+Owner, 2026-10-08, looking at /dashboard/content: "what is the content page about ?? it doesn't
+look great to me." Owner decision, same day: redesign it as a "Changes" page, next after s66c2.
+
+Evidence (production, 2026-10-08):
+
+- Every discovered element is one tall card titled with its internal id (`rcf-1gom2eazz3g`) and a
+  CSS selector path (`div:nth-child(7) > div > button:nth-child(3) > span:nth-child(1)`).
+- Untouched "Original" rows dominate; the few edited ones are buried. No grouping by site or page,
+  no pagination.
+- The embed's own UI was recorded as site content: the 🪄 AI-suggest button, "Failed to generate
+  suggestions. Please try again.", buttons under `#rcf-editor-banner`. Research must confirm
+  whether the current embed (after s67) still reports them and where the exclusion is missing.
+
+Direction (accepted by the owner, to be sharpened by research and design):
+
+- Default view: edited, pending and published rows only; "all discovered text" is a filter.
+- Grouped by site → page; dense rows with a human-readable location ("Homepage · main heading"),
+  the current text (expand to compare with the original), status, who/when, and actions: open on
+  the page, history, revert where the product supports it.
+- The same view filtered to one site as a "Content" tab on the s66c site pages.
+- Junk rows from the embed's own UI are excluded, and the discovery bug is fixed at the source.
+
+Complexity: TBD at research. Dependencies: s66c1 (site pages, merged), s67 (embed discovery,
+merged). Branch `feature/s70-content-changes`.
+
+Embed allocation: TBD at plan (the self-discovery fix may need embed bytes; ceilings only go
+down).
+
+Split at plan (owner-validated 2026-10-08, `docs/plans/s70-content-changes.md`), shipped in this
+order:
+
+- **s70a-embed-ui-not-content** (complexity 2) — the embed never maps or reports a node under a
+  root it injected (Edit Board panel, AI suggestions modal, form-field popover, …); ceilings
+  ratchet down to the measured bytes; one forward migration deletes the untouched rows it already
+  recorded, after the owner approves the read-only count. Closes the leak of an editor's email
+  ("by <email>") into public snapshot rows.
+- **s70b-changes-page** (complexity 4) — `/dashboard/changes` (308 from `/dashboard/content`):
+  Pending + Published by default, site → page groups, readable locations, compare, history,
+  revert (Save as draft · Revert and publish for publishers), 50 rows a page from a
+  security-invoker view (ADR 054); two read-only routes; never calls `GET /api/sites`.
+- **s70c-site-content-tab** (complexity 2) — the same view for one site under its site page.
+
 ## Story s71-billing-plan-badge — the billing page never calls a paid plan "Free"
 
 Owner, 2026-10-08, with a screenshot of `/dashboard/billing`: "here is my account. it says FRee on

@@ -285,6 +285,10 @@ jobs:
       # PostgREST; 20 concurrent wrong guesses must land exactly five charges
       # and burn the code. Only the real PostgREST can say whether the loser of
       # a conditional UPDATE sees zero rows, so it rides in this step too.
+      #
+      # s70a: the embed-UI cleanup migration is executed on its exact seed in a
+      # rolled-back transaction — seven rows deleted, every lookalike, edited
+      # and review-tier row kept. Named here so it never records "[gated]".
       - name: Verify content tables take no direct writes through PostgREST, the snapshot reads fresh rows, and editor-code attempts are charged atomically
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -300,7 +304,8 @@ jobs:
               src/__tests__/db/rls-policies.test.ts \
               src/__tests__/db/edit-sessions-privileges.test.ts \
               src/__tests__/db/replay-privilege-convergence.test.ts \
-              src/__tests__/db/editor-code-attempts.test.ts
+              src/__tests__/db/editor-code-attempts.test.ts \
+              src/__tests__/db/embed-ui-rows-cleanup.test.ts
 
       - name: Test Founding Agency capacity against disposable Postgres
         env:
