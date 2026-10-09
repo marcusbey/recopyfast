@@ -76,6 +76,11 @@ first.
   no grant → the subscription copy. Seen red with the prop pass removed.
 - [x] **m-3** — `priceLabel` states a zero price as "$0/month"; no state of the card prints
   "Free". Test: a plan priced 0, not lifetime → "$0/month", no "Free".
+- [x] **Cancel confirmation under a lifetime plan** (left by the fix pass, cheap) — the confirm
+  text said "You keep access until <period end>", untrue when the plan is held for life. It now
+  reads "Cancel your Pro subscription? You keep Agency for life, and you will not be charged
+  again."; the non-lifetime text is unchanged. Test: "confirms the cancel without ending access
+  the owner holds for life" (red before the fix).
 
 Case 3 of Task 1 asserted `getByText("Current period")` in the lifetime + running-out state; that
 grid is what M-2 replaces, so the assertion now checks the named row ("Your Pro subscription

@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { SubscriptionCard } from "../SubscriptionCard";
 import type { SubscriptionPlan } from "@/lib/stripe/plan-types";
 import type { Subscription } from "@/types/billing";
@@ -205,6 +205,29 @@ describe("a subscription running out under a plan held for life", () => {
     expect(
       screen.getByRole("button", { name: "Cancel Subscription" }),
     ).toBeInTheDocument();
+  });
+
+  // The confirmation promised "You keep access until <period end>" — untrue
+  // when the plan is held for life: cancelling the lower subscription ends
+  // nothing the owner keeps.
+  it("confirms the cancel without ending access the owner holds for life", () => {
+    renderCard({
+      plan: AGENCY,
+      isLifetime: true,
+      subscription: subscription("pro", { current_period_end: PERIOD_END }),
+      subscriptionPlanName: "Pro",
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cancel Subscription" }),
+    );
+
+    expect(
+      screen.getByText(
+        "Cancel your Pro subscription? You keep Agency for life, and you will not be charged again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/keep access until/)).not.toBeInTheDocument();
   });
 
   it("keeps a past-due subscription's status on its row, not the badge", () => {

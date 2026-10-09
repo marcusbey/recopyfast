@@ -226,6 +226,20 @@ export function SubscriptionCard({
     });
   };
 
+  // s71: under a plan held for life, cancelling the lower subscription ends
+  // nothing the owner keeps — "You keep access until <period end>" was untrue.
+  const cancelConfirmText = !subscription
+    ? ""
+    : isLifetime
+      ? `Cancel ${
+          subscriptionPlanName
+            ? `your ${subscriptionPlanName} subscription`
+            : UNNAMED_SUBSCRIPTION.toLowerCase()
+        }? You keep ${plan.name} for life, and you will not be charged again.`
+      : `Cancel your subscription? You keep access until ${formatDate(
+          subscription.current_period_end,
+        )}, and you will not be charged again.`;
+
   return (
     <Card className="p-6">
       <div className="flex justify-between items-start mb-4">
@@ -317,11 +331,7 @@ export function SubscriptionCard({
               </Button>
             ) : isConfirmingCancel ? (
               <div className="space-y-3">
-                <p className="text-sm text-foreground">
-                  Cancel your subscription? You keep access until{" "}
-                  {formatDate(subscription.current_period_end)}, and you will
-                  not be charged again.
-                </p>
+                <p className="text-sm text-foreground">{cancelConfirmText}</p>
                 <div className="flex gap-3">
                   <Button
                     variant="outline"
