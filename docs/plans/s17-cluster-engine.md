@@ -1,11 +1,21 @@
 ---
-validated: yes
+validated: no
+previously_validated: yes
+validation_reopened: 2026-09-12
 ---
 
 > **Validated 2026-08-17.** The SEO cluster surface is decided: **Marketing** —
 > `--sky-*` / `--slate-*`, pinned light, no app tokens, reuse of `Pricing` / `Benefits` /
 > `HowItWorks` / `FinalCTA` permitted. [ADR 020](../decisions/020-seo-clusters-on-marketing-surface.md).
 > This is what the design already assumed; it is no longer provisional.
+>
+> **Validation reopened 2026-09-12 before route implementation.** Execution preflight found
+> three contradictions in the validated wording: Task 8 audits `/alternatives` although no index
+> route was planned; Task 2 required a server page to fetch its own public pricing route during
+> build while the design allowed no loading/error state; and Task 8 requires missing
+> `@lhci/cli` while open PR 16 already owns `package-lock.json`. The corrected tasks below need a
+> fresh human checkpoint. Tasks 1, 5, 6 and 7 were independent and their incremental tests/code
+> were saved before route work stopped; Task 5 is reopened to add the new hub URL.
 # Plan — Story s17-cluster-engine
 
 Branch: `feature/s17-cluster-engine`
@@ -36,7 +46,7 @@ Acceptance criteria:
 
 ## Tasks (ordered)
 
-1. [ ] **Typed comparison data + validator.** Add `src/content/alternatives.ts`: a closed union
+1. [x] **Typed comparison data + validator.** Add `src/content/alternatives.ts`: a closed union
    of the 5 competitor slugs, a `ComparisonEntry` interface (setup, whereContentLives,
    editingWithoutDev, clientEditsWithoutAccount, table rows, `whereTheyWin: string[]` (min 3),
    `whereWeWin: string[]` (min 3), `faq: {question, answer}[]` (4–5), `migrationSteps` (3)), and a
@@ -44,36 +54,52 @@ Acceptance criteria:
    if any entry violates the minimums. Only the array shape and validator — no content yet.
    - Test: a fixture entry with 2 `whereTheyWin` items fails validation with a stated reason; a
      fixture with 3+ passes.
-2. [ ] **`/alternatives/[competitor]/page.tsx`.** Server component, `generateStaticParams` from
+2. [ ] **Current-price helper + `/alternatives/[competitor]/page.tsx`.** Add server-only
+   `src/lib/seo/recopyfast-price.ts`: call `getPlanCatalogue()` directly (the plans table is the
+   repository's price source of truth), select the lowest-priced active sellable subscription,
+   format its returned value, and return `null` on catalogue failure after logging. Never fetch
+   this app's own public pricing route during build, and never embed a fallback amount. The page is a
+   server component, uses `generateStaticParams` from
    the data module's slugs, `notFound()` when the slug doesn't resolve (mirrors
    `blog/[slug]/page.tsx:44-48`). Render per the design doc's section order (breadcrumb → hero →
    comparison table → "where they win"/"where we win" → migration note → FAQ → final CTA →
-   footer), marketing sky/slate palette, `Check`/`X` icon convention, pricing row fetched from
-   `/api/pricing` — never hand-typed.
+   footer), marketing sky/slate palette, `Check`/`X` icon convention. A current price renders when
+   the helper succeeds; `null` renders only **See current pricing** linking to `/#pricing`, never
+   stale or invented copy. Export unique `generateMetadata`: title/description from the same entry
+   and a self-referential canonical from `resolveSiteUrl()`.
    - Test: rendering the `tinacms` slug asserts the hero heading, all comparison-table row
      labels, and the FAQ question text are present; rendering an unknown slug asserts `notFound()`
      fires (404).
-3. [ ] **Marketing 404.** `src/app/alternatives/not-found.tsx` — new route-segment file, not the
+3. [ ] **Comparison hub, visible internal link, and Marketing 404.** Add
+   `src/app/alternatives/page.tsx`, generated from the same typed entries: concise heading,
+   one differentiated summary/link per competitor, unique metadata/self-canonical, no second data
+   array. Add one visible **Alternatives** link to the existing Marketing footer so every detail
+   page is reachable from home through the hub. `src/app/alternatives/not-found.tsx` remains a new
+   route-segment file, not the
    app's `src/app/not-found.tsx`. Same shell (`Header`, `bg-gradient-to-b from-sky-50 to-white`,
    `Footer`), icon tile, "Comparison not found" heading, plain-text links to the known competitor
-   slugs, CTA to `/signup` and `/`.
-   - Test: hitting `/alternatives/not-a-real-competitor` renders this component (assert the
-     marketing-palette class is present), not the app `not-found.tsx`.
+   slugs, CTA to `/signup`, `/alternatives`, and `/`.
+   - Test: the hub lists all five typed entries and the shared footer links it; hitting
+     `/alternatives/not-a-real-competitor` renders the Marketing component (assert its palette),
+     not the app `not-found.tsx`.
 4. [ ] **Shared JSON-LD builders.** `src/lib/seo/json-ld.ts`: `buildSoftwareApplicationLd()`,
    `buildBreadcrumbListLd(items: {label, href}[])`, `buildFAQPageLd(faq: {question, answer}[])` —
    generic, no competitor-specific typing (this genericity is what `s18`/`s19` depend on; see
-   ADR 006). Wire all three into the page from task 2, `FAQPage` generated from the same `faq`
+   ADR 012). Wire all three into the page from task 2, `FAQPage` generated from the same `faq`
    array the `<details>` blocks render from.
    - Test: for a fixture entry, the FAQ JSON-LD's question list has identical text and count to
      the rendered `<details>/<summary>` blocks (schema-matches-content invariant). Validate each
      builder's output has the required schema.org fields (`@type`, `mainEntity`,
      `itemListElement`).
-5. [ ] **Sitemap block.** Extend `src/app/sitemap.ts` with a fourth, synchronous block mapping
+5. [ ] **Sitemap block.** Extend `src/app/sitemap.ts` with the `/alternatives` hub plus a
+   synchronous block mapping
    `src/content/alternatives.ts`'s slugs to `/alternatives/<slug>` sitemap entries — same shape as
-   `STATIC_ROUTES`, no DB round trip (data is static). This is the "automatically appears" AC: the
-   same array feeds `generateStaticParams` (task 2) and this block.
-   - Test: the sitemap output includes all 5 seeded `/alternatives/<slug>` URLs.
-6. [ ] **`llms.txt`.** New route handler `src/app/llms.txt/route.ts`, `text/plain`, generated from
+   `STATIC_ROUTES`, no DB round trip (data is static). Detail entries omit `lastModified` unless
+   the content model gains a trustworthy content-update date; request time is not publication time.
+   The same array feeds `generateStaticParams` (task 2), the hub and this block.
+   - Test: sitemap output includes the hub and all 5 detail URLs and does not fabricate detail
+     freshness.
+6. [x] **`llms.txt`.** New route handler `src/app/llms.txt/route.ts`, `text/plain`, generated from
    `src/content/alternatives.ts`'s slugs (not a static file, not hand-typed — same
    generated-endpoint precedent as `robots.ts`). While here, extract the duplicated
    `resolveSiteUrl()` (identical in `sitemap.ts` and `robots.ts`) into `src/lib/seo/site-url.ts`
@@ -81,19 +107,25 @@ Acceptance criteria:
    third duplication is exactly what the research flagged as worth centralizing.
    - Test: `GET /llms.txt` returns 200, `content-type: text/plain`, and the body contains all 5
      `/alternatives/<slug>` paths.
-7. [ ] **Real content, 5 competitors.** Author tinacms, cloudcannon, contentful, storyblok and
+7. [x] **Real content, 5 competitors.** Author tinacms, cloudcannon, contentful, storyblok and
    decap-cms entries satisfying task 1's validator, sourced from `prd.md`'s "why kill it" section
    and each competitor's actual public positioning — genuine, differentiated "where they win"
    claims per competitor (not filler to hit the count of 3).
    - Test: extend task 1's validator test to assert no two entries share an identical
      `whereTheyWin` or `whereWeWin` string — a mechanical cross-entry thin-content check, not just
      a within-entry one.
-8. [ ] **Lighthouse CI.** New `lighthouserc.json` (thresholds per
+8. [ ] **Lighthouse CI — dependency approval and PR ordering are explicit gates.** Preferred
+   execution keeps ADR 013: after the user authorizes `@lhci/cli` and PR 16's three-line fast-uri
+   lockfile change is merged or explicitly preserved, add the dev dependency, then add
+   `lighthouserc.json` (thresholds per
    `docs/decisions/013-lighthouse-ci-thresholds.md`: Performance ≥ 90, LCP ≤ 2500ms, CLS ≤ 0.1,
    TBT ≤ 200ms), new `npm run lighthouse:ci` script (`lhci autorun`), new CI step/job in
    `.github/workflows/ci.yml` that builds, boots the app (reusing the `e2e` job's
    build-then-serve-then-`wait-on` shape), and runs Lighthouse against the 5
-   `/alternatives/<slug>` URLs plus `/alternatives`.
+   `/alternatives/<slug>` URLs plus the now-real `/alternatives` hub. Do not edit/regenerate
+   `package-lock.json` before that gate. Alternative: supersede ADR 013 with an already-installed
+   Playwright/browser metric contract; it cannot claim Lighthouse category scores and requires a
+   separate human architecture decision rather than an implementation substitution.
    - Test: run `npm run lighthouse:ci` locally against the built app once, confirm all 6 URLs pass
      the committed thresholds before relying on CI to catch a regression for the first time.
 
@@ -106,11 +138,13 @@ Acceptance criteria:
   `/alternatives/*` — the design doc excludes them explicitly, partly to protect task 8's budget.
 - Do not reuse `src/app/not-found.tsx` for the marketing 404 — it is App-token surface
   (`bg-background`, `Card`); task 3 builds a route-segment-scoped replacement.
-- Do not hand-type a price anywhere in the comparison table — read from `/api/pricing`, same rule
-  `Pricing.tsx:14-19` already states.
+- Do not hand-type a ReCopyFast price anywhere in the comparison table — use Task 2's direct
+  server-side `getPlanCatalogue()` helper and its honest `null`/link-only state. Competitor prices
+  are dated content claims with official source URLs.
 - Do not treat the embed byte budget (`s06`, `≤30,000 gz` on `public/embed/recopyfast.js`) as
   applying to these routes — confirmed by research to be a different artifact entirely.
-- `docs/decisions/001` through `005` stay unmodified — this plan only adds 006 and 007.
+- Accepted ADRs stay unmodified. ADRs 012, 013, and 020 already govern this story; changing the
+  Lighthouse tool/threshold contract requires a superseding ADR rather than a silent plan edit.
 
 ## The point everything turns on
 
@@ -123,7 +157,7 @@ functions in `src/lib/seo/json-ld.ts`, `s18` and `s19` will each reimplement it,
 built wrong" condition becomes true on the very first story that rides the engine. Compare: does
 `buildFAQPageLd` take a generic array, or does it take a `ComparisonEntry`?
 
-Second: the numeric Lighthouse thresholds in ADR 007 have no prior measurement against this
+Second: the numeric Lighthouse thresholds in ADR 013 have no prior measurement against this
 specific surface (sky/slate palette, no WebGL) to validate them — they're the standard "Good"
 CWV boundaries, not measured against a real built `/alternatives` page. Task 8's local run before
 trusting CI is the check; if all 6 URLs fail on first real measurement, that's evidence the
@@ -132,13 +166,18 @@ thresholds (or the page's composition) need revisiting, not evidence to relax th
 ## Files touched
 
 - `src/content/alternatives.ts` (new — data + validator)
+- `src/lib/seo/recopyfast-price.ts` (new — direct catalogue read + honest null state)
+- `src/app/alternatives/page.tsx` (new — generated comparison hub)
 - `src/app/alternatives/[competitor]/page.tsx` (new)
 - `src/app/alternatives/not-found.tsx` (new)
+- `src/components/layout/Footer.tsx` (edit — one visible Alternatives link)
 - `src/lib/seo/json-ld.ts` (new)
 - `src/lib/seo/site-url.ts` (new — extracted `resolveSiteUrl()`)
 - `src/app/sitemap.ts` (edit — add alternatives block, switch to shared `resolveSiteUrl`)
 - `src/app/robots.ts` (edit — switch to shared `resolveSiteUrl`, no behavior change)
 - `src/app/llms.txt/route.ts` (new)
+- Colocated Jest/Testing Library suites for data, hub/detail/404, metadata, JSON-LD, sitemap,
+  site URL, price helper, footer link, and `llms.txt`
 - `lighthouserc.json` (new)
 - `package.json` (new `lighthouse:ci` script, `@lhci/cli` devDependency)
 - `.github/workflows/ci.yml` (edit — new Lighthouse step/job)

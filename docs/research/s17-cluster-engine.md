@@ -186,8 +186,9 @@ the drafts-not-publishes constraint on `cron/generate-blog-post`.
   extends a pattern that already exists somewhere in the repo (sitemap merge, `notFound()`,
   typed-union data shapes). This one requires: a new CI job or step, a way to boot the built app
   and hit the five-plus new routes, a Lighthouch CI (or equivalent) invocation, and **numeric
-  Core Web Vitals thresholds that are not stated anywhere in the PRD, architecture doc, or
-  stories.md** — the story says "passes Core Web Vitals thresholds" without a number, the same
+  Core Web Vitals thresholds that were not stated in the PRD, architecture doc, or stories.md.
+  **ADR 013 now supplies them** — Performance ≥90, LCP ≤2500ms, CLS ≤0.1, TBT ≤200ms — resolving the
+  story's previously unfalsifiable wording. The original gap was the same
   class of defect the stories-review flagged elsewhere (m5: "four criteria deferred the number
   that would make them testable," about different stories, but the same gap pattern here).
 - **Marketing-surface palette is unresolved** (see Current state, last bullet, and Open
@@ -208,18 +209,19 @@ the drafts-not-publishes constraint on `cron/generate-blog-post`.
   **App** (token-driven) — and the real blog code confirms that classification. Neither document
   states the cluster pages' palette directly. This needs a decision at `/ks-design`, not a
   default assumed here.
-- **What are the numeric Core Web Vitals thresholds for AC 7?** Not stated anywhere in `prd.md`,
-  `architecture.md`, or `stories.md`. "Passes... thresholds" needs a number (LCP/INP/CLS values,
-  or a Lighthouse score floor) before it is testable.
+- **Resolved after research — numeric Core Web Vitals thresholds.** ADR 013 sets Performance ≥90,
+  LCP ≤2500ms, CLS ≤0.1, and TBT ≤200ms. Tool installation remains an execution/dependency gate,
+  not an unresolved threshold.
 - **Does `s17` need to anticipate `s18`/`s19`'s data shapes**, given the story frames itself as
   "the engine" they "ride on" ("if this needs new route code, `s17` was built wrong" —
   `s19`'s own notes)? The ACs only require the `/alternatives` cluster concretely; whether the
   typed-data/route abstraction must be generic enough for stacks (`s18`) and verticals (`s19`)
   from day one, or whether that generality is proven only when `s18`/`s19` actually land, is not
   stated.
-- **Should the comparison table's claims (pricing, feature parity) be static copy or pull from
-  live data** (e.g., `/api/pricing` for real Stripe amounts, given `s13`'s agency-plan work is
-  itself unshipped and gated behind a "still open" PRD decision)? Not addressed by the ACs.
+- **Resolved at execution preflight — pricing evidence split.** Competitor prices are dated,
+  official-source content claims. ReCopyFast price is read server-side from `getPlanCatalogue()`;
+  catalogue failure renders only a current-pricing link. The page never calls its own HTTP route
+  during build and never carries a fallback amount.
 - **Could not verify:** whether any prior branch/commit already has partial cluster-page work in
   flight outside `main` — this research only inspected the current `main` tree, per the
   read-only, no-code scope of this command.
@@ -252,3 +254,23 @@ Lighthouse CI, define thresholds, wire it to the new routes) rather than a secon
 that `/ks-plan` should either supply the numeric CWV thresholds itself or send the "what number"
 question back up before task-breakdown, the same gap class stories-review already caught
 elsewhere (m5, m8) but did not catch here since it doesn't name `s17`.
+
+## Execution preflight refresh — 2026-09-12
+
+- Live canonical `www` returns 200 to Googlebot, bingbot, OAI-SearchBot, GPTBot and ChatGPT-User;
+  robots and sitemap are reachable. `/alternatives/*` and `/llms.txt` are not yet live.
+- Official Google guidance says generative-search visibility uses foundational SEO and explicitly
+  does not require `llms.txt`; the file in this story is an inventory, not a ranking promise.
+- Official OpenAI publisher guidance says OAI-SearchBot must be crawlable for page content to be
+  available in ChatGPT search summaries/snippets; current wildcard robots rules allow it.
+- Current official competitor pages were checked for every time-sensitive claim. CloudCannon
+  explicitly offers no-account Client Sharing, so the prior broad "competitors require an account"
+  framing is false for that competitor and is not used in the content data.
+- The validated plan had no `/alternatives` index even though Lighthouse targeted it and the
+  breadcrumb linked it. It also coupled server rendering to a same-app HTTP pricing fetch with no
+  failure state. Both are corrected in the reopened plan before affected route source is written.
+- `@lhci/cli` is absent and open PR 16 changes `package-lock.json`; execution is prohibited from
+  adding the dependency or overwriting that lockfile without the explicit gate now recorded.
+
+Full URLs and the live audit are preserved outside the repository at
+`recopyfast-remediation/s17-seo-geo-brief.md` in the task artifact directory.

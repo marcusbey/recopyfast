@@ -197,6 +197,16 @@
   .notfound-panel .links a { color: var(--sky-700); }
   .notfound-panel .links a:hover { text-decoration: underline; }
 
+  /* ---------- execution-amendment states: hub + unavailable live price ---------- */
+  .hub-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+  @media (min-width: 768px) { .hub-grid { grid-template-columns: 1fr 1fr; } }
+  .hub-card { display: block; border: 1px solid var(--sky-70); border-radius: 1rem; background: #fff; padding: 1.5rem; }
+  .hub-card:hover { border-color: var(--sky-200); }
+  .hub-card h3 { margin: 0 0 0.5rem; color: var(--slate-900); font-size: 1.125rem; }
+  .hub-card p { margin: 0; color: var(--slate-600); line-height: 1.6; }
+  .price-unavailable { margin: 2rem auto 4rem; max-width: 42rem; border: 1px dashed var(--sky-200); border-radius: 1rem; background: var(--sky-50); padding: 1.5rem; text-align: center; color: var(--slate-700); }
+  .price-unavailable a { color: var(--sky-700); font-weight: 600; text-decoration: underline; }
+
   section.meta-note { padding: 2rem 1.5rem; text-align: center; font-size: 0.8125rem; color: var(--slate-500); background: var(--slate-50); }
 </style>
 </head>
@@ -289,7 +299,7 @@
           </tr>
           <tr>
             <td>Client edits without an account</td>
-            <td class="us-col"><span class="yes">✓</span> Email link, no login</td>
+            <td class="us-col"><span class="yes">✓</span> Scoped email code; no ReCopyFast account</td>
             <td><span class="no">✗</span> Requires an account</td>
           </tr>
           <tr>
@@ -304,8 +314,8 @@
           </tr>
           <tr>
             <td>Starting price</td>
-            <td class="us-col">Live from /api/pricing</td>
-            <td>~$49/mo, per-seat above that</td>
+            <td class="us-col">Current ReCopyFast plan catalogue</td>
+            <td>$0 Free; Team $29/month or $290/year (checked 2026-09-12)</td>
           </tr>
         </tbody>
       </table>
@@ -459,6 +469,43 @@
 </footer>
 
 <!-- ============================================================
+     HUB STATE REFERENCE — src/app/alternatives/page.tsx
+     Same typed entries as detail routes/sitemap/llms.txt. No
+     filters, rank claims or second content registry.
+     ============================================================ -->
+<section class="meta-note">↓ Hub reference: /alternatives + visible Marketing-footer link ↓</section>
+<section class="band glass">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">Website editing alternatives</span>
+      <h2 class="section-title">Compare ReCopyFast with the tools teams already know</h2>
+      <p class="section-intro">Five sourced comparisons, each written for a different product and setup constraint.</p>
+    </div>
+    <div class="hub-grid">
+      <a class="hub-card" href="#"><h3>TinaCMS</h3><p>Git-backed content models and visual editing compared with a script on an existing site.</p></a>
+      <a class="hub-card" href="#"><h3>CloudCannon</h3><p>Git syncing, publishing workflows, and real no-account Client Sharing compared honestly.</p></a>
+      <a class="hub-card" href="#"><h3>Contentful</h3><p>Structured multi-channel content and enterprise roles versus bounded page editing.</p></a>
+      <a class="hub-card" href="#"><h3>Storyblok</h3><p>A component-aware Visual Editor and SDK integration versus keeping the current frontend.</p></a>
+      <a class="hub-card" href="#"><h3>Decap CMS</h3><p>An open-source Git workflow versus direct editing on dynamic or legacy pages.</p></a>
+    </div>
+  </div>
+</section>
+
+<!-- The footer's existing Product/Company link list gains one ordinary text link: Alternatives. -->
+<footer class="site">Footer link reference: <a href="#">Alternatives</a></footer>
+
+<!-- ============================================================
+     SERVER PRICE-UNAVAILABLE STATE
+     Catalogue failure never produces a fallback number or blank
+     table cell. The rest of the comparison remains server-rendered.
+     ============================================================ -->
+<section class="meta-note">↓ ReCopyFast current-price unavailable state ↓</section>
+<div class="price-unavailable">
+  ReCopyFast price is not repeated from stale data.
+  <a href="#">See current pricing</a>
+</div>
+
+<!-- ============================================================
      404 STATE REFERENCE — src/app/alternatives/not-found.tsx
      Shown here inline as a labelled panel, not a route, since this
      mockup covers one page. Same shell (Header/Footer, sky-50→white
@@ -479,6 +526,7 @@
   </div>
   <div class="actions" style="justify-content:center;">
     <a href="#" class="btn-primary">Get started</a>
+    <a href="#" class="btn-secondary">Browse comparisons</a>
     <a href="#" class="btn-secondary">Back to home</a>
   </div>
 </div>

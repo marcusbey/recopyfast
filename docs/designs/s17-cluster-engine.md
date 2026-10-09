@@ -53,6 +53,14 @@ section-heavy, content-dense) and it is a composition of existing code, not an i
 
 ## Screen(s)
 
+### 0. `/alternatives` — comparison hub (execution amendment 2026-09-12)
+
+One Marketing-surface index generated from the same five typed entries. Header → eyebrow
+"Website editing alternatives" → `h1` "Compare ReCopyFast with the tools teams already know" →
+short scope note → five bordered white link cards, each with competitor name and its unique
+`metaDescription`-sized summary → Footer. No filters, search, ranking claims, or second content
+registry. The shared Marketing footer adds one **Alternatives** link to this hub.
+
 ### 1. `/alternatives/<competitor>` — the comparison page template
 
 One template, rendered from typed per-competitor data (content only — no route code per
@@ -123,7 +131,7 @@ from a nonexistent primitive.
 | Where content lives | The page you already have | (per-competitor) |
 | Editing without a developer | Yes | (per-competitor, honestly stated) |
 | Client edits without an account | Yes | (per-competitor) |
-| Starting price | Live from `/api/pricing` — **not** hand-typed here, same rule `Pricing.tsx:14-19` already states for the homepage | (per-competitor, dated) |
+| Starting price | Read server-side from `getPlanCatalogue()`; on failure show only **See current pricing**, never a fallback amount | Per-competitor dated claim with an official source URL |
 | … | … | … |
 
 Visual spec:
@@ -247,8 +255,9 @@ Inventoried first, per instruction — `src/components/landing/` and `src/compon
 - `Header.tsx` (`layout/`) and `Footer.tsx` (`layout/`) — reused **unmodified**. Every marketing
   page already shares these; no reason for cluster pages to diverge.
 - `Pricing.tsx` — reused for: the bordered-white-card shape (`border border-sky-100`, no heavy
-  shadow), the `Check` icon convention (`text-teal-600`) for included/yes, and the "fetch from
-  `/api/pricing`, never hand-type a price" rule extended to the comparison table's price row.
+  shadow) and the `Check` icon convention (`text-teal-600`) for included/yes. Its no-fallback
+  pricing rule is preserved through Task 2's direct server `getPlanCatalogue()` helper and
+  link-only unavailable state; the comparison page does not fetch its own HTTP route.
 - `Benefits.tsx` — reused for: the section header block pattern (eyebrow → `h2` → intro, centered,
   `mb-16`), and the headline-card shape (`rounded-3xl border border-white/60 bg-white/70 p-9` +
   `rounded-2xl` icon tile) for the "where they win / where we win" section.
@@ -288,7 +297,8 @@ doesn't need. What does apply:
 | **Empty** | **N/A as a UI state** — this isn't a list view. The real analogue is a **content gate**: a competitor entry with fewer than 3 "where they win" items or a table missing rows fails the thin-content requirement and should not ship, not render with a sparse UI. That's a data-validation concern (AC 8's "validated"), not a rendered empty state. |
 | **Error** | **N/A at runtime.** Typed + validated data (AC 8) means a malformed competitor entry is a build-time / type-check failure, not something a visitor can trigger. There is no `Alert variant="destructive"` on this page because there is nothing here that fails after deploy. |
 | **Success** | The only real state — the fully rendered page. This is what the Mockup shows. |
-| **404 — unknown competitor slug** | `src/app/alternatives/not-found.tsx`. Same shell as every `/alternatives/*` page (`Header`, `bg-gradient-to-b from-sky-50 to-white` canvas, `Footer`), **not** the app's `not-found.tsx`. Content: icon tile (`w-16 h-16 rounded-2xl bg-sky-100`, `Compass` icon `text-sky-600` — matching the app 404's icon-in-circle idea, recoloured to the marketing palette), `h1` "Comparison not found" at the Section h2 scale, one line of body copy ("We don't have a comparison for that yet — here's what we do have:"), then the known competitor list rendered as plain text links (`text-sky-700 hover:underline`) rather than a second index route, since no index page is in this story's scope. Primary CTA `Get started` → `/signup`, secondary `Back to home` → `/`. |
+| **ReCopyFast price unavailable** | The rest of the server-rendered comparison remains complete. The ReCopyFast price cell shows only **See current pricing** linking to `/#pricing`; no stale amount, blank cell, spinner, or fallback catalogue. Competitor price remains its dated, sourced content claim. |
+| **404 — unknown competitor slug** | `src/app/alternatives/not-found.tsx`. Same shell as every `/alternatives/*` page (`Header`, `bg-gradient-to-b from-sky-50 to-white` canvas, `Footer`), **not** the app's `not-found.tsx`. Content: icon tile (`w-16 h-16 rounded-2xl bg-sky-100`, `Compass` icon `text-sky-600`), `h1` "Comparison not found", one line of body copy, then the known competitor links from the same data plus a direct link to the `/alternatives` hub. Primary CTA `Get started` → `/signup`, secondary `Browse comparisons` → `/alternatives`, tertiary `Back to home` → `/`. |
 
 ---
 
@@ -312,12 +322,10 @@ token/pattern composed into a new shape, or an open item for `/ks-plan` or a fut
    `/alternatives`**, on the reasoning above (functional shape + forced reuse of hardcoded-palette
    sections). It does not reclassify blog, and a future story touching `/blog` should not cite this
    document as having settled that question.
-4. **No numeric Core Web Vitals thresholds exist anywhere** (`prd.md`, `architecture.md`,
-   `stories.md`) — `docs/research/s17-cluster-engine.md`'s own "Open questions" already flags this
-   for AC 7. Recorded again here because this document's choice to exclude `SkyBackground`/
-   `useLenis` from these pages is partly a hedge against that unset budget; `/ks-plan` should
-   either supply the number or send the question back up before task breakdown, same as the
-   research doc recommends.
+4. **Lighthouse thresholds are settled by ADR 013.** Performance ≥90, LCP ≤2500ms, CLS ≤0.1,
+   and TBT ≤200ms apply to the hub and five detail pages. Excluding `SkyBackground`/`useLenis`
+   remains the design hedge that helps the pages meet the existing gate; the values are no longer
+   an open design question.
 5. **No route-segment `not-found.tsx` exists yet anywhere in the app** — only the root
    `src/app/not-found.tsx` (app-token surface). This story is the first to need a marketing-surface
    404; the file is new, not a gap in tokens, just a routing artefact that didn't need to exist
