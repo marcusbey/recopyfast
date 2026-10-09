@@ -3597,6 +3597,8 @@ Acceptance criteria:
   owner still running out a lower subscription's period sees "Lifetime" — the card describes the
   plan in force, which is the lifetime one — while that subscription's period and cancel rows stay
   visible below (as in the validated plan, case 3).
+- [ ] A subscription still running out under a lifetime plan is named on the card (its plan, its
+  end or renewal date, its status), and Reactivate is never offered for it.
 - [ ] No state of the card prints "Free": with no subscription and no lifetime grant the card
   shows no status badge rather than a wrong one.
 - [ ] The empty payment-methods copy does not offer "start a subscription" to an account whose

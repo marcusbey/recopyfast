@@ -87,7 +87,10 @@ function wallet(included: number) {
   };
 }
 
-function subscription(plan: string): Subscription {
+function subscription(
+  plan: string,
+  overrides: Partial<Subscription> = {},
+): Subscription {
   return {
     id: "sub-row-1",
     user_id: "user-1",
@@ -100,6 +103,7 @@ function subscription(plan: string): Subscription {
     cancel_at_period_end: false,
     created_at: "2026-08-10T00:00:00.000Z",
     updated_at: "2026-09-10T00:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -212,6 +216,54 @@ describe("the plan card for a lifetime Founding Agency owner", () => {
   });
 });
 
+describe("the plan card for a Pro subscriber who bought Lifetime Pro", () => {
+  // s71 review M-1: the plan held for life used to count only when no
+  // subscription billed that very plan. But buying Lifetime Pro sets the Pro
+  // subscription to cancel at period end (the Stripe webhook's
+  // stopBillingForLifetimeOwner) — so for up to a month the card read
+  // "$19/month · ACTIVE" for a plan the owner had just paid $199 to own.
+  const runningOutPro = () =>
+    payload({
+      effectivePlanId: "pro",
+      creditWallet: wallet(500),
+      subscription: subscription("pro", {
+        cancel_at_period_end: true,
+        // Midday, so the date reads October 10 in any test timezone.
+        current_period_end: "2026-10-10T12:00:00.000Z",
+      }),
+    });
+
+  it("says Lifetime, not $19/month and ACTIVE, while Pro runs out", async () => {
+    await renderPlanCard(runningOutPro(), {
+      kind: "granted",
+      planIds: ["pro"],
+    });
+
+    expect(screen.getByText("Lifetime")).toBeInTheDocument();
+    expect(screen.getByText("Lifetime access")).toBeInTheDocument();
+    expect(screen.queryByText(/\$19\/month/)).toBeNull();
+    expect(screen.queryByText("ACTIVE")).toBeNull();
+  });
+
+  it("names the Pro subscription it is running out, and offers no Reactivate", async () => {
+    // s71 review M-2: the plan name comes from the catalogue the page already
+    // holds, not from a fetch of its own.
+    await renderPlanCard(runningOutPro(), {
+      kind: "granted",
+      planIds: ["pro"],
+    });
+
+    expect(
+      screen.getByText(
+        "Your Pro subscription ends October 10, 2026 — you won't be charged again.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /reactivate/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("the plan card for a plan that is not held for life", () => {
   it("is not called lifetime because some other plan was granted", async () => {
     // A Pro trial is the plan in force; the permanent grant is a Starter comp.
@@ -237,5 +289,36 @@ describe("the plan card for an Agency subscriber", () => {
     expect(features.getByText("1,000 AI credits / month")).toBeInTheDocument();
     expect(screen.getByText("$49/month")).toBeInTheDocument();
     expect(screen.queryByText("Lifetime access")).toBeNull();
+  });
+});
+
+describe("the empty payment-methods state on the billing page", () => {
+  // s71 review m-2: PaymentMethodsCard's own test proves the copy switches on
+  // `isPlanHeldForLife`; this proves the page actually passes it. Without the
+  // prop the card falls back to offering a lifetime owner a subscription.
+  it("tells a lifetime owner a card is for AI credits", async () => {
+    await renderPlanCard(payload({ creditWallet: wallet(250) }), {
+      kind: "granted",
+      planIds: ["agency"],
+    });
+
+    expect(
+      screen.getByText("Add a card to buy AI credits"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/start a subscription/i)).toBeNull();
+  });
+
+  it("keeps the subscription copy for an account with no grant", async () => {
+    await renderPlanCard(
+      payload({
+        creditWallet: wallet(1000),
+        subscription: subscription("agency"),
+      }),
+      { kind: "none" },
+    );
+
+    expect(
+      screen.getByText("Add a card to start a subscription or buy AI credits"),
+    ).toBeInTheDocument();
   });
 });

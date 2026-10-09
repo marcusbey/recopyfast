@@ -18,6 +18,13 @@ interface SubscriptionCardProps {
    */
   isLifetime: boolean;
   /**
+   * Display name of the plan `subscription` bills, from the catalogue the page
+   * already holds. Read only while the plan in force is held for life, to name
+   * the subscription still running out beside it (s71 review M-2); undefined
+   * when that plan is not in the catalogue.
+   */
+  subscriptionPlanName?: string;
+  /**
    * The monthly AI-credit allowance this account actually gets — the credit
    * wallet's `included`, resolved server-side — or null when it is not known.
    */
@@ -60,17 +67,64 @@ function featuresWithAllowance(
   });
 }
 
+/**
+ * s71 review m-3: a plan priced 0 printed "Free" here, one row below the badge
+ * that had just stopped saying it. "Free" names a retired plan nobody is on;
+ * a zero price is stated as a price, like any other.
+ */
 function priceLabel(plan: SubscriptionPlan, isLifetime: boolean): string {
   if (isLifetime) {
     return "Lifetime access";
   }
-  return plan.price === 0 ? "Free" : `$${plan.price}/month`;
+  return `$${plan.price}/month`;
+}
+
+/** Who the running-out row is about when the catalogue cannot name its plan. */
+const UNNAMED_SUBSCRIPTION = "Your previous subscription";
+
+/**
+ * The one row a subscription still running out under a plan held for life
+ * gets: its own plan, its end or renewal date, and its status.
+ *
+ * s71 review M-2: the card drew this subscription's period grid unlabelled
+ * under the "Lifetime" badge, so "Next billing: Plan will be canceled" read as
+ * the lifetime plan being cancelled. The badge now speaks for the plan in
+ * force, so the row has to carry the subscription's status itself (review
+ * m-1) — a past-due row hidden behind "Lifetime" is a card about to be retried
+ * with no warning on the page.
+ *
+ * A past-due subscription set to cancel is not promised "you won't be charged
+ * again": its failed invoice is still open, and Stripe's retries may yet
+ * collect it. It is only promised what is certain — it will not renew.
+ */
+function runningOutSubscriptionText(
+  subscription: Subscription,
+  subscriptionPlanName: string | undefined,
+  heldPlanName: string,
+  periodEnd: string,
+): string {
+  const subject = subscriptionPlanName
+    ? `Your ${subscriptionPlanName} subscription`
+    : UNNAMED_SUBSCRIPTION;
+  // A live row is active, trialing or past_due (getUserSubscription); only
+  // "active" goes without saying.
+  const status =
+    subscription.status === "active"
+      ? ""
+      : ` is ${subscription.status.replace("_", " ")} and`;
+  const outcome = !subscription.cancel_at_period_end
+    ? `renews ${periodEnd} — you hold ${heldPlanName} for life, so you no longer need it.`
+    : subscription.status === "past_due"
+      ? `ends ${periodEnd} — it will not renew.`
+      : `ends ${periodEnd} — you won't be charged again.`;
+  return `${subject}${status} ${outcome}`;
 }
 
 export function SubscriptionCard({
   subscription,
   plan,
   isLifetime,
+  subscriptionPlanName,
   monthlyCredits,
   onUpdate,
 }: SubscriptionCardProps) {
@@ -156,6 +210,14 @@ export function SubscriptionCard({
     );
   };
 
+  // s71 review M-2: never offer Reactivate under a plan held for life. The
+  // subscription was set to cancel because the grant replaced it
+  // (stopBillingForLifetimeOwner in the Stripe webhook); reactivating it
+  // restarts monthly billing for a plan the owner already holds.
+  const shouldOfferSubscriptionActions =
+    subscription?.status === "active" &&
+    !(isLifetime && subscription.cancel_at_period_end);
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
       year: "numeric",
@@ -188,7 +250,18 @@ export function SubscriptionCard({
           </p>
         </div>
 
-        {subscription && (
+        {subscription && isLifetime && (
+          <p className="text-sm font-medium">
+            {runningOutSubscriptionText(
+              subscription,
+              subscriptionPlanName,
+              plan.name,
+              formatDate(subscription.current_period_end),
+            )}
+          </p>
+        )}
+
+        {subscription && !isLifetime && (
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-muted-foreground">Current period</p>
@@ -232,7 +305,7 @@ export function SubscriptionCard({
           </ul>
         </div>
 
-        {subscription && subscription.status === "active" && (
+        {subscription && shouldOfferSubscriptionActions && (
           <div className="pt-4 border-t">
             {subscription.cancel_at_period_end ? (
               <Button
