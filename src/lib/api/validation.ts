@@ -308,6 +308,22 @@ export function requireUuid(
   return { ok: true, value: raw.trim().toLowerCase() };
 }
 
+/**
+ * A site id taken from a caller — a query parameter, a path segment or a body
+ * field — canonical, or the refusal to send (s77, s69 R1).
+ *
+ * Every per-site limiter on the editor routes was keyed on the id exactly as
+ * sent, while the access checks reach the site through a `uuid` cast: `ABCD…`
+ * and `abcd…` are one site, and they were two budgets. Call this where the
+ * handler first reads the id, so the access check, the limiter and every query
+ * see one value. Upper case is accepted (the widget sends the snippet's id, and
+ * an installed snippet is permanent); only shapes the dashboard never issues are
+ * refused, before any lookup, with a message that echoes nothing.
+ */
+export function canonicalSiteId(raw: unknown): ValidationResult<string> {
+  return requireUuid({ siteId: raw }, "siteId");
+}
+
 export function requireEnum<T extends string>(
   body: Record<string, unknown>,
   field: string,

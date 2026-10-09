@@ -57,7 +57,7 @@ jest.mock("@/lib/supabase/service", () => ({
 import { PUT } from "@/app/api/staging/content/[siteId]/route";
 import { NextRequest } from "next/server";
 
-const SITE_ID = "site-1";
+const SITE_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
 const ELEMENT_ID = "rcf-nav-link";
 
 /** Every column the route asked the database to write, per call. */

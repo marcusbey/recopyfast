@@ -12,6 +12,7 @@ import { StagingAccessManager } from "@/lib/auth/staging-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { withPublicCors } from "@/lib/http/public-cors";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { canonicalSiteId } from "@/lib/api/validation";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -40,6 +41,9 @@ function withCors(response: NextResponse, origin?: string | null) {
  *
  * 50/min for reading and editing translations — a person working through a
  * language panel.
+ *
+ * Keyed on the canonical id: every handler passes `canonicalSiteId`'s value
+ * (s77, s69 R1), so each spelling of one site spends this one bucket.
  */
 function meterSite(request: NextRequest, siteId: string) {
   return enforceRateLimit(request, {
@@ -102,9 +106,9 @@ export async function GET(request: NextRequest) {
   try {
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
-    const siteId = request.nextUrl.searchParams.get("siteId");
+    const rawSiteId = request.nextUrl.searchParams.get("siteId");
 
-    if (!token || !siteId) {
+    if (!token || !rawSiteId) {
       return withCors(
         NextResponse.json(
           { error: "Missing staging token or siteId" },
@@ -113,6 +117,16 @@ export async function GET(request: NextRequest) {
         origin,
       );
     }
+
+    // s77 (s69 R1): the canonical id, before the access check and the limiter.
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        origin,
+      );
+    }
+    const siteId = canonical.value;
 
     // Validate staging access
     const validation = await StagingAccessManager.validateStagingAccess(
@@ -194,13 +208,13 @@ export async function POST(request: NextRequest) {
     // (the checkbox was on by default), so the field stays tolerated rather than
     // rejected — and ignored. See the tombstone at the insert below.
     const {
-      siteId,
+      siteId: rawSiteId,
       languageCode,
       languageName,
       isDefault = false,
     } = await request.json();
 
-    if (!siteId || !languageCode) {
+    if (!rawSiteId || !languageCode) {
       return withCors(
         NextResponse.json(
           { error: "Missing required fields: siteId, languageCode" },
@@ -209,6 +223,16 @@ export async function POST(request: NextRequest) {
         origin,
       );
     }
+
+    // s77 (s69 R1): the canonical id, before the access check and the limiter.
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        origin,
+      );
+    }
+    const siteId = canonical.value;
 
     // Validate staging access (admin permission required)
     const validation = await StagingAccessManager.validateStagingAccess(
@@ -341,10 +365,14 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const { siteId, languageId, translations, isDefault } =
-      await request.json();
+    const {
+      siteId: rawSiteId,
+      languageId,
+      translations,
+      isDefault,
+    } = await request.json();
 
-    if (!siteId || !languageId) {
+    if (!rawSiteId || !languageId) {
       return withCors(
         NextResponse.json(
           { error: "Missing required fields: siteId, languageId" },
@@ -353,6 +381,16 @@ export async function PUT(request: NextRequest) {
         origin,
       );
     }
+
+    // s77 (s69 R1): the canonical id, before the access check and the limiter.
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        origin,
+      );
+    }
+    const siteId = canonical.value;
 
     // Validate staging access (edit permission required)
     const validation = await StagingAccessManager.validateStagingAccess(
@@ -463,10 +501,10 @@ export async function DELETE(request: NextRequest) {
   try {
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
-    const siteId = request.nextUrl.searchParams.get("siteId");
+    const rawSiteId = request.nextUrl.searchParams.get("siteId");
     const languageId = request.nextUrl.searchParams.get("languageId");
 
-    if (!token || !siteId || !languageId) {
+    if (!token || !rawSiteId || !languageId) {
       return withCors(
         NextResponse.json(
           { error: "Missing required parameters" },
@@ -475,6 +513,16 @@ export async function DELETE(request: NextRequest) {
         origin,
       );
     }
+
+    // s77 (s69 R1): the canonical id, before the access check and the limiter.
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        origin,
+      );
+    }
+    const siteId = canonical.value;
 
     // Validate staging access (admin permission required)
     const validation = await StagingAccessManager.validateStagingAccess(

@@ -50,7 +50,7 @@ function queryResult(result: unknown) {
 
 const attributeOnlyRow = {
   id: "row-1",
-  site_id: "site-1",
+  site_id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
   element_id: "rcf-link",
   selector: "a",
   staging_content: "Documentation",
@@ -106,8 +106,14 @@ describe("staged href/alt projections", () => {
 
   it("overlays draft attributes for an editor and marks an attribute-only change", async () => {
     const response = await getStagingContent(
-      new NextRequest("https://www.recopyfa.st/api/staging/content/site-1"),
-      { params: Promise.resolve({ siteId: "site-1" }) },
+      new NextRequest(
+        "https://www.recopyfa.st/api/staging/content/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      ),
+      {
+        params: Promise.resolve({
+          siteId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        }),
+      },
     );
     const body = await response.json();
 
@@ -124,7 +130,7 @@ describe("staged href/alt projections", () => {
   it("includes attribute-only edits in the publish preview", async () => {
     const response = await getPublishPreview(
       new NextRequest(
-        "https://www.recopyfa.st/api/staging/publish?siteId=site-1",
+        "https://www.recopyfa.st/api/staging/publish?siteId=9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
       ),
     );
     const body = await response.json();
@@ -150,13 +156,17 @@ describe("staged href/alt projections", () => {
 
     const stagingResponse = await getStagingContent(
       new NextRequest(
-        "https://www.recopyfa.st/api/staging/content/site-1?page_path=%2Fpricing",
+        "https://www.recopyfa.st/api/staging/content/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d?page_path=%2Fpricing",
       ),
-      { params: Promise.resolve({ siteId: "site-1" }) },
+      {
+        params: Promise.resolve({
+          siteId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        }),
+      },
     );
     const previewResponse = await getPublishPreview(
       new NextRequest(
-        "https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=%2Fpricing",
+        "https://www.recopyfa.st/api/staging/publish?siteId=9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d&page_path=%2Fpricing",
       ),
     );
     const stagingBody = await stagingResponse.json();
@@ -198,7 +208,7 @@ describe("staged href/alt projections", () => {
 
     const response = await getPublishPreview(
       new NextRequest(
-        "https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=%2Fpricing",
+        "https://www.recopyfa.st/api/staging/publish?siteId=9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d&page_path=%2Fpricing",
       ),
     );
     const body = await response.json();

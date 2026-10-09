@@ -346,7 +346,13 @@ describe("POST /api/ab-tests/track — refuses out-of-bounds input before the da
 
       expect(response.status).toBe(400);
       expect(queries).toHaveLength(0);
-      expect(enforceRateLimit).not.toHaveBeenCalled();
+      // The site's bucket is not spent by a refused body. Since s77 the per-IP
+      // guard runs first, before the body is read (s69 L7), so it is the one
+      // limiter a refused body meets.
+      expect(enforceRateLimit).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ endpoint: "ab-tests/track" }),
+      );
     },
   );
 

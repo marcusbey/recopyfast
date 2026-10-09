@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "@/lib/security/cron-auth";
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify cron secret to prevent unauthorized access (fail-closed when unset)
-    const cronSecret = process.env.CRON_SECRET;
-    const authHeader = request.headers.get("authorization");
-    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    // Constant-time and fail-closed: see isAuthorizedCronRequest (s77, s69 L4).
+    if (!isAuthorizedCronRequest(request)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    // Read only to forward it below; the gate above has already refused an
+    // unset secret.
+    const cronSecret = process.env.CRON_SECRET;
 
     // Get suggested topic
     const topicResponse = await fetch(
