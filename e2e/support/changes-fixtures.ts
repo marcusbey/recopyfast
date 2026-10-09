@@ -40,6 +40,10 @@ export const HERO = {
   variant: "default",
 } as const;
 
+/** Northwind's pending draft: the row a Northwind-only list shows. */
+export const NORTHWIND_DRAFT =
+  "Paste the snippet just before the closing body tag";
+
 const MINUTE = 60 * 1000;
 const ago = (minutes: number) =>
   new Date(Date.now() - minutes * MINUTE).toISOString();
@@ -134,7 +138,7 @@ function rows() {
       selector: "#__next > main > article > ol > li:nth-child(2)",
       original: "Paste the snippet in your head tag",
       live: "Paste the snippet in your head tag",
-      draft: "Paste the snippet just before the closing body tag",
+      draft: NORTHWIND_DRAFT,
       state: "pending",
       changedAt: ago(180),
     },
@@ -152,6 +156,34 @@ function rows() {
       changedAt: ago(60 * 144),
     },
   ];
+}
+
+/** Each site's untouched rows, never listed by default, only counted. */
+const ORIGINAL_ROWS: Record<string, number> = {
+  [ACME_ID]: 412,
+  [NORTHWIND_ID]: 826,
+};
+
+export interface FixtureCounts {
+  pending: number;
+  published: number;
+  original: number;
+}
+
+/**
+ * The status counts the list answers for one site, or every site (null).
+ * Different per site on purpose (s70b re-review N3): with one set of counts
+ * for every answer, "the counts stay put while the list reloads" held even
+ * when the filter row was rebuilt from nothing.
+ */
+export function countsFor(site: string | null): FixtureCounts {
+  const listed = rows().filter((row) => site === null || row.siteId === site);
+  const sites = site === null ? Object.keys(ORIGINAL_ROWS) : [site];
+  return {
+    pending: listed.filter((row) => row.state === "pending").length,
+    published: listed.filter((row) => row.state === "published").length,
+    original: sites.reduce((sum, id) => sum + (ORIGINAL_ROWS[id] ?? 0), 0),
+  };
 }
 
 /** Every element id the embed assigned in the fixture: none may be shown. */
@@ -173,6 +205,14 @@ export interface ChangesFixtureLog {
   publishBodies: unknown[];
 }
 
+export interface ChangesFixtures extends ChangesFixtureLog {
+  /**
+   * The next list read is answered only once the returned function is
+   * called, so a spec can look at the page while the list reloads.
+   */
+  holdNextList(): () => void;
+}
+
 function json(body: unknown) {
   return {
     status: 200,
@@ -184,16 +224,26 @@ function json(body: unknown) {
 /**
  * Answers the Changes page's reads and writes from the fixture: the list,
  * each row's history, the staging draft PUT and the publish POST. Nothing
- * reaches the real routes. Returns a log the spec asserts on.
+ * reaches the real routes. The list answers as the route does for its `site`:
+ * that site's rows and counts, or every site's. Returns a log the spec
+ * asserts on, and a hold on the next list read.
  */
 export async function routeChangesFixtures(
   page: Page,
-): Promise<ChangesFixtureLog> {
-  const log: ChangesFixtureLog = {
+): Promise<ChangesFixtures> {
+  let held: Promise<void> | null = null;
+  const log: ChangesFixtures = {
     listSites: [],
     historyReads: [],
     draftBodies: [],
     publishBodies: [],
+    holdNextList() {
+      let release: () => void = () => {};
+      held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => release();
+    },
   };
   const fixtureRows = rows();
 
@@ -201,15 +251,20 @@ export async function routeChangesFixtures(
     (url) => url.pathname === "/api/content/changes",
     async (route) => {
       if (route.request().method() !== "GET") return route.continue();
-      log.listSites.push(
-        new URL(route.request().url()).searchParams.get("site"),
+      const site = new URL(route.request().url()).searchParams.get("site");
+      log.listSites.push(site);
+      const gate = held;
+      held = null;
+      if (gate) await gate;
+      const listed = fixtureRows.filter(
+        (row) => site === null || row.siteId === site,
       );
       await route.fulfill(
         json({
           sites: SITES,
-          rows: fixtureRows,
-          total: fixtureRows.length,
-          counts: { pending: 2, published: 5, original: 1238 },
+          rows: listed,
+          total: listed.length,
+          counts: countsFor(site),
           nextOffset: null,
         }),
       );

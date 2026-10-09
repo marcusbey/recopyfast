@@ -40,25 +40,31 @@ const EDIT_SESSION_HOURS = 2;
 
 /**
  * One line at ≥ 768 (design, "Row anatomy"): expand · status · location ·
- * text · who/when · Open · ⋮. Below it the row stacks: status and location,
- * the location running to the row's right edge; then the text on two lines;
- * then who/when, Open and ⋮ together on the last line.
+ * text · who/when · Open · ⋮. Below it the row stacks as the design draws it:
+ * status, the location and ⋮ on the first line; the text on two lines; then
+ * who/when and Open on the last line, Open under ⋮.
  *
- * Tombstone (s70b review m4): ⋮ sat on the first line, in the same last track
- * as Open on the third. A track is as wide as its widest item, so Open's width
- * was taken from the location's line and cut it to a few characters at 375.
- * Open and ⋮ now have a track each, both on the last line, and the location
- * spans them on the first. The spanning items (location, who, text) each
- * cross the flexible track, which keeps them out of the `auto` tracks' sizing:
- * the status track is the badge's width and the Open track is Open's. (Before
- * that, a 2rem last track made Open overflow leftwards over who/when.) Every
- * child is `min-w-0`, so a long string truncates inside its area instead of
- * pushing the panel sideways (the dialog rule, one level down).
+ * Five tracks, `2rem auto minmax(0,1fr) auto 2rem`. ⋮ alone owns the last
+ * (2rem, its own width) on the first line; the location spans the flexible
+ * track and the `auto` one beside it, so it runs up to ⋮. On the last line
+ * Open spans that `auto` track and ⋮'s, and who/when spans the status track
+ * and the flexible one. Items that cross the flexible track (location, text,
+ * who/when) are left out of the `auto` tracks' sizing, so the status track is
+ * the badge's width and the fourth track is only what Open needs beyond
+ * ⋮'s 2rem. Every child is `min-w-0`, so a long string truncates inside its
+ * area instead of pushing the panel sideways (the dialog rule, one level down).
+ *
+ * Tombstones. s70b review m4: ⋮ and Open shared one last track, ⋮ on the
+ * first line, Open on the third. A track is as wide as its widest item, so
+ * Open's width was taken from the location's line and cut it to a few
+ * characters at 375. The first fix moved ⋮ down beside Open, and that cut
+ * "when" ("sam@example.com · 2…", s70b re-review N2). Open spanning ⋮'s track
+ * on another line takes nothing from either line.
  */
 const ROW_GRID = [
   "grid items-center gap-x-3 gap-y-1 px-4 py-3 md:min-h-11 md:py-1.5",
   "grid-cols-[2rem_auto_minmax(0,1fr)_auto_2rem]",
-  "[grid-template-areas:'expand_status_location_location_location'_'._text_text_text_text'_'._who_who_open_menu']",
+  "[grid-template-areas:'expand_status_location_location_menu'_'._text_text_text_text'_'._who_who_open_open']",
   "md:grid-cols-[2rem_6rem_minmax(10rem,1.1fr)_minmax(0,2fr)_11rem_auto_2rem]",
   "md:[grid-template-areas:'expand_status_location_text_who_open_menu']",
 ].join(" ");

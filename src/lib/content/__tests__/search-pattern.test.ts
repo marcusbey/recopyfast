@@ -1,29 +1,73 @@
-import { likePattern } from "../search-pattern";
+import { escapeRegex } from "../search-pattern";
 
 /**
- * s70b — the Changes search's LIKE pattern (review m1).
+ * s70b — the Changes search's pattern (review m1, then re-review N1).
  *
- * Typed text is a literal, never pattern syntax: `%`, `_` and `\` are escaped
- * for Postgres. `*` cannot be: PostgREST rewrites every `*` in a like/ilike
- * value to `%` before Postgres sees it, and `\*` only becomes `\%`, a literal
- * percent sign (measured on PostgREST 14.16: `%5*%` matched "Save 50 today",
- * `%5\*%` matched "5% off", neither matched only "From $5* a month"). So "5*"
- * would have listed every row containing a 5. A search holding `*` has no
- * pattern at all and the route refuses it.
+ * Typed text is a literal, never pattern syntax. The search was an `ilike`,
+ * and PostgREST rewrites every `*` in a like value to `%` with no escape for
+ * it (measured on PostgREST 14.16: `%5\*%` arrived as `%5\%%`), so "5*"
+ * listed every row containing a 5 and the fix refused `*` with a 400 the page
+ * showed as a failure. The search is now `imatch` (`~*`), which PostgREST
+ * passes through as a bound value, untouched: escaping every POSIX ERE
+ * metacharacter makes the typed text match itself and nothing else.
  */
-describe("likePattern", () => {
-  it("wraps plain text for a substring match", () => {
-    expect(likePattern("pricing")).toBe("%pricing%");
+describe("escapeRegex", () => {
+  it("leaves plain text as it is", () => {
+    expect(escapeRegex("pricing")).toBe("pricing");
   });
 
-  it("escapes %, _ and \\ so they match themselves", () => {
-    expect(likePattern("50%_off\\")).toBe("%50\\%\\_off\\\\%");
+  it.each([
+    ["\\"],
+    ["."],
+    ["["],
+    ["]"],
+    ["{"],
+    ["}"],
+    ["("],
+    [")"],
+    ["*"],
+    ["+"],
+    ["?"],
+    ["^"],
+    ["$"],
+    ["|"],
+  ])("escapes %p with one backslash", (character) => {
+    expect(escapeRegex(`a${character}b`)).toBe(`a\\${character}b`);
   });
 
-  it.each([["5*"], ["*"], ["From $5* a month"], ["\\*"]])(
-    "gives no pattern for %p: PostgREST would turn its * into a wildcard",
-    (q) => {
-      expect(likePattern(q)).toBeNull();
+  it("turns 5* into 5\\*, a literal star", () => {
+    expect(escapeRegex("5*")).toBe("5\\*");
+  });
+
+  it("keeps % and _ as they are: neither is regex syntax", () => {
+    expect(escapeRegex("50%_off")).toBe("50%_off");
+  });
+
+  it("doubles a backslash, so a Windows path matches itself", () => {
+    expect(escapeRegex("C:\\new")).toBe("C:\\\\new");
+  });
+
+  it("escapes every metacharacter in one string, in place", () => {
+    expect(escapeRegex("From $5* a month (or less?)")).toBe(
+      "From \\$5\\* a month \\(or less\\?\\)",
+    );
+  });
+
+  it.each([
+    ["5*", "From $5* a month", "Save 50 today"],
+    ["a.b", "see a.b here", "see axb here"],
+    ["x+", "x+", "xxx"],
+    ["[ab]", "pick [ab]", "pick a"],
+    ["a|b", "a|b", "a"],
+    ["^start", "the ^start", "start here"],
+    ["50%_off", "50%_off", "50 xoff"],
+  ])(
+    "as a regex, %p matches its literal text and not a lookalike",
+    (typed, literal, lookalike) => {
+      const pattern = new RegExp(escapeRegex(typed), "i");
+
+      expect(pattern.test(literal)).toBe(true);
+      expect(pattern.test(lookalike)).toBe(false);
     },
   );
 });

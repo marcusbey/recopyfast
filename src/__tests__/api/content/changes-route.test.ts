@@ -12,8 +12,9 @@
  *
  * Pinned: the limiter runs before `getUser()` (AGENTS.md, rate limit before
  * authorization), 401 / 404 / 400 / generic 500, the filters each state maps
- * to, `q` escaped and reaching `.ilike` only (never an `.or()` string built
- * from input), bounded offsets, and counts that share the list's filters.
+ * to, `q` regex-escaped and reaching one `imatch` filter only (never an
+ * `.or()` string built from input), bounded offsets, and counts that share
+ * the list's filters.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -296,32 +297,52 @@ describe("GET /api/content/changes", () => {
     expect(callsOf(list, "range")).toEqual([[100, 149]]);
   });
 
-  it("escapes %, _ and \\ in q and sends it to .ilike on search_text only", async () => {
+  // `.filter(column, "imatch", value)`: one `search_text=imatch.<value>`
+  // query parameter, the value percent-encoded by URLSearchParams and bound
+  // by PostgREST as one literal (postgrest-js PostgrestFilterBuilder.filter).
+  const searchFilters = (query: RecordedQuery) =>
+    callsOf(query, "filter").filter(([column]) => column === "search_text");
+
+  it("regex-escapes q and sends it to one imatch filter on search_text only", async () => {
     await get(`?q=${encodeURIComponent("50%_off\\")}`);
 
     for (const query of contentQueries()) {
-      expect(callsOf(query, "ilike")).toEqual([
-        ["search_text", "%50\\%\\_off\\\\%"],
+      expect(searchFilters(query)).toEqual([
+        ["search_text", "imatch", "50%_off\\\\"],
       ]);
+      expect(callsOf(query, "ilike")).toEqual([]);
     }
     const everyCall = mockRecorded.flatMap((query) => query.calls);
     expect(everyCall.filter(([method]) => method === "or")).toEqual([]);
     const carryingQ = everyCall.filter((call) =>
       JSON.stringify(call).includes("50"),
     );
-    expect(carryingQ.every(([method]) => method === "ilike")).toBe(true);
+    expect(carryingQ.every(([method]) => method === "filter")).toBe(true);
   });
 
-  // Review m1: PostgREST rewrites `*` to `%` in a like value and has no escape
-  // for it, so "5*" listed every row containing a 5.
-  it("refuses a search holding *, so 5* never matches every row containing 5", async () => {
+  // s70b re-review N1 (after review m1): `*` was refused with a 400, which
+  // the page showed as "could not be loaded", its Try again repeating the
+  // 400. Under `imatch` PostgREST leaves `*` alone (it rewrites `*` to `%`
+  // for like/ilike only), so `\*` is a literal star and the search works.
+  it("answers 5* with 200, searching for a literal star", async () => {
     const response = await get(`?q=${encodeURIComponent("5*")}`);
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: "Search cannot contain *",
-    });
-    expect(contentQueries()).toEqual([]);
+    expect(response.status).toBe(200);
+    expect(contentQueries()).toHaveLength(4);
+    for (const query of contentQueries()) {
+      expect(searchFilters(query)).toEqual([["search_text", "imatch", "5\\*"]]);
+    }
+  });
+
+  it("keeps % and _ literal: 50%_off is sent as typed, not as a wildcard", async () => {
+    const response = await get(`?q=${encodeURIComponent("50%_off")}`);
+
+    expect(response.status).toBe(200);
+    for (const query of contentQueries()) {
+      expect(searchFilters(query)).toEqual([
+        ["search_text", "imatch", "50%_off"],
+      ]);
+    }
   });
 
   it.each([
@@ -350,7 +371,7 @@ describe("GET /api/content/changes", () => {
         head: true,
       });
       expect(callsOf(head, "eq")).toContainEqual(["site_id", SITE_A]);
-      expect(callsOf(head, "ilike")).toEqual([["search_text", "%hero%"]]);
+      expect(searchFilters(head)).toEqual([["search_text", "imatch", "hero"]]);
     }
     expect(
       heads

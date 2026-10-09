@@ -231,15 +231,19 @@ the choices the plan left open.
   in a `src/components/ui/` primitive, which this story may not touch beyond the status registry.
   The same bug affects the 10 other files that use `<Button asChild>` today. It needs a follow-up
   story.
-- **Search refuses `*`** (review m1). The plan escapes `%`, `_`, `\` and applies `.ilike`. PostgREST
-  rewrites every `*` in a like value to `%` and has no escape for it. Measured on PostgREST 14.16:
-  `\*` arrives as `\%`, a literal percent sign. So `q` holding `*` is a 400 with the error
-  `Search cannot contain *`. The pattern builder moved to `src/lib/content/search-pattern.ts` so
-  it can be unit-tested (a route file may export only its handlers).
-- **The 375 row layout differs from the design** (review m4). The design's narrow row puts ⋮ on the
-  first line and Open on the who · when line. Both sat in one shared last track, and Open's width
-  cut the location to a few characters. Now status and location fill the first line, and
-  who · when, Open and ⋮ share the last line.
+- **Search is a case-insensitive regex match, not `.ilike`** (review m1, re-review N1). The plan
+  escapes `%`, `_`, `\` and applies `.ilike`. PostgREST rewrites every `*` in a like/ilike value to
+  `%` and has no escape for it (measured on PostgREST 14.16: `\*` arrives as `\%`), so "5*" matched
+  every row containing a 5. The first fix refused `*` with a 400, which the page showed as a
+  failure. The route now applies `.filter("search_text", "imatch", escapeRegex(q))`. `imatch` is
+  Postgres's `~*`, and PostgREST's `*` rewrite applies to like/ilike only (`Query/SqlFragment.hs`,
+  read at v14.16 and at v16.2, the image CI's Supabase CLI 2.117.0 pins). Every POSIX ERE
+  metacharacter is escaped, so typed text matches only itself, case-insensitively, as with
+  `ilike`; `%` and `_` are left as typed. Proven on a scratch PostgreSQL 16 (every migration)
+  and PostgREST 14.16 through postgrest-js: 12 searches (each metacharacter, `5*`, `50%_off`, a
+  backslash, a case change) each returned exactly their literal rows, where the unescaped controls
+  matched lookalikes. `escapeRegex` lives in `src/lib/content/search-pattern.ts` so it can be
+  unit-tested (a route file may export only its handlers).
 - **"N changes on M sites" counts the sites the list holds** (review m5), and only once every row
   is loaded. With more to load, the line reads "N changes" alone, because a site further down is
   not known yet. The design's example ("15 changes on 2 sites") counted every site.

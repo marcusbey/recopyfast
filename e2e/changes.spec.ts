@@ -3,8 +3,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
+  countsFor,
   EMBED_ELEMENT_IDS,
+  type FixtureCounts,
   HERO,
+  NORTHWIND_DRAFT,
   NORTHWIND_ID,
   routeChangesFixtures,
   SELECTORS,
@@ -31,12 +34,15 @@ import {
  *
  * 1. At 1280 nothing passes the content edge, both site panels and their page
  *    bands render, and no `rcf-` id or `>` selector reaches the page's text.
- *    Picking a site reloads the rows, never the filter row: the select keeps
- *    focus (s70b review M1: it was unmounted under the owner's hand).
+ *    Picking a site reloads the rows, never the filter row: while the answer
+ *    is held the select keeps focus and the previous answer's counts, then
+ *    shows the new site's (s70b review M1: it was unmounted under the
+ *    owner's hand).
  * 2. At 375 nothing passes the edge, every ⋮ is visible at rest (a touch
  *    screen has no hover: s66c's Delete was unreachable on phones), and rows
- *    stack with the location given the first line's width (s70b review m4:
- *    Open shared ⋮'s column and cut the location to a few characters).
+ *    stack as the design draws them: ⋮ at the end of the location's line,
+ *    the location reaching it, Open beside who · when (s70b review m4,
+ *    re-review N2).
  * 3. Expanding a row compares the text and reads its history once.
  * 4. Revert → Save as draft sends exactly the staging PUT's four fields and
  *    the row turns Pending in place.
@@ -134,6 +140,19 @@ async function measureOverflow(
   }, EDGE_TOLERANCE);
 }
 
+/** The status select's options for a set of counts (ChangesFilterBar). */
+function statusLabels(counts: FixtureCounts): string[] {
+  const n = (value: number) => value.toLocaleString("en-US");
+  return [
+    `Changes (${n(counts.pending + counts.published)})`,
+    `Pending (${n(counts.pending)})`,
+    `Published (${n(counts.published)})`,
+    `All text (${n(counts.pending + counts.published + counts.original)})`,
+  ];
+}
+
+const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
+
 function rowFor(page: Page, text: string): Locator {
   return page
     .locator("li")
@@ -202,19 +221,33 @@ test.describe("s70b Changes page", () => {
 
     // Picking a site reloads the rows, never the filter row (s70b review M1):
     // the select was drawn from the reloading list, so it unmounted under the
-    // owner's hand and came back unfocused, its status counts blanked.
+    // owner's hand and came back unfocused, its status counts blanked. The
+    // answer is held so the reload itself is looked at, and each site answers
+    // its own counts (s70b re-review N3: with one set of counts for every
+    // answer, a filter row rebuilt from nothing passed as one kept).
     const siteSelect = page.getByRole("combobox", { name: "Filter by site" });
     const statusOptions = page
       .getByRole("combobox", { name: "Filter by status" })
       .locator("option");
-    const countsBefore = await statusOptions.allTextContents();
+    await expect(statusOptions).toHaveText(statusLabels(countsFor(null)));
+    const release = log.holdNextList();
     await siteSelect.focus();
     await siteSelect.selectOption(NORTHWIND_ID);
     await expect.poll(() => log.listSites).toContain(NORTHWIND_ID);
-    await expect(rowFor(page, HERO.live)).toBeVisible();
+
+    // Reloading: the select in hand, the previous answer's counts.
     await expect(siteSelect).toBeFocused();
     await expect(siteSelect).toHaveValue(NORTHWIND_ID);
-    await expect(statusOptions).toHaveText(countsBefore);
+    await expect(statusOptions).toHaveText(statusLabels(countsFor(null)));
+
+    // Answered: Northwind's rows and counts, the select still in hand.
+    release();
+    await expect(rowFor(page, NORTHWIND_DRAFT)).toBeVisible();
+    await expect(rowFor(page, HERO.live)).toHaveCount(0);
+    await expect(statusOptions).toHaveText(
+      statusLabels(countsFor(NORTHWIND_ID)),
+    );
+    await expect(siteSelect).toBeFocused();
   });
 
   test("375: rows stack, every ⋮ is visible at rest, nothing overflows", async ({
@@ -231,13 +264,17 @@ test.describe("s70b Changes page", () => {
       ).toBe("1");
     }
 
-    // Stacked (design, Row anatomy below 768, as reworked by s70b review m4):
-    // status and location on the first line, the location running to the
-    // row's right edge; the text on its own line below; then who · when, Open
-    // and ⋮ together on the last line, ⋮ at the right. Open used to share ⋮'s
-    // column on the first line's right, and that column took Open's width
-    // from the location, cut to a few characters at 375.
+    // Stacked as the design draws it (Row anatomy, below 768): status, the
+    // location and ⋮ on the first line, the location running up to ⋮; the
+    // text on its own line; who · when and Open on the last line, Open at the
+    // right edge under ⋮. Tombstones: Open once shared ⋮'s track and cut the
+    // location to a few characters (s70b review m4); the first fix moved ⋮
+    // down beside Open and cut "when" instead (s70b re-review N2).
     for (const row of await page.locator("li:has([data-row-text])").all()) {
+      const gap = await row
+        .locator(":scope > div")
+        .first()
+        .evaluate((grid) => parseFloat(getComputedStyle(grid).columnGap));
       // The row's first paragraph is its location (status is a badge).
       const location = await row.locator("p").first().boundingBox();
       const text = await row.locator("[data-row-text]").boundingBox();
@@ -249,25 +286,26 @@ test.describe("s70b Changes page", () => {
         .boundingBox();
       const who = await row.locator("p:has(time)").boundingBox();
       expect(location && text && open && menu && who).toBeTruthy();
-      expect(text!.y).toBeGreaterThanOrEqual(
-        location!.y + location!.height - EDGE_TOLERANCE,
+
+      // ⋮ ends the location's line, and the location reaches it.
+      expect(Math.abs(middle(menu!) - middle(location!))).toBeLessThanOrEqual(
+        1,
       );
+      expect(
+        Math.abs(location!.x + location!.width + gap - menu!.x),
+      ).toBeLessThanOrEqual(EDGE_TOLERANCE);
+      expect(text!.y).toBeGreaterThanOrEqual(
+        menu!.y + menu!.height - EDGE_TOLERANCE,
+      );
+      // Open is on the who · when line below the text, right-aligned with ⋮,
+      // and who · when ends before it.
       expect(open!.y).toBeGreaterThanOrEqual(
         text!.y + text!.height - EDGE_TOLERANCE,
       );
-      expect(open!.x).toBeGreaterThan(text!.x);
-      // Nothing shares the location's line on its right: it ends where the
-      // row's content ends, the right edge ⋮ is aligned to below.
-      expect(location!.x + location!.width).toBeGreaterThanOrEqual(
-        menu!.x + menu!.width - EDGE_TOLERANCE,
-      );
-      // ⋮ sits on Open's line, after it; who · when ends before Open.
+      expect(Math.abs(middle(open!) - middle(who!))).toBeLessThanOrEqual(1);
       expect(
-        Math.abs(menu!.y + menu!.height / 2 - (open!.y + open!.height / 2)),
-      ).toBeLessThanOrEqual(1);
-      expect(menu!.x).toBeGreaterThanOrEqual(
-        open!.x + open!.width - EDGE_TOLERANCE,
-      );
+        Math.abs(open!.x + open!.width - (menu!.x + menu!.width)),
+      ).toBeLessThanOrEqual(EDGE_TOLERANCE);
       expect(who!.x + who!.width).toBeLessThanOrEqual(open!.x + EDGE_TOLERANCE);
     }
 

@@ -233,7 +233,8 @@ describe("AuthContext — sign-out", () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it("forgets every cached change history when the user signs out", async () => {
+  /** Renders the provider and returns what Supabase would call it with. */
+  function renderListening(): (event: string, session: unknown) => void {
     let emit: (event: string, session: unknown) => void = () => {};
     mockAuth.onAuthStateChange.mockImplementation(
       (cb: (event: string, session: unknown) => void) => {
@@ -242,6 +243,11 @@ describe("AuthContext — sign-out", () => {
       },
     );
     renderProbe();
+    return (event, session) => emit(event, session);
+  }
+
+  it("forgets every cached change history when the user signs out", async () => {
+    const emit = renderListening();
     const first = renderHook(() => useChangeHistory("row-signout", "v1"));
     await waitFor(() => expect(first.result.current.data).toEqual(HISTORY));
     first.unmount();
@@ -257,4 +263,26 @@ describe("AuthContext — sign-out", () => {
     await waitFor(() => expect(after.result.current.data).toEqual(HISTORY));
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
+
+  // Only a sign-out clears it (s70b re-review N4). Supabase emits
+  // TOKEN_REFRESHED about hourly and SIGNED_IN on every tab focus that
+  // revalidates the session; clearing on those would read every open trail
+  // again for the same owner, for nothing.
+  it.each(["TOKEN_REFRESHED", "SIGNED_IN"])(
+    "keeps every cached change history through %s",
+    async (event) => {
+      const emit = renderListening();
+      const key = `row-${event}`;
+      const first = renderHook(() => useChangeHistory(key, "v1"));
+      await waitFor(() => expect(first.result.current.data).toEqual(HISTORY));
+      first.unmount();
+
+      act(() => emit(event, { user: { email: "me@example.com" } }));
+
+      const kept = renderHook(() => useChangeHistory(key, "v1"));
+      expect(kept.result.current.data).toEqual(HISTORY);
+      kept.unmount();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    },
+  );
 });
