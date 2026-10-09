@@ -1,0 +1,89 @@
+# Design — Story s82-billing-lifetime-guards
+
+Research: `docs/research/s82-billing-lifetime-guards.md`. Design system: `docs/design-system.md`.
+**No new screen and no layout change.** The "Current subscription" card and the "Change plan"
+dialog on `/dashboard/billing` keep their frames and slots; what changes is the copy a few states
+print, one badge word and one price slot in the dialog. The rest of this story is server-side
+(routes and messages), listed at the end because its messages reach the same page. No `.html`
+mockup, as for s71: nothing moves on either surface, so the state matrices below are the design.
+
+## Components
+
+- No new component, no new token. `Badge variant="secondary"` (the dialog's existing "Current"
+  badge variant) carries "Lifetime" in the dialog; the card's header badge is unchanged from s71.
+- The dialog's price slot for a plan held for life prints "Lifetime access" at `text-xl
+  font-semibold` — a phrase, not a number, so not `.tabular`, and one step below the tile's
+  `text-3xl` number so it fits a third-width tile at `md` without wrapping.
+- Running-out row: the same `p.text-sm.font-medium` line s71 introduced; one sentence is appended.
+
+## State matrix — the card's running-out row (plan held for life + a live subscription)
+
+`N` is the allowance the server resolves without the subscription (`includedAfterSubscription`),
+present only when it is lower than the allowance in force.
+
+| Subscription | `N` | Row |
+|---|---|---|
+| active, set to cancel | absent | "Your Pro subscription ends October 10, 2026 — you won't be charged again." (unchanged) |
+| active, set to cancel | 250 | "Your Agency subscription ends October 10, 2026 — you won't be charged again. Without it, your plan includes 250 AI credits a month." |
+| active, renewing | 250 | "Your Agency subscription renews October 10, 2026 — you hold Agency for life, so you no longer need it. Without it, your plan includes 250 AI credits a month." |
+| past due / trialing (any) | 250 | the s71 sentence for that status, then "Without it, your plan includes 250 AI credits a month." |
+| any | absent | the s71 sentence, unchanged |
+
+Cancel confirmation in the same state, with `N`: "Cancel your Agency subscription? You keep Agency
+for life, and you will not be charged again. Without it, your plan includes 250 AI credits a
+month." Without `N`: unchanged.
+
+The feature list keeps stating the allowance in force (the wallet's `included`, e.g. 1,000 while
+the Agency subscription runs); the row is where its end is told.
+
+## The allowance bullet (card and dialog)
+
+The bullet restated is the one that carries the plan's own `limits.monthlyCredits` beside the word
+"credit", in any spelling of the number ("1,000" or "1000"). Only that number is replaced; the
+catalogue's wording stays.
+
+| Catalogue bullet | Catalogue allowance | Resolved | Printed |
+|---|---|---|---|
+| "1,000 AI credits / month" | 1000 | 250 | "250 AI credits / month" |
+| "AI rewrite suggestions, 500 credits a month" | 500 | 100 | "AI rewrite suggestions, 100 credits a month" |
+| "1000 AI credits every month" (reworded) | 1000 | 250 | "250 AI credits every month" |
+| "+$4 per additional website", "10 client websites" | 1000 | 250 | unchanged |
+| any allowance bullet | n | null | dropped |
+| any | n | n | the catalogue's list, untouched |
+
+## State matrix — the "Change plan" dialog tile
+
+| Tile's plan | Badge | Price slot | Bullets | Submit when selected |
+|---|---|---|---|---|
+| Held for life (grant covers the plan in force) | **Lifetime** | **Lifetime access** (no "/month", no annual line) | allowance restated to the account's own | disabled |
+| The plan in force, billed monthly | Current (unchanged) | $49/month (unchanged) | catalogue (unchanged) | disabled (unchanged) |
+| Any other | Selected when selected (unchanged) | $price/month, annual line (unchanged) | catalogue (unchanged) | enabled (unchanged) |
+
+## Server messages that reach this page
+
+| Situation | Status | Message |
+|---|---|---|
+| Reactivate a subscription a lifetime grant covers | 409 | "Your lifetime plan already includes this one, so this subscription can't be restarted." |
+| No active subscription to change or cancel | 404 | "No active subscription found" (text unchanged; was 500) |
+| No subscription to reactivate | 404 | "No subscription found" (text unchanged; was 500) |
+| Change to the price already billed | 409 | "You are already on this plan" (text unchanged; was 500) |
+| Reactivate a subscription not set to cancel | 409 | "Subscription is not scheduled for cancellation" (text unchanged; was 500) |
+| Anything else in plan change / cancel / reactivate | 500 | "Failed to update subscription" / "Failed to cancel subscription" / "Failed to reactivate subscription" |
+| Unknown or foreign payment method | 404 | "Payment method not found" |
+| Anything else in set-default / remove card | 500 | "Failed to update payment method" / "Failed to remove payment method" |
+| AI suggestion failed, refund succeeded | 502 | "AI suggestions are unavailable right now. You were not charged." (unchanged) |
+| AI suggestion failed, refund failed | 502 | "AI suggestions are unavailable right now. We could not refund the credit for this request automatically, and we have been notified." |
+| Translate refused by the owner's plan or wallet, caller is not the owner | 403 | "AI translation isn't available on this site's plan right now. Ask the site owner to add AI credits." |
+
+The card and the dialog already print `error` from any non-ok response, so no client change is
+needed for these.
+
+## Responsive and accessibility
+
+No layout change. The appended sentence wraps inside the row at every width the card supports.
+The dialog's "Lifetime access" is plain text in the slot the price occupied; the tile stays a
+`role="radio"` button and its accessible name gains "Lifetime" in place of "Current".
+
+## Design system gaps
+
+None.
