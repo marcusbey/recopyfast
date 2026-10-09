@@ -3530,8 +3530,8 @@ at that commit, to be re-verified at research time):
   on `/health` (`server/index.js:78,125-136`; live).
 - [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
   121 bare handshakes/min lock real editors out of realtime.
-- [ ] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
-  (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`.
+- [x] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
+  (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`. → closed by s72.
 - [ ] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
   Node 24.14.0.
 - [ ] L17 — Grant hygiene: `ALTER DEFAULT PRIVILEGES … REVOKE … FROM PUBLIC`

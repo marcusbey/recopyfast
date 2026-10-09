@@ -20,6 +20,7 @@ import {
   ownerCanEditRefusal,
 } from "@/lib/billing/owner-can-edit";
 import { optionalBoundedString } from "@/lib/api/validation";
+import { isPlausibleEmail } from "@/lib/auth/editor-directory";
 
 /** Longest invite label accepted (s68b M6) — it is mailed to the invitee. */
 const MAX_STAGING_LABEL_LENGTH = 80;
@@ -106,6 +107,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // s72. The invite's address becomes the `created_by` of every version its
+    // holder saves, and the embed's History tab rendered that as markup on the
+    // customer's origin (s70a review F1): this route checked only that an email
+    // was present, so a site admin could invite `<img/src/onerror=…>@x.co`. The
+    // address must now be a string holding a valid address (the shared rule the
+    // editor routes use), trimmed, refused before the site is read with a fixed
+    // message that never repeats what was sent. Advisory against an admin until
+    // s72b: an admin can still write `staging_access.email` directly through
+    // PostgREST. The embed rendering it as text is what makes a stored value
+    // harmless, rows written before this included.
+    const inviteEmail = typeof email === "string" ? email.trim() : email;
+    if (
+      type === "invite" &&
+      (typeof inviteEmail !== "string" || !isPlausibleEmail(inviteEmail))
+    ) {
+      return NextResponse.json(
+        { error: "Enter a valid email address." },
+        { status: 400 },
+      );
+    }
+
     // s68b M6. The label is free text any site admin chooses, and it is mailed
     // — beside a genuine code, from our domain — to an address that admin also
     // chooses. The emails escape it; this bounds it before anything is created:
@@ -157,7 +179,7 @@ export async function POST(request: NextRequest) {
       result = await StagingAccessManager.createStagingAccess({
         siteId,
         accessType: type,
-        email,
+        email: inviteEmail,
         permissions,
         label: labelCheck.value,
         createdBy: user.id,
@@ -210,9 +232,9 @@ export async function POST(request: NextRequest) {
     // dialog said "Link created".
     let emailDelivered: boolean | undefined;
 
-    if (type === "invite" && email && result.verificationCode) {
+    if (type === "invite" && inviteEmail && result.verificationCode) {
       const mail = await sendStagingVerificationEmail(
-        email,
+        inviteEmail,
         result.verificationCode,
         result.access.label ?? undefined,
       );

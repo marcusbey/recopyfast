@@ -91,13 +91,13 @@ embed gets smaller.
 
 ## Tasks (ordered)
 
-0. [ ] **Rebase and baseline.** After PR #75 merges: `git fetch && git rebase origin/main`. Record
+0. [x] **Rebase and baseline.** After PR #75 merges: `git fetch && git rebase origin/main`. Record
    `npm run build:embed -- --check` (expected 45840 / 33073 — whatever main's ceilings are is the
    budget), and the three dynamic sinks with
    `grep -n "innerHTML = '<span>' + dateStr\|Restored ' + result\|(result.error || 'Failed to restore')" public/embed/recopyfast.src.js`
    (s70a: `:6516`, `:6587`, `:6593`; main: `:6496`, `:6567`, `:6573`). If main's embed source
    moved in a way that changes these three statements, stop and re-plan.
-1. [ ] **RED — the History tab and the restore panel render text.** New
+1. [x] **RED — the History tab and the restore panel render text.** New
    `src/__tests__/embed/edit-board-history-xss.test.ts`, booting the real `recopyfast.src.js` the way
    `embed-ui-not-content.test.ts` does (script tag, stubbed `fetch`, `settle()`, then
    `showStagingBanner()` with a verified `stagingAccess`, a click on `#rcf-edit-board-btn`, then on
@@ -116,7 +116,7 @@ embed gets smaller.
    - Restore answered `200 {success: true, elementsRestored: true}` (decision 1): the panel reads
      "Version restored" and contains no "true". Fake timers after the click, never advanced past
      1.5 s, so `location.reload` never runs. Red today.
-2. [ ] **RED — every `innerHTML` in the embed is a literal.** New
+2. [x] **RED — every `innerHTML` in the embed is a literal.** New
    `src/__tests__/embed/html-sinks-are-literal.test.ts`, reading the source as text:
    - every `.innerHTML =` / `+=` statement's right-hand side (up to its `;`, across lines) is
      string literals joined by `+`, except exactly `svg.innerHTML = ICONS[name]` (a const map of
@@ -129,7 +129,7 @@ embed gets smaller.
    Red today on the three statements of task 0 (the research scanner listed exactly those three
    plus the allowlisted icon map). Under decision 1 = no, the restore success and failure lines are
    added to the allowlist by exact text, with a comment naming the decision.
-3. [ ] **GREEN — `public/embed/recopyfast.src.js`, exactly these hunks and nothing else.**
+3. [x] **GREEN — `public/embed/recopyfast.src.js`, exactly these hunks and nothing else.**
    - History meta (`:6516`): replace the `innerHTML` line with
 
      ```js
@@ -157,7 +157,7 @@ embed gets smaller.
      scan selector never matches, so it carries neither (s70a review F4: a marker measured +7 / +8
      bytes for no behaviour). Give it a marker the day it gains a child the scan selector can match."
    - `npm run build:embed`. Then task 4.
-4. [ ] **Ratchet the ceilings down to the measurement.** `MAX_BUNDLE_GZ` / `MAX_WIDGET_GZ`
+4. [x] **Ratchet the ceilings down to the measurement.** `MAX_BUNDLE_GZ` / `MAX_WIDGET_GZ`
    (`scripts/build-embed.mjs:289-290`) and `SEEDED_MAX_BUNDLE_GZ` / `SEEDED_MAX_WIDGET_GZ`
    (`src/__tests__/embed/build-size-gate.test.ts:106-107`) := the rebased branch's measurement.
    Ledger block "RATCHETED DOWN <date> (s72-edit-board-history-xss), from <main's ceilings>",
@@ -168,7 +168,7 @@ embed gets smaller.
    Only the two ends are measurements of shipped bytes; say so, as s70a's block does.
    **Stop rule:** if the rebased branch measures above the ceilings on main, do not raise anything
    — stop and report; the funding options are in the research table.
-5. [ ] **RED — one email rule.** (Decision 2 = a.) New
+5. [x] **RED — one email rule.** (Decision 2 = a.) New
    `src/lib/auth/__tests__/editor-directory-email.test.ts`, a table for `isPlausibleEmail`:
    accepts `editor@example.com`, `First.Last+tag@sub.example.co.uk`, `o'brien@example.com`,
    `a@b.co`, a 254-character valid address; refuses `<img/src/onerror=alert(1)>@x.co`,
@@ -183,7 +183,7 @@ embed gets smaller.
    neither `createStagingAccess` nor `sendStagingVerificationEmail` is called;
    `" editor@example.com "` is created with `email: "editor@example.com"`. Red today (the payload is
    accepted). The existing s51, s68c and s68b blocks stay green unchanged.
-6. [ ] **GREEN — server.** `src/lib/auth/editor-directory.ts:57-59`: `isPlausibleEmail` becomes the
+6. [x] **GREEN — server.** `src/lib/auth/editor-directory.ts:57-59`: `isPlausibleEmail` becomes the
    WHATWG HTML "valid e-mail address" production with a dotted domain whose last label has at
    least two characters (today's TLD rule), ≤ 254 characters —
    `` /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])$/ ``,
@@ -198,7 +198,7 @@ embed gets smaller.
    tests) stay green unchanged — every fixture address passes the new rule (research checked 28).
    Under decision 2 = b: a new `isDeliverableEmail` beside it, used by `staging/access` only, and
    `isPlausibleEmail` untouched.
-7. [ ] **Gates and commit.** `lint`, `type-check`, `type-check:build`, `format:check`, `build`,
+7. [x] **Gates and commit.** `lint`, `type-check`, `type-check:build`, `format:check`, `build`,
    `npm test`, `npm run build:embed -- --check`; Playwright `--list` unchanged (+0: no browser test
    added). In `docs/stories.md`, s69 L15 is marked "→ closed by s72". One story commit.
 

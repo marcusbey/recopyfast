@@ -286,8 +286,34 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * shouldSkipElement, measured 45840 / 33074 and was not shipped.
  * build-size-gate.test.ts pins the same pair.
  */
-const MAX_BUNDLE_GZ = 45840;
-const MAX_WIDGET_GZ = 33073;
+/*
+ * RATCHETED DOWN 2026-10-09 (s72-edit-board-history-xss), from 45840 / 33073.
+ *
+ * The Edit Board's History tab ran a version's author as markup on the
+ * customer's origin (s70a review F1). Text, never markup, for anything a
+ * response carries — and the fix is byte-negative, measured in sequence on the
+ * branch:
+ *
+ *   45840 / 33073  ceilings before s72 = measured on main at 59d0596, where
+ *                  s72 rebased (s70a merged)
+ *   −6 / −4        the History meta line as a text node (the date) and one
+ *                  span ("by …", textContent), instead of innerHTML
+ *   −6 / −5        the restore lines: the refusal as text in an empty div (R1)
+ *                  and "Version restored" for the RPC's boolean (R2), together.
+ *                  R1 alone measured +6 / +6 — over the widget ceiling — and
+ *                  is only shippable with R2
+ *   0 / −2         the "THE RULE" comment names the container hint (s70a
+ *                  review F4(a)); a comment moves the banner hash only
+ *   45828 / 33062  measured on the branch — the new ceilings
+ *
+ * As s70a's block says: the artifact's banner carries the source's sha256, so
+ * every source edit moves gzip by up to ±2 B, and the three middle lines carry
+ * that noise. Research measured 45828–45829 / 33062–33064 for the whole edit
+ * across eight comment salts. Only the two ends are measurements of shipped
+ * bytes. build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45828;
+const MAX_WIDGET_GZ = 33062;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.
