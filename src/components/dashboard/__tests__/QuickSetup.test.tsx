@@ -242,6 +242,22 @@ describe("QuickSetup", () => {
     expect(screen.queryByText("Install the snippet")).not.toBeInTheDocument();
   });
 
+  // s66c2 review N-3. The shared alert title is set at line-height 1, and a
+  // long site name wraps anywhere in this one: its lines touched.
+  it("sets the load error's title at a readable line height", () => {
+    mockUseSiteActivation.mockReturnValue(
+      activation({ data: null, error: "Could not load activation progress" }),
+    );
+
+    renderQuickSetup();
+
+    const title = screen.getByRole("heading", {
+      name: "Could not load setup progress for Client Site",
+    });
+    expect(title).toHaveClass("leading-snug");
+    expect(title).not.toHaveClass("leading-none");
+  });
+
   it("has three steps: Site added, Install the snippet, Start editing", () => {
     renderQuickSetup();
 
@@ -479,6 +495,153 @@ describe("QuickSetup", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "Activity" }),
     ).toHaveFocus();
+  });
+
+  /*
+   * The two other ways the panel leaves under the owner's focus. "Hide quick
+   * setup" removed the button that was pressed, and focus fell to <body>
+   * with it. And Close pressed while the invite's refresh was still out gave
+   * focus back to Add editor, still drawn; the refresh then finished setup,
+   * removed the panel and Add editor with it, and focus fell to <body>.
+   */
+  it("hands focus to the page's next heading when quick setup is hidden", async () => {
+    const user = userEvent.setup();
+    const view = renderQuickSetup();
+    dismiss.mockImplementationOnce(async () => {
+      mockUseSiteActivation.mockReturnValue(
+        activation({
+          data: {
+            installed: false,
+            invited: false,
+            published: false,
+            dismissed: true,
+          },
+        }),
+      );
+      view.rerender(quickSetup());
+    });
+
+    await user.click(screen.getByRole("button", { name: "Hide quick setup" }));
+
+    expect(screen.queryByRole("heading", { name: "Quick setup" })).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Activity" }),
+    ).toHaveFocus();
+  });
+
+  it("hands focus to the page's next heading when the invite's refresh finishes setup after Close", async () => {
+    const user = userEvent.setup();
+    mockUseSiteActivation.mockReturnValue(activation({ data: INSTALLED }));
+    const view = renderQuickSetup(LIVE_SITE);
+    let finishRefresh!: () => void;
+    refetch.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRefresh = () => {
+            mockUseSiteActivation.mockReturnValue(
+              activation({ data: { ...INSTALLED, invited: true } }),
+            );
+            view.rerender(quickSetup(LIVE_SITE));
+            resolve();
+          };
+        }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Add editor to Client Site" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Complete invitation" }),
+    );
+    await user.click(screen.getByRole("button", { name: /close/i }));
+    // The refresh is still out: the panel is drawn and Close gave focus back
+    // to the button that opened the dialog.
+    const addEditor = screen.getByRole("button", {
+      name: "Add editor to Client Site",
+    });
+    expect(addEditor).toHaveFocus();
+
+    finishRefresh();
+
+    expect(addEditor).not.toBeInTheDocument();
+    expect(screen.queryByRole("listitem")).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Activity" }),
+    ).toHaveFocus();
+  });
+
+  // The real dialog swaps its form for the delivery notice on success, which
+  // takes the focused submit button with it. While the dialog is open, focus
+  // is the dialog's to place, never the page's behind it.
+  it("leaves focus to the open dialog when the invite finishes setup", async () => {
+    const user = userEvent.setup();
+    mockUseSiteActivation.mockReturnValue(activation({ data: INSTALLED }));
+    const view = renderQuickSetup(LIVE_SITE);
+    refetch.mockImplementationOnce(async () => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      mockUseSiteActivation.mockReturnValue(
+        activation({ data: { ...INSTALLED, invited: true } }),
+      );
+      view.rerender(quickSetup(LIVE_SITE));
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Add editor to Client Site" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Complete invitation" }),
+    );
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByRole("listitem")).toBeNull();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Activity" }),
+    ).not.toHaveFocus();
+  });
+
+  it("leaves focus where the owner put it when the panel leaves", () => {
+    mockUseSiteActivation.mockReturnValue(activation({ data: INSTALLED }));
+    const withElsewhere = () => (
+      <>
+        {quickSetup(LIVE_SITE)}
+        <button type="button">Elsewhere</button>
+      </>
+    );
+    const view = render(withElsewhere());
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    elsewhere.focus();
+
+    mockUseSiteActivation.mockReturnValue(
+      activation({ data: { ...INSTALLED, invited: true } }),
+    );
+    view.rerender(withElsewhere());
+
+    expect(screen.queryByRole("listitem")).toBeNull();
+    expect(elsewhere).toHaveFocus();
+  });
+
+  // Only the drawn steps can leave under the owner's focus. A site whose
+  // setup is already finished goes from the loading skeleton to nothing on
+  // every visit, and that must not move focus to the Activity heading.
+  it("takes no focus when quick setup loads already finished", () => {
+    mockUseSiteActivation.mockReturnValue(
+      activation({ data: null, loading: true }),
+    );
+    const view = renderQuickSetup(LIVE_SITE);
+
+    mockUseSiteActivation.mockReturnValue(
+      activation({ data: { ...INSTALLED, invited: true } }),
+    );
+    view.rerender(quickSetup(LIVE_SITE));
+
+    expect(
+      screen.queryByRole("status", {
+        name: "Loading quick setup for Client Site",
+      }),
+    ).toBeNull();
+    expect(document.body).toHaveFocus();
   });
 
   it("keeps the invite dialog and fallback notice visible through a refresh error", async () => {

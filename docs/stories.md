@@ -2821,6 +2821,7 @@ Complexity: 3. Dependencies: s66c1 merged. Branch `feature/s66c2-quick-setup`.
   are carried over where the behaviour stays).
 - [ ] **AC 2 — Done means Live.**
   - When the site is live, the header reads "Setup complete — <name> is live" in the success tone.
+    A stale site (installed, not live) reads "… is installed", as its Stale badge does.
   - Step 3 stays offered until it is done or the owner chooses "Hide quick setup" (persisted, as
     today). Then the panel is gone.
   - This replaces s35's single completion card ("installed + invited + published").

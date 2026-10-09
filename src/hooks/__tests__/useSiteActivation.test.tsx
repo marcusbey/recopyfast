@@ -279,6 +279,41 @@ describe("useSiteActivation", () => {
     },
   );
 
+  /*
+   * The other side of the finish rule. Installed alone is Live, but step 3
+   * is still offered, so the panel is still drawn and its progress must keep
+   * arriving: a rule of `installed` alone would stop polling here.
+   */
+  it("keeps polling once installed while no editor was added and nothing published", async () => {
+    const setIntervalSpy = jest.spyOn(window, "setInterval");
+    const clearIntervalSpy = jest.spyOn(window, "clearInterval");
+    const fetchMock = jest.fn().mockResolvedValue(
+      response({
+        installed: true,
+        invited: false,
+        published: false,
+        dismissed: false,
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+    const { result } = renderHook(() =>
+      useSiteActivation({ siteId: SITE_A, userId: "user-a" }),
+    );
+    await waitFor(() => expect(result.current.data?.installed).toBe(true));
+    const pollCallIndex = setIntervalSpy.mock.calls.findIndex(
+      ([, delay]) => delay === 60_000,
+    );
+    expect(pollCallIndex).toBeGreaterThanOrEqual(0);
+    const poll = setIntervalSpy.mock.calls[pollCallIndex]?.[0] as () => void;
+    const intervalId = setIntervalSpy.mock.results[pollCallIndex]?.value;
+
+    act(() => poll());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(clearIntervalSpy).not.toHaveBeenCalledWith(intervalId);
+  });
+
   it("does not start a polling interval while initially hidden", async () => {
     Object.defineProperty(document, "visibilityState", {
       configurable: true,

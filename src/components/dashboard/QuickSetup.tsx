@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { AlertCircle, CheckCircle2, Loader2, UserPlus } from "lucide-react";
@@ -36,9 +36,10 @@ interface QuickSetupPanelProps {
   embedScript: string;
   userId: string;
   /**
-   * Where focus goes when the Add editor dialog closes after the invite has
-   * finished setup and the panel has left the page. It must be drawn
-   * whatever the panel does; the Overview gives its next section's heading.
+   * Where focus goes when the panel leaves the page under the owner's focus:
+   * hidden, or finished by the invite (whether the Add editor dialog is
+   * still open or already closed). It must be drawn whatever the panel does;
+   * the Overview gives its next section's heading.
    */
   focusFallbackRef: RefObject<HTMLElement | null>;
 }
@@ -243,6 +244,38 @@ function QuickSetupPanel({
   const [actionError, setActionError] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  // The steps are drawn from the server's progress with no error; they
+  // leave the page once setup is hidden or finished.
+  const isPanelGone =
+    data !== null &&
+    !error &&
+    (data.dismissed || deriveProgress(site, data).isFinished);
+  const areStepsDrawn = data !== null && !error && !isPanelGone;
+  const wereStepsDrawnRef = useRef(areStepsDrawn);
+
+  /*
+   * When the steps leave the page, focus can leave with them. "Hide quick
+   * setup" removed the very button that was pressed, and focus fell to
+   * <body>. Close pressed while the invite's refresh was still out gave
+   * focus back to Add editor, still drawn; the refresh then finished setup,
+   * removed Add editor with the panel, and focus fell to <body> again
+   * (s66c2 fix pass, both reproduced before this effect). A layout effect,
+   * so focus moves in the same commit that removed the panel.
+   *
+   * Only focus that was lost is moved: on <body>, or on a node no longer in
+   * the document. Focus the owner has put elsewhere stays there. While the
+   * Add editor dialog is open, its `onCloseAutoFocus` below decides. And
+   * only drawn steps count: a finished site goes from the loading skeleton
+   * to nothing on every visit, which must not pull focus to the heading.
+   */
+  useLayoutEffect(() => {
+    const wereStepsDrawn = wereStepsDrawnRef.current;
+    wereStepsDrawnRef.current = areStepsDrawn;
+    if (!wereStepsDrawn || !isPanelGone || inviteOpen) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    focusFallbackRef.current?.focus();
+  }, [areStepsDrawn, isPanelGone, inviteOpen, focusFallbackRef]);
 
   const handleDismiss = async () => {
     setActionError(null);
@@ -272,8 +305,8 @@ function QuickSetupPanel({
       );
     }
 
+    if (isPanelGone) return null;
     const progress = deriveProgress(site, data);
-    if (data.dismissed || progress.isFinished) return null;
     const message = actionError || dismissError;
 
     return (
@@ -403,7 +436,9 @@ function SetupLoadError({
   return (
     <Alert variant="destructive">
       <AlertCircle className="h-4 w-4" aria-hidden="true" />
-      <AlertTitle className="[overflow-wrap:anywhere]">
+      {/* The shared title is `leading-none`: with a long site name wrapping
+          anywhere, its lines touched (s66c2 review N-3). */}
+      <AlertTitle className="leading-snug [overflow-wrap:anywhere]">
         Could not load setup progress for {siteName}
       </AlertTitle>
       <AlertDescription className="space-y-3">

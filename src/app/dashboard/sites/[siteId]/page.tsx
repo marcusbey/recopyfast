@@ -56,11 +56,12 @@ export default function SiteOverviewPage() {
       )}
 
       <section aria-labelledby={activityId} className="space-y-3">
-        {/* Focusable by script only: when the Add editor invite finishes
-            setup, the panel above leaves the page while its dialog is open,
-            and this is where focus goes on Close instead of <body> (s66c2
-            review M-1). The page's h1 belongs to PageShell, which takes a
-            title string and no ref. */}
+        {/* Focusable by script only: when the panel above leaves the page
+            under the owner's focus (hidden, or finished by the Add editor
+            invite, before or after its dialog closes), this is where focus
+            goes instead of <body> (s66c2 review M-1 and its fix pass). The
+            page's h1 belongs to PageShell, which takes a title string and
+            no ref. */}
         <h2
           id={activityId}
           ref={activityHeadingRef}

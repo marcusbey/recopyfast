@@ -43,7 +43,8 @@ Page frame: s66b1's `PageShell` and page-shell guard (ADR 053, on the s66b branc
      - with the provider stub flipping `site.status` from `awaiting-install` to `live`, step 2's
        status row changes from "Waiting for the first page view…" to "Installed…" without an
        activation refetch;
-     - live gives the header "Setup complete — <name> is live", with step 3 current;
+     - live gives the header "Setup complete — <name> is live", with step 3 current (a stale
+       site reads "… is installed");
      - `invited` or `published` (with live) hides the panel;
      - "Hide quick setup" calls the dismissal endpoint;
      - Edit website and Add editor appear when step 3 becomes current, once step 2 is done.
