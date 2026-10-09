@@ -3870,3 +3870,72 @@ Complexity: 3. Dependencies: none (PR #77, s70b, adds a view gated on `server_ve
 `feature/s75-ci-release-gates`.
 
 Embed allocation: 0 bytes (ceilings only go down).
+
+## Story s77-route-limiters-and-errors — API routes meter a caller before spending anything on them, and refuse what they cannot bound
+
+Owner directive 2026-10-09 ("take CTO-level decisions; get the product ready for production"),
+scoped by the orchestrator: the API-route items of `s69-security-lows` (L4, the A/B and staging
+part of L7, R1, R2, R5, R6) and three open review minors — s68b #3 (no IP guard before `getUser`
+on `PUT /api/domains/verify`), s42 m3 (no cap on API keys per site or on a key's name) and s44 m2
+(the public content API is metered per key, never recorded as a decision). Security story; no new
+screen. Research: `docs/research/s77-route-limiters-and-errors.md`. Plan:
+`docs/plans/s77-route-limiters-and-errors.md`. Decision: ADR 056.
+
+Cause (verified on `origin/main` `c0c40bf`):
+
+- **L4.** `CRON_SECRET` is compared with `!==`/`===` (`cron/ab-test-lifecycle/route.ts:14`,
+  `cron/generate-blog-post/route.ts:8`, `cron/webhook-dispatch/route.ts:28`,
+  `blog/generate/route.ts:21`) — the one secret not compared in constant time.
+- **L7.** `authorizeSiteRequest` (a `sites` lookup) runs for every caller before any limiter on
+  `ab-tests/bucket/[siteId]` (`:45` → `:82`), `ab-tests/active/[siteId]` (`:40` → `:86`) and
+  `ab-tests/track` (`:440` → `:478`). `staging/publish` POST authorizes (`:86-138`) before its
+  limiter (`:150`); its GET and `staging/content/[siteId]` GET (`:45-166`) have no limiter at all
+  in front of a service-role read.
+- **R1.** Per-site buckets keyed on the raw `siteId` (`staging/publish:153`, `staging/content:280`,
+  `edit-board/{history:51, languages:48,68, styles:46, styles/apply:51, themes:49}`): the authorizers
+  reach the site through a `uuid` cast, so each spelling of one id opens its own bucket.
+  `ai/translate:218` and `edit-board/history/[versionId]:85` are already canonical (verified).
+- **R2.** `bulk/update` takes any number of operations (`route.ts:31-39`), each a sequential read
+  and up to one service-role write.
+- **R5 / s68b #3.** `domains/verify` POST, GET and DELETE have no limiter; PUT's per-user limiter
+  (`:311`) has no IP guard before `getUser` (`:300`).
+- **R6.** `sites/[siteId]/share` POST, GET and DELETE have no limiter.
+- **s42 m3 / s44 m2.** `POST /api/api-keys` caps neither the keys on a site nor a key's name
+  (`route.ts:153-246`); `/api/v1/content` meters per key (`v1/content/route.ts:82-97`) where ADR 002
+  §4 says per site, so N keys gave a site N × the ceiling.
+
+Acceptance criteria:
+
+- [ ] L4: the four routes decide `Authorization: Bearer <CRON_SECRET>` through one helper that
+  compares in constant time over equal-length digests, refuses an unset or empty secret, and never
+  throws on a length mismatch. Test: `src/__tests__/api/cron/cron-secret.test.ts`.
+- [ ] L7: the three A/B routes and the staging publish/content routes refuse a flood per IP
+  (200/min, fail closed) before any authorization or database work; the per-site limiters stay
+  behind authorization; the two staging GETs gain a fail-closed per-site limiter (100/min). Tests:
+  `src/__tests__/api/ab-tests/ip-guard-before-auth.test.ts`,
+  `src/__tests__/api/staging/limiter-order.test.ts`.
+- [ ] R1: every handler that takes a `siteId` from the caller on the staging and edit-board routes
+  canonicalises it before any work: an upper-case id is served and metered as the lower-case id; a
+  malformed id is 400 before any authorization, limiter or query. Tests:
+  `src/__tests__/api/staging/limiter-order.test.ts`,
+  `src/__tests__/api/edit-board/canonical-site-id.test.ts`.
+- [ ] R2: more than 100 operations in one `bulk/update` request is 400 before authentication, and
+  nothing is written. Test: `src/__tests__/api/bulk/update-operations-cap.test.ts`.
+- [ ] R5 / s68b #3 / R6: every verb of `domains/verify` and `sites/[siteId]/share` runs IP guard →
+  `getUser` → fail-closed per-user limiter → permission read → service role (writes 10/min,
+  reads 100/min per user). Tests: `src/__tests__/api/domains/verify-limiters.test.ts`,
+  `src/__tests__/api/sites/share-limiters.test.ts`.
+- [ ] s42 m3: an eleventh key on a site is 409 and a key name over 100 characters is 400, nothing
+  written; ADR 056 records per-key metering with the cap (s44 m2). Test:
+  `src/__tests__/api/api-keys/key-cap.test.ts`.
+- [ ] No migration, nothing under `server/` or `public/embed/`, no new dependency; existing suites
+  whose fixtures or call-order assertions change are listed in the PR. Required gates pass; one
+  story commit.
+
+Complexity: 3 (eight small, well-precedented route changes; the breadth — ~15 route handlers and
+the suites that drive them — is the risk). Dependencies: none. Branch
+`feature/s77-route-limiters-and-errors`. Follow-up: **s77b** — the same gaps in files other stories
+own right now (`staging/validate`, `edit-sessions/*` including s68a review m9, and an IP guard in
+front of `edit-board/*`), listed in the plan.
+
+Embed allocation: 0 bytes.
