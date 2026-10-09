@@ -103,15 +103,42 @@ function validEditUrl(value: unknown, domain: string): string | null {
   }
 }
 
+/**
+ * The validated edit link, moved to one page of the same site (s70b, "Edit on
+ * page"). Applied only after `validEditUrl`, and only for a same-origin
+ * absolute path: `//evil.example` and `https://…` are origins, not paths, and
+ * `/\evil.example` parses to one. The host is checked again on the result, so
+ * whatever the path is, the token stays on the registered host. Only the
+ * pathname moves; the token's query string is kept.
+ */
+function atPagePath(editUrl: string, path: string | undefined): string {
+  if (!path || !path.startsWith("/") || path.startsWith("//")) return editUrl;
+  try {
+    const link = new URL(editUrl);
+    const resolved = new URL(path, link);
+    if (resolved.host !== link.host) return editUrl;
+    link.pathname = resolved.pathname;
+    return link.toString();
+  } catch {
+    return editUrl;
+  }
+}
+
 export function useEditSession(domain: string) {
   const [isOpening, setIsOpening] = useState(false);
 
   /**
    * Resolves `null` once the tab is on the site, or the message to show when
    * it is not. Call it from the click handler itself.
+   *
+   * `path` (s70b) opens the session on that page of the site instead of the
+   * page the server's link names. It never reaches the request body.
    */
   const openEditSession = useCallback(
-    async (request: EditSessionRequest): Promise<string | null> => {
+    async (
+      request: EditSessionRequest,
+      path?: string,
+    ): Promise<string | null> => {
       // Browsers associate pop-up permission with the synchronous click.
       // Opening only after the network round trip loses that activation and
       // turns a healthy edit-session response into a blocked pop-up.
@@ -136,7 +163,7 @@ export function useEditSession(domain: string) {
         const editUrl = validEditUrl(body.editUrl, domain);
         if (!editUrl) throw new Error(INVALID_LINK);
 
-        popup.location.href = editUrl;
+        popup.location.href = atPagePath(editUrl, path);
         return null;
       } catch (caught) {
         popup.close();

@@ -147,6 +147,55 @@ describe("useEditSession", () => {
     expect(popup.close).toHaveBeenCalled();
   });
 
+  /**
+   * s70b: "Edit on page" opens the session on the row's own page. The token
+   * link is still validated first (registered host, http(s)); only its path
+   * changes, and only to a same-origin absolute path. The request body is
+   * unchanged: the path never reaches the server.
+   */
+  describe("with a page path (s70b)", () => {
+    const TOKEN_URL = "https://client.example.com/?rcf_edit_token=short-lived";
+
+    async function openAt(path: string) {
+      respondWith({ editUrl: TOKEN_URL });
+      const { result } = renderHook(() => useEditSession(DOMAIN));
+      let message: string | null = "unset";
+      await act(async () => {
+        message = await result.current.openEditSession(REQUEST, path);
+      });
+      return message;
+    }
+
+    it("keeps the validated host and token and opens the row's page", async () => {
+      const message = await openAt("/pricing");
+
+      expect(message).toBeNull();
+      const opened = new URL(popup.location.href);
+      expect(opened.host).toBe("client.example.com");
+      expect(opened.pathname).toBe("/pricing");
+      expect(opened.searchParams.get("rcf_edit_token")).toBe("short-lived");
+      const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+      expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+        siteId: SITE_ID,
+        permissions: ["edit", "publish"],
+        durationHours: 2,
+      });
+    });
+
+    it.each([
+      "//evil.example/pricing",
+      "https://evil.example/pricing",
+      "/\\evil.example/pricing",
+      "javascript:alert(1)",
+      "pricing",
+    ])("ignores %p and opens the validated link as it came", async (path) => {
+      const message = await openAt(path);
+
+      expect(message).toBeNull();
+      expect(popup.location.href).toBe(TOKEN_URL);
+    });
+  });
+
   it("sends nothing and says how to fix it when the pop-up is blocked", async () => {
     respondWith({ editUrl: "https://client.example.com/edit" });
     (window.open as jest.Mock).mockReturnValue(null);

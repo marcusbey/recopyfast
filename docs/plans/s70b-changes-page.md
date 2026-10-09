@@ -1,7 +1,12 @@
 ---
 validated: yes
 ---
-# Plan — Story s70-content-changes
+# Plan — Story s70b-changes-page
+
+> Part B of `docs/plans/s70-content-changes.md`, copied verbatim as that plan instructs ("Each
+> part is copied verbatim to `docs/plans/<part id>.md` with the shared sections below, as s66c
+> did"), with the shared sections that govern this part, also verbatim. The source stays the
+> reference; its checkboxes and these move together.
 
 > Owner decisions (2026-10-08): plan and split validated; **s70a first** (it closes the public
 > editor-email leak), then s70b, then s70c, each its own branch, review and PR. Cleanup: the
@@ -9,11 +14,6 @@ validated: yes
 > separately before it reaches production. Statuses: **Pending + Published** ("Edited" dropped).
 > Revert: both "Save as draft" (anyone who can edit) and "Revert and publish" (publishers only).
 > URL: `/dashboard/changes`, `/dashboard/content` redirects.
-
-Branch: `feature/s70-content-changes` (docs only). Each part, once validated, gets its own branch
-from `main` and its own PR: `feature/s70a-embed-ui-not-content`, `feature/s70b-changes-page`,
-`feature/s70c-site-content-tab`. Each part is copied verbatim to `docs/plans/<part id>.md` with the
-shared sections below, as s66c did.
 
 Research: `docs/research/s70-content-changes.md` — read it first; this plan does not repeat it.
 Design: `docs/designs/s70-content-changes.md` and `.html`. Decision: [ADR 054](../decisions/054-content-change-state-is-a-security-invoker-view.md).
@@ -48,120 +48,6 @@ Acceptance criteria (proposed; the owner validates them with this plan):
 9. `/dashboard/sites/<id>/content` shows the same view for that site, as the subnav's second link.
 10. Every state of the design exists: loading, no sites, no changes, no match, error (never empty),
     row-action error, success in place. No horizontal overflow at 375 and 1280.
-
----
-
-## Part A — s70a-embed-ui-not-content (3 tasks, complexity 2)
-
-1. [x] **The embed's own UI is never content.**
-   - RED, new `src/__tests__/embed/embed-ui-not-content.test.ts`, booting the real
-     `recopyfast.src.js` the way `embed-spa.test.ts:150-160` does (stubbed `fetch`, `settle()`),
-     with a host `<main id="host">` of three text elements. For each surface — `showEditorBanner`,
-     `showStagingBanner` then a click on `#rcf-edit-board-btn` (Elements tab, then History tab with
-     one version by `owner@example.com`), `showAISuggestions` then a click on "Generate
-     Suggestions" answered 500, and again answered with two suggestions, `startFormEdit` on an
-     author-declared `<input data-rcf-id>`, `showPublishConfirmation`, `startTextEdit`,
-     `showContainerHint` — advance past the observer's rescan and assert:
-     - every `ReCopyFast.elements` entry's element is inside `#host`;
-     - no POST body to `/content/<site>` names an entry whose `content` is not host text (force the
-       trailing report: `lastReport = 0`, `sendContentMap()`);
-     - no node outside `#host` carries `data-rcf-id`;
-     - "by owner@example.com" appears in no POST body (the public-snapshot leak).
-
-     Today this fails on the Edit Board, the AI modal and the popover (the research probe's output,
-     `docs/research/s70-content-changes.md` fact 1).
-   - GREEN, `public/embed/recopyfast.src.js`, exactly:
-     - `shouldSkipElement` (`:2707-2712`): the six checks become one
-       `if (element.closest('[data-rcf-ignore],[contenteditable="true"],#rcf-staging-banner,#rcf-edit-board-panel,.rcf-overlay')) return true;`
-       with a tombstone: `#rcf-edit-board` named no element, so the Edit Board was content; the
-       AI modal and the popover had no marker; `closest()` matches the element itself, so the
-       separate `hasAttribute` was redundant;
-     - `showAISuggestions` (`:5560`): `overlay.setAttribute('data-rcf-ignore', '');`
-     - `startFormEdit` (`:5404`): `popover.setAttribute('data-rcf-ignore', '');`
-     - the rule, in the comment above `shouldSkipElement`: every root the embed appends to `body`
-       carries `data-rcf-ignore` or matches this selector.
-   - `npm run build:embed`. Ratchet `MAX_BUNDLE_GZ` / `MAX_WIDGET_GZ` (`scripts/build-embed.mjs:261-262`)
-     and `SEEDED_MAX_*` (`src/__tests__/embed/build-size-gate.test.ts:95-96`) **down** to the
-     measured values, itemized as the s67 block is:
-     `+5 / +7` (two markers, the corrected id) · `−7 / −8` (one `closest()` for six checks) ·
-     `45839 / 33072 measured — the new ceilings` (measured at research on `828970c`; re-measure,
-     record what the branch measures, and refuse anything above 45,841 / 33,073).
-2. [x] **Delete the rows the embed's UI left behind.**
-   - Owner precondition, before merge (not run by the implementer unless the owner says so): the
-     read-only count below, its output pasted in the PR. Channel: the Supabase connector, against
-     production; only `SELECT` statements ran through it (recorded in
-     `docs/plans/s70a-embed-ui-not-content.md`, "Done 2026-10-08"). (Amended at the s70a review,
-     F7: this line first named the `read-prod-database` skill and its `agents_readonly` role. That
-     skill belongs to another project; it was not used.)
-   - RED, new `src/__tests__/db/embed-ui-rows-cleanup.test.ts` (`describeDb`, the harness pattern of
-     `site-delete-cascade.test.ts`), in a transaction rolled back at the end: seed one site and
-     - deleted: `#rcf-edit-board-panel > div:nth-child(2) > button:nth-child(1)` "Elements";
-       `#rcf-eb-content > div:nth-child(1) > div:nth-child(2) > div:nth-child(3) > span:nth-child(2)`
-       "by owner@example.com"; `#rcf-editor-banner > button:nth-child(5)` "All sites";
-       `div:nth-child(7) > div > button:nth-child(3) > span:nth-child(1)` "🪄";
-       `div:nth-child(5) > div > div:nth-child(4) > p` "Failed to generate suggestions. Please try again.";
-       `div:nth-child(5) > div > div:nth-child(5) > button` "Close";
-       `div:nth-child(10) > div:nth-child(6) > button:nth-child(2)` "Save";
-     - kept: `#site-nav > button` "Close"; `#hero > button` "Generate Suggestions";
-       `div:nth-child(2) > div > p` "Close"; an `#rcf-edit-board-panel …` row whose
-       `published_content` differs from its original; one whose `staging_content` is set; an AI
-       suggestion paragraph `div:nth-child(5) > div > div:nth-child(4) > div:nth-child(1) > p`
-       (review tier);
-
-     then execute the migration file's SQL and assert exactly the seven are gone. Add the file to
-     the named CI step (`.github/workflows/ci.yml:286-299`).
-   - GREEN, `supabase/migrations/<timestamp>_delete_embed_ui_discovery_rows.sql`, one statement,
-     the predicate below, with the incident in its header comment. The predicate and the count were
-     run at research on a throwaway local Postgres against exactly this seed: 7 deleted, 2 edited
-     kept, 1 review row kept, no lookalike touched. It fires the existing delete
-     trigger and public-revision rotation; nothing else is needed.
-3. [ ] **Gates and PR.** `lint`, `type-check`, `type-check:build`, `format:check`, `build`,
-   `npm test`, `npm run build:embed -- --check`; the DB suite in CI by name. Playwright contract
-   unchanged (+0: the jsdom suite drives the shipped source; no browser test is added). One story
-   commit plus one migration commit.
-
-### The cleanup predicate (s70a Task 2)
-
-```sql
--- certain: deleted. guard: never a row anyone touched.
-WITH c AS (
-  SELECT ce.id,
-    ce.staging_content IS NULL
-      AND ce.published_content IS NOT DISTINCT FROM ce.original_content
-      AND ce.published_at IS NULL
-      AND NOT (COALESCE(ce.metadata, '{}'::jsonb) ? 'staging_attributes') AS untouched,
-    (
-      -- every id the embed ever assigned, matched as the whole leading id
-      ce.selector ~ '^#rcf-(ai-cancel|ai-close|ai-suggest|ai-suggestions|cancel|code-error|code-input|eb-content|edit-board-btn|edit-board-panel|editor-banner|editor-code|editor-email|editor-remember|editor-textarea|email-error|email-input|email-submit|generate-suggestions|preview-live|publish-btn|publish-status|save|staging-banner|suggestion-goal|suggestions-list)(\s|$)'
-      OR (ce.selector ~ '^div(:nth-child\(\d+\))? > div > '
-          AND ce.original_content IN ('🪄', 'Generate Suggestions', 'AI Content Suggestions',
-            'Optimization Goal', 'Failed to generate suggestions. Please try again.',
-            'Error connecting to AI service. Please check your connection.',
-            '⚠️ Please enter some text first.', '✓ Use This', 'Generating...', '🔄'))
-      OR (ce.selector ~ '^div(:nth-child\(\d+\))? > div > div:nth-child\(5\) > button$'
-          AND ce.original_content = 'Close')       -- the AI modal's footer
-      OR (ce.selector ~ '^div(:nth-child\(\d+\))? > (p:nth-child\(1\)|label:nth-child\([24]\)|div:nth-child\(6\) > button:nth-child\([12]\))$'
-          AND ce.original_content IN ('Edit Form Field', 'Placeholder', 'Default Value', 'Cancel', 'Save'))
-    ) AS embed_ui,
-    ce.selector ~ '^div(:nth-child\(\d+\))? > div > div:nth-child\(4\) > (div(:nth-child\(\d+\))? > )?(p|button)$'
-      AS ai_list_shape                                 -- review tier: AI suggestions, server errors
-  FROM public.content_elements ce
-)
-DELETE FROM public.content_elements
-WHERE id IN (SELECT id FROM c WHERE embed_ui AND untouched);
-```
-
-Read-only count for the owner (same CTE, no write):
-
-```sql
-SELECT s.domain,
-  count(*) FILTER (WHERE c.embed_ui AND c.untouched)             AS will_delete,
-  count(*) FILTER (WHERE c.embed_ui AND NOT c.untouched)         AS embed_ui_but_edited_kept,
-  count(*) FILTER (WHERE c.ai_list_shape AND NOT c.embed_ui)     AS review_not_deleted
-FROM c JOIN public.content_elements ce USING (id) JOIN public.sites s ON s.id = ce.site_id
-GROUP BY s.domain ORDER BY s.domain;
--- and, for the review tier: SELECT s.domain, ce.page_path, ce.selector, left(ce.original_content, 80) …
-```
 
 ---
 
@@ -322,32 +208,6 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
 
 ---
 
-## Part C — s70c-site-content-tab (3 tasks, complexity 2)
-
-1. [ ] **The subnav gains Content.**
-   - RED: `src/app/dashboard/sites/[siteId]/__tests__/layout.test.tsx`: the `nav` named "Site"
-     has five links, in order Overview, Content, Install, People & access, Settings, with exact
-     hrefs and `aria-current` on the current one only; `Breadcrumbs.test.tsx`: `…/<uuid>/content`
-     reads "Site / Content".
-   - GREEN: `SITE_PAGES` (`SiteSubnav.tsx:11-16`) gains `{ segment: "content", label: "Content" }`
-     after Overview. (ADR 052: a per-site page joins the subtree; no new provider.)
-2. [ ] **The page.**
-   - RED, new `src/app/dashboard/sites/[siteId]/content/__tests__/page.test.tsx` with the provider
-     stub (`site-context-fixture.tsx`): the request carries `site=<this id>`; no site select and no
-     site header; the empty state offers Edit website for an `edit`/`admin` grant and only "Show all
-     text" for `view`; the page renders through `useSitePageShell` (one `h1`, the site name); the
-     page-shell guard covers the new file.
-   - GREEN: `src/app/dashboard/sites/[siteId]/content/page.tsx` = `<PageShell {...shell}>` +
-     `editWebsiteAlert` + `<ChangesView siteId={site.id} />`.
-3. [ ] **e2e and gates.**
-   - `e2e/site-pages.spec.ts`: at 375 and 1280 the Content tab has no overflow, the subnav wraps
-     and clips nothing, only this site's rows are requested (`site=` asserted in the route), and
-     Back from Content returns to Overview. Raise `expected` by exactly those new tests (2).
-   - Captures to `docs/designs/s70-content-changes/after/` (`site-content-1280`, `-375`).
-   - Gates as Part B.
-
----
-
 ## Run interdicts
 
 - **Ceilings only go down.** `MAX_BUNDLE_GZ`/`MAX_WIDGET_GZ` and the seeded pair never rise;
@@ -390,11 +250,6 @@ Where it could be wrong, and what to compare it against:
 
 ## Files touched
 
-- **s70a**: `public/embed/recopyfast.src.js`, `public/embed/recopyfast.js` (rebuilt),
-  `scripts/build-embed.mjs`, `src/__tests__/embed/build-size-gate.test.ts`,
-  `src/__tests__/embed/embed-ui-not-content.test.ts` (new),
-  `supabase/migrations/<ts>_delete_embed_ui_discovery_rows.sql` (new),
-  `src/__tests__/db/embed-ui-rows-cleanup.test.ts` (new), `.github/workflows/ci.yml` (step list).
 - **s70b**: `supabase/migrations/<ts>_content_changes_view.sql`;
   `src/app/api/content/changes/route.ts`, `…/[rowId]/history/route.ts`;
   `src/lib/content/describe-location.ts`; `src/hooks/{useContentChanges,useChangeHistory,useChangeActions}.ts`,
@@ -405,9 +260,6 @@ Where it could be wrong, and what to compare it against:
   `.github/workflows/ci.yml`. Deleted: `src/app/dashboard/content/page.tsx`,
   `ContentElementCard.tsx`, `ContentFilterBar.tsx`, `SiteSelectorBar.tsx` and the three content
   page tests.
-- **s70c**: `SiteSubnav.tsx`, `src/app/dashboard/sites/[siteId]/content/page.tsx` and test,
-  `layout.test.tsx`, `Breadcrumbs.test.tsx`, `e2e/site-pages.spec.ts`, `playwright.config.ts`,
-  `.github/workflows/ci.yml`.
 
 ## Test strategy
 

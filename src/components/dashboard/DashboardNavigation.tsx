@@ -43,7 +43,9 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
       { label: "Sites", href: "/dashboard/sites", icon: Globe },
-      { label: "Content", href: "/dashboard/content", icon: FileText },
+      // s70b: "Content" listed every discovered string; "Changes" lists what
+      // changed. Same icon, same place (design s70, Route map).
+      { label: "Changes", href: "/dashboard/changes", icon: FileText },
       // A/B Tests is deliberately absent. The feature is not being pursued, and
       // the route it pointed at now 404s — see src/app/dashboard/ab-tests.
       // The components and API routes are kept so the decision is reversible.

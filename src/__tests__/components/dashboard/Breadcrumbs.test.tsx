@@ -50,11 +50,12 @@ describe("Breadcrumbs", () => {
       expect(screen.getByText("Sites")).toBeInTheDocument();
     });
 
-    it("should render correct breadcrumbs for content page", () => {
-      mockUsePathname.mockReturnValue("/dashboard/content");
+    // s70b: the Content page became Changes, at /dashboard/changes.
+    it("should render correct breadcrumbs for the changes page", () => {
+      mockUsePathname.mockReturnValue("/dashboard/changes");
       render(<Breadcrumbs />);
 
-      expect(screen.getByText("Content")).toBeInTheDocument();
+      expect(screen.getByText("Changes")).toBeInTheDocument();
     });
 
     it("should render correct breadcrumbs for analytics page", () => {

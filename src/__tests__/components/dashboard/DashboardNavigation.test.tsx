@@ -59,7 +59,7 @@ describe("DashboardNavigation", () => {
 
       expect(screen.getByText("Overview")).toBeInTheDocument();
       expect(screen.getByText("Sites")).toBeInTheDocument();
-      expect(screen.getByText("Content")).toBeInTheDocument();
+      expect(screen.getByText("Changes")).toBeInTheDocument();
       expect(screen.getByText("Analytics")).toBeInTheDocument();
       expect(screen.getByText("Settings")).toBeInTheDocument();
       expect(screen.getByText("Billing")).toBeInTheDocument();
@@ -139,7 +139,7 @@ describe("DashboardNavigation", () => {
     it.each([
       ["Overview"],
       ["Sites"],
-      ["Content"],
+      ["Changes"],
       // A/B Tests is no longer in the nav at all — the feature is not being
       // pursued and its route is disabled, so there is nothing here to gate.
       ["Analytics"],
@@ -203,12 +203,13 @@ describe("DashboardNavigation", () => {
       expect(sitesLink).toHaveAttribute("aria-current", "page");
     });
 
-    it("should highlight Content link when on content page", () => {
-      mockUsePathname.mockReturnValue("/dashboard/content");
+    // s70b: the Content page became Changes, at /dashboard/changes.
+    it("should highlight Changes link when on the changes page", () => {
+      mockUsePathname.mockReturnValue("/dashboard/changes");
       render(<DashboardNavigation />);
 
-      const contentLink = screen.getByText("Content").closest("a");
-      expect(contentLink).toHaveAttribute("aria-current", "page");
+      const changesLink = screen.getByText("Changes").closest("a");
+      expect(changesLink).toHaveAttribute("aria-current", "page");
     });
 
     it("should highlight Analytics link when on analytics page", () => {
@@ -317,9 +318,9 @@ describe("DashboardNavigation", () => {
         "href",
         "/dashboard/sites",
       );
-      expect(screen.getByText("Content").closest("a")).toHaveAttribute(
+      expect(screen.getByText("Changes").closest("a")).toHaveAttribute(
         "href",
-        "/dashboard/content",
+        "/dashboard/changes",
       );
       expect(screen.getByText("Analytics").closest("a")).toHaveAttribute(
         "href",
@@ -347,7 +348,7 @@ describe("DashboardNavigation", () => {
       for (const label of [
         "Overview",
         "Sites",
-        "Content",
+        "Changes",
         "Analytics",
         "Settings",
         "Billing",

@@ -183,7 +183,8 @@ describe("an authenticated session holding only credits", () => {
     asMock(resolveEntitlement).mockResolvedValue(CREDIT_HOLDER);
   });
 
-  it.each(["/dashboard", "/dashboard/content", "/settings"])(
+  // s70b: /dashboard/content redirects (next.config) to /dashboard/changes.
+  it.each(["/dashboard", "/dashboard/changes", "/settings"])(
     "reaches %s",
     async (path) => {
       // Relaxing the feature gate alone would change nothing observable: the

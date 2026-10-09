@@ -254,7 +254,7 @@ export default function DashboardPage() {
           value={String(totalEdits)}
           state={sitesState}
           icon={History}
-          href="/dashboard/content"
+          href="/dashboard/changes"
           className="lg:col-span-2"
         />
         <Metric
