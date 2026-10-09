@@ -1,7 +1,13 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s72-edit-board-history-xss
+
+> Owner decisions (2026-10-09): plan **validated**; restore panel folded in (R1 + R2); **one shared email
+> rule** (tighten `isPlausibleEmail`); database lockdown is **s72b**, separate; read-only production count
+> **run before ship** — done 2026-10-09 by the orchestrator (Supabase connector, `SELECT` only): every
+> count **0** (`content_versions.created_by`, `staging_access.email`, `site_editors.email`,
+> `staging_history.user_email` hold no `<>"\``/whitespace; no live address fails the tightened rule).
 
 Branch: `feature/s72-edit-board-history-xss`
 Research: `docs/research/s72-edit-board-history-xss.md` — read it first; this plan does not repeat it.
