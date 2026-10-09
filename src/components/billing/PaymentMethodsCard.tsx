@@ -10,6 +10,11 @@ import type { PaymentMethod } from "@/types/billing";
 
 interface PaymentMethodsCardProps {
   paymentMethods: PaymentMethod[];
+  /**
+   * The plan in force is held for life, so there is no subscription left to
+   * start: a card is only for AI credits (s71).
+   */
+  isPlanHeldForLife?: boolean;
   onUpdate: () => void;
 }
 
@@ -29,6 +34,7 @@ function formatExpiry(month?: number, year?: number): string | null {
 
 export function PaymentMethodsCard({
   paymentMethods,
+  isPlanHeldForLife = false,
   onUpdate,
 }: PaymentMethodsCardProps) {
   const [pending, setPending] = useState<PendingAction>(null);
@@ -201,8 +207,12 @@ export function PaymentMethodsCard({
       ) : (
         <div className="text-center py-8 text-muted-foreground">
           <p>No payment methods added yet</p>
+          {/* s71: a lifetime owner was told to "start a subscription" here,
+              beside a plan card saying "Lifetime access". */}
           <p className="text-sm">
-            Add a card to start a subscription or buy AI credits
+            {isPlanHeldForLife
+              ? "Add a card to buy AI credits"
+              : "Add a card to start a subscription or buy AI credits"}
           </p>
         </div>
       )}

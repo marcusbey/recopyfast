@@ -258,13 +258,25 @@ export function BillingDashboard({
       };
     }
 
-    // A plan held through a permanent grant and billed by no subscription has no
-    // monthly price. A lifetime owner still running out a lower subscription's
-    // paid period is billed for that plan, not this one, so it counts too.
+    // A plan the permanent grant covers is held for life, whatever a still-live
+    // subscription row happens to bill. s71 review M-1: this used to add "and no
+    // subscription bills this very plan" — but buying Lifetime Pro does not end
+    // the Pro subscription, it sets it to cancel at period end
+    // (stopBillingForLifetimeOwner in the Stripe webhook), so the same-plan case
+    // is exactly the one every Pro subscriber who upgrades lands in. For up to a
+    // month they read "$19/month · ACTIVE" for a plan they had just paid $199 to
+    // own. Do not reintroduce the clause: the running-out subscription is named
+    // on its own row of the card (SubscriptionCard), not by the plan's price or
+    // badge, and that row is where its billing is told.
     const isPlanHeldForLife =
       lifetimeGrant.kind === "granted" &&
-      lifetimeGrant.planIds.includes(plan.id) &&
-      dashboardData.subscription?.plan_id !== plan.id;
+      lifetimeGrant.planIds.includes(plan.id);
+    // The plan a still-live subscription bills, named from the catalogue the
+    // page already holds. Undefined when the row's plan is not in it.
+    const subscriptionPlanName = findSubscriptionPlan(
+      dashboardData.catalogue,
+      dashboardData.subscription?.plan_id,
+    )?.name;
 
     return {
       actions: (
@@ -299,6 +311,7 @@ export function BillingDashboard({
                 subscription={dashboardData.subscription}
                 plan={plan}
                 isLifetime={isPlanHeldForLife}
+                subscriptionPlanName={subscriptionPlanName}
                 // The allowance the server resolved for this account, not the
                 // catalogue row's: they differ for a lifetime Founding Agency owner
                 // (ADR 038).
@@ -307,6 +320,7 @@ export function BillingDashboard({
               />
               <PaymentMethodsCard
                 paymentMethods={dashboardData.paymentMethods}
+                isPlanHeldForLife={isPlanHeldForLife}
                 onUpdate={handleSubscriptionUpdate}
               />
               <InvoiceHistoryCard invoices={dashboardData.invoices} />
