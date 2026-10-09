@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import Footer from "@/components/layout/Footer";
 import sitemap from "@/app/sitemap";
+import { createSchemaStrictDatabase } from "@/__tests__/helpers/schema-strict-supabase";
 import { createAnonClient } from "@/lib/supabase/anon";
 import { comparisonList } from "@/lib/compare/comparisons";
 
@@ -61,20 +62,22 @@ describe("comparison page discovery", () => {
   });
 
   it("preserves published blog URLs beside the static comparison entries", async () => {
-    const order = jest.fn().mockResolvedValue({
-      data: [
-        {
-          slug: "client-editing-guide",
-          published_at: "2026-09-01T00:00:00.000Z",
-          updated_at: "2026-09-20T00:00:00.000Z",
-        },
-      ],
-      error: null,
-    });
-    const eq = jest.fn().mockReturnValue({ order });
-    const select = jest.fn().mockReturnValue({ eq });
-    const from = jest.fn().mockReturnValue({ select });
-    mockedCreateClient.mockReturnValue({ from } as never);
+    // The schema-strict double, not a hand-built chain: the sitemap pages
+    // through blog_posts (order, order, range) since Devin's review of PR #83.
+    const db = createSchemaStrictDatabase();
+    db.seed("blog_posts", [
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        title: "Client editing guide",
+        slug: "client-editing-guide",
+        content: "Body",
+        category: "Guides",
+        status: "published",
+        published_at: "2026-09-01T00:00:00.000Z",
+        updated_at: "2026-09-20T00:00:00.000Z",
+      },
+    ]);
+    mockedCreateClient.mockReturnValue(db.client as never);
 
     const entries = await sitemap();
     const paths = entries.map((entry) => new URL(entry.url).pathname);
@@ -86,6 +89,6 @@ describe("comparison page discovery", () => {
         "/blog/client-editing-guide",
       ]),
     );
-    expect(from).toHaveBeenCalledWith("blog_posts");
+    expect(db.queriesOn("blog_posts").length).toBeGreaterThan(0);
   });
 });

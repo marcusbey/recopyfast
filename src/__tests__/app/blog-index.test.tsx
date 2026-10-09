@@ -187,6 +187,27 @@ describe("/blog with published posts", () => {
     expect(links).not.toContain("/blog/post-0");
   });
 
+  // Devin on PR #83: PostgreSQL sorts NULLs FIRST in a descending order, so
+  // without `nullsFirst: false` a page of undated posts hid every dated one.
+  it("never lets undated posts push a dated one out of the index", async () => {
+    const undated = Array.from({ length: PUBLISHED_POSTS_LIMIT }, (_, i) =>
+      post({
+        id: `undated-${i}`,
+        title: `Undated ${i}`,
+        slug: `undated-${i}`,
+        status: "published",
+        published_at: null,
+      }),
+    );
+    serve([...undated, NEWER]);
+
+    await renderIndex();
+
+    const links = postLinks();
+    expect(links).toHaveLength(PUBLISHED_POSTS_LIMIT);
+    expect(links[0]).toBe("/blog/a-newer-post");
+  });
+
   it("reads as anon, never through the cookie client or the service role", async () => {
     const db = serve([NEWER]);
 

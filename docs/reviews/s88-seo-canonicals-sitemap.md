@@ -78,6 +78,22 @@ Minors: (1) the hourly cache also holds a failed read for up to an hour — not 
 PUBLISHED_POSTS_LIMIT posts" (101 published rows → 100 links, newest first, oldest dropped) red before the limit
 ("Expected length: 100, Received length: 101"). Blog + canonicals suites 43/43.
 
+## Devin Review on PR #83 — fixed (orchestrator)
+
+🟡 **Undated posts crowd out recent articles** (valid): PostgreSQL sorts NULLs first in a descending order, so 100
+undated published posts would have filled the bounded index. `listPublishedPosts` orders
+`published_at DESC NULLS LAST, id`. Test (red first: "Expected /blog/a-newer-post, Received /blog/undated-0"): 100
+undated posts plus one dated → the dated one leads, 100 links.
+
+🟡 **Sitemap drops published posts after row cap** (valid): PostgREST caps each response at `max_rows = 1000` and a
+capped answer looks complete. `getBlogRoutes` now pages with a total order (`published_at DESC NULLS LAST, id`), each
+page starting where the last ended, until an empty page, bounded at 49,000 posts (one sitemap file holds 50,000 URLs).
+Test (red first: 3 of 5 posts missing): the schema-strict double with `maxRows: 2` and five published posts → all five
+listed, no draft. The double now models chained `order` keys, PostgreSQL's NULL placement (`nullsFirst`), `range`
+and a `max_rows` cap. Existing test changed: `comparison-discovery.test.tsx` now seeds the schema-strict double
+instead of a hand-built `select → eq → order` chain that had no `range` (no assertion weakened). App + integration
+suites 229/229; type-check and lint clean on the touched files.
+
 ## Not verified
 
 Real anon read through PostgREST: `curl "$SUPABASE_URL/rest/v1/blog_posts?select=slug&status=eq.published" -H

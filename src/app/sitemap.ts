@@ -59,6 +59,15 @@ type BlogPostEntry = {
   updated_at: string | null;
 };
 
+/** PostgREST's `max_rows` in supabase/config.toml: one response, at most. */
+const BLOG_PAGE_SIZE = 1000;
+
+/**
+ * One sitemap file holds at most 50,000 URLs (sitemaps.org); the static pages
+ * take a handful, so the posts stop well short of it.
+ */
+const MAX_BLOG_URLS = 49_000;
+
 /**
  * Published blog posts, mirroring the query in `src/app/blog/[slug]/page.tsx`.
  *
@@ -75,22 +84,36 @@ type BlogPostEntry = {
 async function getBlogRoutes(): Promise<BlogPostEntry[]> {
   try {
     const supabase = createAnonClient();
+    const posts: BlogPostEntry[] = [];
 
-    const { data, error } = await supabase
-      .from("blog_posts")
-      .select("slug, published_at, updated_at")
-      .eq("status", "published")
-      .order("published_at", { ascending: false });
+    // PostgREST caps every response at `max_rows` (supabase/config.toml) and a
+    // capped answer looks complete, so read page after page — each starting
+    // where the last one ended, whatever size it came back — until one comes
+    // back empty (Devin, PR #83). The order is total (`id` breaks ties) so no
+    // post repeats or falls between two pages.
+    while (posts.length < MAX_BLOG_URLS) {
+      const { data, error } = await supabase
+        .from("blog_posts")
+        .select("slug, published_at, updated_at")
+        .eq("status", "published")
+        .order("published_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: true })
+        .range(posts.length, posts.length + BLOG_PAGE_SIZE - 1);
 
-    if (error) {
-      console.error(
-        "[sitemap] could not read published blog posts:",
-        error.message,
-      );
-      return [];
+      if (error) {
+        console.error(
+          "[sitemap] could not read published blog posts:",
+          error.message,
+        );
+        return [];
+      }
+
+      const page = (data ?? []) as BlogPostEntry[];
+      if (page.length === 0) break;
+      posts.push(...page);
     }
 
-    return (data ?? []) as BlogPostEntry[];
+    return posts.slice(0, MAX_BLOG_URLS);
   } catch (error) {
     console.error("[sitemap] could not read published blog posts:", error);
     return [];

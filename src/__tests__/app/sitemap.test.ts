@@ -32,6 +32,7 @@ jest.mock("@/lib/supabase/service", () => ({
 }));
 
 import sitemap, { revalidate } from "@/app/sitemap";
+import { createSchemaStrictDatabase } from "@/__tests__/helpers/schema-strict-supabase";
 import { createAnonClient } from "@/lib/supabase/anon";
 import { createClient as createCookieClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -70,6 +71,10 @@ function fakeTable(rows: Row[], failWith?: string) {
           return query;
         },
         order() {
+          return query;
+        },
+        range(from: number, to: number) {
+          visible = visible.slice(from, to + 1);
           return query;
         },
         then(resolve: (result: QueryResult) => unknown) {
@@ -196,6 +201,49 @@ describe("blog posts in the sitemap", () => {
     expect(entryFor(entries, "/blog/undated")).not.toHaveProperty(
       "lastModified",
     );
+  });
+});
+
+// s88, Devin on PR #83: PostgREST caps every response at `max_rows` (1,000
+// in supabase/config.toml) whatever the query asks, and a capped answer looks
+// like a complete one. The sitemap pages through the posts until a page comes
+// back empty, so a blog past the cap still lists every published post.
+describe("a blog larger than one PostgREST response", () => {
+  it("lists every published post when the database caps each response", async () => {
+    const db = createSchemaStrictDatabase({ maxRows: 2 });
+    const published = Array.from({ length: 5 }, (_, i) => ({
+      id: `00000000-0000-4000-8000-00000000000${i}`,
+      title: `Post ${i}`,
+      slug: `post-${i}`,
+      content: "Body",
+      category: "Guides",
+      status: "published",
+      published_at: `2026-09-0${i + 1}T00:00:00.000Z`,
+      updated_at: null,
+    }));
+    db.seed("blog_posts", [
+      ...published,
+      {
+        id: "00000000-0000-4000-8000-000000000009",
+        title: "Draft",
+        slug: "a-draft",
+        content: "Body",
+        category: "Guides",
+        status: "draft",
+        published_at: null,
+        updated_at: null,
+      },
+    ]);
+    mockedAnon.mockReturnValue(db.client as never);
+
+    const listed = paths(await sitemap()).filter((path) =>
+      path.startsWith("/blog/"),
+    );
+
+    expect(listed.sort()).toEqual(
+      published.map((post) => `/blog/${post.slug}`),
+    );
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });
 

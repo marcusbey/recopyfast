@@ -69,7 +69,10 @@ export async function listPublishedPosts(): Promise<PublishedPostsResult> {
       .from("blog_posts")
       .select("id, title, slug, excerpt, category, published_at")
       .eq("status", "published")
-      .order("published_at", { ascending: false })
+      // PostgreSQL sorts NULLs first in a descending order: without this,
+      // undated posts would fill the page ahead of dated ones (Devin, PR #83).
+      .order("published_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: true })
       .limit(PUBLISHED_POSTS_LIMIT);
 
     if (error) {
