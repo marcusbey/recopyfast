@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import {
   StatusBadge,
+  contentStatuses,
   resolveSiteStatus,
   siteStatuses,
 } from "@/components/ui/status-badge";
@@ -66,5 +67,43 @@ describe("site status registry", () => {
 
     expect(screen.getByText("Awaiting install")).toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * s70b — the content vocabulary is the data's: two change states and the
+ * untouched one. "Edited" meant "published, different from the original"
+ * (its own description said "Edited and live on your site"), and the owner
+ * dropped the word (2026-10-08). The state itself is derived once, by the
+ * `content_changes` view (ADR 054); this registry only names it.
+ */
+describe("content status registry", () => {
+  it("names pending and published, and has no edited", () => {
+    expect(Object.keys(contentStatuses).sort()).toEqual([
+      "original",
+      "pending",
+      "published",
+    ]);
+    expect(contentStatuses).not.toHaveProperty("edited");
+  });
+
+  it("draws published as success, live and different from the original", () => {
+    render(<StatusBadge status={contentStatuses.published} />);
+
+    const badge = screen.getByText("Published");
+    expect(badge.className).toContain("bg-tone-success-surface");
+    expect(contentStatuses.published.description).toBe(
+      "Live on your site, different from the original",
+    );
+  });
+
+  it("keeps pending as a warning: saved as a draft, not live yet", () => {
+    expect(contentStatuses.pending).toEqual(
+      expect.objectContaining({
+        label: "Pending",
+        tone: "warning",
+        description: "Saved as a draft, not live yet",
+      }),
+    );
   });
 });

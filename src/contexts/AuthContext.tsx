@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { clearChangeHistory } from "@/hooks/useChangeHistory";
 import { useRouter } from "next/navigation";
 
 /** Optional extras callers can attach to a magic-link request. */
@@ -68,7 +69,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for changes on auth state (logged in, signed out, etc.)
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // Per-user caches kept in module scope survive a client-side sign-out;
+      // this is the one place every sign-out passes (s70b review m6).
+      if (event === "SIGNED_OUT") clearChangeHistory();
       setUser(session?.user ?? null);
       setLoading(false);
     });

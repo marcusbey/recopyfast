@@ -3,7 +3,9 @@
  *
  * s66b design §4 (Content): the filter row wraps, search takes what is left,
  * and the site and status selects sit at their content width from 640px up
- * and full width below it (s66b1 review m-7).
+ * and full width below it (s66b1 review m-7). Carried over from
+ * ContentFilterBar.test.tsx when s70b replaced that bar with this one; the
+ * layout assertions are unchanged.
  *
  * Below 640 they kept their content width: on a phone the two selects sat
  * side by side under the search, each as wide as its longest option, with a
@@ -13,7 +15,7 @@
  */
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
-import { ContentFilterBar } from "../ContentFilterBar";
+import { ChangesFilterBar } from "../ChangesFilterBar";
 
 afterEach(() => {
   cleanup();
@@ -21,14 +23,22 @@ afterEach(() => {
 
 function renderFilterBar(): void {
   render(
-    <ContentFilterBar
-      searchQuery=""
-      onSearchChange={() => {}}
-      selectedSiteId={null}
+    <ChangesFilterBar
+      query=""
+      onQueryChange={() => {}}
+      siteId={null}
       onSiteChange={() => {}}
-      selectedStatus="all"
-      onStatusChange={() => {}}
-      sites={[{ id: "site-a", name: "Acme", domain: "acme.example" }]}
+      state="changes"
+      onStateChange={() => {}}
+      counts={null}
+      sites={[
+        {
+          id: "site-a",
+          name: "Acme",
+          domain: "acme.example",
+          permission: "admin",
+        },
+      ]}
     />,
   );
 }
@@ -47,7 +57,7 @@ function filterCell(label: string): HTMLElement {
   return cell;
 }
 
-describe("ContentFilterBar", () => {
+describe("ChangesFilterBar", () => {
   it.each(["Filter by site", "Filter by status"])(
     "draws %s full width below 640 and at its content width above",
     (label) => {
@@ -61,6 +71,9 @@ describe("ContentFilterBar", () => {
   it("lets the search take what is left, never below 12rem", () => {
     renderFilterBar();
 
-    expect(filterCell("Search content")).toHaveClass("flex-1", "min-w-[12rem]");
+    expect(filterCell("Search text or page")).toHaveClass(
+      "flex-1",
+      "min-w-[12rem]",
+    );
   });
 });

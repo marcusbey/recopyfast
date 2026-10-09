@@ -121,6 +121,15 @@ const nextConfig: NextConfig = {
       // Config redirects run before middleware, so src/middleware.ts never
       // sees this path.
       { source: "/pricing", destination: "/#pricing", permanent: true },
+      // s70b: the Content page became Changes. The old URL is in bookmarks
+      // and in every tab the old sidebar opened, so it answers 308 rather
+      // than 404; the session gate in src/middleware.ts then applies to
+      // /dashboard/changes like any dashboard page.
+      {
+        source: "/dashboard/content",
+        destination: "/dashboard/changes",
+        permanent: true,
+      },
     ];
   },
 

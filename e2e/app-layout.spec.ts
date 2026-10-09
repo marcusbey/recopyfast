@@ -663,10 +663,11 @@ const APP_PAGES: readonly AppPage[] = [
     hasActions: true,
   },
   {
-    path: "/dashboard/content",
-    name: "content",
-    navLabel: "Content",
-    description: "Manage all editable content across your sites",
+    // s70b: the Content page became Changes (/dashboard/content redirects).
+    path: "/dashboard/changes",
+    name: "changes",
+    navLabel: "Changes",
+    description: "What changed on your sites, page by page.",
     hasActions: false,
   },
   {

@@ -195,7 +195,7 @@ jobs:
   # constructing a service-role client, so changing only this workflow cannot
   # point them at production. The strict reporter makes skipped/flaky/missing
   # tests a failure and writes the only uploaded artifact: a credential-free
-  # summary with the exact expected 81-test count.
+  # summary with the exact expected 86-test count.
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
@@ -245,7 +245,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p test-results
-          printf '%s\n' '{"contract":"not-run","expected":81,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
+          printf '%s\n' '{"contract":"not-run","expected":86,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
           chmod 600 test-results/playwright-summary.json
 
       - name: Set up Node.js 24
@@ -322,6 +322,11 @@ jobs:
       # s70a: the embed-UI cleanup migration is executed on its exact seed in a
       # rolled-back transaction — seven rows deleted, every lookalike, edited
       # and review-tier row kept. Named here so it never records "[gated]".
+      #
+      # s70b (ADR 054): content_changes is a security-invoker view, which only
+      # this stack can prove — PostgreSQL 15 has the option the bare PG14
+      # replay lacks, and only real GoTrue JWTs through PostgREST show that an
+      # edit member reads no "who" and that no member reads another tenant.
       - name: Verify content tables take no direct writes through PostgREST, the snapshot reads fresh rows, and editor-code attempts are charged atomically
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -338,7 +343,8 @@ jobs:
               src/__tests__/db/edit-sessions-privileges.test.ts \
               src/__tests__/db/replay-privilege-convergence.test.ts \
               src/__tests__/db/editor-code-attempts.test.ts \
-              src/__tests__/db/embed-ui-rows-cleanup.test.ts
+              src/__tests__/db/embed-ui-rows-cleanup.test.ts \
+              src/__tests__/db/content-changes-view.test.ts
 
       - name: Test Founding Agency capacity against disposable Postgres
         env:
@@ -391,7 +397,7 @@ jobs:
       - name: Build production app
         run: npm run build
 
-      - name: Run all 81 Playwright tests (blocking)
+      - name: Run all 86 Playwright tests (blocking)
         run: |
           set -euo pipefail
           ws_log="$RUNNER_TEMP/recopyfast-ws.log"
@@ -433,14 +439,14 @@ jobs:
           );
           if (
             report.contract !== "passed" ||
-            report.expected !== 81 ||
-            report.total !== 81 ||
-            report.passed !== 81 ||
+            report.expected !== 86 ||
+            report.total !== 86 ||
+            report.passed !== 86 ||
             report.failed !== 0 ||
             report.skipped !== 0 ||
             report.flaky !== 0
           ) {
-            throw new Error("Playwright did not produce the required clean 81-test summary.");
+            throw new Error("Playwright did not produce the required clean 86-test summary.");
           }
           NODE
 

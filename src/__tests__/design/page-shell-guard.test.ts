@@ -486,7 +486,7 @@ describe("page-shell guard (ADR 053)", () => {
       "src/app/dashboard/page.tsx",
       "src/app/dashboard/analytics/page.tsx",
       "src/app/dashboard/billing/page.tsx",
-      "src/app/dashboard/content/page.tsx",
+      "src/app/dashboard/changes/page.tsx",
       "src/app/dashboard/settings/page.tsx",
       "src/app/dashboard/sites/page.tsx",
       // s66c1: a site's four subpages (ADR 052).

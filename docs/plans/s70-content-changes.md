@@ -193,7 +193,7 @@ Order `changed_at desc, id desc`, 50 rows, `count: "exact"`. `q` is escaped for 
 applied with `.ilike("search_text", …)` (never inside an `.or()` string). An IP limiter
 (`IP_GENERAL`, `onStoreFailure: "allow"`, justified as a signed-in read) runs before `getUser()`.
 
-1. [ ] **The view.**
+1. [x] **The view.**
    - RED, new `src/__tests__/db/content-changes-view.test.ts`, run through the real PostgREST with
      real GoTrue JWTs (the `content-write-privileges.test.ts` pattern), named in the CI step:
      - `change_state` for: an untouched row (original); a draft ≠ live (pending); a draft equal to
@@ -211,14 +211,14 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
      The body (the `CASE`, the attribute `EXISTS`, the lateral history row) was run at research on a
      throwaway local Postgres 14 against eight seeded states, all as listed above; PG 14 has no
      `security_invoker`, so that option is proven only by this task's tests on the CI stack (PG 15).
-2. [ ] **Readable locations.**
+2. [x] **Readable locations.**
    - RED, new `src/lib/content/__tests__/describe-location.test.ts`: the table in the design
      (§ Human-readable location) row for row, plus: no output ever contains `rcf-`, `>`, `:nth`,
      `#`; an empty selector and an unknown type give "Text"; a 300-character path is shortened to
      its last two segments.
    - GREEN: `src/lib/content/describe-location.ts` exporting `describePage(pagePath)` and
      `describeElement({ selector, elementType, elementId, pageLabel })`. Pure, no DOM.
-3. [ ] **The list route.**
+3. [x] **The list route.**
    - RED, new `src/__tests__/api/content/changes-route.test.ts` (mocked `@/lib/supabase/server` and
      rate limiter, as other route suites do): the limiter is called before `getUser`; 401 without a
      user; the sites come from `site_permissions` + `sites(id, name, domain)` for this user only;
@@ -229,13 +229,13 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
      changes" }` with no detail; `createServiceRoleClient` is never imported (assert by module
      mock).
    - GREEN: `src/app/api/content/changes/route.ts`.
-4. [ ] **The history route.**
+4. [x] **The history route.**
    - RED, `src/__tests__/api/content/changes-history-route.test.ts`: 401; a row the RLS client does
      not return → 404; an admin gets at most 20 events newest first plus `discoveredAt`; a non-admin
      gets `{ historyVisible: false, events: [], discoveredAt }`; `user_email` values without `@`
      are returned as `null`; a non-UUID `rowId` → 400.
    - GREEN: `src/app/api/content/changes/[rowId]/history/route.ts`.
-5. [ ] **The data hooks.**
+5. [x] **The data hooks.**
    - RED, `src/hooks/__tests__/useContentChanges.test.ts` and `useChangeHistory.test.ts`: first
      load, then `loadMore()` appends and de-duplicates by `id`; changing a filter resets to offset 0
      and drops a stale response that arrives late; a non-ok response is an error state, never an
@@ -243,7 +243,7 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
      is cached.
    - GREEN: `src/hooks/useContentChanges.ts`, `src/hooks/useChangeHistory.ts`
      (`{ data, loading, error, refetch }` per AGENTS.md § React).
-6. [ ] **Row actions through the existing routes.**
+6. [x] **Row actions through the existing routes.**
    - RED, `src/hooks/__tests__/useChangeActions.test.ts`, asserting every `fetch` exactly:
      - revert as draft → one `PUT /api/staging/content/<site>` with
        `{ elementId, content: <original>, language, variant }`;
@@ -257,7 +257,7 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
      `path` that is not a same-origin absolute path (`//evil.example`, `https://…`) is ignored.
    - GREEN: `src/hooks/useChangeActions.ts`; `useEditSession` gains an optional `path` in
      `openEditSession` (applied with `new URL(path, editUrl)` after `validEditUrl`, host re-checked).
-7. [ ] **The view component.**
+7. [x] **The view component.**
    - RED, `src/components/dashboard/changes/__tests__/ChangesView.test.tsx` (RTL, fetch mocked):
      - groups site → page with `h2`/`h3` headers, band counts and site counts;
      - a row shows the `StatusBadge`, `describeElement`'s label, the state's text, who for an
@@ -278,7 +278,7 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
    - GREEN: `src/components/dashboard/changes/{ChangesView,ChangeSiteGroup,ChangeRow,ChangeDetail,RevertDialog,ChangesFilterBar}.tsx`,
      the registry entry. `ChangesFilterBar` replaces `ContentFilterBar` (its 12rem/full-row
      behaviour and test carried over).
-8. [ ] **The page, the move, the links.**
+8. [x] **The page, the move, the links.**
    - RED:
      - `src/__tests__/app/dashboard/changes-page-shell.test.tsx` (from
        `content-page-shell.test.tsx`, assertions kept): one `h1` "Changes" while loading, on error,
@@ -298,7 +298,7 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
      `content-load-states.test.tsx` (its "refused read is a failure, not an empty account" cases
      are re-asserted in Task 7), `content-partial-failure.test.tsx` (per-site failure no longer
      exists: one query), `content-page-shell.test.tsx` (moved). The PR lists each with its reason.
-9. [ ] **e2e and captures.**
+9. [x] **e2e and captures.**
    - New `e2e/changes.spec.ts` on the signed-in harness (`e2e/support/owner-session.ts`), every list
      fulfilled by `page.route` from `e2e/support/changes-fixtures.ts` (fixture data only:
      `.example` domains, `@example.com`):
@@ -316,7 +316,7 @@ applied with `.ilike("search_text", …)` (never inside an `.or()` string). An I
      `.github/workflows/ci.yml:215,398`.
    - With the build and the in-memory Supabase stand-in (never `next dev`), captures at 1280 and
      375 to `docs/designs/s70-content-changes/after/`.
-10. [ ] **Gates.** `lint`, `type-check`, `type-check:build`, `format:check`, `build`, `npm test`,
+10. [x] **Gates.** `lint`, `type-check`, `type-check:build`, `format:check`, `build`, `npm test`,
     the DB suites by name in CI, `npm run test:e2e` with `RUN_RECOPYFAST_CORE_E2E`. The radius and
     page-shell guards pass with no new entry. One story commit plus one migration commit.
 

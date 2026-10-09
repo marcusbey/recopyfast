@@ -1,6 +1,13 @@
 import React from "react";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useChangeHistory } from "@/hooks/useChangeHistory";
 import { AuthProvider, useAuth } from "../AuthContext";
 
 const mockAuth = {
@@ -202,4 +209,80 @@ describe("AuthContext — magic link", () => {
       ),
     );
   });
+});
+
+// s70b review m6: a row's history (who changed what, admin-only) is cached
+// for the page's lifetime in module scope, and a client-side sign-out keeps
+// the module. The next account signed in on the same tab must not be served
+// the last one's trail.
+describe("AuthContext — sign-out", () => {
+  const HISTORY = {
+    historyVisible: true,
+    discoveredAt: "2026-09-28T09:00:00+00:00",
+    events: [],
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAuth.getSession.mockResolvedValue({ data: { session: null } });
+    global.fetch = jest.fn(
+      async () =>
+        ({ ok: true, status: 200, json: async () => HISTORY }) as Response,
+    ) as typeof fetch;
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  /** Renders the provider and returns what Supabase would call it with. */
+  function renderListening(): (event: string, session: unknown) => void {
+    let emit: (event: string, session: unknown) => void = () => {};
+    mockAuth.onAuthStateChange.mockImplementation(
+      (cb: (event: string, session: unknown) => void) => {
+        emit = cb;
+        return { data: { subscription: { unsubscribe: jest.fn() } } };
+      },
+    );
+    renderProbe();
+    return (event, session) => emit(event, session);
+  }
+
+  it("forgets every cached change history when the user signs out", async () => {
+    const emit = renderListening();
+    const first = renderHook(() => useChangeHistory("row-signout", "v1"));
+    await waitFor(() => expect(first.result.current.data).toEqual(HISTORY));
+    first.unmount();
+    const cached = renderHook(() => useChangeHistory("row-signout", "v1"));
+    expect(cached.result.current.data).toEqual(HISTORY);
+    cached.unmount();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    act(() => emit("SIGNED_OUT", null));
+
+    const after = renderHook(() => useChangeHistory("row-signout", "v1"));
+    expect(after.result.current.data).toBeNull();
+    await waitFor(() => expect(after.result.current.data).toEqual(HISTORY));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  // Only a sign-out clears it (s70b re-review N4). Supabase emits
+  // TOKEN_REFRESHED about hourly and SIGNED_IN on every tab focus that
+  // revalidates the session; clearing on those would read every open trail
+  // again for the same owner, for nothing.
+  it.each(["TOKEN_REFRESHED", "SIGNED_IN"])(
+    "keeps every cached change history through %s",
+    async (event) => {
+      const emit = renderListening();
+      const key = `row-${event}`;
+      const first = renderHook(() => useChangeHistory(key, "v1"));
+      await waitFor(() => expect(first.result.current.data).toEqual(HISTORY));
+      first.unmount();
+
+      act(() => emit(event, { user: { email: "me@example.com" } }));
+
+      const kept = renderHook(() => useChangeHistory(key, "v1"));
+      expect(kept.result.current.data).toEqual(HISTORY);
+      kept.unmount();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    },
+  );
 });

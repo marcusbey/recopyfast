@@ -876,6 +876,102 @@ if (!DB_URL) {
       expect(rows[0].metadata).toEqual({ type: "a", href: "/same" });
     });
 
+    // s70b, Devin review / re-review N1: the Changes page's Discard is this
+    // same save with the live text and each staged attribute's live value.
+    // The four cases below are what the page relies on, in the real RPCs.
+    async function saveDraft(
+      siteId: string,
+      content: string,
+      patch: Record<string, string>,
+    ): Promise<void> {
+      await query(
+        `SELECT * FROM save_staging_content_atomic(
+          $1, 'rcf-nav-link', 'en', 'default', $2,
+          $3::jsonb, NULL, 'db-test@example.com'
+        )`,
+        [siteId, content, JSON.stringify(patch)],
+      );
+    }
+
+    async function storedMetadata(
+      rowId: string,
+    ): Promise<Record<string, unknown>> {
+      const { rows } = await query<{ metadata: Record<string, unknown> }>(
+        "SELECT metadata FROM content_elements WHERE id = $1",
+        [rowId],
+      );
+      return rows[0].metadata;
+    }
+
+    async function publishSite(siteId: string) {
+      const { rows } = await query<{
+        element_id: string;
+        attributes: Record<string, unknown>;
+      }>(
+        "SELECT element_id, attributes FROM publish_staging_content_with_attributes_atomic($1, NULL, NULL, 'db-test@example.com', NULL)",
+        [siteId],
+      );
+      return rows;
+    }
+
+    test("s70b discard: a save carrying the live value un-stages a staged link, and Publish then has nothing to push", async () => {
+      const { siteId, rowId } = await seedElement({
+        type: "a",
+        href: "/signup",
+        staging_attributes: { href: "/new" },
+      });
+
+      await saveDraft(siteId, "Documentation", { href: "/signup" });
+
+      expect(await storedMetadata(rowId)).toEqual({
+        type: "a",
+        href: "/signup",
+      });
+      expect(await publishSite(siteId)).toEqual([]);
+    });
+
+    test("s70b N1: a save carrying an OLD live value stages it, and the next Publish silently puts it back live", async () => {
+      // The live link after Publish made the staged "/new" live.
+      const { siteId, rowId } = await seedElement({ type: "a", href: "/new" });
+
+      await saveDraft(siteId, "Documentation", { href: "/signup" });
+
+      expect(await storedMetadata(rowId)).toEqual({
+        type: "a",
+        href: "/new",
+        staging_attributes: { href: "/signup" },
+      });
+      expect(await publishSite(siteId)).toEqual([
+        { element_id: "rcf-nav-link", attributes: { href: "/signup" } },
+      ]);
+      expect((await storedMetadata(rowId)).href).toBe("/signup");
+    });
+
+    test("s70b N1 fixed: the discard of a row with nothing staged sends no link, and stages none", async () => {
+      const { siteId, rowId } = await seedElement({ type: "a", href: "/new" });
+
+      await saveDraft(siteId, "Documentation", {});
+
+      expect(await storedMetadata(rowId)).toEqual({ type: "a", href: "/new" });
+      expect(await publishSite(siteId)).toEqual([]);
+    });
+
+    test("s70b revert to draft: a text-only save keeps a pending row's staged link and its live value", async () => {
+      const { siteId, rowId } = await seedElement({
+        type: "a",
+        href: "/signup",
+        staging_attributes: { href: "/new" },
+      });
+
+      await saveDraft(siteId, "The original text", {});
+
+      expect(await storedMetadata(rowId)).toEqual({
+        type: "a",
+        href: "/signup",
+        staging_attributes: { href: "/new" },
+      });
+    });
+
     test("publish ignores an equal-value staged attribute", async () => {
       const { siteId, rowId } = await seedElement({
         type: "a",

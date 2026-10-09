@@ -3629,6 +3629,11 @@ order:
   Pending + Published by default, site → page groups, readable locations, compare, history,
   revert (Save as draft · Revert and publish for publishers), 50 rows a page from a
   security-invoker view (ADR 054); two read-only routes; never calls `GET /api/sites`.
+  Follow-up **s81-version-restore-integrity** (compare-and-set in the staging PUT): Discard reads
+  its row again before its PUT, but a write landing between that read and the save RPC is not seen
+  — a write from a second tab or the live-page editor, or one of the Changes page's own writes
+  still in flight after the owner left the page and came back (its one-write-per-element lock
+  lives in the mounted page, not the tab).
 - **s70c-site-content-tab** (complexity 2) — the same view for one site under its site page.
 
 ## Story s71-billing-plan-badge — the billing page never calls a paid plan "Free"

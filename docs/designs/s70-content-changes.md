@@ -115,7 +115,8 @@ Page label (used in the band):
 | `/` | Homepage |
 | `/pricing` | Pricing |
 | `/blog/how-we-ship` | Blog › How we ship |
-| `/docs/a/b/c` | … › B › C (last two segments) |
+| `/products/alpha/setup` | Products › Alpha › Setup (three segments or fewer: whole) |
+| `/docs/a/b/c` | Docs › … › B › C (deeper: the first segment, then the last two) |
 | `NULL` | Every page |
 
 Element label (the row's Location column) = `[place · ]element`:
@@ -197,15 +198,38 @@ only, beside the draft it publishes.
   `{ elementId, content: original, language, variant }`; then, for "Revert and publish",
   `POST /api/staging/publish` `{ siteId, elementIds: [elementId] }`.
 - Pending: buttons disabled with a spinner in the pressed one; the dialog stays open on failure
-  with the server's message in a destructive `Alert` (402 "plan ended" included).
-- Success: the dialog closes; the row updates in place (Pending, or Published with "Text is the
-  same as the original."), and the result line announces "Reverted. Saved as a draft." /
-  "Reverted and published." politely. No toast (gap 1).
+  with the server's message in a destructive `Alert` (402 "plan ended" included). One write at a
+  time per element: while it runs (and until its re-read lands), every other language and variant
+  row of the same element has Publish, Discard draft and Revert to original disabled too, in the
+  panel and in ⋮, without a spinner. Rows of other elements stay usable.
+- Success: the buttons keep their spinner until the page has read the element again (every
+  language and variant row of it: Publish promotes them all) and the counts; then the dialog
+  closes, the rows update in place as the server now holds them (Pending, or Published with "Text
+  is the same as the original."), and the result line announces "Reverted. Saved as a draft." /
+  "Reverted and published." politely. No toast (gap 1). If that read fails, the row says "This
+  went through, but the row could not be read again and may be out of date. Reload the page to see
+  it as it is now." (s70b fix pass)
 - Below 640: the bottom sheet (design system, Dialogs and sheets), buttons full width, primary on
   top.
 
 "Discard draft" (Pending) is the same dialog shape: "Discard this draft?" — body shows Draft and
-Live now — Cancel · **Discard draft** (destructive). Request: `PUT …` with the live text.
+Live now — Cancel · **Discard draft** (destructive). Request: `PUT …` with the live text, plus each
+attribute the draft stages (`href`, `alt`) with its live value, which the save RPC drops from the
+draft (`{ elementId, content, language, variant, href?, alt? }`). When one cannot go back that way
+(no live value, a key the PUT does not know, a value it would trim or refuse), Discard is not
+offered and the expanded row says "This draft changes a link or image attribute, which can't be
+discarded here. Change it on the page."; when the staged attributes could not be read, it says
+"This draft could not be read in full, so it can't be discarded here. Reload the page to try
+again."
+Just before the PUT, Discard reads its row again and builds the PUT from that read (s70b fix pass):
+if the draft was published, replaced or gone meanwhile (another tab, an editor on the live page),
+nothing is sent, the dialog closes on the row as it now is, and the row says "This change was
+updated elsewhere — review it again." (followed by "The row could not be read again and may be out
+of date. Reload the page to see it as it is now." when that read fails).
+A draft on text that was never published (a translation: no published text of its own, "Live now"
+shows the original) is not offered Discard: the staging PUT cannot clear a draft, and saving the
+original keeps it pending. The expanded row says "This text was never published, so its draft
+can't be discarded here. Edit or publish it on the page."
 "Publish" (Pending, publish/admin) asks nothing more: the draft is visible right above it; the
 request is `POST /api/staging/publish` with the one element id.
 
@@ -250,7 +274,8 @@ caller's grant) when the caller may edit; "Show all text" otherwise.
 | No matches | Inside the panel area: "Nothing matches “pricng”." · ghost "Clear search" | same |
 | Error (list) | `Alert variant="destructive"`: "Changes could not be loaded." + the reason + **Try again**. Never the empty state | same |
 | Error (row action) | Inside the dialog, or under the panel's action row for Publish: destructive `Alert`, `role="alert"` | same |
-| Success | Row updates in place; polite announcement in the result line | same |
+| No answer (row action) | The connection dropped before the server answered, or no answer came within 30 s (the page then drops the request): the row is read again, the dialog closes onto it, and under its actions: "The connection dropped before the server answered, so the draft may or may not have been discarded / the revert may or may not have been saved / it may or may not have been published. Check the row before trying again." No announcement | same |
+| Success | Once the element is read again: its rows update in place; polite announcement in the result line | same |
 
 ## Accessibility
 

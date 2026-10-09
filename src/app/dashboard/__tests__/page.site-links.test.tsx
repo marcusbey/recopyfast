@@ -60,3 +60,25 @@ describe("the Overview's site rows", () => {
     }
   });
 });
+
+/**
+ * s70b: "Total edits" opens what changed. It pointed at the Content page,
+ * which became Changes at /dashboard/changes.
+ */
+describe("the Overview's Total edits metric", () => {
+  it("links to the Changes page", async () => {
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      return {
+        ok: true,
+        json: async () =>
+          url === "/api/sites" ? { sites } : { currentUsage: { aiUsage: 0 } },
+      } as Response;
+    }) as typeof fetch;
+
+    render(<DashboardPage />);
+
+    const label = await screen.findByText("Total edits");
+    expect(label.closest("a")).toHaveAttribute("href", "/dashboard/changes");
+  });
+});
