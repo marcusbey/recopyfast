@@ -68,3 +68,33 @@ Non-admin on Settings (m-3). `npm run build` and full `npm run lint` (CI).
 
 Max severity: major
 Ship allowed: yes
+
+## Fix pass `3fc4e67` — M-1 and m-1…m-7
+
+M-1: when the panel has left, focus goes to the Overview's always-drawn "Activity" `h2` (`tabIndex={-1}`,
+required `focusFallbackRef` on the full variant); region focus otherwise. m-1 wording in the four docs and the
+test comment; m-2 the hook stops polling on installed AND (invited OR published) — QuickSetup is its only
+consumer; m-3 per-site API keys gated on `isAdmin` (`Boolean(site.siteToken)`, minted only for the admin grant
+the `/api/api-keys` POST checks); m-4 "is live" only when `live`, "is installed" otherwise; m-5 summary-row error
+is the shared `Alert variant="destructive"`; m-6 Prettier; m-7 nits.
+
+## Verification of `3fc4e67` (fresh reviewer, 2026-10-08)
+
+All eight findings fixed; 11 mutations, each red except one (polling stopped at `installed` alone → 0 red, N-1).
+Jest 374 suites / 4,861 passed; `type-check`, `type-check:build` exit 0; ESLint 0; `format:check` and the e2e
+Prettier check green; Playwright `--list` 80. Interdicts hold on the whole story diff. New minors: N-1 polling
+predicate pinned from one side; N-2 stale copy undocumented; N-3 `leading-none` on a wrapped error title; (a)
+"Hide quick setup" and (b) Close-before-refresh drop focus to `<body>` — both pre-existing on main.
+
+## Fix pass `b6a8936` — (a), (b), N-1…N-3
+
+A layout effect hands lost focus (on `<body>` or a disconnected node) to the Activity heading when drawn steps
+leave the page, unless the Add editor dialog is open or focus is elsewhere; a finished site loading from the
+skeleton takes no focus. Polling test from the installed-only side; stale copy documented in AC 2, design and
+plan; `leading-snug` on the load-error title. Tests (a), (b), N-3 red first; guards (c)–(e) and N-1 bite under
+mutation. Jest 374 suites / 4,868 passed; type-check (both) 0; ESLint 0; `format:check` clean; `--list` 80.
+Reviewed by the orchestrator (not the author): the effect runs at a fixed hook position, moves only lost focus,
+and leaves `onCloseAutoFocus` unchanged.
+
+Max severity: minor
+Ship allowed: yes
