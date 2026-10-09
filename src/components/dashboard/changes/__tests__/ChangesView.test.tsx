@@ -369,6 +369,20 @@ describe("ChangesView — a row", () => {
     expect(within(hero).getByText(/ago/)).toBeInTheDocument();
   });
 
+  // s70b re-review N2: at 375 the who·when line is ~174 px, and a long address
+  // cut "when" ("sam@example.com · 25 minut…"). The address truncates on its
+  // own; "when" never shrinks.
+  it("truncates a long address, never the time", async () => {
+    await renderLoaded();
+
+    const hero = rowOf("Ship copy changes in minutes, not sprints");
+    const address = within(hero).getByText("ana@example.com");
+    expect(address).toHaveClass("min-w-0", "truncate");
+    const time = within(hero).getByText(/ago/).closest("time");
+    expect(time).not.toBeNull();
+    expect(time).toHaveClass("shrink-0", "whitespace-nowrap");
+  });
+
   it("shows the draft for a pending row", async () => {
     await renderLoaded();
 

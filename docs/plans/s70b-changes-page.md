@@ -265,6 +265,11 @@ the choices the plan left open.
 - Captures are opt-in: `e2e/changes.spec.ts` writes `docs/designs/s70-content-changes/after/` only
   with `RCF_LAYOUT_SCREENSHOTS=1`, so CI runs the spec as assertions only.
 
+- **Who · when at 375 (re-review N2, orchestrator).** The who·when line is about 174 px at 375; a
+  long address used to cut "when" ("sam@example.com · 25 minut…"). The address now truncates in its
+  own span and the time never shrinks (`ChangeRow.tsx`, test "truncates a long address, never the
+  time"); the design's full address is kept wherever it fits.
+
 ## Run interdicts
 
 - **Ceilings only go down.** `MAX_BUNDLE_GZ`/`MAX_WIDGET_GZ` and the seeded pair never rise;

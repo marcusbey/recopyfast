@@ -265,10 +265,18 @@ export function ChangeRow({
           )}
         </p>
 
-        <p className="min-w-0 truncate text-xs text-muted-foreground [grid-area:who]">
-          {who && `${who} · `}
+        {/* At 375 this line is ~174 px: a long address truncates on its own,
+            and "when" never shrinks (s70b re-review N2). */}
+        <p className="flex min-w-0 text-xs text-muted-foreground [grid-area:who]">
+          {who && (
+            <>
+              <span className="min-w-0 truncate">{who}</span>
+              <span className="shrink-0 whitespace-pre"> · </span>
+            </>
+          )}
           {row.changedAt && (
             <time
+              className="shrink-0 whitespace-nowrap"
               dateTime={row.changedAt}
               title={format(new Date(row.changedAt), "d MMM yyyy, HH:mm")}
             >
