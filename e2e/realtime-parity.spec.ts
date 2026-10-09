@@ -2,6 +2,7 @@ import {
   chromium,
   expect,
   test,
+  type BrowserContext,
   type Page,
   type Request,
 } from "@playwright/test";
@@ -106,10 +107,32 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
    * Both reach the staging room. The staging link is device-bound and raises an
    * emailed-code prompt (9f1aa70), which two independent browser contexts would
    * each have to clear — noise that has nothing to do with what AC 4 measures.
-   * `rcf_edit_token` alone sets `EDITOR_MODE` (recopyfast.src.js:87), so both
-   * contexts enter an editing session directly.
+   * A stored edit session alone sets `EDITOR_MODE`, so both contexts enter an
+   * editing session directly (see holdEditSession).
    */
   const editToken = `parity_edit_${randomUUID()}`;
+
+  /**
+   * Start a context as a tab that already holds the edit session (ADR 036).
+   *
+   * Both contexts used to land on `?rcf_edit_token=`, which the widget no
+   * longer reads (s76): the owner's link is now a single-use code in the
+   * fragment (ADR 055), and two contexts on one session cannot both spend one.
+   * How a link becomes this stored session is share-edit-publish.spec.ts's
+   * subject; parity starts after it.
+   */
+  async function holdEditSession(context: BrowserContext) {
+    await context.addInitScript(
+      ([key, token]: readonly [string, string]) => {
+        try {
+          window.sessionStorage.setItem(key, JSON.stringify([null, token]));
+        } catch {
+          // A frame without storage is not the page under test.
+        }
+      },
+      [`rcf_edit_link:${siteId}`, editToken] as const,
+    );
+  }
 
   const ownerEmail = `e2e-parity-owner-${siteId}@recopyfast.local`;
   let ownerId: string | null = null;
@@ -224,14 +247,14 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
     // claims to check.
     const browser = await launchResolvingBrowser();
     const context = await browser.newContext();
+    await holdEditSession(context);
     const page = await context.newPage();
 
     try {
       const observed = observe(page);
-      await page.goto(
-        `http://${PARITY_DOMAIN}:${FIXTURE_PORT}/legacy?rcf_edit_token=${encodeURIComponent(editToken)}`,
-        { waitUntil: "domcontentloaded" },
-      );
+      await page.goto(`http://${PARITY_DOMAIN}:${FIXTURE_PORT}/legacy`, {
+        waitUntil: "domcontentloaded",
+      });
 
       // No realtime bootstrap at all — the precondition for the whole test.
       expect(await page.evaluate(() => window.RECOPYFAST_WS)).toBeFalsy();
@@ -289,11 +312,13 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
     const browser = await launchResolvingBrowser();
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
+    await holdEditSession(contextA);
+    await holdEditSession(contextB);
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
 
     try {
-      const editorUrl = `http://${PARITY_DOMAIN}:${FIXTURE_PORT}/?rcf_edit_token=${encodeURIComponent(editToken)}`;
+      const editorUrl = `http://${PARITY_DOMAIN}:${FIXTURE_PORT}/`;
       await Promise.all([
         pageA.goto(editorUrl, { waitUntil: "domcontentloaded" }),
         pageB.goto(editorUrl, { waitUntil: "domcontentloaded" }),

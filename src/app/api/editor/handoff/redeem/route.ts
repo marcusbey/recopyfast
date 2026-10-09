@@ -48,7 +48,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!(await originBelongsToSite(siteId, device.origin))) {
+    const belongs = await originBelongsToSite(siteId, device.origin);
+    if (belongs === null) {
+      // No verdict: the site could not be read (s76 review minor 2), so the
+      // answer is 503 `unavailable`, never origin_mismatch — an outage is not
+      // a refusal. The code is left unspent, but nothing presents it again:
+      // the widget strips `?rcf_handoff=` at parse time and redeems once, then
+      // falls back to a grant this browser already holds or offers an emailed
+      // code (EditorAuth.boot, initEditorAuth). A fresh hub click mints a new
+      // code; this one dies at sixty seconds.
+      return withPublicCors(
+        NextResponse.json(
+          { ok: false, reason: "unavailable" },
+          { status: 503 },
+        ),
+        request,
+      );
+    }
+    if (!belongs) {
       console.warn(
         `[editor-auth] handoff redemption refused: ${device.origin} is not the registered domain of site ${siteId}`,
       );

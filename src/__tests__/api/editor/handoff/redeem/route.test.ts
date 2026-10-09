@@ -42,6 +42,8 @@ const HANDOFF_CODE = "handoff-code-from-the-hub";
 /** Table name → rows. Joins are attached on read, as PostgREST embeds them. */
 const mockTables: Record<string, Row[]> = {};
 const mockRpcCalls: string[] = [];
+/** Reads of this table error, as in an outage (s76 review minor 2). */
+let mockFailingTable: string | null = null;
 
 function mockEmbed(table: string, row: Row): Row {
   if (table === "editor_device_grants" || table === "editor_handoffs") {
@@ -107,7 +109,11 @@ function mockServiceClient() {
       },
       single: () => Promise.resolve({ data: run()[0] ?? null, error: null }),
       maybeSingle: () =>
-        Promise.resolve({ data: run()[0] ?? null, error: null }),
+        Promise.resolve(
+          table === mockFailingTable
+            ? { data: null, error: { message: "connection reset" } }
+            : { data: run()[0] ?? null, error: null },
+        ),
       then: (onOk: (v: unknown) => unknown, onErr?: (e: unknown) => unknown) =>
         Promise.resolve({ data: run(), error: null }).then(onOk, onErr),
     };
@@ -201,6 +207,7 @@ beforeEach(() => {
   jest.spyOn(console, "error").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});
   mockRpcCalls.length = 0;
+  mockFailingTable = null;
   mockTables.sites = [{ id: SITE_ID, domain: "helloworld.example" }];
   mockTables.site_editors = [
     {
@@ -279,5 +286,27 @@ describe("s51 — a grant redeemed for a lapsed owner's site", () => {
       Object.keys(payingBody).sort(),
     );
     expect(mockResolveEntitlement).not.toHaveBeenCalled();
+  });
+});
+
+describe("s76 — an outage is not an origin verdict", () => {
+  it("answers 503 and leaves the hand-off code unspent when the site cannot be read", async () => {
+    // Review minor 2: a failed `sites` read used to answer 403
+    // origin_mismatch, a verdict on the caller's origin that nobody reached.
+    mockResolveEntitlement.mockResolvedValue(ON_PLAN);
+    mockFailingTable = "sites";
+
+    const refused = await redeem();
+
+    expect(refused.status).toBe(503);
+    await expect(refused.json()).resolves.toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(mockTables.editor_handoffs[0].consumed_at).toBeNull();
+    expect(mockTables.editor_device_grants).toHaveLength(0);
+
+    mockFailingTable = null;
+    expect((await redeem()).status).toBe(200);
   });
 });

@@ -3525,8 +3525,8 @@ at that commit, to be re-verified at research time):
   and quota exhaustion.
 - [ ] L11 — `v1/content` POST stores `metadata` without `optionalMetadata` (`:236,298,322`), and
   `/api/published` then serves it.
-- [ ] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
-  content routes pin the exact host.
+- [x] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
+  content routes pin the exact host. → closed by s76.
 - [ ] L13 — WS server: no helmet, `x-powered-by: Express`, `ACAO:*` and the live connection count
   on `/health` (`server/index.js:78,125-136`; live).
 - [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
@@ -3564,9 +3564,9 @@ at that commit, to be re-verified at research time):
 - [ ] R3 — `staging_access` keeps admin-only INSERT/UPDATE policies for `authenticated`
   (`20251230000000_staging_workflow.sql:120-142`); an admin can write rows that bypass route
   validation (ADR 047 "Watch").
-- [ ] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
+- [x] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
   (`src/lib/auth/editor-directory.ts:271-299`); s68c makes it non-load-bearing, the dashboard still
-  lists them as live.
+  lists them as live. → closed by s76.
 - [x] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
   covers `PUT` only. → closed by s77 (with `PUT`'s IP guard, s68b review minor 3).
 - [x] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter. → closed by s77.
@@ -4017,3 +4017,93 @@ own right now (`staging/validate`, `edit-sessions/*` including s68a review m9, a
 front of `edit-board/*`), listed in the plan.
 
 Embed allocation: 0 bytes.
+
+## Story s76-grant-and-edit-token-hardening — the Edit website link carries no reusable credential, and editor access ends when it should
+
+Owner directive 2026-10-09 ("take CTO-level decisions; get the product ready for production"),
+scoped by the orchestrator: the production defects pinned by `test.failing` tests on main, plus
+s69 L12 and R4 and the s41 review's outage follow-up. Security story; no new screen (the only
+visible change is the address the "Edit website" tab opens). Research:
+`docs/research/s76-grant-and-edit-token-hardening.md`. Plan:
+`docs/plans/s76-grant-and-edit-token-hardening.md`. Decision: ADR 055.
+
+Cause (verified on `origin/main` `72f4cff`):
+
+- **The edit session travels in the URL (A-29).** `POST /api/edit-sessions/create` answers
+  `editUrl: https://${site.domain}?rcf_edit_token=${token}`
+  (`src/app/api/edit-sessions/create/route.ts:143`). The token is a bearer credential good for 2 h
+  (24 h absolute) with no origin or device binding; it reaches the customer's access logs and CDN,
+  every `Referer` the page sends before the widget strips it (`public/embed/recopyfast.src.js:77-89`),
+  and history. A `sites.domain` stored with a scheme yields `https://https://…`. Pinned by
+  `src/__tests__/api/edit-sessions/create-token-leak.test.ts:151,170,192` (`test.failing`).
+- **A request body chooses a grant's lifetime, and a grant lineage never ends (A-28).**
+  `POST /api/editor/refresh-grant` reads `rememberDevice` off the body (`route.ts:39`) and
+  `refreshDeviceGrant` hands it to `issueDeviceGrant`, which picks 12 h or 7 d from it
+  (`src/lib/auth/editor-grants.ts:162-165`, `:450-456`); every rotation re-anchors expiry on today,
+  so a grant refreshed on schedule never retires. Pinned by
+  `src/lib/auth/__tests__/editor-grants-ttl.test.ts:250,298,352,412` (`test.failing`).
+- **L12.** `originBelongsToSite` accepts any subdomain of the registered domain
+  (`src/lib/auth/editor-request.ts:73`) while the content routes pin the exact host
+  (`src/lib/security/site-auth.ts:242`): a grant can be minted for, and bound to, `evil.example.com`.
+- **R4.** `revokeSiteEditor` sweeps the editor's device grants but not their `staging_access`
+  invites (`src/lib/auth/editor-directory.ts:292-322`); the dashboard keeps listing them as live.
+- **Outage signs editors out (s41 review).** A database error during validation answers 401:
+  `validateEditSessionAccess` (`src/lib/auth/editor-access.ts:471-482`, `.single()` error),
+  `validateStagingAccess` (`src/lib/auth/staging-access.ts:214-232`, `:343-353`),
+  `validateDeviceGrantAccess` (`editor-access.ts:330-335`, reason `error`) and
+  `POST /api/editor/validate-grant` (`route.ts:56-66`, 401 with reason `error`, which the widget
+  reads as a verdict and clears the grant, `recopyfast.src.js:338-347`).
+
+Acceptance criteria:
+
+- [x] `editUrl` is `https://<host>/#rcf_edit=<code>`: no query string at all, no edit-session token
+  anywhere in it, a well-formed host when `sites.domain` carries a scheme. The code is signed,
+  names one session and one site, lives 60 s and is spent once. The three A-29 pins are plain
+  tests. Tests: `create-token-leak.test.ts`, `src/lib/auth/__tests__/edit-link.test.ts`.
+- [x] Only the widget's boot check (`POST /api/staging/validate`) spends a code, after its
+  signature, site and expiry are checked offline, the request's `Origin` is the site's
+  registered host and the session is validated (without recording a use); it answers the
+  session's token in the body. A second presentation, a code past 60 s, a code for another site,
+  a forged code, a code from another origin and a code whose holder lost their grant are refused;
+  an outage at any step is 503 and leaves the code unspent. Test:
+  `src/__tests__/api/staging/validate-edit-link.test.ts`.
+- [x] The widget reads the code from the fragment, strips it from the address bar, swaps it for the
+  returned token in memory and in the tab's storage (ADR 036), and never reads `rcf_edit_token`
+  from the query: an old or crafted `?rcf_edit_token=` link boots a visitor, stores nothing, and
+  leaves the address bar without it. Customer install docs name `#rcf_edit=` instead.
+  Multi-page editing (s41) keeps working. Test: `src/__tests__/embed/edit-link-persistence.test.ts`.
+- [x] A refreshed grant's lifetime comes from its own lineage, never from the request body, and no
+  lineage outlives 30 days from its first issue: past it, validation and refresh refuse
+  (`expired`); within it, a replacement never expires after the ceiling. The four A-28 pins are
+  plain tests. Tests: `editor-grants-ttl.test.ts`, `src/__tests__/api/editor/refresh-grant/route.test.ts`.
+- [x] L12: an origin belongs to a site only on the exact registered host (scheme, port and case
+  aside); a subdomain, a parent domain and a look-alike suffix are refused; localhost only outside
+  production. Test: `src/lib/auth/__tests__/editor-request-origin.test.ts`.
+- [x] R4: revoking an editor also deactivates that address's active `staging_access` invites on
+  that site (case-insensitive), and nobody else's. Test:
+  `src/lib/auth/__tests__/editor-directory-revoke.test.ts`.
+- [x] An infrastructure error while validating an edit session, a staging invite or a device grant
+  (the Edit Board's routes included), or while reading a site's domain for an origin check,
+  answers 503, never 401/403; the widget keeps the edit link and the grant on 503. Tests:
+  `src/lib/auth/__tests__/editor-access-outage.test.ts`, `edit-link-persistence.test.ts`,
+  `src/__tests__/embed/editor-auth.test.ts`, `src/__tests__/api/edit-board/staging-outage.test.ts`,
+  `editor-request-origin.test.ts`.
+- [ ] Embed bytes do not grow: the ceilings (45828 / 33062) ratchet down to the branch's
+  measurement. No migration, nothing under `server/`, no new dependency. Required gates pass; e2e
+  specs that landed with `?rcf_edit_token=` use the new link; Playwright count unchanged.
+  (Local: measured 45818 / 33059 after review fix pass 2 — `window.` restored on every name a
+  host page can shadow, `src/__tests__/embed/host-page-globals.test.ts`, with the census by scope
+  analysis in `host-page-globals-census.test.ts` (verification fix pass) — below main's
+  45828 / 33062; gates green, `--list` 81 after the rebase on s74/s75 (unchanged by s76). Open until
+  CI runs the two e2e specs.)
+
+Complexity: 4. Dependencies: none (s72 merged). Branch `feature/s76-grant-and-edit-token-hardening`.
+Follow-ups (not s76): the widget's own API reads still carry `?rcf_edit_token=` to RecopyFast's API
+(`recopyfast.src.js:1333`) and the realtime handshake carries `editToken` in its query
+(`server/index.js:211`, s79's file) — RecopyFast's own logs, not a third party's; the editor hub's
+`?rcf_handoff=` (60 s, one-time) could move to the fragment too; Share Preview Links
+(`?rcf_staging=1&rcf_token=`) belong to s72b; globals the widget used bare before s76 (`fetch`,
+`setTimeout`, `alert`, `confirm`, `crypto`, …) can be shadowed by a host page's top-level `let`
+exactly as the six names s76 now reaches through `window.` (plan, review fix pass 2).
+
+Embed allocation: ≤ 0 bytes (ceilings only go down; research measured −3 / −4 for the whole edit).

@@ -100,11 +100,14 @@ describe("the widget shows a 402 plan_ended and keeps editing", () => {
   }
 
   async function boot(writeStatus: number) {
-    window.history.replaceState(
-      null,
-      "",
-      "/pricing?rcf_staging=1&rcf_edit_token=owner-edit-token",
+    // A tab that already holds the owner's edit session (ADR 036); before s76
+    // this landed on `?rcf_staging=1&rcf_edit_token=…`, which the widget no
+    // longer reads.
+    window.sessionStorage.setItem(
+      `rcf_edit_link:${SITE_ID}`,
+      JSON.stringify([null, "owner-edit-token"]),
     );
+    window.history.replaceState(null, "", "/pricing");
     installFetch(writeStatus);
     new Function(WIDGET_SOURCE)();
     await settle();

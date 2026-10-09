@@ -115,8 +115,32 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 //   45828 / 33062  measured on feature/s72-edit-board-history-xss
 // The middle lines carry the banner hash's ±2 B; only the two ends are
 // measurements of shipped bytes (build-embed.mjs, same note).
-const SEEDED_MAX_BUNDLE_GZ = 45828;
-const SEEDED_MAX_WIDGET_GZ = 33062;
+// RATCHETED 2026-10-09 (s76-grant-and-edit-token-hardening), DOWNWARD:
+// 45828 → 45827, 33062 → 33059. The owner's edit link carries a one-time code
+// in its fragment, paid for in the same file (itemised in build-embed.mjs):
+//
+//   45828 / 33062  ceilings before s76 = measured on main at 72f4cff
+//   +45 / +40      the code read from `#rcf_edit=`, stripped, swapped for the
+//                  boot check's answer, through one keepEditLink()
+//   −48 / −44      offsets: `kind` fallback, refresh `rememberDevice`, the
+//                  init() condition, `|| undefined` ×4, a destructured restore
+//   +2 / +1        the story's comments (banner hash only)
+//   45827 / 33059  measured on feature/s76-grant-and-edit-token-hardening
+// Only the two ends are measurements of shipped bytes.
+// RATCHETED again in the s76 review fix pass, DOWNWARD: 45827 → 45813,
+// 33059 → 33052. A legacy `?rcf_edit_token=` leaves the address bar (+13 /
+// +15), paid for by dropping `window.` from always-present globals (−27 / −22,
+// itemised in build-embed.mjs).
+// CORRECTED in the s76 review fix pass 2: 45813 → 45818, 33052 → 33059. Up
+// from fix pass 1's pair, which never reached main; still DOWN from main's
+// 45828 / 33062. Fix pass 1's offset was a defect (review major): a bare
+// `open` / `history` / `addEventListener` / `removeEventListener` /
+// `localStorage` / `sessionStorage` reaches a host page's own top-level `let`
+// first (host-page-globals.test.ts). `window.` is back on every use (+10 /
+// +12), part-paid by `864e5` for two 24 h products (−5 / −5); itemised in
+// build-embed.mjs.
+const SEEDED_MAX_BUNDLE_GZ = 45818;
+const SEEDED_MAX_WIDGET_GZ = 33059;
 
 interface CheckRun {
   status: number;

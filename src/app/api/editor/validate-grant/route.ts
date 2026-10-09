@@ -50,6 +50,21 @@ export async function POST(request: NextRequest) {
 
     const result = await validateDeviceGrant({ grant, siteId, device });
 
+    // TOMBSTONE (s76). `error` — the grant row could not be read — went out
+    // with 401 and `nextAction: "verify"` like any verdict. The widget keeps a
+    // grant only on a 5xx (or a body with no reason) and clears it on anything
+    // else, so a database blip signed every invited editor out of every site
+    // and sent them to their mailbox. No verdict, no next action: 503.
+    if (!result.valid && result.reason === "error") {
+      console.error(
+        `[editor-auth] grant check unavailable for site ${siteId}; answering 503`,
+      );
+      return withPublicCors(
+        NextResponse.json({ valid: false, reason: "error" }, { status: 503 }),
+        request,
+      );
+    }
+
     if (!result.valid) {
       console.warn(
         `[editor-auth] grant refused (${result.reason}) for site ${siteId} from ${device.origin}`,

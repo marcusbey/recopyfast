@@ -159,7 +159,24 @@ export async function POST(request: NextRequest) {
     // Bind at mint time, not only at use. Otherwise a genuine editor could mint
     // a grant for an origin they control and stand up a working clone of the
     // customer's site.
-    if (!(await originBelongsToSite(siteId, device.origin))) {
+    const belongs = await originBelongsToSite(siteId, device.origin);
+    if (belongs === null) {
+      // No verdict: the site could not be read (s76 review minor 2). Not
+      // origin_mismatch, which would tell the editor their site is misdeployed.
+      // The code above is already spent — the editor requests a new one.
+      return withPublicCors(
+        NextResponse.json(
+          {
+            error: "unavailable",
+            message:
+              "We couldn't check this site just now. Request a new code and try again.",
+          },
+          { status: 503 },
+        ),
+        request,
+      );
+    }
+    if (!belongs) {
       console.warn(
         `[editor-auth] refused to mint a grant for ${device.origin} on site ${siteId} — origin is not the registered domain`,
       );

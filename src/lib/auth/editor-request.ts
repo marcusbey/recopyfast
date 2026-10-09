@@ -31,20 +31,37 @@ export function readDeviceContext(request: NextRequest): DeviceContext | null {
 /**
  * Does this origin belong to this site?
  *
- * Checked when a grant is minted, not only when it is used. Without it an
- * authorised editor could mint a grant bound to an origin they control and
- * host a convincing clone of the customer's site that really does load and save
- * the customer's content.
+ * Checked when a grant is minted, not only when it is used, and before an
+ * edit-link code is spent (s76). Without it an authorised editor could mint a
+ * grant bound to an origin they control and host a convincing clone of the
+ * customer's site that really does load and save the customer's content.
  *
- * Subdomains are accepted: sites are commonly registered as `example.com` and
- * served from `www.example.com`. A registered `www.example.com` does NOT accept
- * a bare `example.com`, because the narrower registration is the more
- * deliberate one.
+ * THE EXACT REGISTERED HOST — scheme, port and case aside — and nothing else.
+ * The same rule as the widget's content and publish requests
+ * (`authorizeSiteRequest`: `parseOrigin(origin) === normalizeDomain(domain)`,
+ * src/lib/security/site-auth.ts), pinned against it by
+ * editor-request-origin.test.ts. Not imported from there: site-auth builds a
+ * JSDOM at module load for its sanitizer, which every editor route would pay.
+ *
+ * TOMBSTONE — s69 L12 (s76). This used to accept any subdomain, "because sites
+ * are commonly registered as example.com and served from www.example.com". The
+ * content routes never accepted that host, so the branch let nobody edit
+ * `www.` — and did let a grant be minted for, and bound to, whatever answers at
+ * `evil.example.com` (user content on a shared parent, a dangling CNAME): a
+ * credential issued under our name for an origin that is not the customer's.
+ * A site served from `www.` registers `www.`.
+ *
+ * NULL WHEN THE `sites` READ FAILED: no verdict either way. Callers answer 503
+ * and must not spend or discard what the caller presented (s76 review minor
+ * 2). This answered `false` on a database error, so an outage became "this
+ * site isn't served from its registered domain" — a 403, on which the widget
+ * forgets an edit-link code for good. A caller that forgets the null still
+ * refuses (`!null` is true): fail closed, never open.
  */
 export async function originBelongsToSite(
   siteId: string,
   origin: string,
-): Promise<boolean> {
+): Promise<boolean | null> {
   const supabase = createServiceRoleClient();
 
   const { data: site, error } = await supabase
@@ -53,26 +70,21 @@ export async function originBelongsToSite(
     .eq("id", siteId)
     .maybeSingle();
 
-  if (error || !site?.domain) return false;
-
-  let originHost: string;
-  try {
-    originHost = new URL(origin).hostname.toLowerCase();
-  } catch {
-    return false;
+  if (error) {
+    console.error("[editor-auth] site domain lookup failed:", error.message);
+    return null;
   }
+  if (!site?.domain) return false;
 
-  const registered = site.domain
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "")
-    .replace(/:\d+$/, "")
-    .toLowerCase();
+  const originHost = hostnameOf(origin);
+  const domain = String(site.domain).trim();
+  const registered = hostnameOf(
+    /^https?:\/\//i.test(domain) ? domain : `https://${domain}`,
+  );
 
-  if (!registered) return false;
+  if (!originHost || !registered) return false;
 
-  if (originHost === registered || originHost.endsWith(`.${registered}`)) {
-    return true;
-  }
+  if (originHost === registered) return true;
 
   // Local development against a real site row. Gated on NODE_ENV so this can
   // never widen the check in a deployed environment.
@@ -87,6 +99,15 @@ export async function originBelongsToSite(
   }
 
   return false;
+}
+
+/** `URL.hostname`, lowercased — port and scheme dropped — or null. */
+function hostnameOf(value: string): string | null {
+  try {
+    return new URL(value).hostname.toLowerCase() || null;
+  } catch {
+    return null;
+  }
 }
 
 /**

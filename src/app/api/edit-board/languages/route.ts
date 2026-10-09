@@ -8,7 +8,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { StagingAccessManager } from "@/lib/auth/staging-access";
+import {
+  StagingAccessManager,
+  stagingRefusalStatus,
+} from "@/lib/auth/staging-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { withPublicCors } from "@/lib/http/public-cors";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
@@ -138,7 +141,7 @@ export async function GET(request: NextRequest) {
       return withCors(
         NextResponse.json(
           { error: validation.error || "Access denied" },
-          { status: 401 },
+          { status: stagingRefusalStatus(validation) },
         ),
         origin,
       );
@@ -244,7 +247,7 @@ export async function POST(request: NextRequest) {
       return withCors(
         NextResponse.json(
           { error: validation.error || "Access denied" },
-          { status: 401 },
+          { status: stagingRefusalStatus(validation) },
         ),
         origin,
       );
@@ -402,7 +405,7 @@ export async function PUT(request: NextRequest) {
       return withCors(
         NextResponse.json(
           { error: validation.error || "Access denied" },
-          { status: 401 },
+          { status: stagingRefusalStatus(validation) },
         ),
         origin,
       );
@@ -534,7 +537,7 @@ export async function DELETE(request: NextRequest) {
       return withCors(
         NextResponse.json(
           { error: validation.error || "Access denied" },
-          { status: 401 },
+          { status: stagingRefusalStatus(validation) },
         ),
         origin,
       );
