@@ -1,157 +1,53 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { isAuthorizedCronRequest } from "@/lib/security/cron-auth";
-
 /**
- * Checks whether the incoming request is authorised to trigger blog generation.
+ * /api/blog/generate
  *
- * Two accepted paths:
- *  1. Cron / server-to-server: `Authorization: Bearer <CRON_SECRET>`
- *     (used by /api/cron/generate-blog-post which has no user session)
- *  2. Interactive admin: a valid Supabase session whose user either has
- *     server-managed `app_metadata.role === "admin"` (set via the Supabase Admin
- *     SDK) OR whose email is listed in the comma-separated ADMIN_EMAILS env var.
- *     user_metadata is caller-writable and is never trusted for authorization.
+ *   GET  — a random topic suggestion (public, reads nothing).
+ *   POST — an on-demand AI DRAFT, for a platform admin only.
  *
- * Fails closed: if CRON_SECRET is unset the bearer path is disabled.
+ * Until s89, POST accepted the cron bearer or an admin session and inserted
+ * the model's post with `status: "published"` — no person between OpenAI and
+ * the public page, against the PRD's "it drafts, a human publishes"
+ * (docs/prd.md:320-322). It wrote through the cookie-bound RLS client, which
+ * refuses the cron (no session: `anon`) and an owner who is admin only through
+ * ADMIN_EMAILS (the write policy reads `app_metadata.role`, which cannot see an
+ * env var) — research facts 2 and 3.
+ *
+ * Now, in this order (ADR 057):
+ *   1. same-origin POST — the session cookie is SameSite=Lax, and branded
+ *      `*.recopyfa.st` hosts are same-site (ADR 021);
+ *   2. `authorizePlatformAdmin`: per-IP flood guard → getUser() → per-user
+ *      limiter (tight: each call is an OpenAI spend) → ADMIN_EMAILS or
+ *      `app_metadata.role`; both limiters fail closed;
+ *   3. a bounded, validated body — read field by field, never spread;
+ *   4. only then the service-role client, writing a draft through
+ *      `createOnDemandDraft`, which cannot write anything but a draft.
+ *
+ * The cron bearer opens nothing here any more: the daily cron drafts
+ * in-process (src/app/api/cron/generate-blog-post/route.ts), and a leaked
+ * CRON_SECRET must not buy an OpenAI-spending POST. Publishing is
+ * POST /api/admin/blog/posts/[id] (docs/operations/blog.md).
  */
-async function isAuthorised(request: NextRequest): Promise<boolean> {
-  // --- Path 1: CRON_SECRET bearer token ---
-  // Constant-time and fail-closed: see isAuthorizedCronRequest (s77, s69 L4).
-  if (isAuthorizedCronRequest(request)) {
-    return true;
-  }
 
-  // --- Path 2: Authenticated admin user via Supabase session ---
-  try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
+import { NextRequest, NextResponse } from "next/server";
+import { authorizePlatformAdmin } from "@/lib/auth/platform-admin";
+import { createOnDemandDraft } from "@/lib/blog/drafts";
+import { pickTopic, type BlogTopic } from "@/lib/blog/topics";
+import { isSameOriginRequest } from "@/lib/http/same-origin";
+import {
+  optionalPlainText,
+  readBoundedJson,
+  type ValidationResult,
+} from "@/lib/api/validation";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 
-    if (error || !user) return false;
-
-    // Check ADMIN_EMAILS allowlist (comma-separated env var)
-    const adminEmails = (process.env.ADMIN_EMAILS ?? "")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean);
-
-    if (user.email && adminEmails.includes(user.email.toLowerCase())) {
-      return true;
-    }
-
-    // Trust ONLY server-managed app_metadata for role. user_metadata is caller-writable
-    // (any authenticated user can set it via PATCH /api/auth/profile or Supabase
-    // auth.updateUser), so reading role from user_metadata is a privilege-escalation vector.
-    if (user.app_metadata?.role === "admin") {
-      return true;
-    }
-  } catch {
-    // Any error means we cannot confirm authorisation — deny
-  }
-
-  return false;
-}
-
-const CONTENT_TOPICS = [
-  {
-    category: "ai-tools",
-    topics: [
-      "How AI Website Builders Are Changing Web Development Forever",
-      "The Future of No-Code Website Creation with AI",
-      "AI-Powered Content Generation vs Traditional Copywriting",
-      "Why Every Developer Should Embrace AI-Assisted Coding",
-      "The Rise of AI Design Tools for Non-Designers",
-      "Machine Learning in Web Development: What You Need to Know",
-      "Automated Website Testing with AI: A Game Changer",
-      "How AI is Making Web Development More Accessible",
-    ],
-  },
-  {
-    category: "marketing",
-    topics: [
-      "Dynamic Content Updates: The Secret to Higher Conversion Rates",
-      "A/B Testing Website Content Without Developer Dependencies",
-      "Personalization at Scale: Making Every Visitor Feel Special",
-      "The Psychology Behind Instant Content Updates",
-      "How Real-Time Content Changes Boost User Engagement",
-      "Marketing Automation Meets Website Management",
-      "Content Localization Made Simple for Global Campaigns",
-      "The ROI of Dynamic Website Content Management",
-    ],
-  },
-  {
-    category: "freelancing",
-    topics: [
-      "The Freelancer's Guide to Efficient Client Website Management",
-      "How to Scale Your Web Development Services Without Hiring",
-      "Client Communication: Making Website Updates Transparent",
-      "Pricing Website Maintenance Services in 2024",
-      "Building Long-Term Client Relationships Through Better UX",
-      "The Remote Freelancer's Toolkit for Website Management",
-      "How to Deliver Faster Website Updates to Impress Clients",
-      "Freelancer vs Agency: Competing with Better Tools",
-    ],
-  },
-  {
-    category: "development",
-    topics: [
-      "Headless CMS vs Traditional CMS: Which is Right for You?",
-      "API-First Content Management: Building for the Future",
-      "The Developer's Guide to Content-First Architecture",
-      "Implementing Real-Time Features Without Complex Infrastructure",
-      "Modern JavaScript Patterns for Content Management",
-      "Building Scalable Content Systems with Minimal Code",
-      "The Evolution of Content Management Systems",
-      "Progressive Enhancement in Modern Web Development",
-    ],
-  },
-  {
-    category: "design",
-    topics: [
-      "Design Systems That Actually Work for Content Teams",
-      "The Designer's Guide to Content-Driven Design",
-      "Creating Flexible Layouts That Adapt to Dynamic Content",
-      "Typography and Content Hierarchy in Modern Web Design",
-      "Color Psychology in Website Content Management",
-      "Accessibility in Dynamic Content Systems",
-      "Mobile-First Design for Content-Heavy Websites",
-      "The Art of White Space in Content-Rich Interfaces",
-    ],
-  },
-  {
-    category: "business",
-    topics: [
-      "How Startups Can Compete with Enterprise-Level Content Management",
-      "The Business Case for Dynamic Website Content",
-      "Reducing Technical Debt Through Better Content Architecture",
-      "Cost-Effective Website Management for Growing Companies",
-      "Building a Content Strategy That Scales with Your Business",
-      "The Hidden Costs of Traditional Website Management",
-      "Digital Transformation Starts with Better Content Management",
-      "Why Founders Should Care About Website Content Velocity",
-    ],
-  },
-];
+const MAX_BODY_BYTES = 4 * 1024;
+const MAX_TOPIC_LENGTH = 200;
+const MAX_CATEGORY_LENGTH = 50;
+const MAX_KEYWORDS_LENGTH = 500;
 
 export async function GET() {
   try {
-    // Select random topic
-    const randomCategoryData =
-      CONTENT_TOPICS[Math.floor(Math.random() * CONTENT_TOPICS.length)];
-    const randomTopic =
-      randomCategoryData.topics[
-        Math.floor(Math.random() * randomCategoryData.topics.length)
-      ];
-
-    return NextResponse.json({
-      suggestion: {
-        topic: randomTopic,
-        category: randomCategoryData.category,
-      },
-    });
+    return NextResponse.json({ suggestion: pickTopic() });
   } catch (error) {
     console.error("Error suggesting blog topic:", error);
     return NextResponse.json(
@@ -161,171 +57,84 @@ export async function GET() {
   }
 }
 
+interface GenerateBody {
+  subject?: BlogTopic;
+  keywords?: string;
+}
+
+function invalid(error: string): ValidationResult<GenerateBody> {
+  return { ok: false, error };
+}
+
+/** `topic` and `category` travel together; `targetKeywords` is optional. */
+function parseBody(raw: unknown): ValidationResult<GenerateBody> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return invalid("Request body must be a JSON object");
+  }
+  const body = raw as Record<string, unknown>;
+
+  const topic = optionalPlainText(body, "topic", {
+    maxLength: MAX_TOPIC_LENGTH,
+  });
+  if (!topic.ok) return invalid(topic.error);
+  const category = optionalPlainText(body, "category", {
+    maxLength: MAX_CATEGORY_LENGTH,
+  });
+  if (!category.ok) return invalid(category.error);
+  const keywords = optionalPlainText(body, "targetKeywords", {
+    maxLength: MAX_KEYWORDS_LENGTH,
+  });
+  if (!keywords.ok) return invalid(keywords.error);
+
+  if (Boolean(topic.value) !== Boolean(category.value)) {
+    return invalid('Fields "topic" and "category" must be given together');
+  }
+
+  return {
+    ok: true,
+    value: {
+      subject:
+        topic.value && category.value
+          ? { topic: topic.value, category: category.value }
+          : undefined,
+      keywords: keywords.value,
+    },
+  };
+}
+
 export async function POST(request: NextRequest) {
-  // Auth gate: cron bearer token OR authenticated admin user required
-  if (!(await isAuthorised(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!isSameOriginRequest(request)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const admin = await authorizePlatformAdmin(request, {
+    endpoint: "blog-generate",
+    userLimit: "API_UPLOAD",
+  });
+  if (!admin.ok) return admin.response;
+
+  const raw = await readBoundedJson(request, MAX_BODY_BYTES);
+  if (!raw.ok) {
+    return NextResponse.json({ error: raw.error }, { status: 400 });
+  }
+  const body = parseBody(raw.value);
+  if (!body.ok) {
+    return NextResponse.json({ error: body.error }, { status: 400 });
   }
 
   try {
-    const { topic, category, targetKeywords } = await request.json();
-
-    // If no topic provided, select one randomly
-    let selectedTopic = topic;
-    let selectedCategory = category;
-
-    if (!selectedTopic) {
-      const randomCategoryData =
-        CONTENT_TOPICS[Math.floor(Math.random() * CONTENT_TOPICS.length)];
-      selectedCategory = randomCategoryData.category;
-      selectedTopic =
-        randomCategoryData.topics[
-          Math.floor(Math.random() * randomCategoryData.topics.length)
-        ];
-    }
-
-    const prompt = `Write a compelling, naturally flowing blog post about "${selectedTopic}" for web developers, marketers, freelancers, and founders.
-
-CONTENT REQUIREMENTS:
-- Target audience: Developers, marketers, designers, freelancers, founders using AI website builders
-- Tone: Conversational, engaging, and naturally flowing like Medium articles
-- Length: 800-1200 words with smooth narrative flow
-- Include real-world examples and stories woven throughout
-- Naturally mention ReCopyFast as a helpful tool where contextually appropriate (don't force it)
-- Focus on practical value and actionable insights
-
-SEO KEYWORDS TO NATURALLY INCLUDE: ${targetKeywords || getKeywordsForCategory(selectedCategory)}
-
-STRUCTURE:
-- Compelling headline that hooks the reader
-- Engaging introduction with a relatable scenario or question
-- 3-4 main sections with practical insights and examples
-- Real-world use cases and stories
-- Actionable takeaways
-- Natural conclusion that ties everything together
-
-Please write the complete blog post in markdown format with proper headings, and make it genuinely valuable to read.`;
-
-    // Call OpenAI API
-    const openaiResponse = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a skilled content writer who creates engaging, naturally flowing blog posts that provide real value to readers. Write in a conversational tone that feels like a knowledgeable friend sharing insights.",
-            },
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-          temperature: 0.7,
-          max_tokens: 2000,
-        }),
-      },
-    );
-
-    if (!openaiResponse.ok) {
-      throw new Error("OpenAI API call failed");
-    }
-
-    const openaiResult = await openaiResponse.json();
-    const content = openaiResult.choices[0].message.content;
-
-    // Extract title from content (assume it's the first # heading)
-    const titleMatch = content.match(/^#\s+(.+)/m);
-    const title = titleMatch ? titleMatch[1] : selectedTopic;
-
-    // Create slug from title
-    const slug = title
-      .toLowerCase()
-      .replace(/[^\w\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .trim();
-
-    // Extract excerpt (first paragraph after title)
-    const paragraphs = content.split("\n\n");
-    let excerpt = "";
-    for (const paragraph of paragraphs) {
-      if (
-        paragraph.trim() &&
-        !paragraph.startsWith("#") &&
-        paragraph.length > 50
-      ) {
-        excerpt = paragraph.trim().substring(0, 200) + "...";
-        break;
-      }
-    }
-
-    const supabase = await createClient();
-
-    // Save to database
-    const { data: post, error } = await supabase
-      .from("blog_posts")
-      .insert({
-        title,
-        slug,
-        content,
-        excerpt,
-        category: selectedCategory,
-        status: "published",
-        published_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Database error:", error);
-      throw new Error("Failed to save blog post");
-    }
-
-    return NextResponse.json({
-      success: true,
-      post: {
-        id: post.id,
-        title: post.title,
-        slug: post.slug,
-        category: post.category,
-        publishedAt: post.published_at,
-      },
+    const draft = await createOnDemandDraft({
+      db: createServiceRoleClient(),
+      now: new Date(),
+      subject: body.value.subject,
+      keywords: body.value.keywords,
     });
+    return NextResponse.json({ success: true, draft });
   } catch (error) {
-    console.error("Error generating blog post:", error);
+    console.error("Error generating blog draft:", error);
     return NextResponse.json(
-      { success: false, error: "Failed to generate blog post" },
+      { success: false, error: "Failed to generate blog draft" },
       { status: 500 },
     );
   }
-}
-
-function getKeywordsForCategory(category: string): string {
-  const keywordMap: { [key: string]: string } = {
-    "ai-tools":
-      "AI website builder, no-code development, automated web design, AI-powered tools, machine learning",
-    marketing:
-      "content marketing, conversion optimization, A/B testing, user engagement, digital marketing, website optimization",
-    freelancing:
-      "freelance web development, client management, website maintenance, remote work, freelancer tools",
-    development:
-      "web development, JavaScript, API development, headless CMS, modern web architecture, developer tools",
-    design:
-      "web design, UX/UI design, design systems, responsive design, user experience, visual design",
-    business:
-      "startup tools, business growth, digital transformation, content strategy, website ROI, business automation",
-  };
-
-  return (
-    keywordMap[category] ||
-    "website management, content management, web development, digital tools"
-  );
 }

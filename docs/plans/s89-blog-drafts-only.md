@@ -7,7 +7,7 @@ validated: yes
 
 Branch: `feature/s89-blog-drafts-only` (from `origin/main` `c0c40bf`).
 Research: `docs/research/s89-blog-drafts-only.md` — read it first; this plan does not repeat it.
-Decision record: [ADR 056](../decisions/056-ai-blog-posts-are-drafts-platform-admin-publishes.md).
+Decision record: [ADR 057](../decisions/057-ai-blog-posts-are-drafts-platform-admin-publishes.md).
 No Design step: no new screen (recorded in `docs/designs/README.md`). No embed change (0 bytes), no
 `server/` change, no new dependency, no e2e test (Playwright contract count unchanged).
 
@@ -28,12 +28,13 @@ No Design step: no new screen (recorded in `docs/designs/README.md`). No embed c
 3. **CTO decision: `POST /api/blog/generate` stays, admin-only.** The cron bearer path is removed
    from it (nothing calls it any more; a leaked `CRON_SECRET` should not open an OpenAI-spending
    POST). It runs the shared platform-admin guard, so it gains the Origin check and limiters, and its
-   body is validated (`topic` ≤ 200, `category` ≤ 50, `targetKeywords` ≤ 500 plain text; a `topic`
-   without a `category` is a 400 — today it reaches a NOT NULL violation). Its unauthenticated `GET`
+   body is validated (`topic` ≤ 200, `category` ≤ 50, `targetKeywords` ≤ 500 plain text; `topic` and
+   `category` come together or not at all, either alone is a 400 — today a lone `topic` reaches a NOT
+   NULL violation, and a lone `category` was silently replaced). Its unauthenticated `GET`
    (topic suggestion) is left as is.
 4. **CTO decision: idempotency is a database key.** Migration
    `supabase/migrations/20261009150000_blog_posts_daily_draft_key.sql` adds
-   `blog_posts.generated_on date` and a unique index on it (ADR 056 §2). Cron rows carry the UTC day;
+   `blog_posts.generated_on date` and a unique index on it (ADR 057 §2). Cron rows carry the UTC day;
    on-demand drafts carry NULL.
 5. **CTO decision: a slug collision appends the UTC day** (`<slug>-YYYY-MM-DD`) and retries once
    (research, "slug is UNIQUE"). Without it the cron fails on the first repeated title.
@@ -52,13 +53,13 @@ No Design step: no new screen (recorded in `docs/designs/README.md`). No embed c
 
 ## Tasks
 
-- [ ] 1. **Daily key in the database.** Write `src/__tests__/db/blog-daily-draft.test.ts` (in a
+- [x] 1. **Daily key in the database.** Write `src/__tests__/db/blog-daily-draft.test.ts` (in a
      rolled-back transaction): a second row with the same `generated_on` fails with 23505; two rows
      with NULL `generated_on` both insert; `anon` sees only the published row. Run it on the local
      PG 14 runner — red (column missing). Add the migration (header explaining why; `IF NOT EXISTS`
      so a retry converges; no new table, so no new RLS). Green. Name the suite in
      `scripts/run-db-invariants.mjs` (the CI "PostgreSQL 14" step runs that list).
-- [ ] 2. **Drafts library.** Tests first in `src/lib/blog/__tests__/drafts.test.ts`, against an
+- [x] 2. **Drafts library.** Tests first in `src/lib/blog/__tests__/drafts.test.ts`, against an
      in-memory `blog_posts` fake that enforces both unique keys and returns 23505:
      a draft row is `draft` / `published_at` null even when the model output carries
      `status: published` front matter; title, slug and excerpt as today; `createDailyDraft` creates
@@ -67,7 +68,7 @@ No Design step: no new screen (recorded in `docs/designs/README.md`). No embed c
      race returns the winner; the next UTC day creates a new one; a slug collision appends the day;
      a generator failure writes nothing. Red, then move topics/keywords to `src/lib/blog/topics.ts`
      and generation to `src/lib/blog/generate-post.ts`, write `src/lib/blog/drafts.ts`. Green.
-- [ ] 3. **Cron route.** Tests first in `src/__tests__/api/cron/generate-blog-post.test.ts`
+- [x] 3. **Cron route.** Tests first in `src/__tests__/api/cron/generate-blog-post.test.ts`
      (service client faked, OpenAI via a mocked global `fetch`): 401 without/with a wrong bearer and
      when `CRON_SECRET` is unset, with no OpenAI call; with the bearer, 200
      `{ success, created: true, draft: { status: "draft", … } }` and exactly one draft row, even when
@@ -75,21 +76,21 @@ No Design step: no new screen (recorded in `docs/designs/README.md`). No embed c
      run → `created: false`, OpenAI called once in total; an OpenAI failure → 500, generic error, no
      row; no self-fetch of `NEXT_PUBLIC_APP_URL`. Red, rewrite the route over `createDailyDraft`.
      Green.
-- [ ] 4. **Platform-admin guard and same-origin check.** Tests first:
+- [x] 4. **Platform-admin guard and same-origin check.** Tests first:
      `src/lib/auth/__tests__/platform-admin.test.ts` (allow-list case/whitespace-insensitive, empty
      allow-list matches nobody, `app_metadata.role` admin passes, `user_metadata.role` admin does
      not; guard order: IP limiter refusal returns before `getUser`, no user → 401, user limiter
      refusal → 429/503 before the admin check, non-admin → 403) and
      `src/lib/http/__tests__/same-origin.test.ts` (same origin passes; other origin, `null` and absent
      fail). Red, implement `src/lib/auth/platform-admin.ts` and `src/lib/http/same-origin.ts`. Green.
-- [ ] 5. **On-demand generate route.** Tests first in `src/__tests__/api/blog/generate.test.ts`
+- [x] 5. **On-demand generate route.** Tests first in `src/__tests__/api/blog/generate.test.ts`
      (user-scoped fake refuses `blog_posts` writes, like production RLS): the cron bearer alone → 401;
      a non-admin → 403; `user_metadata.role: "admin"` → 403; an `ADMIN_EMAILS` admin → 200 draft
      written through the service role, and a body with `status: "published"`, `published_at`,
      `generated_on` still yields `draft` / null / null; cross-origin or Origin-less POST → 403 and no
      OpenAI call; topic without category → 400. Red, rewrite POST over the guard and
      `createOnDemandDraft`. Green.
-- [ ] 6. **Admin list and publish routes.** Tests first in
+- [x] 6. **Admin list and publish routes.** Tests first in
      `src/__tests__/api/admin/blog-posts.test.ts`: `GET /api/admin/blog/posts` — 401/403 for
      anon/non-admin, drafts by default, `?status=published` for published, anything else 400,
      `Cache-Control: no-store`; `POST /api/admin/blog/posts/[id]` — publish turns a draft
@@ -98,16 +99,16 @@ No Design step: no new screen (recorded in `docs/designs/README.md`). No embed c
      action → 400; cross-origin / Origin-less / non-admin / `user_metadata` admin → 403 and the row is
      unchanged. Red, implement `src/app/api/admin/blog/posts/route.ts` and
      `src/app/api/admin/blog/posts/[id]/route.ts`. Green.
-- [ ] 7. **Published read path pinned.** Add to `src/app/blog/[slug]/__tests__/page.test.tsx` a case
+- [x] 7. **Published read path pinned.** Add to `src/app/blog/[slug]/__tests__/page.test.tsx` a case
      whose fake client applies `eq` filters over a draft and a published row (the view an
      `app_metadata` admin's RLS session has): the draft's slug → `notFound()`, the published slug
      renders. It passes on the current code — prove it bites by removing the page's
      `.eq("status", "published")` (red), then restore. `src/app/sitemap.ts` untouched (s88).
-- [ ] 8. **Runbook and doc touch-ups.** `docs/operations/blog.md` (how drafts are created, reviewed,
+- [x] 8. **Runbook and doc touch-ups.** `docs/operations/blog.md` (how drafts are created, reviewed,
      published and unpublished; `ADMIN_EMAILS` in Vercel; migration-first; troubleshooting);
      `docs/README.md` operations row; `docs/operations/deployment-checklist.md`'s `CRON_SECRET` note
      (it no longer guards `/api/blog/generate`) and an `ADMIN_EMAILS` line; `.env.example`'s
      `ADMIN_EMAILS` comment (blog publishing).
-- [ ] 9. **Gates and mutations.** Full jest, type-check, type-check:build, lint, format:check,
+- [x] 9. **Gates and mutations.** Full jest, type-check, type-check:build, lint, format:check,
      `build:embed --check`, Playwright `--list`, the PG 14 DB runner. For each guard: neutralise,
      see its test go red, restore with `git checkout --`. One story commit.

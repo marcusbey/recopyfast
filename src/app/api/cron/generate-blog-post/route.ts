@@ -1,92 +1,50 @@
+/**
+ * GET /api/cron/generate-blog-post — the daily blog DRAFT (vercel.json, 14:00
+ * UTC). It never publishes.
+ *
+ * Until s89 this route fetched its own public URL (`NEXT_PUBLIC_APP_URL`) for a
+ * topic, then POSTed it back to /api/blog/generate with the cron secret, and
+ * that route inserted the model's post as `published` with no human in the
+ * path — what the PRD calls "the fastest route to a site-wide quality
+ * demotion" (docs/prd.md:320-322). It also wrote through the cookie-bound RLS
+ * client with no session, i.e. as `anon`, which RLS refuses: every run paid
+ * OpenAI and then failed (docs/research/s89-blog-drafts-only.md, fact 2).
+ *
+ * Now it drafts in-process (`createDailyDraft`) through the service role,
+ * which ADR 057 grants this route only after the bearer check below. The draft
+ * waits for a platform admin to publish it (POST /api/admin/blog/posts/[id],
+ * runbook: docs/operations/blog.md). Nothing in the URL is read: there is no
+ * parameter that could ask for a published post.
+ *
+ * Idempotent per UTC day: Vercel can deliver one scheduled run twice. A second
+ * delivery answers `created: false` with the day's draft and does not call the
+ * model. Fail-closed when CRON_SECRET is unset — an open endpoint here would
+ * let anyone spend our OpenAI budget.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
+import { createDailyDraft } from "@/lib/blog/drafts";
 import { isAuthorizedCronRequest } from "@/lib/security/cron-auth";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 
 export async function GET(request: NextRequest) {
+  // Constant-time and fail-closed: see isAuthorizedCronRequest (s77, s69 L4).
+  if (!isAuthorizedCronRequest(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    // Constant-time and fail-closed: see isAuthorizedCronRequest (s77, s69 L4).
-    if (!isAuthorizedCronRequest(request)) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    // Read only to forward it below; the gate above has already refused an
-    // unset secret.
-    const cronSecret = process.env.CRON_SECRET;
-
-    // Get suggested topic
-    const topicResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/blog/generate`,
-      {
-        method: "GET",
-      },
-    );
-
-    if (!topicResponse.ok) {
-      throw new Error("Failed to get topic suggestion");
-    }
-
-    const { suggestion } = await topicResponse.json();
-
-    // Generate blog post — forward the CRON_SECRET so the auth gate passes
-    const generateResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/blog/generate`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${cronSecret}`,
-        },
-        body: JSON.stringify({
-          topic: suggestion.topic,
-          category: suggestion.category,
-          targetKeywords: getKeywordsForCategory(suggestion.category),
-        }),
-      },
-    );
-
-    if (!generateResponse.ok) {
-      throw new Error("Failed to generate blog post");
-    }
-
-    const { post } = await generateResponse.json();
-
-    console.log(`✅ Generated blog post: "${post.title}" (${post.slug})`);
-
-    return NextResponse.json({
-      success: true,
-      message: "Blog post generated successfully",
-      post: {
-        title: post.title,
-        slug: post.slug,
-        category: post.category,
-        publishedAt: post.publishedAt,
-      },
+    const { created, draft } = await createDailyDraft({
+      db: createServiceRoleClient(),
+      now: new Date(),
     });
+
+    return NextResponse.json({ success: true, created, draft });
   } catch (error) {
-    console.error("Error in blog generation cron job:", error);
+    console.error("Error in blog draft cron job:", error);
     return NextResponse.json(
-      { success: false, error: "Failed to generate blog post" },
+      { success: false, error: "Failed to generate blog draft" },
       { status: 500 },
     );
   }
-}
-
-function getKeywordsForCategory(category: string): string {
-  const keywordMap: { [key: string]: string } = {
-    "ai-tools":
-      "AI website builder, no-code development, automated web design, AI-powered tools, machine learning, website automation",
-    marketing:
-      "content marketing, conversion optimization, A/B testing, user engagement, digital marketing, website optimization, dynamic content",
-    freelancing:
-      "freelance web development, client management, website maintenance, remote work, freelancer tools, project management",
-    development:
-      "web development, JavaScript, API development, headless CMS, modern web architecture, developer tools, real-time updates",
-    design:
-      "web design, UX/UI design, design systems, responsive design, user experience, visual design, content-first design",
-    business:
-      "startup tools, business growth, digital transformation, content strategy, website ROI, business automation, scaling websites",
-  };
-
-  return (
-    keywordMap[category] ||
-    "website management, content management, web development, digital tools, ReCopyFast"
-  );
 }

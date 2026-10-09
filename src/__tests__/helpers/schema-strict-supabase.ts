@@ -18,7 +18,10 @@
  * - a read or filter on an unknown column → 42703 "column t.c does not exist";
  * - a write payload with an unknown column → PGRST204;
  * - a table no migration creates → 42P01;
- * - `.single()` without exactly one row, `.maybeSingle()` with several → PGRST116.
+ * - `.single()` without exactly one row, `.maybeSingle()` with several → PGRST116;
+ * - an insert or update duplicating a declared unique key → 23505 (s89). Keys
+ *   are opt-in per table (`uniqueKeys`), NULLs distinct as in PostgreSQL, and a
+ *   refused write changes nothing.
  *
  * Supported: `select` (column lists and `*`, `{ count, head }`), `insert`,
  * `update`, `delete`, `eq/neq/gt/gte/lt/lte/is/in`, `order`, `limit`, `single`,
@@ -87,6 +90,11 @@ function parseColumnList(list: string): string[] {
     });
 }
 
+function keyValue(row: Row, key: readonly string[]): string | null {
+  const values = key.map((column) => row[column] ?? null);
+  return values.includes(null) ? null : JSON.stringify(values);
+}
+
 function compare(
   operator: FilterOperator,
   actual: unknown,
@@ -118,7 +126,30 @@ class Table {
     readonly name: string,
     readonly columns: ReadonlySet<string> | undefined,
     readonly rows: Row[],
+    readonly uniqueKeys: ReadonlyArray<readonly string[]> = [],
   ) {}
+
+  /**
+   * The first unique key `candidates` would duplicate — against the rows they
+   * do not replace, or each other. A key with any NULL column never collides.
+   */
+  duplicateKey(candidates: Row[], replaced: Row[] = []): string | undefined {
+    const others = this.rows.filter((row) => !replaced.includes(row));
+    for (const key of this.uniqueKeys) {
+      const seen = new Set(
+        others
+          .map((row) => keyValue(row, key))
+          .filter((value): value is string => value !== null),
+      );
+      for (const candidate of candidates) {
+        const value = keyValue(candidate, key);
+        if (value === null) continue;
+        if (seen.has(value)) return `${this.name}_${key.join("_")}_key`;
+        seen.add(value);
+      }
+    }
+    return undefined;
+  }
 
   unknownColumn(names: Iterable<string>): string | undefined {
     if (!this.columns) return undefined;
@@ -335,7 +366,7 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   }
 
   private execute(): QueryResult {
-    const error = this.violation();
+    const error = this.violation() ?? this.conflict();
     this.record({
       table: this.table.name,
       operation: this.operation,
@@ -368,6 +399,26 @@ class QueryBuilder implements PromiseLike<QueryResult> {
       error: null,
       count: this.isCounted ? affected.length : null,
     };
+  }
+
+  /** A write that would duplicate a unique key, refused before anything is written. */
+  private conflict(): DoubleError | null {
+    let duplicate: string | undefined;
+    if (this.operation === "insert") {
+      duplicate = this.table.duplicateKey(this.payload);
+    } else if (this.operation === "update") {
+      const matched = this.table.rows.filter((row) => this.matches(row));
+      duplicate = this.table.duplicateKey(
+        matched.map((row) => ({ ...row, ...this.payload[0] })),
+        matched,
+      );
+    }
+    return duplicate
+      ? doubleError(
+          "23505",
+          `duplicate key value violates unique constraint "${duplicate}"`,
+        )
+      : null;
   }
 
   /** Mutates the table for writes; returns the rows the query touched. */
@@ -441,12 +492,21 @@ export interface SchemaStrictDatabase {
   queriesOn: (table: string) => RecordedQuery[];
 }
 
-/**
- * `maxRows` models PostgREST's `max_rows` (supabase/config.toml): no response
- * carries more rows than that, whatever `limit` or `range` asked for.
- */
+export interface SchemaStrictOptions {
+  /**
+   * `maxRows` models PostgREST's `max_rows` (supabase/config.toml): no response
+   * carries more rows than that, whatever `limit` or `range` asked for.
+   */
+  maxRows?: number;
+  /**
+   * Unique keys to enforce, per table — each an array of columns. Opt-in: the
+   * double does not read indexes out of the migrations.
+   */
+  uniqueKeys?: Record<string, ReadonlyArray<readonly string[]>>;
+}
+
 export function createSchemaStrictDatabase(
-  options: { maxRows?: number } = {},
+  options: SchemaStrictOptions = {},
 ): SchemaStrictDatabase {
   const maxRows = options.maxRows ?? null;
   const tables = new Map<string, Table>();
@@ -455,7 +515,12 @@ export function createSchemaStrictDatabase(
   function table(name: string): Table {
     let existing = tables.get(name);
     if (!existing) {
-      existing = new Table(name, migrationColumns(name), []);
+      existing = new Table(
+        name,
+        migrationColumns(name),
+        [],
+        options.uniqueKeys?.[name] ?? [],
+      );
       tables.set(name, existing);
     }
     return existing;

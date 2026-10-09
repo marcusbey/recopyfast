@@ -264,4 +264,64 @@ describe("the schema-strict database double", () => {
     ]);
     expect(db.queriesOn("rate_limits")).toHaveLength(1);
   });
+
+  // s89: the blog cron's idempotency rests on a unique index, so its tests
+  // need a double that answers a duplicate the way PostgREST does — 23505 in
+  // `{ error }`, nothing written. Opt-in per table, NULLs distinct as in
+  // PostgreSQL.
+  it("refuses a duplicate on a declared unique key with 23505 and writes nothing", async () => {
+    const db = createSchemaStrictDatabase({
+      uniqueKeys: { blog_posts: [["slug"], ["generated_on"]] },
+    });
+    const post = (slug: string, generatedOn: string | null) => ({
+      title: "T",
+      slug,
+      content: "C",
+      category: "development",
+      status: "draft",
+      generated_on: generatedOn,
+    });
+
+    const first = await db.client
+      .from("blog_posts")
+      .insert(post("a", "2026-10-09"));
+    const sameDay = await db.client
+      .from("blog_posts")
+      .insert(post("b", "2026-10-09"));
+    const sameSlug = await db.client
+      .from("blog_posts")
+      .insert(post("a", "2026-10-10"));
+    const undated = await db.client
+      .from("blog_posts")
+      .insert([post("c", null), post("d", null)]);
+
+    expect(first.error).toBeNull();
+    expect(sameDay.error).toMatchObject({ code: "23505" });
+    expect(sameSlug.error).toMatchObject({ code: "23505" });
+    expect(undated.error).toBeNull();
+    expect(
+      db
+        .rows("blog_posts")
+        .map((row) => row.slug)
+        .sort(),
+    ).toEqual(["a", "c", "d"]);
+  });
+
+  it("refuses an update that would duplicate a unique key", async () => {
+    const db = createSchemaStrictDatabase({
+      uniqueKeys: { blog_posts: [["slug"]] },
+    });
+    db.seed("blog_posts", [
+      { id: "1", title: "T", slug: "a", content: "C", category: "x" },
+      { id: "2", title: "T", slug: "b", content: "C", category: "x" },
+    ]);
+
+    const result = await db.client
+      .from("blog_posts")
+      .update({ slug: "a" })
+      .eq("id", "2");
+
+    expect(result.error).toMatchObject({ code: "23505" });
+    expect(db.rows("blog_posts").map((row) => row.slug)).toEqual(["a", "b"]);
+  });
 });

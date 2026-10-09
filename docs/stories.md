@@ -4023,7 +4023,7 @@ Embed allocation: 0 bytes.
 CTO decision under the owner's 2026-10-09 directive. Source: the PRD's SEO "Publishing discipline"
 (`docs/prd.md:320-322`: *"it drafts, a human publishes … Gate it."*) and the live finding recorded in
 s17's agentic notes (this file, "`cron/generate-blog-post` already auto-publishes, today, daily").
-Research: `docs/research/s89-blog-drafts-only.md`. Decision: [ADR 056](./decisions/056-ai-blog-posts-are-drafts-platform-admin-publishes.md).
+Research: `docs/research/s89-blog-drafts-only.md`. Decision: [ADR 057](./decisions/057-ai-blog-posts-are-drafts-platform-admin-publishes.md).
 No new screen, so no Design step (recorded in `docs/designs/README.md`).
 
 Cause (verified on `origin/main` `c0c40bf`): `vercel.json:3-5` runs `/api/cron/generate-blog-post`

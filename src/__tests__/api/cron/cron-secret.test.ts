@@ -1,10 +1,10 @@
 /**
  * s77 (s69 L4) — `CRON_SECRET` is compared in constant time, through one helper.
  *
- * The three cron routes and the blog generator's server-to-server path compared
- * `Authorization` against `Bearer ${CRON_SECRET}` with `!==` / `===`, which
- * returns at the first differing byte. Every other secret in this codebase goes
- * through `crypto.timingSafeEqual`; this was the one that did not.
+ * The three cron routes compared `Authorization` against
+ * `Bearer ${CRON_SECRET}` with `!==` / `===`, which returns at the first
+ * differing byte. Every other secret in this codebase goes through
+ * `crypto.timingSafeEqual`; this was the one that did not.
  *
  * The routes' 401/200 behaviour is the same under either comparison, so the
  * route rows also assert the decision consulted `crypto.timingSafeEqual` — the
@@ -39,48 +39,24 @@ jest.mock("@/lib/supabase/service", () => ({
   })),
 }));
 
-// The blog generator's second path (a signed-in admin): nobody is signed in.
-jest.mock("@/lib/supabase/server", () => ({
-  createClient: jest.fn(() =>
-    Promise.resolve({
-      auth: {
-        getUser: jest.fn(() =>
-          Promise.resolve({ data: { user: null }, error: null }),
-        ),
-      },
-    }),
-  ),
-}));
-
 import { GET as abTestLifecycle } from "@/app/api/cron/ab-test-lifecycle/route";
 import { GET as generateBlogPostCron } from "@/app/api/cron/generate-blog-post/route";
 import { GET as webhookDispatch } from "@/app/api/cron/webhook-dispatch/route";
-import { POST as generateBlogPost } from "@/app/api/blog/generate/route";
 
 const SECRET = "cron-secret-0123456789";
 const manager = webhookManager as jest.Mocked<typeof webhookManager>;
 const mockFetch = jest.fn();
 
-function request(
-  path: string,
-  authorization: string | undefined,
-  method = "GET",
-): NextRequest {
+function request(path: string, authorization: string | undefined): NextRequest {
   return new NextRequest(`https://www.recopyfa.st${path}`, {
-    method,
-    headers: {
-      ...(authorization ? { authorization } : {}),
-      ...(method === "POST" ? { "content-type": "application/json" } : {}),
-    },
-    ...(method === "POST" ? { body: JSON.stringify({ topic: "Topic" }) } : {}),
+    headers: authorization ? { authorization } : {},
   });
 }
 
 /**
  * Each route, called the way its caller calls it. An authorised call goes past
- * the gate: the lifecycle and dispatch ticks answer 200, the two blog paths
- * reach their outbound `fetch` (stubbed to fail, so they answer 500 — anything
- * but 401 means the gate opened).
+ * the gate: the lifecycle and dispatch ticks answer 200; the blog cron reaches
+ * its draft read and answers anything but 401.
  */
 const ROUTES: Array<{
   name: string;
@@ -102,11 +78,6 @@ const ROUTES: Array<{
     name: "GET /api/cron/webhook-dispatch",
     call: (authorization) =>
       webhookDispatch(request("/api/cron/webhook-dispatch", authorization)),
-  },
-  {
-    name: "POST /api/blog/generate",
-    call: (authorization) =>
-      generateBlogPost(request("/api/blog/generate", authorization, "POST")),
   },
 ];
 

@@ -1,4 +1,4 @@
-# ADR 056 — AI blog posts are drafts; only a platform admin publishes, through the service role
+# ADR 057 — AI blog posts are drafts; only a platform admin publishes, through the service role
 
 - Status: accepted
 - Date: 2026-10-09

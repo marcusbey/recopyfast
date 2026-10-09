@@ -36,7 +36,7 @@ built by `scripts/run-db-invariants.mjs` (bootstrap + every migration), deleted 
    only the JWT's `app_metadata.role` (`20260818000000…sql:1174-1180`). Postgres cannot read a Vercel
    env var, so an owner who is only in `ADMIN_EMAILS` passes the route and is refused by the database.
    The owner directive says `ADMIN_EMAILS` is how the owner is made admin, so any admin write has to
-   go through the service role after the route's own check (ADR 056).
+   go through the service role after the route's own check (ADR 057).
 
 4. **There is no blog admin tooling.** `grep -rln blog_posts src` → `sitemap.ts`,
    `blog/[slug]/page.tsx`, `api/blog/generate/route.ts` and one test. No page, no publish route, no
