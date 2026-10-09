@@ -114,6 +114,11 @@ s72b's.
   `expires_at − created_at` is the span the server itself chose at mint: 12 h for a session grant,
   7 d for a remembered one. That span, not the body, is what a rotation can honestly inherit
   (threshold 24 h — the widget's own `REMEMBERED_FLOOR_MS`, `recopyfast.src.js:198`).
+  **Corrected in the Devin fix pass:** the span describes the row, not the choice. Once the
+  ceiling caps a replacement (any rotation in the final day), its span is under 24 h and the next
+  rotation read a remembered lineage as session-only. The choice now travels signed in the token
+  as `r` (1 / 0), beside `l`; the span stands in only for a token minted before it, whose row was
+  never capped.
 - The lineage's first issue is not on the row, and walking `rotated_from` is unbounded. The grant
   is already a signed payload (`{g, s, o, x, n}`, `editor-grants.ts:69-80`): it can carry the
   lineage start `l` (epoch seconds) forward at every rotation, unforgeable without the key. A

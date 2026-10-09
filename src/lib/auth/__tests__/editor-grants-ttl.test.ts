@@ -48,6 +48,7 @@ import {
   MAX_GRANT_LINEAGE_MS,
   REMEMBERED_GRANT_TTL_MS,
   SESSION_GRANT_TTL_MS,
+  issueDeviceGrant,
   refreshDeviceGrant,
   validateDeviceGrant,
   type DeviceContext,
@@ -157,6 +158,8 @@ function grantRow(
     signedExpiry?: unknown;
     /** The row's `expires_at`, verbatim (default: `createdAtMs + expiresInMs`). */
     rowExpiresAt?: unknown;
+    /** The token's signed `r`, verbatim (default: absent, a pre-fix token). */
+    remembered?: unknown;
   } = {},
 ) {
   const createdAtMs = opts.createdAtMs ?? Date.now();
@@ -174,6 +177,7 @@ function grantRow(
     ...(opts.lineageStartMs === undefined
       ? {}
       : { l: Math.floor(opts.lineageStartMs / 1000) }),
+    ...("remembered" in opts ? { r: opts.remembered } : {}),
   });
 
   return {
@@ -709,5 +713,302 @@ describe("s76 review fix pass 2 — a date that cannot be believed is refused", 
         reason: "expired",
       });
     });
+  });
+});
+
+describe("Devin fix pass — a remembered lineage stays remembered to its ceiling", () => {
+  // Remembered-ness used to be read off the row being rotated (its
+  // `expires_at − created_at` above a day). A replacement minted in the
+  // lineage's final day is capped at the ceiling, so its own span is under a
+  // day: the next rotation read it as session-only and minted twelve hours,
+  // asking a remembered editor for an emailed code before the thirty days
+  // they were promised. The choice now travels in the signed token as `r`.
+
+  const EDITOR_JOIN = {
+    id: EDITOR_ID,
+    site_id: SITE_ID,
+    email: "bob@corp.example",
+    permissions: ["edit"],
+    revoked_at: null,
+  };
+
+  /**
+   * A stateful `editor_device_grants`: an insert gets an id and a
+   * database-stamped `created_at` (the frozen clock); reads and updates honour
+   * `eq` / `is`. Each rotation therefore reads the row the previous one wrote.
+   */
+  function grantTable() {
+    const rows: Array<Record<string, unknown>> = [];
+    let minted = 0;
+
+    function from() {
+      let kind: "select" | "update" | "insert" | "delete" = "select";
+      let payload: Record<string, unknown> = {};
+      const filters: Array<(row: Record<string, unknown>) => boolean> = [];
+      const matching = () => rows.filter((row) => filters.every((f) => f(row)));
+
+      const run = () => {
+        if (kind === "insert") {
+          minted += 1;
+          const row = {
+            ...payload,
+            id: `grant-${minted}`,
+            created_at: new Date(Date.now()).toISOString(),
+            revoked_at: null,
+            revoked_reason: null,
+            site_editors: EDITOR_JOIN,
+          };
+          rows.push(row);
+          return { data: { id: row.id }, error: null };
+        }
+        const hit = matching();
+        if (kind === "update") {
+          for (const row of hit) Object.assign(row, payload);
+          return { data: hit.map((row) => ({ id: row.id })), error: null };
+        }
+        if (kind === "delete") {
+          for (const row of hit) rows.splice(rows.indexOf(row), 1);
+          return { data: null, error: null };
+        }
+        return { data: hit[0] ?? null, error: null };
+      };
+
+      const builder: Record<string, unknown> = {
+        select: () => builder,
+        insert: (values: Record<string, unknown>) => {
+          kind = "insert";
+          payload = values;
+          return builder;
+        },
+        update: (values: Record<string, unknown>) => {
+          kind = "update";
+          payload = values;
+          return builder;
+        },
+        delete: () => {
+          kind = "delete";
+          return builder;
+        },
+        eq: (column: string, value: unknown) => {
+          filters.push((row) => row[column] === value);
+          return builder;
+        },
+        is: (column: string, value: unknown) => {
+          filters.push((row) => (row[column] ?? null) === value);
+          return builder;
+        },
+        single: () => Promise.resolve(run()),
+        maybeSingle: () => Promise.resolve(run()),
+        then: (
+          onOk: (v: unknown) => unknown,
+          onErr?: (e: unknown) => unknown,
+        ) => Promise.resolve(run()).then(onOk, onErr),
+      };
+      return builder;
+    }
+
+    mockCreateServiceRoleClient.mockReturnValue({
+      from,
+    } as unknown as ReturnType<typeof createServiceRoleClient>);
+    return { rows };
+  }
+
+  /** Freeze the clock on a whole second (`l` is epoch seconds). */
+  function frozenClock() {
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const clock = { now: start };
+    jest.spyOn(Date, "now").mockImplementation(() => clock.now);
+    return { start, clock };
+  }
+
+  async function rotate(
+    grant: string,
+  ): Promise<{ grant: string; expiresAt: number }> {
+    const result = await refreshDeviceGrant({
+      grant,
+      siteId: SITE_ID,
+      device,
+      // Ignored (A-28); sent to prove it moves nothing either way.
+      rememberDevice: true,
+    });
+    if (!result.ok) throw new Error(`refresh refused: ${result.reason}`);
+    return { grant: result.grant, expiresAt: result.expiresAt.getTime() };
+  }
+
+  function signedFlag(grant: string): unknown {
+    return decodeSignedToken<{ r?: unknown }>(
+      "rcfg1",
+      CRYPTO_DOMAIN.grant,
+      grant,
+    )?.r;
+  }
+
+  it("a remembered lineage refreshed twice in its final day ends exactly at its ceiling, still remembered", async () => {
+    const { rows } = grantTable();
+    const { start, clock } = frozenClock();
+    const ceiling = start + MAX_GRANT_LINEAGE_MS;
+
+    const issued = await issueDeviceGrant({
+      siteEditorId: EDITOR_ID,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: true,
+    });
+    let grant = issued!.grant;
+
+    // On schedule: a day before each seven-day grant runs out. Day 24's
+    // replacement is already capped at the ceiling (six days, not seven).
+    for (const day of [6, 12, 18, 24]) {
+      clock.now = start + day * DAY_MS;
+      grant = (await rotate(grant)).grant;
+    }
+
+    // The final day: every page load slides a grant this close to expiry.
+    // The first replacement's own row spans 23 h, the second's 22 h.
+    for (const hours of [1, 2]) {
+      clock.now = start + 29 * DAY_MS + hours * HOUR_MS;
+      const replaced = await rotate(grant);
+      grant = replaced.grant;
+
+      expect(replaced.expiresAt).toBe(ceiling);
+      expect(rows[rows.length - 1].expires_at).toBe(
+        new Date(ceiling).toISOString(),
+      );
+      expect(signedFlag(grant)).toBe(1);
+    }
+
+    await expect(
+      validateDeviceGrant({ grant, siteId: SITE_ID, device }),
+    ).resolves.toMatchObject({ valid: true, grant: { remembered: true } });
+
+    // And the ceiling still holds: at thirty days, expired.
+    clock.now = ceiling;
+    await expect(
+      validateDeviceGrant({ grant, siteId: SITE_ID, device }),
+    ).resolves.toEqual({ valid: false, reason: "expired" });
+  });
+
+  it("a session-only lineage stays session-only every rotation, to its ceiling too", async () => {
+    const { rows } = grantTable();
+    const { start, clock } = frozenClock();
+    const ceiling = start + MAX_GRANT_LINEAGE_MS;
+
+    const issued = await issueDeviceGrant({
+      siteEditorId: EDITOR_ID,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: false,
+    });
+    let grant = issued!.grant;
+    expect(signedFlag(grant)).toBe(0);
+
+    // Every eleven hours for the whole lineage: each replacement gets twelve
+    // hours (the body's `rememberDevice: true` notwithstanding), the last one
+    // stops at the ceiling.
+    let rotations = 0;
+    for (let at = 11 * HOUR_MS; at < MAX_GRANT_LINEAGE_MS; at += 11 * HOUR_MS) {
+      clock.now = start + at;
+      const replaced = await rotate(grant);
+      grant = replaced.grant;
+      rotations += 1;
+
+      expect(replaced.expiresAt).toBe(
+        Math.min(clock.now + SESSION_GRANT_TTL_MS, ceiling),
+      );
+      expect(signedFlag(grant)).toBe(0);
+    }
+    expect(rotations).toBe(65);
+    expect(rows[rows.length - 1].expires_at).toBe(
+      new Date(ceiling).toISOString(),
+    );
+
+    await expect(
+      validateDeviceGrant({ grant, siteId: SITE_ID, device }),
+    ).resolves.toMatchObject({ valid: true, grant: { remembered: false } });
+  });
+
+  it("a token minted before the fix is judged by its row once; its replacement carries the choice", async () => {
+    // No `r` in a pre-fix token: the row's span decides, as it did, and the
+    // replacement is signed with that answer, so the inference never runs on
+    // a capped row.
+    for (const [expiresInMs, flag] of [
+      [REMEMBERED_GRANT_TTL_MS, 1],
+      [SESSION_GRANT_TTL_MS, 0],
+    ] as const) {
+      const { token, row } = grantRow({ expiresInMs });
+      const { client } = clientFor(row);
+      mockCreateServiceRoleClient.mockReturnValue(client);
+
+      const result = await refreshDeviceGrant({
+        grant: token,
+        siteId: SITE_ID,
+        device,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(signedFlag(result.ok ? result.grant : "")).toBe(flag);
+    }
+  });
+
+  it.each([
+    ["true", true],
+    ['"1"', "1"],
+    ["2", 2],
+  ])(
+    "a signed r of %s reads as session-only, whatever the row's span",
+    async (_, remembered) => {
+      // Only 1 means remembered. Anything else this application could have
+      // signed by mistake takes the narrower lifetime, never the longer.
+      const { token, row } = grantRow({
+        expiresInMs: REMEMBERED_GRANT_TTL_MS,
+        remembered,
+      });
+      const { client, ops } = clientFor(row);
+      mockCreateServiceRoleClient.mockReturnValue(client);
+
+      const before = Date.now();
+      const result = await refreshDeviceGrant({
+        grant: token,
+        siteId: SITE_ID,
+        device,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(mintedExpiryMs(ops) - before).toBeLessThanOrEqual(
+        SESSION_GRANT_TTL_MS + 60_000,
+      );
+    },
+  );
+
+  it("a session-only token whose flag is rewritten to remembered is refused, and nothing is minted", async () => {
+    // The flag is inside the HMAC: changing it breaks the signature.
+    const { rows } = grantTable();
+    frozenClock();
+
+    const issued = await issueDeviceGrant({
+      siteEditorId: EDITOR_ID,
+      siteId: SITE_ID,
+      device,
+      rememberDevice: false,
+    });
+    const [prefix, body, signature] = issued!.grant.split(".");
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    expect(payload.r).toBe(0);
+    const forged = [
+      prefix,
+      Buffer.from(JSON.stringify({ ...payload, r: 1 }), "utf8").toString(
+        "base64url",
+      ),
+      signature,
+    ].join(".");
+    const before = rows.length;
+
+    await expect(
+      validateDeviceGrant({ grant: forged, siteId: SITE_ID, device }),
+    ).resolves.toEqual({ valid: false, reason: "malformed" });
+    await expect(
+      refreshDeviceGrant({ grant: forged, siteId: SITE_ID, device }),
+    ).resolves.toEqual({ ok: false, reason: "malformed" });
+    expect(rows).toHaveLength(before);
   });
 });

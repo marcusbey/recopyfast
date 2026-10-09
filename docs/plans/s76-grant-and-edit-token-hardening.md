@@ -36,6 +36,8 @@ banners and modals are unchanged.
    `rememberDevice` so the A-28 suite can prove no value of it moves the lifetime; the route stops
    reading it. Issuance choices (submit-code's checkbox, handoff/create's hub session) are the
    editor's own and unchanged.
+   **Remembered-ness superseded by decision 20 (Devin fix pass): the span was the row's, not the
+   choice; the choice is signed as `r`.**
 5. **L12: exact registered host** for `originBelongsToSite`, with site-auth's `normalizeDomain` /
    `parseOrigin` (one rule with the content routes). Localhost stays a non-production convenience.
 6. **R4: "sessions" = the editor's `staging_access` invites on that site** (edit sessions belong to
@@ -254,6 +256,73 @@ embed byte. `docs/stories.md` keeps s74, s75 and s76 in id order. s77 is not on 
 27. [x] **Minor 3 — wording.** `build-embed.mjs`, decision 13, `editor-grants.ts`, the jsdom
     suite's escape record.
 28. [x] **Rebase, gates, mutations, one commit.**
+
+## Devin fix pass (2026-10-09, PR #84)
+
+Devin Review raised two findings on `621f936`, one critical and one minor; both fixed, test-first. CTO
+decisions:
+
+20. **The remembered choice travels signed in the grant, as `r`** (critical, "Remembered grants
+   expire early near ceiling", `editor-grants.ts:473`; supersedes decision 4's "remembered-ness
+   of a rotation = the span the server chose for the row being rotated"). The span describes the
+   row, not the editor's choice: `issueDeviceGrant` caps every replacement at the lineage
+   ceiling, so a remembered grant rotated in its final day gets a row spanning under 24 h, and the
+   next rotation read it as session-only: 12 h, and an emailed code before the 30 days. Now
+   `issueDeviceGrant` signs `r: 1 | 0` from the choice it was given (the editor's checkbox at
+   submit-code, the hub session's signed `r` at handoff, the lineage's own `r` at rotation), and
+   `validateDeviceGrant` reads `remembered` off it. `r` is inside the HMAC, beside `l`, so
+   rewriting it breaks the signature (`malformed`); no holder can promote a session-only grant. A
+   token without `r` (minted before this) falls back to its row's span once. Its row was never
+   capped, so the span is truthful there, and the replacement is signed. A present `r` other than
+   1 reads as session-only (the narrower). Written `1 | 0`, not omitted when unticked as the hub
+   session's `r` is, because here absence must mean "minted before the flag", not "session-only".
+   Rejected: deriving it from the lineage's first grant (walking `rotated_from` is unbounded, one
+   read per rotation); a `remembered` column (a migration, a backfill, and a migration-first
+   deploy for a bit the signed payload already carries safely). The widget needs no change: it
+   carries `remembered` across a refresh from its own record, and infers it from the expiry only
+   for a handoff, which starts a new lineage.
+21. **The invite sweep pages in a total order, then writes in bounded batches** (minor, "Editor
+   revocation misses later invites", `editor-directory.ts:376`). The single read of a site's
+   active invites was capped by PostgREST's `max_rows` (1000, `supabase/config.toml`), so an
+   invite past the first page stayed active. Matching in the database was weighed and rejected,
+   because no PostgREST filter expresses `normalizeEmail` exactly. `eq` misses the case variants
+   `staging_access.email` keeps. PostgREST rewrites every `*` in an `ilike` pattern to `%` with no
+   escape, and `*` is legal in an address. `imatch` would need a regex escaper and still not
+   reproduce JS `trim()` / `toLowerCase()`, and an over-match ends somebody else's access.
+   `lower(email)` needs a computed column or an RPC, which means a migration. So: read pages of
+   `id, email` ordered by `id` (the primary key, a total order) with `.range()`, advancing by the
+   rows returned until an empty page, so a server that caps lower still reads every row. Every
+   page is read before anything is written, so the sweep's own updates never shift a later
+   page. Then update by id in batches of 100: every invite is a new row (no uniqueness on
+   `site_id, email`), the ids ride in the URL at about 40 bytes each, and one request for all of
+   them would outgrow a request line. A failed batch logs and reports what landed. Matching stays
+   in code with `normalizeEmail` (decision 6). Concurrent edits to the site's invites during the
+   sweep can shift an offset by a row; best effort, as before. Every staging validator already
+   refuses a revoked address (s68c), so a missed row is stale, not access.
+   The schema-strict double gains s88's `range`, chained `order` keys with PostgreSQL null
+   placement and a `maxRows` option, ported verbatim from `499bbe0` so the two branches merge
+   cleanly.
+
+29. [x] **Critical — remembered to the ceiling.** RED `editor-grants-ttl.test.ts` (new block, with
+    a stateful grant table and a clock frozen on a whole second): a remembered lineage minted
+    by `issueDeviceGrant`, rotated on schedule (days 6, 12, 18, 24), then twice in its final day
+    (+1 h, +2 h). Each final-day replacement expires exactly at the ceiling, its token is signed
+    `r: 1`, it still validates `remembered: true`, and it is `expired` at 30 days. Red before the
+    fix: the +2 h replacement ended 10 h early. Also: a session-only lineage rotated every
+    11 h for the whole 30 days (65 rotations) gets exactly `min(now + 12 h, ceiling)` each time and
+    stays `r: 0`. A pre-fix token (no `r`) is judged by its row once, and its replacement is
+    signed 1 / 0. A session-only token whose payload is rewritten to `r: 1` is `malformed` for
+    validation and refresh, and nothing is minted. GREEN `editor-grants.ts`.
+30. [x] **Minor — every invite.** RED `editor-directory-revoke.test.ts` (new block, on the
+    schema-strict double with `maxRows`, rows seeded out of id order). With 2,500 invites capped at
+    1,000 per response, the editor's invites on pages 1, 2 and 3 are all ended, and a lookalike
+    address, a neighbour and another site's invite are not. A server capping at 7 still reaches
+    rows 8, 15 and 29. Every paged read is ordered ending on `id` (4 reads: 3 pages + the empty
+    one). 250 of the editor's own invites are ended in batches of ≤ 100 ids. The file's
+    hand-rolled fake gains `order` (no-op) and `range` (declared) so its four tests run on the
+    paged read. GREEN `editor-directory.ts`, `schema-strict-supabase.ts` (s88 port).
+31. [x] **Docs.** This section; research § 2 corrected.
+32. [x] **Gates, mutations, one commit.**
 
 Follow-ups (not s76): **the same shadowing class predates s76** — names bare on main before this
 story: `fetch` ×17, `setTimeout` ×15, `clearTimeout` ×4, `alert` ×4, `confirm` ×3, `crypto` ×3,

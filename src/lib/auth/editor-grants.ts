@@ -75,11 +75,19 @@ export const MAX_GRANT_LINEAGE_MS = 30 * 24 * 60 * 60 * 1000;
 const LINEAGE_CLOCK_SKEW_MS = 60 * 1000;
 
 /**
- * A row whose own `expires_at − created_at` exceeds this was minted
- * remembered: seven days against twelve hours, with a day between them for
- * the two clocks that stamp those columns (the database stamps `created_at`,
- * this server computes `expires_at`). The widget's REMEMBERED_FLOOR_MS draws
- * the same line.
+ * For a token minted before the signed `r` only: a row whose own
+ * `expires_at − created_at` exceeds this was minted remembered — seven days
+ * against twelve hours, with a day between them for the two clocks that stamp
+ * those columns (the database stamps `created_at`, this server computes
+ * `expires_at`). The widget's REMEMBERED_FLOOR_MS draws the same line.
+ *
+ * TOMBSTONE (s76 Devin fix pass). This used to decide every rotation. A
+ * replacement minted in a lineage's final day is capped at the ceiling, so
+ * its own span is under a day, and the next rotation read a remembered
+ * lineage as session-only: twelve hours, and an emailed code before the
+ * thirty days. The span describes the row, not the editor's choice; `r`
+ * carries the choice. Pre-fix rows were never capped, so for them alone the
+ * span still tells the truth — once, since their replacement is signed.
  */
 const REMEMBERED_SPAN_FLOOR_MS = 24 * 60 * 60 * 1000;
 
@@ -118,6 +126,14 @@ interface GrantPayload {
    * before s76: their row's `created_at` stands in, once.
    */
   l?: number;
+  /**
+   * Whether the lineage was minted remembered: 1, or 0 (s76 Devin fix pass).
+   * Chosen once, by the editor, at first issue, and copied by every rotation —
+   * inside the HMAC, so no holder can turn a session-only grant into a
+   * remembered one. Absent on tokens minted before it: their row's span
+   * stands in, once. Present but not 1 reads as session-only (the narrower).
+   */
+  r?: 0 | 1;
 }
 
 export type GrantRejection =
@@ -144,7 +160,10 @@ export interface ValidatedGrant {
   shouldRefresh: boolean;
   /** First issue of this grant's lineage — what MAX_GRANT_LINEAGE_MS counts from. */
   lineageStartedAt: Date;
-  /** Whether the row was minted remembered, read off its own span. */
+  /**
+   * Whether the lineage was minted remembered: the signed `r`, or — for a
+   * token minted before it — the row's own span.
+   */
   remembered: boolean;
 }
 
@@ -249,6 +268,7 @@ export async function issueDeviceGrant(params: {
     x: Math.floor(expiresAt.getTime() / 1000),
     n: generateOpaqueSecret(18),
     l: Math.floor(lineageStartedAtMs / 1000),
+    r: params.rememberDevice ? 1 : 0,
   };
   const grant = encodeSignedToken(GRANT_PREFIX, CRYPTO_DOMAIN.grant, payload);
 
@@ -469,8 +489,10 @@ export async function validateDeviceGrant(params: {
         expiresAt.getTime() - Date.now() <= GRANT_REFRESH_THRESHOLD_MS,
       lineageStartedAt: new Date(lineageStartedAtMs),
       remembered:
-        expiresAt.getTime() - new Date(row.created_at).getTime() >
-        REMEMBERED_SPAN_FLOOR_MS,
+        payload.r === undefined
+          ? expiresAt.getTime() - new Date(row.created_at).getTime() >
+            REMEMBERED_SPAN_FLOOR_MS
+          : payload.r === 1,
     },
   };
 }
@@ -489,8 +511,9 @@ export async function refreshDeviceGrant(params: {
   device: DeviceContext;
   /**
    * IGNORED (s76, A-28). The replacement's lifetime comes from the lineage
-   * being rotated — the span the server chose for its row — never from the
-   * caller. TOMBSTONE: this was read off the refresh-grant body and picked the
+   * being rotated — the remembered choice signed into its token (`r`; for a
+   * token minted before that, its row's span) — never from the caller.
+   * TOMBSTONE: this was read off the refresh-grant body and picked the
    * TTL, so a session-only grant became a remembered one with one extra JSON
    * field. Still accepted so a widget built before s76, which sends it, and
    * the A-28 suite, which proves no value of it moves the lifetime, both

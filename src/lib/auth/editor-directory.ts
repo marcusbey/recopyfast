@@ -353,59 +353,104 @@ export async function revokeSiteEditor(params: {
 }
 
 /**
+ * Rows asked for per read of a site's invites: PostgREST's `max_rows`
+ * (supabase/config.toml). The sweep advances by the rows actually returned,
+ * so a server that caps lower still reads every row, just in more requests.
+ */
+const INVITE_PAGE_SIZE = 1000;
+
+/**
+ * Invite ids per update. They travel in the URL (`id=in.(…)`), about 40
+ * bytes each once encoded: a hundred stays near 4 KB, under the 8 KB request
+ * line common proxies allow.
+ */
+const INVITE_UPDATE_BATCH = 100;
+
+/**
  * Deactivate the active `staging_access` invites to one address on one site.
- * Best effort, like the grant sweep: logs and reports 0 when it does not land.
+ * Best effort, like the grant sweep: logs and reports what landed (0 when
+ * nothing did).
  *
  * Matched in code with `normalizeEmail`, never with a PostgREST `ilike`:
  * `staging_access.email` keeps the case it was typed in, and in a LIKE pattern
  * `_` and `%` are wildcards — `bob_x@…` would match, and end, `bobzx@…`'s
- * access. One read of the site's active invites, then an update by id.
+ * access. Nor `imatch`: a regex would not reproduce `normalizeEmail`'s trim
+ * and case rule exactly, and an over-match ends somebody else's access.
+ *
+ * TOMBSTONE (s76 Devin fix pass). The read was one request, and PostgREST
+ * caps every response at `max_rows`: on a site with more active invites than
+ * that, an invite past the first page was never read and stayed active. Every
+ * page is read first, in a total order (the primary key), until an empty
+ * page; only then is anything written, so the sweep's own updates never
+ * shift a later page.
  */
 async function revokeStagingInvites(
   siteId: string,
   email: string,
   now: string,
 ): Promise<number> {
+  const ids = await readStagingInviteIds(siteId, normalizeEmail(email));
+  if (!ids) return 0;
+
   const supabase = createServiceRoleClient();
-  const address = normalizeEmail(email);
+  let revoked = 0;
 
-  const { data: invites, error } = await supabase
-    .from("staging_access")
-    .select("id, email")
-    .eq("site_id", siteId)
-    .eq("is_active", true);
+  for (let start = 0; start < ids.length; start += INVITE_UPDATE_BATCH) {
+    const { data, error } = await supabase
+      .from("staging_access")
+      .update({ is_active: false, revoked_at: now })
+      .in("id", ids.slice(start, start + INVITE_UPDATE_BATCH))
+      .eq("is_active", true)
+      .select("id");
 
-  if (error) {
-    console.error("[editor-directory] invite read failed:", error.message);
-    return 0;
+    if (error) {
+      console.error("[editor-directory] invite sweep failed:", error.message);
+      return revoked;
+    }
+    revoked += data?.length ?? 0;
   }
 
-  const ids = (invites ?? [])
-    .filter(
-      (invite: { email: string | null }) =>
+  return revoked;
+}
+
+/**
+ * The ids of the site's active invites to `address`, every page read; null
+ * when a read fails (nothing is written then).
+ */
+async function readStagingInviteIds(
+  siteId: string,
+  address: string,
+): Promise<string[] | null> {
+  const supabase = createServiceRoleClient();
+  const ids: string[] = [];
+
+  for (let offset = 0; ; ) {
+    const { data, error } = await supabase
+      .from("staging_access")
+      .select("id, email")
+      .eq("site_id", siteId)
+      .eq("is_active", true)
+      .order("id")
+      .range(offset, offset + INVITE_PAGE_SIZE - 1);
+
+    if (error) {
+      console.error("[editor-directory] invite read failed:", error.message);
+      return null;
+    }
+
+    const page = (data ?? []) as Array<{ id: string; email: string | null }>;
+    if (page.length === 0) return ids;
+
+    for (const invite of page) {
+      if (
         typeof invite.email === "string" &&
-        normalizeEmail(invite.email) === address,
-    )
-    .map((invite: { id: string }) => invite.id);
-
-  if (ids.length === 0) return 0;
-
-  const { data: revoked, error: updateError } = await supabase
-    .from("staging_access")
-    .update({ is_active: false, revoked_at: now })
-    .in("id", ids)
-    .eq("is_active", true)
-    .select("id");
-
-  if (updateError) {
-    console.error(
-      "[editor-directory] invite sweep failed:",
-      updateError.message,
-    );
-    return 0;
+        normalizeEmail(invite.email) === address
+      ) {
+        ids.push(invite.id);
+      }
+    }
+    offset += page.length;
   }
-
-  return revoked?.length ?? 0;
 }
 
 /** Editors of a site, for the dashboard. Includes revoked rows for audit. */
