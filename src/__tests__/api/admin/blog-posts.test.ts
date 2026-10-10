@@ -50,6 +50,14 @@ const NEWER_DRAFT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const PUBLISHED_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const UNKNOWN_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
+function numberedId(index: number): string {
+  return `00000000-0000-4000-8000-${index.toString().padStart(12, "0")}`;
+}
+
+function encodedCursor(createdAt: string, id = DRAFT_ID): string {
+  return Buffer.from(JSON.stringify({ createdAt, id })).toString("base64url");
+}
+
 const mockCreateClient = createClient as jest.MockedFunction<
   typeof createClient
 >;
@@ -197,6 +205,157 @@ describe("GET /api/admin/blog/posts", () => {
     expect(posts.map((entry: { id: string }) => entry.id)).toEqual([
       PUBLISHED_ID,
     ]);
+  });
+
+  it("returns a cursor that reaches the 51st draft", async () => {
+    db = createSchemaStrictDatabase({
+      uniqueKeys: { blog_posts: [["slug"], ["generated_on"]] },
+    });
+    db.seed(
+      "blog_posts",
+      Array.from({ length: 51 }, (_, index) =>
+        post(numberedId(index + 1), {
+          slug: `draft-${index + 1}`,
+          created_at: new Date(
+            Date.parse("2026-10-09T14:00:00.000Z") - index * 1_000,
+          ).toISOString(),
+        }),
+      ),
+    );
+    mockCreateServiceRoleClient.mockReturnValue(
+      db.client as unknown as ReturnType<typeof createServiceRoleClient>,
+    );
+
+    const firstResponse = await GET(listRequest());
+    const first = await firstResponse.json();
+    const secondResponse = await GET(
+      listRequest(`?cursor=${encodeURIComponent(first.nextCursor)}`),
+    );
+    const second = await secondResponse.json();
+
+    expect(first.posts).toHaveLength(50);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(second.posts.map((entry: { id: string }) => entry.id)).toEqual([
+      numberedId(51),
+    ]);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("uses id as the deterministic tiebreaker when timestamps are equal", async () => {
+    const createdAt = "2026-10-09T14:00:00.000Z";
+    db = createSchemaStrictDatabase({
+      uniqueKeys: { blog_posts: [["slug"], ["generated_on"]] },
+    });
+    db.seed(
+      "blog_posts",
+      Array.from({ length: 52 }, (_, index) =>
+        post(numberedId(index + 1), {
+          slug: `tied-draft-${index + 1}`,
+          created_at: createdAt,
+        }),
+      ),
+    );
+    mockCreateServiceRoleClient.mockReturnValue(
+      db.client as unknown as ReturnType<typeof createServiceRoleClient>,
+    );
+
+    const first = await (await GET(listRequest())).json();
+    const second = await (
+      await GET(listRequest(`?cursor=${encodeURIComponent(first.nextCursor)}`))
+    ).json();
+    const ids = [...first.posts, ...second.posts].map(
+      (entry: { id: string }) => entry.id,
+    );
+
+    expect(ids).toEqual(
+      Array.from({ length: 52 }, (_, index) => numberedId(52 - index)),
+    );
+    expect(new Set(ids)).toHaveProperty("size", 52);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("preserves PostgreSQL microseconds and offset across the page boundary", async () => {
+    const rows = Array.from({ length: 49 }, (_, index) =>
+      post(numberedId(index + 1), {
+        slug: `newer-draft-${index + 1}`,
+        created_at: new Date(
+          Date.parse("2026-10-10T14:00:00.000Z") - index * 1_000,
+        ).toISOString(),
+      }),
+    );
+    rows.push(
+      post(numberedId(50), {
+        slug: "microsecond-boundary",
+        created_at: "2026-10-09T14:00:00.000002+00:00",
+      }),
+      post(numberedId(51), {
+        slug: "microsecond-follower",
+        created_at: "2026-10-09T14:00:00.000001+00:00",
+      }),
+    );
+    db = createSchemaStrictDatabase({
+      uniqueKeys: { blog_posts: [["slug"], ["generated_on"]] },
+    });
+    db.seed("blog_posts", rows);
+    mockCreateServiceRoleClient.mockReturnValue(
+      db.client as unknown as ReturnType<typeof createServiceRoleClient>,
+    );
+
+    const first = await (await GET(listRequest())).json();
+    const decodedCursor = JSON.parse(
+      Buffer.from(first.nextCursor, "base64url").toString("utf8"),
+    );
+    const second = await (
+      await GET(listRequest(`?cursor=${encodeURIComponent(first.nextCursor)}`))
+    ).json();
+
+    expect(decodedCursor).toEqual({
+      createdAt: "2026-10-09T14:00:00.000002+00:00",
+      id: numberedId(50),
+    });
+    expect(second.posts.map((entry: { id: string }) => entry.id)).toEqual([
+      numberedId(51),
+    ]);
+  });
+
+  it.each([
+    "not-base64url!",
+    "a".repeat(257),
+    Buffer.from("not json").toString("base64url"),
+    Buffer.from(
+      JSON.stringify({ createdAt: "yesterday", id: DRAFT_ID }),
+    ).toString("base64url"),
+    Buffer.from(
+      JSON.stringify({
+        createdAt: "2026-10-09T14:00:00.000Z",
+        id: "not-a-uuid",
+      }),
+    ).toString("base64url"),
+    encodedCursor("2026-02-31T14:00:00.000Z"),
+    encodedCursor("2025-02-29T14:00:00.000Z"),
+    encodedCursor("2026-10-09T24:00:00.000Z"),
+    encodedCursor("2026-10-09T23:60:00.000Z"),
+    encodedCursor("2026-10-09T23:59:00.000+15:00"),
+    encodedCursor("2026-10-09T23:59:00.000-14:01"),
+  ])("answers 400 to malformed cursor %s", async (cursor) => {
+    const response = await GET(
+      listRequest(`?cursor=${encodeURIComponent(cursor)}`),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Invalid "cursor"' });
+    expect(mockCreateServiceRoleClient).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid leap day with microseconds and a timezone offset", async () => {
+    const cursor = encodedCursor("2024-02-29T23:59:59.123456-05:00");
+
+    const response = await GET(
+      listRequest(`?cursor=${encodeURIComponent(cursor)}`),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockCreateServiceRoleClient).toHaveBeenCalledTimes(1);
   });
 
   it("works for an app_metadata admin too", async () => {

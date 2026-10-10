@@ -324,6 +324,16 @@ describeDb("s89: durable generation claim", ({ withClient }) => {
         await client.query(
           "GRANT SELECT(owner_token) ON blog_generation_claims TO PUBLIC",
         );
+        for (const role of ["anon", "authenticated"]) {
+          expect(
+            (
+              await client.query(
+                "SELECT has_column_privilege($1,'public.blog_generation_claims','owner_token','SELECT') AS permitted",
+                [role],
+              )
+            ).rows[0].permitted,
+          ).toBe(true);
+        }
         await client.query(
           readFileSync(
             path.join(

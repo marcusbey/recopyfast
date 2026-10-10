@@ -60,15 +60,30 @@ route refuses a request from any other origin, including the apex host and brand
 ## Review
 
 1. Sign in at `<app>/login` with an admin account.
-2. Open `<app>/api/admin/blog/posts` in the same browser. It lists drafts, newest first, each with its
-   full markdown `content`. `<app>/api/admin/blog/posts?status=published` lists what is live.
+2. Open `<app>/api/admin/blog/posts` in the same browser. It lists up to 50 drafts, newest first,
+   each with its full markdown `content`. The JSON response is `{ posts, nextCursor }`. When
+   `nextCursor` is not null, continue from the browser console without editing the opaque cursor:
+
+   ```js
+   let page = await fetch("/api/admin/blog/posts").then((response) => response.json());
+   page = await fetch(
+     `/api/admin/blog/posts?cursor=${encodeURIComponent(page.nextCursor)}`,
+   ).then((response) => response.json());
+   ```
+
+   Repeat the second call until `nextCursor` is null; that is how drafts older than the first 50
+   remain reviewable. For live posts, keep `status=published` on every page:
+   `/api/admin/blog/posts?status=published&cursor=<encoded-nextCursor>`. A malformed or edited cursor
+   returns 400 rather than restarting at the newest page.
+
 3. Read the draft. Check at least:
    - every claim about RecopyFast is true today — the prompt asks the model to mention the product,
      and it will invent features; nothing from the PRD's graveyard (`docs/prd.md`, "Explicitly NOT
      replicated") may be promised;
    - no invented statistics, quotes, customers or sources;
    - it is not a near-duplicate of a post already live (the topic list is fixed; a repeated title
-     gets the day appended to its slug — `…-2026-10-09`);
+     first gets the day appended to its slug — `…-2026-10-09` — and further collisions get an
+     opaque UUID suffix so already-paid output is retained);
    - the title and slug are what you want public.
 4. There is no in-app editor. To fix wording, edit `title`, `content`, `excerpt` or `slug` of the draft
    in the Supabase dashboard (Table Editor → `blog_posts`) **before** publishing. Do not change

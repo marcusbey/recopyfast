@@ -134,11 +134,26 @@ No Design step: no new screen (recorded in `docs/designs/README.md`). No embed c
      sessions proving one owner during an in-flight claim, finalization transaction rollback, legacy
      daily-row reuse, service-role-only table/function grants, RLS, and no replay drift. Keep the
      suite in `scripts/run-db-invariants.mjs`.
-- [ ] 13. **Contract and operations repair.** Make the story AC explicitly require a concurrent
+- [x] 13. **Contract and operations repair.** Make the story AC explicitly require a concurrent
      duplicate to return the same draft without a second OpenAI call; record the review finding in
      research; add the cron/platform-admin service-role principals to AGENTS.md; and document manual
      pending/failed claim recovery in the blog runbook. Rerun focused checks, then hand the fix to an
      independent `/ks-review`; do not write the ship gate here.
+- [x] 14. **Post-CI admin-list pagination.** Add a bounded opaque cursor over `created_at DESC,
+     id DESC`, fetch one look-ahead row while returning at most 50 posts, and reject malformed
+     cursors before creating the service-role client. Prove a 51st row is reachable and equal
+     timestamps neither skip nor duplicate a post. Document repeated runbook navigation.
+- [x] 15. **Post-CI on-demand slug collisions.** Preserve the paid model output when the plain and
+     dated slugs are both occupied: retry a bounded number of UUID-suffixed slugs for on-demand
+     drafts only. Prove a further collision and concurrent same-title calls produce distinct rows
+     without another generation attempt or returning an unrelated draft. Leave the daily durable
+     claim path unchanged.
+- [x] 16. **Withdraw the stale review gate and triage the database claim.** Retain the 2026-10-10
+     review text as historical evidence but remove its terminal ship authorization because tasks
+     14-15 changed reviewed source. The PUBLIC-column-grant bot claim needs no migration change:
+     `src/__tests__/db/blog-generation-claim.test.ts` injects that exact grant, replays the actual
+     migration, and proves web roles cannot read `owner_token`; the retained PostgreSQL 17 run passed.
+     Record focused red/green evidence and require a fresh independent review.
 
 ## Claim-fix verification checkpoint (2026-10-10)
 
@@ -158,3 +173,29 @@ already committed draft/claim stay succeeded and a retry does not call the gener
 The operational runbook now names both migrations and the explicit manual-recovery boundary.
 Full gates and independent review are still open; the existing blocked review is not a verdict
 on this uncommitted repair.
+
+## Post-CI fix checkpoint (2026-10-10)
+
+The admin list now returns at most 50 rows plus an opaque continuation cursor derived from its
+deterministic `created_at DESC, id DESC` order. Focused tests traverse a 51st row, preserve all rows
+across an equal-timestamp boundary, and reject invalid encodings/timestamps/UUIDs before the
+service-role client is created. On-demand generation now retries a bounded set of UUID-suffixed
+slugs after the plain and dated candidates collide; the paid markdown is generated once per request
+and the returned row is the row inserted by that request. The daily claim path is unchanged.
+
+The previously passed review was withdrawn after these source changes. Fresh review found and
+the implementer repaired strict calendar validation and test-fixture typing defects. Invalid
+February dates and hour 24 now fail before service-role client creation; valid leap days and
+PostgreSQL microseconds/offsets remain accepted. The independent repair rerun passed 79 focused
+tests and both findings are resolved.
+
+The orchestrator's fresh full gates passed: lint (0 errors, 34 inherited warnings), both type
+checks, formatting, 421 Jest suites / 5,683 tests (38 existing database-gated skips), production
+build, and coverage (72.84% lines, 65.50% branches). Disposable PostgreSQL 17.11 replay passed all
+15 named suites / 102 tests, with one existing PostgREST-only skip. The strengthened grant test
+proves the injected PUBLIC owner-token permission is effective before replay and absent afterward
+for both web roles; no migration change is needed for that automated warning.
+
+Evidence: primary checkout `.omx/ultragoal/evidence/s89/post-ci-fixes/` and
+`post-ci-review/`. Final independent review, normal-hook commit/push, and exact-head hosted CI
+remain the delivery gates; production and live provider acceptance stay separate.

@@ -1,4 +1,9 @@
-# Review — s89-blog-drafts-only
+# Historical review — s89-blog-drafts-only (fresh review pending)
+
+> This report passed source `96e2d0786ed79cc2432b5c57feb55d62aebbe169`. Post-CI fixes now
+> change the admin-list pagination and on-demand slug-collision behavior, so its mechanical ship
+> authorization is withdrawn. The report is retained verbatim below as point-in-time evidence; a
+> fresh independent `/ks-review` must replace this pending state before ship.
 
 Reviewer: fresh independent review, 2026-10-10. Frozen source:
 `96e2d0786ed79cc2432b5c57feb55d62aebbe169`; accepted base:
@@ -105,7 +110,43 @@ Before production release, the owner still must inventory existing blog rows, re
 legacy AI publication, apply both migrations in order, set `ADMIN_EMAILS`, deploy, and verify the
 live cron plus public visibility. The hard-coded `/blog` index remains the declared follow-up.
 
-Review passed. Next step: `/ks-ship s89-blog-drafts-only`.
+Historical verdict at `96e2d0786ed79cc2432b5c57feb55d62aebbe169`: max severity none; ship
+allowed at that frozen source only.
+
+## Independent post-CI review — 2026-10-10
+
+Reviewer: fresh `s89_post_ci_review` context, separate from the implementation context.
+Reviewed base `0dea1c05babed48834ecc72700cfebef01ae6733`, HEAD
+`3fd0a25a852f73d241d8447ec5af6fd3d6e7b293` plus the nine-file post-CI working diff.
+The reviewer examined the 40-file full story and the new fixes in detail, first requested
+changes for invalid calendar acceptance and test fixture typing, then independently re-reviewed
+the repair and approved with no remaining findings.
+
+- The composite descending `created_at`/`id` cursor reaches drafts beyond row 50 without skipping
+  or repeating timestamp ties. Null timestamps sort last and continue by UUID.
+- Cursor input is bounded and validated before service-role client creation. Gregorian calendar,
+  leap-year, clock and offset checks reject impossible dates while preserving PostgreSQL
+  microseconds and original offsets. The earlier permissive `Date.parse` defect is fixed.
+- On-demand generation retains its generated markdown through bounded UUID slug retries, calls
+  the generator once per request, and returns its own inserted draft. The daily durable-claim
+  path is unchanged.
+- Test fixture rows now use explicit object spreads; no `any` or type escape was introduced.
+- The automated PUBLIC `owner_token` claim is empirically false on PostgreSQL 17.11. The test
+  injects `GRANT SELECT(owner_token) TO PUBLIC`, proves effective access for both web roles,
+  replays the actual migration, and proves both roles lose access. The positive control and
+  post-replay assertions passed; no speculative migration change was made.
+
+Fresh reviewer execution: three focused suites, 79 tests passed. Root gates inspected by the
+reviewer: both type checks, lint (zero errors, 34 inherited warnings), formatting, full coverage
+(421 suites / 5,683 tests passed, 38 known database-gated skips; 72.84% lines and 65.50% branches),
+production build, and disposable PostgreSQL 17.11 replay (15 named suites / 102 tests passed,
+one expected PostgREST-only skip). Evidence is in the primary checkout's
+`.omx/ultragoal/evidence/s89/post-ci-fixes/` and `post-ci-review/`.
+
+No real OpenAI request, signed-in hosted browser journey, production database, migration
+deployment, deployed `ADMIN_EMAILS` setting or production blog inventory was verified. The
+operational release checks above remain open. This approval covers the repaired source; normal
+commit/push hooks and exact-head hosted CI must still pass before the PR returns to ready.
 
 Max severity: none
 Ship allowed: yes

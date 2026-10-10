@@ -507,6 +507,137 @@ describe("createOnDemandDraft", () => {
     });
   });
 
+  it("keeps paid output after the plain, dated, and one UUID slug all collide", async () => {
+    const firstSuffix = "11111111-1111-4111-8111-111111111111";
+    const secondSuffix = "22222222-2222-4222-8222-222222222222";
+    db.seed("blog_posts", [
+      {
+        ...buildDraftRow(PLAIN, {
+          topic: "Existing plain",
+          category: "development",
+          generatedOn: null,
+        }),
+      },
+      {
+        ...buildDraftRow(PLAIN, {
+          topic: "Existing dated",
+          category: "development",
+          generatedOn: null,
+        }),
+        slug: `${SLUG}-2026-10-09`,
+      },
+      {
+        ...buildDraftRow(PLAIN, {
+          topic: "Existing UUID",
+          category: "development",
+          generatedOn: null,
+        }),
+        slug: `${SLUG}-${firstSuffix}`,
+      },
+    ]);
+    const suffixes = [firstSuffix, secondSuffix][Symbol.iterator]();
+    const generate = generator();
+
+    const result = await createOnDemandDraft({
+      db: client(),
+      now: DELIVERY,
+      subject: { topic: "Paid topic", category: "development" },
+      generate,
+      slugSuffix: () => suffixes.next().value!,
+    });
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(result.slug).toBe(`${SLUG}-${secondSuffix}`);
+    expect(db.rows("blog_posts")).toHaveLength(4);
+    expect(db.rows("blog_posts").at(-1)).toMatchObject({
+      id: result.id,
+      slug: result.slug,
+      content: PLAIN,
+    });
+  });
+
+  it("bounds UUID retries without regenerating or returning an existing draft", async () => {
+    const occupiedSuffix = "11111111-1111-4111-8111-111111111111";
+    const existing = [
+      {
+        ...buildDraftRow(PLAIN, {
+          topic: "Existing plain",
+          category: "development",
+          generatedOn: null,
+        }),
+      },
+      {
+        ...buildDraftRow(PLAIN, {
+          topic: "Existing dated",
+          category: "development",
+          generatedOn: null,
+        }),
+        slug: `${SLUG}-2026-10-09`,
+      },
+      {
+        ...buildDraftRow(PLAIN, {
+          topic: "Existing UUID",
+          category: "development",
+          generatedOn: null,
+        }),
+        slug: `${SLUG}-${occupiedSuffix}`,
+      },
+    ];
+    db.seed("blog_posts", existing);
+    const generate = generator();
+
+    await expect(
+      createOnDemandDraft({
+        db: client(),
+        now: DELIVERY,
+        subject: { topic: "Paid topic", category: "development" },
+        generate,
+        slugSuffix: () => occupiedSuffix,
+      }),
+    ).rejects.toThrow("duplicate key value");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(db.rows("blog_posts")).toHaveLength(existing.length);
+    expect(
+      db
+        .queriesOn("blog_posts")
+        .filter((query) => query.operation === "insert"),
+    ).toHaveLength(6);
+  });
+
+  it("gives concurrent same-title drafts distinct slugs without regenerating", async () => {
+    const generate = generator();
+    const suffixes = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+
+    const drafts = await Promise.all(
+      suffixes.map((suffix) =>
+        createOnDemandDraft({
+          db: client(),
+          now: DELIVERY,
+          subject: { topic: "Concurrent topic", category: "development" },
+          generate,
+          slugSuffix: () => suffix,
+        }),
+      ),
+    );
+
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(new Set(drafts.map((draft) => draft.id))).toHaveProperty("size", 3);
+    expect(new Set(drafts.map((draft) => draft.slug))).toHaveProperty(
+      "size",
+      3,
+    );
+    expect(drafts.map((draft) => draft.slug)).toEqual([
+      SLUG,
+      `${SLUG}-2026-10-09`,
+      `${SLUG}-${suffixes[2]}`,
+    ]);
+  });
+
   it("picks a listed topic when none is given", async () => {
     const generate = generator();
 

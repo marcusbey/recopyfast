@@ -25,7 +25,8 @@
  *
  * Supported: `select` (column lists and `*`, `{ count, head }`), `insert`,
  * `update`, `delete`, `eq/neq/gt/gte/lt/lte/is/in`, `order`, `limit`, `single`,
- * `maybeSingle`, and awaiting the builder. Anything else throws, so a test can
+ * `maybeSingle`, the bounded `or(simple,and(simple,simple))` form used by cursor
+ * pagination, and awaiting the builder. Anything else throws, so a test can
  * never pass by the double silently ignoring what the code asked.
  */
 
@@ -131,6 +132,47 @@ function compare(
   }
 }
 
+function splitTopLevel(expression: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index];
+    if (character === "(") depth += 1;
+    if (character === ")") depth -= 1;
+    if (character === "," && depth === 0) {
+      parts.push(expression.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(expression.slice(start));
+  return parts;
+}
+
+function parseOrFilter(expression: string): RecordedFilter[][] {
+  function simple(value: string): RecordedFilter {
+    const match = value.match(/^(\w+)\.(eq|neq|gt|gte|lt|lte|is)\.(.+)$/);
+    if (!match) {
+      throw new Error(
+        `schema-strict double: unsupported or() filter "${value}" — extend the double`,
+      );
+    }
+    const [, column, operator, raw] = match;
+    return {
+      column,
+      operator: operator as FilterOperator,
+      value: operator === "is" && raw === "null" ? null : raw,
+    };
+  }
+
+  return splitTopLevel(expression).map((arm) => {
+    if (arm.startsWith("and(") && arm.endsWith(")")) {
+      return splitTopLevel(arm.slice(4, -1)).map(simple);
+    }
+    return [simple(arm)];
+  });
+}
+
 class Table {
   constructor(
     readonly name: string,
@@ -175,6 +217,7 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   private projection: string[] | null = null;
   private payload: Row[] = [];
   private filters: RecordedFilter[] = [];
+  private disjunctions: RecordedFilter[][][] = [];
   private rowLimit: number | null = null;
   private isHead = false;
   private isCounted = false;
@@ -249,6 +292,10 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   }
   in(column: string, values: unknown[]): this {
     return this.filter("in", column, values);
+  }
+  or(expression: string): this {
+    this.disjunctions.push(parseOrFilter(expression));
+    return this;
   }
 
   /**
@@ -342,6 +389,7 @@ class QueryBuilder implements PromiseLike<QueryResult> {
     const readColumn = table.unknownColumn([
       ...(this.projection ?? []),
       ...this.filters.map((filter) => filter.column),
+      ...this.disjunctions.flat(2).map((filter) => filter.column),
       ...this.orderings.map((ordering) => ordering.column),
     ]);
     if (readColumn) {
@@ -355,8 +403,17 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   }
 
   private matches(row: Row): boolean {
-    return this.filters.every((filter) =>
-      compare(filter.operator, row[filter.column], filter.value),
+    return (
+      this.filters.every((filter) =>
+        compare(filter.operator, row[filter.column], filter.value),
+      ) &&
+      this.disjunctions.every((arms) =>
+        arms.some((conjunction) =>
+          conjunction.every((filter) =>
+            compare(filter.operator, row[filter.column], filter.value),
+          ),
+        ),
+      )
     );
   }
 

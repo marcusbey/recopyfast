@@ -84,6 +84,7 @@ const DAILY_CLAIM_COLUMNS = "status, post_id";
 const DAILY_CLAIM_RPC = "claim_daily_blog_generation";
 const DAILY_COMPLETE_RPC = "complete_daily_blog_generation";
 const DAILY_FAIL_RPC = "fail_daily_blog_generation";
+const ON_DEMAND_UUID_RETRIES = 4;
 
 /** OpenAI is bounded at 30 s; give its winning request a small commit margin. */
 export const DAILY_DRAFT_FOLLOWER_WAIT_MS = 35_000;
@@ -182,14 +183,14 @@ function insertDraft(db: SupabaseClient, row: DraftRow) {
 }
 
 /**
- * Inserts the draft. A unique violation is either the day's key (another run
- * won: return its row) or the slug (an earlier post has this title: append the
- * day and try once more).
+ * Inserts the draft. A daily unique violation may be the day's key, while an
+ * on-demand draft retries slug collisions without discarding paid model output.
  */
 async function writeDraft(
   db: SupabaseClient,
   row: DraftRow,
   day: string,
+  slugSuffix: () => string,
 ): Promise<DailyDraftResult> {
   const first = await insertDraft(db, row);
   if (!first.error) {
@@ -217,6 +218,23 @@ async function writeDraft(
   if (row.generated_on && retry.error.code === UNIQUE_VIOLATION) {
     const winner = await findDailyDraft(db, row.generated_on);
     if (winner) return { created: false, draft: winner };
+  }
+
+  if (!row.generated_on && retry.error.code === UNIQUE_VIOLATION) {
+    for (let attempt = 0; attempt < ON_DEMAND_UUID_RETRIES; attempt += 1) {
+      const candidate = await insertDraft(db, {
+        ...row,
+        slug: `${row.slug}-${slugSuffix()}`,
+      });
+      if (!candidate.error) {
+        return { created: true, draft: candidate.data as BlogPostSummary };
+      }
+      if (candidate.error.code !== UNIQUE_VIOLATION) {
+        throw new Error(
+          `Failed to save the blog draft: ${candidate.error.message}`,
+        );
+      }
+    }
   }
 
   throw new Error(`Failed to save the blog draft: ${retry.error.message}`);
@@ -482,6 +500,8 @@ export interface OnDemandDraftOptions {
   keywords?: string;
   generate?: GeneratePost;
   random?: () => number;
+  /** Deterministic seam for bounded slug-collision tests. */
+  slugSuffix?: () => string;
 }
 
 /** An admin's on-demand draft: not keyed by day, still never published. */
@@ -492,6 +512,7 @@ export async function createOnDemandDraft({
   keywords,
   generate = generatePostMarkdown,
   random = Math.random,
+  slugSuffix = randomUUID,
 }: OnDemandDraftOptions): Promise<BlogPostSummary> {
   const chosen = subject ?? pickTopic(random);
   const markdown = await generate({
@@ -504,6 +525,7 @@ export async function createOnDemandDraft({
     db,
     buildDraftRow(markdown, { ...chosen, generatedOn: null }),
     utcDay(now),
+    slugSuffix,
   );
   return draft;
 }
