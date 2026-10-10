@@ -27,10 +27,12 @@
  */
 
 const mockConstructEvent = jest.fn();
+const mockSubscriptionRetrieve = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
+    subscriptions: { retrieve: mockSubscriptionRetrieve },
   })),
 );
 
@@ -239,6 +241,21 @@ describe("invoice and customer handlers", () => {
     jest.spyOn(console, "warn").mockImplementation(() => {});
     jest.spyOn(console, "error").mockImplementation(() => {});
     customerReadError = null;
+    // invoice.payment_succeeded now checks Stripe's cancellation marker even
+    // when the local row reads live: webhook ordering can leave that row stale,
+    // and only `covered_by_lifetime` authorises the late refund. This guard
+    // fixture is an ordinary renewing subscription, so the invoice is recorded
+    // and no refund path runs.
+    mockSubscriptionRetrieve.mockResolvedValue({
+      id: "sub_1",
+      customer: "cus_1",
+      status: "active",
+      cancellation_details: {
+        comment: null,
+        feedback: null,
+        reason: null,
+      },
+    });
     db = {
       billing_events: [],
       billing_invoices: [],

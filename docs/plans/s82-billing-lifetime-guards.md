@@ -770,6 +770,236 @@ Mutations (each neutralised, its test red, restored with `git checkout --`):
 | N13 | m-6 report regardless of who cancelled | 2 |
 | N14 | m-7 shared terminal list loses `canceled` | 8 |
 
+## Verification fix pass (8f6c30e)
+
+The fresh verification of `8f6c30e` found one major and four minors: the m-2 late refund read the
+invoice's subscription only from the top-level field the pinned API version no longer sends, and
+four money rules or alerts were unpinned or uneven. Rebased onto `origin/main` `8c121f7` (s88 +
+s70b) first: clean; `docs/stories.md` reordered so s82 sits before s88 (id order).
+
+> CTO decision under the owner's 2026-10-09 directive.
+
+### CTO decisions (verification fix pass)
+
+28. **The invoice's subscription is read in both shapes (MA-1).** `handleInvoicePaymentSucceeded`
+    reads it once through the file's existing `subscriptionOfInvoice()`: `parent.subscription_details`
+    (the pinned `2025-07-30.basil`) or the top-level field (an endpoint on an older version). The
+    same read links `billing_invoices.subscription_id`, which a basil payload left empty before —
+    same field, same handler. Audit of the diff: no other invoice read depends on that field
+    (`handleInvoicePaymentFailed` reads none; the refusal reads the subscription's
+    `latest_invoice` and lists the invoice's payments by id).
+29. **A cover that cannot be read is alerted, and a payment Stripe does not have is dated from its
+    grant (mi-2).** The grant-first path reads the cover through `readCoverOrAlert`: a failure
+    alerts in words ("Could not tell whether subscription … is covered by a lifetime grant … cancel
+    and refund the subscription by hand") and answers 500, as every other refusal failure. CTO
+    decision: a grant whose payment intent Stripe answers `resource_missing` for (a seeded QA grant,
+    `pi_qa_*`; one written in the other Stripe mode) can never be read, and retrying would leave the
+    subscription unrecorded and billing for three days, so that grant is dated from its
+    `granted_at`, as a comp is. The cost is bounded: `granted_at` follows the payment by seconds, so
+    a subscription bought inside that gap would be set to end at period end instead of refunded.
+    Any other Stripe error stays transient (alert + 500).
+30. **A refund another delivery is making is in flight, not failed (mi-3).** When
+    `refunds.create` answers `idempotency_key_in_use` (after the SDK's own two retries of a 409),
+    the refusal re-checks the refunds once: a refund that landed meanwhile counts as made; one that
+    has not is listed as in flight (`inFlightPaymentIds`). Neither path alerts "could not be
+    refunded", retries, or falls back to the period-end update for it: the request holding the key
+    owns the refund and reports its own failure.
+31. **The refusal report is claimed once per subscription (mi-4; replaces decision 25's
+    mechanism).** Whichever delivery first completes the refusal reports it, by winning a
+    write-once `billing_events` row (`stripe_event_id` `covered_by_lifetime:<subscription>`,
+    `event_type` `internal.covered_subscription_refused`, `processed` true, ids only in `data`) —
+    the synthetic-id pattern `credit-revocations.ts` already uses, so no migration. A second event,
+    a concurrent delivery or a later retry loses the insert and logs at info; a retry that
+    completes a refusal its first delivery could not finish wins it and reports, with the payments
+    still in flight. A claim that cannot be written reports anyway (a second alert beats silence).
+    Decision 25's residual (Stripe answering success to a second cancel) no longer affects the
+    report count; its "no false alarm" re-read stays.
+32. **Two money-direction rules pinned (mi-1).** The earliest covering grant decides (X1), and a
+    refund retried after an earlier cancelled one is made again (X10).
+
+### Task 32 — late refunds follow the pinned invoice shape (MA-1)
+
+`invoicePaid()` sends the basil shape by default; the m-2 cases ran red on it (no refund, 200),
+green after. One legacy-shape case keeps the older endpoint covered.
+
+- [x] Task 32
+
+### Task 33 — the earliest grant and cancelled refunds pinned (mi-1)
+
+X1: Lifetime Pro, then a later Founding Agency; a Pro bought between them is refunded. X10: an
+earlier `canceled` refund is refunded again under `…-after-re_canceled`.
+
+- [x] Task 33
+
+### Task 34 — the cover read alerts, a missing payment is dated from its grant (mi-2)
+
+Failing tests first: a grant read failure and a payment-intent read failure each answer 500 with
+the alert sentence (no `Error` attached, `cause` in metadata); a grant whose payment Stripe does
+not have is dated from `granted_at` — bought after → refused, bought before → set to end.
+
+- [x] Task 34
+
+### Task 35 — a refund in flight is not a failure (mi-3)
+
+Failing tests first: subscription-first and grant-first with `idempotency_key_in_use` → no "could
+not be refunded", no period-end update, 200, the report lists the payment in flight; a refund that
+lands meanwhile is counted as made.
+
+- [x] Task 35
+
+### Task 36 — a refusal finished by a retry is reported (mi-4)
+
+Failing test first: first delivery cancels and fails to refund (500, no report); the retry
+completes it and makes the one report, with the payment still processing.
+
+- [x] Task 36
+
+### Verification fix pass — existing tests changed (declared)
+
+- `stripe-webhook-lifetime-covered.test.ts`: `invoicePaid()` takes a shape and defaults to basil
+  (`parent.subscription_details`), so the m-2 cases of the previous pass now send the pinned shape;
+  one legacy-shape case is added. No assertion changed.
+
+### Verification fix pass — execution notes (deviations, declared)
+
+- Rebased before the code changes rather than after (the tree was clean); the result is the same
+  branch on `8c121f7`.
+- `CoveredSubscriptionRefusal.cancelledNow` is gone: the claim decides who reports, not who
+  cancelled.
+- MA-1 also fills `billing_invoices.subscription_id` on basil payloads (decision 28).
+
+Mutations, the whole backstop re-run on the rebased tree (each neutralised, its test red,
+restored with `git checkout --`; N13 of the previous pass is gone with `cancelledNow`, its role
+taken by Y06):
+
+| # | Neutralised | Red |
+|---|---|---|
+| M01 | refund idempotency key made random | 5 |
+| M03 | grant-first rank rule → exact plan match | 1 |
+| M06 | `>=` → `>` on paid-at | 2 |
+| M08 | subscription-first rank rule → exact plan match | 1 |
+| M13 | non-paid payments refunded too | 1 |
+| M14 | `open` payment branch dropped | 3 |
+| M17 | an earlier `failed` refund treated as done | 1 |
+| M21 | "already ended, not by us" guard dropped (grant-first) | 1 |
+| N01 | m-1 grant-first timing rule dropped | 4 |
+| N02 | m-1 comp dated "always" (granted_at ignored) | 2 |
+| N03 | m-2 late-payment refund not run | 3 |
+| N04 | m-2 refusal marker check dropped on the invoice path | 1 |
+| N05 | m-2 live-row gate dropped | 1 |
+| N06 | m-3 cancelled-only branch dropped (subscription-first) | 1 |
+| N07 | m-3 terminal skip dropped (subscription-first) | 1 |
+| N08 | m-3 grant-first alert ignores cancelled-only | 1 |
+| N09 | m-4 alert sends the `Error` (captureException) | 9 |
+| N10 | m-5 chargeback refusal dropped | 1 |
+| N11 | m-5 stale `cancelled_reason` kept | 1 |
+| N12 | m-6 re-read after a failed cancel dropped | 1 |
+| N14 | m-7 shared terminal list loses `canceled` | 10 |
+| Y01 | MA-1 invoice subscription read from the top level only | 2 |
+| X01 | earliest covering grant → latest | 1 |
+| X10 | an earlier `canceled` refund treated as done | 1 |
+| Y02 | mi-2 cover-read alert dropped | 2 |
+| Y03 | mi-2 missing-payment fallback dropped | 2 |
+| Y04 | mi-3 `idempotency_key_in_use` treated as a failure | 3 |
+| Y05 | mi-3 re-check after key-in-use dropped | 1 |
+| Y06 | mi-4/m-6 report claim always granted | 2 |
+
+## Recovery fix pass — Stripe refund-list contract (2026-10-09)
+
+An official-reference audit of the staged verification fix found two defects in the durable
+duplicate-refund guard. Stripe's `refunds.list` is paginated, while `findRefund` read only the
+first 100 rows and could infer "no refund" without reading the remaining pages. Stripe types the
+refund status as `string | null` and documents exactly `pending`, `requires_action`, `succeeded`,
+`failed`, and `canceled`; the staged predicate treated every other value, including null, as a
+refund that stood. Both defects sit inside s82's existing no-duplicate-refund outcome and require
+no API version, dependency, schema, or policy change.
+
+### CTO decisions (recovery fix pass)
+
+33. **The metadata duplicate-refund guard reads every refund page before it infers absence.** It
+    follows Stripe's stable order with `starting_after` and the last id of each page, up to the
+    API's 100-row page size. A page read failure, an empty page that says `has_more`, or a repeated
+    cursor throws; the refusal alerts and returns 500 instead of risking another refund. A live
+    matching refund on any page wins over an earlier failed/canceled attempt; the newest
+    failed/canceled match still supplies the deterministic `-after-<refund id>` retry key when no
+    live match exists.
+34. **Only the five refund statuses documented by the pinned API are actionable.** `pending`,
+    `requires_action`, and `succeeded` stand; `failed` and `canceled` permit the existing retry
+    under a new deterministic key. Null or an unknown future value throws before another refund is
+    created and also throws when returned from `refunds.create`; the webhook reports the failure
+    and asks Stripe to redeliver.
+
+### Task 37 — a matching refund beyond page 100 is still found
+
+`stripe-webhook-lifetime-covered.test.ts`: a matching `succeeded`, `pending`, or
+`requires_action` refund on page two is found and no refund is created; failure to read page two
+and `has_more` without a usable next cursor both answer 500 with no refund attempt. The focused
+block was red 5 cases on the staged helper and green after pagination.
+
+- [x] Task 37
+
+### Task 38 — unknown refund status fails closed
+
+Same file: null and an unknown future status on either a matching existing refund or the result of
+`refunds.create` answer 500, create no additional refund, make no completed-refusal report, and
+raise the existing actionable refund-failure alert. The focused block was red 4 cases on the
+staged helper and green after explicit classification. The complete file passed 68 tests at this
+fix pass.
+
+- [x] Task 38
+
+### Task 39 — a late-payment subscription read failure is retryable
+
+Fresh review found that `handleInvoicePaymentSucceeded` dropped the error from its
+`billing_subscriptions` lookup. A transient read failure therefore looked like no subscription,
+returned 200, and skipped the late refund Task 26 requires. The webhook now keeps PGRST116 as the
+valid no-row case, but alerts in words and throws every other read error so Stripe redelivers. The
+new regression was red at 200 with no alert and green at 500 with the actionable alert.
+
+- [x] Task 39
+
+### Task 40 — Stripe's refusal marker wins over a stale or missing local row
+
+An `invoice.payment_succeeded` can overtake the local cancellation write. The handler now reads
+the current Stripe subscription whenever an invoice names one, checks the
+`covered_by_lifetime` marker, and refunds only that marker after verifying the subscription and
+invoice name the same Stripe customer. Stale-active, missing-row, live-uncovered, and
+customer-mismatch cases pin both directions. This deliberately replaces Task 26's local
+terminal-row optimization: it could silently skip money owed to the customer.
+
+- [x] Task 40
+
+### Task 41 — every invoice-payment page is processed
+
+`refundCoveredInvoice` follows `starting_after` until Stripe says the list is complete. A paid
+payment on page two is refunded; a later-page failure, empty continuation, or repeated cursor
+throws so Stripe redelivers instead of accepting a partial scan.
+
+- [x] Task 41
+
+### Task 42 — covered Checkout pagination must make progress
+
+The open-Checkout scan now treats `has_more` without a new cursor as a read failure. The grant
+stays written and the existing ops alert fires, while the subscription refusal remains the
+backstop if an unexpired session is paid.
+
+- [x] Task 42
+
+### Task 43 — refund reports state what Stripe has proved
+
+`pending` and `requires_action` refunds count as durable, live refund objects for idempotency, but
+are described as "created or found", never "refunded in full". Focused cases also pin expanded
+basil invoice-subscription references plus charge and expanded payment-intent invoice payments.
+The complete webhook backstop file passes 85 tests after this reviewer pass.
+
+- [x] Task 43
+
+### Recovery pass — existing test fixture changed (declared)
+
+- `stripe-webhook-invoice-customer.test.ts`: its Stripe fake now answers the subscription retrieve
+  that Task 40 requires, as a live subscription with no refusal marker. Its existing invoice and
+  customer assertions are unchanged.
+
 ## Follow-ups (not this story)
 
 - Translate and A/B generate refunds report failures to `console.error` only (decision 5).
@@ -791,8 +1021,9 @@ Mutations (each neutralised, its test red, restored with `git checkout --`):
 - `stopBillingForLifetimeOwner` destructures `{ data }` off its subscription read and drops the
   error, so a failed read reads as "no subscriptions" (pre-existing).
 - Stripe test mode (no access here): what `subscriptions.cancel` answers for a subscription already
-  cancelled (decision 25's residual), and whether a canceled subscription's metadata can be read
-  with `cancellation_details.comment` intact on retrieve.
+  cancelled (decision 25's re-read), whether a canceled subscription's metadata can be read with
+  `cancellation_details.comment` intact on retrieve, and the webhook endpoint's API version (basil
+  or older payload shape — decision 28 handles both).
 
 ## Execution notes (deviations, declared)
 

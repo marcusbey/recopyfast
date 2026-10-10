@@ -93,13 +93,34 @@ export async function lifetimePaymentTime(
 
 async function paidAtOf(grant: LifetimeGrant): Promise<number> {
   if (grant.paymentIntentId) {
-    return lifetimePaymentTime(grant.paymentIntentId);
+    try {
+      return await lifetimePaymentTime(grant.paymentIntentId);
+    } catch (error) {
+      // s82 verification (mi-2): a payment Stripe says does not exist — a
+      // seeded QA grant (`pi_qa_*`), one written in the other Stripe mode —
+      // can never be read, and a retry would fail the same way for three
+      // days while the subscription goes unrecorded. Date the grant from when
+      // it was written instead. Any other failure is transient: thrown, so
+      // the caller alerts and Stripe redelivers.
+      if (!isStripeResourceMissing(error)) throw error;
+    }
   }
   // A comp: nobody paid, it covers the plan from when it was written. An
   // unreadable date counts as "always" — the customer-favourable reading,
   // which refunds rather than bills.
   const grantedAtMs = grant.grantedAt ? Date.parse(grant.grantedAt) : NaN;
   return Number.isFinite(grantedAtMs) ? Math.floor(grantedAtMs / 1000) : 0;
+}
+
+/** Stripe's answer for an id it does not have. */
+function isStripeResourceMissing(error: unknown): boolean {
+  return stripeErrorCode(error) === "resource_missing";
+}
+
+function stripeErrorCode(error: unknown): unknown {
+  return typeof error === "object" && error !== null
+    ? (error as { code?: unknown }).code
+    : undefined;
 }
 
 /**
@@ -145,17 +166,9 @@ export function isRefusedAsCoveredByLifetime(
   return subscription.cancellation_details?.comment === COVERED_BY_LIFETIME;
 }
 
-/** What a refusal took back, for the ops report. */
-export interface CoveredSubscriptionRefusal {
-  /** The subscription as Stripe holds it after the refusal: cancelled. */
-  subscription: Stripe.Subscription;
-  /**
-   * True when THIS call cancelled it. Only that call reports the refusal to
-   * ops (s82 review, m-6): Stripe cancels a subscription once, so the report
-   * is made once, however many deliveries reach the refusal.
-   */
-  cancelledNow: boolean;
-  /** Refunds made or found, one per payment the latest invoice collected. */
+/** What refunding a refused subscription's invoice did, for the ops report. */
+export interface CoveredInvoiceRefund {
+  /** Refunds made or found, one per payment the invoice collected. */
   refundIds: string[];
   /**
    * Payments on that invoice still in flight (a bank debit `open`), which the
@@ -163,6 +176,19 @@ export interface CoveredSubscriptionRefusal {
    * `invoice.payment_succeeded` runs `refundCoveredInvoice` (s82 review, m-2).
    */
   pendingPaymentIds: string[];
+  /**
+   * Paid payments whose refund another delivery of the same refusal is making
+   * at this very moment — Stripe refused ours as `idempotency_key_in_use`
+   * (s82 verification, mi-3). That delivery owns the refund and reports its
+   * own failure; this one neither alerts nor retries for it.
+   */
+  inFlightPaymentIds: string[];
+}
+
+/** What a refusal took back, for the ops report. */
+export interface CoveredSubscriptionRefusal extends CoveredInvoiceRefund {
+  /** The subscription as Stripe holds it after the refusal: cancelled. */
+  subscription: Stripe.Subscription;
 }
 
 /**
@@ -213,28 +239,22 @@ export class CoveredRefundFailed extends Error {
 export async function refuseSubscriptionCoveredByLifetime(
   subscription: Stripe.Subscription,
 ): Promise<CoveredSubscriptionRefusal> {
-  const { stopped, cancelledNow } = await cancelCovered(subscription);
+  const stopped = await cancelCovered(subscription);
 
   const invoiceId = idOf(stopped.latest_invoice);
   if (!invoiceId) {
     return {
       subscription: stopped,
-      cancelledNow,
       refundIds: [],
       pendingPaymentIds: [],
+      inFlightPaymentIds: [],
     };
   }
 
   try {
-    const { refundIds, pendingPaymentIds } = await refundCoveredInvoice(
-      invoiceId,
-      stopped.id,
-    );
     return {
       subscription: stopped,
-      cancelledNow,
-      refundIds,
-      pendingPaymentIds,
+      ...(await refundCoveredInvoice(invoiceId, stopped.id)),
     };
   } catch (error) {
     throw new CoveredRefundFailed(stopped, error);
@@ -254,17 +274,16 @@ export async function refuseSubscriptionCoveredByLifetime(
  */
 async function cancelCovered(
   subscription: Stripe.Subscription,
-): Promise<{ stopped: Stripe.Subscription; cancelledNow: boolean }> {
+): Promise<Stripe.Subscription> {
   if (isTerminalSubscriptionStatus(subscription.status)) {
-    return { stopped: subscription, cancelledNow: false };
+    return subscription;
   }
   try {
-    const stopped = await stripe.subscriptions.cancel(subscription.id, {
+    return await stripe.subscriptions.cancel(subscription.id, {
       prorate: false,
       invoice_now: false,
       cancellation_details: { comment: COVERED_BY_LIFETIME },
     });
-    return { stopped, cancelledNow: true };
   } catch (error) {
     const current = await stripe.subscriptions
       .retrieve(subscription.id)
@@ -274,7 +293,7 @@ async function cancelCovered(
       isRefusedAsCoveredByLifetime(current) &&
       isTerminalSubscriptionStatus(current.status)
     ) {
-      return { stopped: current, cancelledNow: false };
+      return current;
     }
     throw error;
   }
@@ -293,31 +312,56 @@ async function cancelCovered(
 export async function refundCoveredInvoice(
   invoiceId: string,
   subscriptionId: string,
-): Promise<{ refundIds: string[]; pendingPaymentIds: string[] }> {
-  const payments = await stripe.invoicePayments.list({
-    invoice: invoiceId,
-    limit: INVOICE_PAYMENT_LOOKUP_LIMIT,
-  });
-
+): Promise<CoveredInvoiceRefund> {
   const refundIds: string[] = [];
   const pendingPaymentIds: string[] = [];
-  for (const payment of payments.data) {
-    if (payment.status === "open") {
-      pendingPaymentIds.push(payment.id);
-      continue;
-    }
-    if (payment.status !== "paid") continue;
+  const inFlightPaymentIds: string[] = [];
+  let startingAfter: string | undefined;
+  const seenCursors = new Set<string>();
 
-    refundIds.push(await refundOnce(payment.payment, subscriptionId));
+  for (;;) {
+    const payments = await stripe.invoicePayments.list({
+      invoice: invoiceId,
+      limit: INVOICE_PAYMENT_LOOKUP_LIMIT,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const nextCursor = nextStripePageCursor(
+      payments.data,
+      payments.has_more,
+      startingAfter,
+      seenCursors,
+      `invoice-payment lookup for invoice ${invoiceId}`,
+    );
+
+    for (const payment of payments.data) {
+      if (payment.status === "open") {
+        pendingPaymentIds.push(payment.id);
+        continue;
+      }
+      if (payment.status !== "paid") continue;
+
+      const refundId = await refundOnce(payment.payment, subscriptionId);
+      if (refundId === REFUND_IN_FLIGHT) {
+        inFlightPaymentIds.push(payment.id);
+      } else {
+        refundIds.push(refundId);
+      }
+    }
+
+    if (!nextCursor) break;
+    startingAfter = nextCursor;
   }
 
-  return { refundIds, pendingPaymentIds };
+  return { refundIds, pendingPaymentIds, inFlightPaymentIds };
 }
 
+/** `refundOnce`'s answer when another request is making the same refund. */
+const REFUND_IN_FLIGHT = Symbol("refund in flight");
+
 /**
- * How many payments to read off one invoice. A subscription's first invoice is
- * paid by one payment, or a few after declines; the cap bounds an unexpected
- * list rather than paging through it.
+ * Invoice-payment page size. A subscription's first invoice is normally paid
+ * by one payment, or a few after declines, but s82 refunds every collected
+ * payment and therefore follows every page rather than treating ten as a cap.
  */
 const INVOICE_PAYMENT_LOOKUP_LIMIT = 10;
 
@@ -333,7 +377,7 @@ const INVOICE_PAYMENT_LOOKUP_LIMIT = 10;
 async function refundOnce(
   payment: Stripe.InvoicePayment.Payment,
   subscriptionId: string,
-): Promise<string> {
+): Promise<string | typeof REFUND_IN_FLIGHT> {
   const target =
     payment.type === "payment_intent"
       ? { payment_intent: idOf(payment.payment_intent) ?? undefined }
@@ -346,39 +390,190 @@ async function refundOnce(
     );
   }
 
-  const existing = await stripe.refunds.list({ ...target, limit: 100 });
-  const previous = existing.data.find(
-    (refund) =>
-      refund.metadata?.reason_code === COVERED_BY_LIFETIME &&
-      refund.metadata?.subscription_id === subscriptionId,
-  );
-  if (
-    previous &&
-    previous.status !== "failed" &&
-    previous.status !== "canceled"
-  ) {
-    return previous.id;
+  const found = await findCoveredRefund(target, subscriptionId);
+  if (found.live) {
+    return found.live.id;
   }
+  const previous = found.retryable;
 
   const baseKey = `${COVERED_BY_LIFETIME}-refund-${subscriptionId}-${targetId}`;
-  const refund = await stripe.refunds.create(
-    {
-      ...target,
-      metadata: {
-        reason_code: COVERED_BY_LIFETIME,
-        subscription_id: subscriptionId,
+  let refund: Stripe.Refund;
+  try {
+    refund = await stripe.refunds.create(
+      {
+        ...target,
+        metadata: {
+          reason_code: COVERED_BY_LIFETIME,
+          subscription_id: subscriptionId,
+        },
       },
-    },
-    {
-      idempotencyKey: previous ? `${baseKey}-after-${previous.id}` : baseKey,
-    },
-  );
-  if (refund.status === "failed" || refund.status === "canceled") {
+      {
+        idempotencyKey: previous ? `${baseKey}-after-${previous.id}` : baseKey,
+      },
+    );
+  } catch (error) {
+    // s82 verification (mi-3): another delivery is creating this very refund
+    // — same key — and Stripe answered ours 409 (after the SDK's own retries
+    // of a 409). It is in flight, not failed: re-check once, and if it has not
+    // landed yet leave it to the request that owns it, which reports its own
+    // failure.
+    if (stripeErrorCode(error) !== "idempotency_key_in_use") throw error;
+    const landed = await findCoveredRefund(target, subscriptionId);
+    return landed.live ? landed.live.id : REFUND_IN_FLIGHT;
+  }
+  if (refundDisposition(refund, subscriptionId) === "retryable") {
     throw new Error(
       `refund ${refund.id} for subscription ${subscriptionId} is ${refund.status}`,
     );
   }
   return refund.id;
+}
+
+interface RefundTarget {
+  payment_intent?: string;
+  charge?: string;
+}
+
+interface CoveredRefundMatch {
+  /** A refund that stands: succeeded, pending, or awaiting customer action. */
+  live: Stripe.Refund | null;
+  /** The newest failed/cancelled attempt, whose id makes the retry key new. */
+  retryable: Stripe.Refund | null;
+}
+
+/**
+ * Find this refusal's refund across every page Stripe returns for a payment.
+ *
+ * s82 recovery, Stripe reference audit: the idempotency key expires but the
+ * refund metadata does not, so metadata is the durable duplicate-refund guard.
+ * Reading only Stripe's first page could infer "none" after 100 attempts and
+ * send the money twice. Walk the API's stable order with `starting_after` until
+ * exhausted. A failed page or a broken cursor throws: absence is safe to infer
+ * only after every page was read.
+ */
+async function findCoveredRefund(
+  target: RefundTarget,
+  subscriptionId: string,
+): Promise<CoveredRefundMatch> {
+  let startingAfter: string | undefined;
+  let retryable: Stripe.Refund | null = null;
+  const seenCursors = new Set<string>();
+
+  for (;;) {
+    const page = await stripe.refunds.list({
+      ...target,
+      limit: REFUND_LOOKUP_LIMIT,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+
+    for (const refund of page.data) {
+      if (
+        refund.metadata?.reason_code !== COVERED_BY_LIFETIME ||
+        refund.metadata?.subscription_id !== subscriptionId
+      ) {
+        continue;
+      }
+
+      if (refundDisposition(refund, subscriptionId) === "live") {
+        return { live: refund, retryable };
+      }
+      retryable ??= refund;
+    }
+
+    if (!page.has_more) {
+      return { live: null, retryable };
+    }
+
+    startingAfter = nextStripePageCursor(
+      page.data,
+      page.has_more,
+      startingAfter,
+      seenCursors,
+      `refund lookup for subscription ${subscriptionId}`,
+    );
+  }
+}
+
+/** Stripe's maximum page size for refund listing. */
+const REFUND_LOOKUP_LIMIT = 100;
+
+type RefundDisposition = "live" | "retryable";
+
+/**
+ * Classify only the five statuses documented by the pinned Stripe API.
+ * Unknown or null is neither success nor permission to try another refund:
+ * fail closed so the webhook alerts and Stripe retries after the object has a
+ * status this code understands.
+ */
+function refundDisposition(
+  refund: Stripe.Refund,
+  subscriptionId: string,
+): RefundDisposition {
+  switch (refund.status) {
+    case "pending":
+    case "requires_action":
+    case "succeeded":
+      return "live";
+    case "failed":
+    case "canceled":
+      return "retryable";
+    default:
+      throw new Error(
+        `refund ${refund.id} for subscription ${subscriptionId} has ` +
+          `unsupported status ${String(refund.status)}; refusing to create ` +
+          `another refund`,
+      );
+  }
+}
+
+/** `billing_events.event_type` of the once-only refusal report marker. */
+const REFUSAL_REPORT_EVENT_TYPE = "internal.covered_subscription_refused";
+
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * Claim the one report of a subscription's refusal; true for the caller that
+ * should make it.
+ *
+ * s82 verification (mi-4, with review m-6): the report must be made once per
+ * subscription — not by every delivery that reaches the refusal — yet still be
+ * made when the refusal is completed by a retry (the first delivery cancelled,
+ * then failed to refund, and alerted that failure instead). Neither "whoever
+ * cancelled" nor "whoever refunded" decides it: concurrent deliveries share
+ * both. A write-once row does. Same pattern as `credit-revocations.ts`: a
+ * synthetic `stripe_event_id` (prefixed, so it can never match a Stripe event
+ * id) whose UNIQUE constraint lets exactly one insert succeed.
+ *
+ * A claim that cannot be written (the database, not a duplicate) answers true:
+ * a second alert is better than a refusal nobody hears of.
+ */
+export async function claimRefusalReport(
+  supabase: SupabaseClient,
+  refusal: CoveredSubscriptionRefusal,
+  userId: string,
+  planId: string,
+): Promise<boolean> {
+  const { error } = await supabase.from("billing_events").insert({
+    user_id: userId,
+    event_type: REFUSAL_REPORT_EVENT_TYPE,
+    stripe_event_id: `${COVERED_BY_LIFETIME}:${refusal.subscription.id}`,
+    data: {
+      subscription_id: refusal.subscription.id,
+      plan_id: planId,
+      refund_ids: refusal.refundIds,
+      pending_payment_ids: refusal.pendingPaymentIds,
+      in_flight_payment_ids: refusal.inFlightPaymentIds,
+    },
+    processed: true,
+  });
+
+  if (!error) return true;
+  if (error.code === UNIQUE_VIOLATION) return false;
+  console.error(
+    `Could not record the refusal report of subscription ` +
+      `${refusal.subscription.id}; reporting it anyway: ${error.message}`,
+  );
+  return true;
 }
 
 /** What closing the covered Checkouts did, for the ops report. */
@@ -411,13 +606,21 @@ export async function expireCheckoutsCoveredByGrant(
   const failures: CoveredCheckoutExpiry["failures"] = [];
 
   let startingAfter: string | undefined;
-  do {
+  const seenCursors = new Set<string>();
+  for (;;) {
     const page = await stripe.checkout.sessions.list({
       customer: stripeCustomerId,
       status: "open",
       limit: 100,
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     });
+    const nextCursor = nextStripePageCursor(
+      page.data,
+      page.has_more,
+      startingAfter,
+      seenCursors,
+      `open Checkout lookup for customer ${stripeCustomerId}`,
+    );
 
     for (const session of page.data) {
       const planId = session.metadata?.plan_id;
@@ -436,10 +639,42 @@ export async function expireCheckoutsCoveredByGrant(
       }
     }
 
-    startingAfter = page.has_more ? page.data.at(-1)?.id : undefined;
-  } while (startingAfter);
+    if (!nextCursor) break;
+    startingAfter = nextCursor;
+  }
 
   return { expiredSessionIds, failures };
+}
+
+/**
+ * Advance a Stripe list cursor, or prove the list is complete.
+ *
+ * `has_more` without a new last id is not completion. Treating an empty page
+ * as done left covered Checkouts or collected invoice payments unseen; blindly
+ * reusing the cursor loops forever. Every money-moving scan in this module
+ * fails closed on either shape instead.
+ */
+function nextStripePageCursor(
+  items: readonly { id: string }[],
+  hasMore: boolean,
+  currentCursor: string | undefined,
+  seenCursors: Set<string>,
+  subject: string,
+): string | undefined {
+  if (!hasMore) return undefined;
+
+  const nextCursor = items.at(-1)?.id;
+  if (
+    !nextCursor ||
+    nextCursor === currentCursor ||
+    seenCursors.has(nextCursor)
+  ) {
+    throw new Error(
+      `${subject} said another page exists but did not advance its cursor`,
+    );
+  }
+  seenCursors.add(nextCursor);
+  return nextCursor;
 }
 
 /** Stripe expands references inconsistently; normalise to an id. */
