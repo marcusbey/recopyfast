@@ -419,7 +419,24 @@ async function verifyEventsBelongToSite(
 
 export async function POST(request: NextRequest) {
   try {
-    // Bounds first: nothing below — authorization included — touches the
+    // s77 (s69 L7). Per IP, BEFORE authorization. The per-site limiter below has
+    // to sit behind `authorizeSiteRequest` (an anonymous caller must not spend a
+    // customer's bucket), which left the authorizer's `sites` lookup unmetered
+    // for anyone naming a site id. 200/min per address: the content GET on the
+    // same page view is already behind the same ceiling, so no visitor meets a
+    // new one here. Fails CLOSED: every request this route would serve passes
+    // the fail-closed per-site limiter anyway, so an outage refuses visitors
+    // there regardless — failing open would only hand a flood the authorizer.
+    // Ahead of the body read too: a refused beacon is not worth parsing.
+    const shed = await enforceRateLimit(request, {
+      limit: "IP_GENERAL",
+      endpoint: "ab-tests/track:ip",
+      identifierType: "ip",
+      onStoreFailure: "deny",
+    });
+    if (shed) return withCors(shed);
+
+    // Bounds next: nothing below — authorization included — touches the
     // database for a request that fails them (s68b M5).
     const parsed = await readTrackEvents(request);
     if (!parsed.ok) return refuse(parsed.error);

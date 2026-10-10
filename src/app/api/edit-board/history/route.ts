@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth/editor-access";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { canonicalSiteId } from "@/lib/api/validation";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -43,6 +44,9 @@ function withCors(response: NextResponse, origin?: string | null) {
  * owner's budget by naming their site id.
  *
  * 50/min: a person scrolling history and taking the occasional snapshot.
+ *
+ * Keyed on the canonical id: every handler passes `canonicalSiteId`'s value
+ * (s77, s69 R1), so each spelling of one site spends this one bucket.
  */
 function meterSite(request: NextRequest, siteId: string) {
   return enforceRateLimit(request, {
@@ -60,14 +64,24 @@ export async function GET(request: NextRequest) {
   try {
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
-    const siteId = request.nextUrl.searchParams.get("siteId");
+    const rawSiteId = request.nextUrl.searchParams.get("siteId");
 
-    if (!siteId) {
+    if (!rawSiteId) {
       return withCors(
         NextResponse.json({ error: "Missing siteId" }, { status: 400 }),
         origin,
       );
     }
+
+    // s77 (s69 R1): the canonical id, before the access check and the limiter.
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        origin,
+      );
+    }
+    const siteId = canonical.value;
 
     // The site's own owner is signed in and holds a `site_permissions` row;
     // they carry no staging token and never can. Version history was the third
@@ -163,14 +177,28 @@ export async function POST(request: NextRequest) {
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
 
-    const { siteId, description, changeType = "manual" } = await request.json();
+    const {
+      siteId: rawSiteId,
+      description,
+      changeType = "manual",
+    } = await request.json();
 
-    if (!siteId) {
+    if (!rawSiteId) {
       return withCors(
         NextResponse.json({ error: "Missing siteId" }, { status: 400 }),
         origin,
       );
     }
+
+    // s77 (s69 R1): the canonical id, before the access check and the limiter.
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        origin,
+      );
+    }
+    const siteId = canonical.value;
 
     // Signed-in owner first; falls through to the staging token untouched.
     const firstPartyAccess = await authorizeFirstPartyEditorAccess(

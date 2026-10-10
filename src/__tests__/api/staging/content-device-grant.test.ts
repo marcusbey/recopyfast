@@ -64,8 +64,8 @@ const mockCreateServiceRoleClient =
     typeof createServiceRoleClient
   >;
 
-const SITE_ID = "site-abc";
-const OTHER_SITE_ID = "site-xyz";
+const SITE_ID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
+const OTHER_SITE_ID = "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e";
 const EDITOR_ID = "site-editor-1";
 const GRANT_ROW_ID = "grant-row-1";
 const ELEMENT_ROW_ID = "content-element-1";

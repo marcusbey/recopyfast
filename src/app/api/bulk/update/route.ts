@@ -9,6 +9,7 @@ import {
 } from "@/lib/billing/owner-can-edit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { MAX_BULK_UPDATE_OPERATIONS } from "@/lib/bulk/constants";
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,6 +35,17 @@ export async function POST(req: NextRequest) {
     if (!site_id || !operations || !Array.isArray(operations)) {
       return NextResponse.json(
         { error: "Missing required fields: site_id, operations" },
+        { status: 400 },
+      );
+    }
+
+    // s77 (s69 R2): bounded before the session is read — see
+    // MAX_BULK_UPDATE_OPERATIONS for the number and why.
+    if (operations.length > MAX_BULK_UPDATE_OPERATIONS) {
+      return NextResponse.json(
+        {
+          error: `At most ${MAX_BULK_UPDATE_OPERATIONS} operations per request.`,
+        },
         { status: 400 },
       );
     }

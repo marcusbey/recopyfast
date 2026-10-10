@@ -30,7 +30,9 @@ import { hashOpaqueSecret } from "@/lib/auth/editor-crypto";
 
 type Row = Record<string, unknown>;
 
-const SITE_ID = "site-abc";
+// RFC 4122 v4, as gen_random_uuid() issues: since s77 (s69 R1) the staging
+// content route refuses an id `requireUuid` rejects before any work.
+const SITE_ID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
 const OWNER_ID = "owner-1";
 const EDITOR_ID = "site-editor-1";
 const ORIGIN = "https://helloworld.example";

@@ -111,6 +111,61 @@ function buildInstructions(
 }
 
 /**
+ * s77 (s69 R5, s68b review minor 3) — ADR 037 step 1 on every verb.
+ *
+ * Each verb starts with `getUser()` (a round trip to the auth server) and then
+ * an RLS permission read and service-role work on `domain_verifications`. POST,
+ * GET and DELETE had no limiter at all, and PUT's per-user one (s68b M10) can
+ * only run once the user is known, so an anonymous flood reached the auth
+ * server unmetered on all four. Per IP, before anything; 200/min per address,
+ * one bucket for the route — an office of admins shares a NAT address and the
+ * tight buckets below are per user. Fails CLOSED like every limiter behind it:
+ * this route writes with RLS bypassed and, on PUT, makes our infrastructure
+ * resolve and fetch a hostname the caller chose.
+ */
+function shedIpFlood(request: NextRequest) {
+  return enforceRateLimit(request, {
+    limit: "IP_GENERAL",
+    endpoint: "domains/verify:ip",
+    identifierType: "ip",
+    onStoreFailure: "deny",
+  });
+}
+
+/**
+ * ADR 037 step 3 for POST and DELETE: once the caller is known, before any
+ * permission read or service-role call. One bucket for both — creating, re-
+ * issuing and deleting a challenge are the same human action, the api-keys
+ * precedent. 10 a minute (`API_UPLOAD`) is far above a person adding a domain.
+ * Fails CLOSED: both write `domain_verifications` with RLS bypassed.
+ */
+function limitVerificationWrites(request: NextRequest, userId: string) {
+  return enforceRateLimit(request, {
+    limit: "API_UPLOAD",
+    endpoint: "domains/verify:write",
+    identifier: userId,
+    identifierType: "user",
+    onStoreFailure: "deny",
+    message: "Too many domain changes. Please try again shortly.",
+  });
+}
+
+/**
+ * ADR 037 step 3 for GET. The list is read through the service role (ADR 002
+ * §4: such a read carries a fail-closed limiter). 100 a minute per user
+ * (`USER_GENERAL`): the domain panel fetches on mount and after each action.
+ */
+function limitVerificationReads(request: NextRequest, userId: string) {
+  return enforceRateLimit(request, {
+    limit: "USER_GENERAL",
+    endpoint: "domains/verify:read",
+    identifier: userId,
+    identifierType: "user",
+    onStoreFailure: "deny",
+  });
+}
+
+/**
  * Read the caller's permission on a site through their own token, so RLS is
  * still the thing deciding what they can see. Returns null when they have no
  * row at all.
@@ -132,6 +187,9 @@ async function readSitePermission(
 
 export async function POST(request: NextRequest) {
   try {
+    const shed = await shedIpFlood(request);
+    if (shed) return shed;
+
     const supabase = await createClient();
 
     const {
@@ -141,6 +199,9 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userLimited = await limitVerificationWrites(request, user.id);
+    if (userLimited) return userLimited;
 
     const body = await request.json();
     const { siteId, domain, method } = body;
@@ -292,6 +353,9 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    const shed = await shedIpFlood(request);
+    if (shed) return shed;
+
     const supabase = await createClient();
 
     const {
@@ -307,7 +371,8 @@ export async function PUT(request: NextRequest) {
     // was an unmetered DNS/HTTP probe. Per user (the bucket needs the user, so
     // it sits after getUser, ADR 037's order) and before the row read, so a
     // refused request does no database, DNS or HTTP work. Fails CLOSED: an
-    // outage of the store must not reopen the probe.
+    // outage of the store must not reopen the probe. The per-IP guard above it
+    // (s77) is ADR 037 step 1, which this verb lacked (s68b review minor 3).
     const limited = await enforceRateLimit(request, {
       limit: "USER_DOMAIN_VERIFY",
       endpoint: "domains/verify",
@@ -405,6 +470,9 @@ export async function PUT(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    const shed = await shedIpFlood(request);
+    if (shed) return shed;
+
     const supabase = await createClient();
 
     const {
@@ -414,6 +482,9 @@ export async function GET(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userLimited = await limitVerificationReads(request, user.id);
+    if (userLimited) return userLimited;
 
     const { searchParams } = new URL(request.url);
     const sanitizedSiteId = validateAndSanitizeInput(
@@ -467,6 +538,9 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const shed = await shedIpFlood(request);
+    if (shed) return shed;
+
     const supabase = await createClient();
 
     const {
@@ -476,6 +550,9 @@ export async function DELETE(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userLimited = await limitVerificationWrites(request, user.id);
+    if (userLimited) return userLimited;
 
     const { searchParams } = new URL(request.url);
     const sanitizedVerificationId = validateAndSanitizeInput(
