@@ -35,7 +35,16 @@ import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
  */
 export type LifetimeGrantStatus =
   | { kind: "none" }
-  | { kind: "granted"; planIds: readonly string[] }
+  | {
+      kind: "granted";
+      planIds: readonly string[];
+      /**
+       * For a plan in `planIds` held only through dated grants, the latest
+       * end (ISO); a plan absent here is held without an end date. Read in
+       * the same query (`readGrantedPlans`) — s82 review (second pass), m3.
+       */
+      endsAt?: Readonly<Partial<Record<string, string>>>;
+    }
   | { kind: "unknown" };
 
 /**

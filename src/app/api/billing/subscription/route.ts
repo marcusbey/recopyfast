@@ -10,6 +10,7 @@ import {
   isBillingPeriod,
   isPaidPlanId,
 } from "@/lib/stripe/plans";
+import { billingErrorResponse } from "@/lib/billing/billing-refusal";
 
 /**
  * GET /api/billing/subscription
@@ -98,15 +99,13 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error: unknown) {
-    console.error("Error updating subscription:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to update subscription",
-      },
-      { status: 500 },
+    // A `BillingRefusal` ("You are already on this plan", "No active
+    // subscription found") keeps its words; anything else — Stripe's text
+    // included — stays in the log (s82, s69 L5). See billing-refusal.ts.
+    return billingErrorResponse(
+      error,
+      "Error updating subscription",
+      "Failed to update subscription",
     );
   }
 }
@@ -135,15 +134,11 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ subscription });
   } catch (error: unknown) {
-    console.error("Error canceling subscription:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to cancel subscription",
-      },
-      { status: 500 },
+    // Same rule as PUT: only a `BillingRefusal` reaches the client as written.
+    return billingErrorResponse(
+      error,
+      "Error canceling subscription",
+      "Failed to cancel subscription",
     );
   }
 }

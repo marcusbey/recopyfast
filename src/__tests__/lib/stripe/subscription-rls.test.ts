@@ -77,6 +77,19 @@ let effects: string[] = [];
  */
 let allWritesBlocked = false;
 
+/**
+ * When true, the SELECT finds no row — the "no subscription" state (s82: its
+ * refusal is a `BillingRefusal` a route may show).
+ */
+let rowMissing = false;
+
+/**
+ * When true, the SELECT itself fails — the database is down, not the row
+ * missing (s82 review, finding 3: that is an `Error`, logged and answered 500,
+ * never the customer-facing "No active subscription found").
+ */
+let readFails = false;
+
 type SupabaseError = { code?: string; message: string; details?: string };
 
 /**
@@ -90,7 +103,22 @@ type SupabaseError = { code?: string; message: string; details?: string };
 function createPolicyScopedClient(role: "authenticated" | "service_role") {
   const canWrite = role === "service_role" && !allWritesBlocked;
 
-  const from = () => {
+  const from = (table: string) => {
+    // s82: `reactivateSubscription` and `updateSubscription` ask whether a
+    // lifetime grant covers the plan before they touch Stripe. This account
+    // holds none, so the read answers no rows and every case below behaves as
+    // before; the grant cases live in reactivate-lifetime.test.ts.
+    if (table === "plan_entitlements") {
+      const grants: Record<string, unknown> = {
+        then: (resolve: (value: unknown) => unknown) =>
+          Promise.resolve({ data: [], error: null }).then(resolve),
+      };
+      for (const method of ["select", "eq", "is", "neq", "or", "returns"]) {
+        grants[method] = () => grants;
+      }
+      return grants;
+    }
+
     let isWrite = false;
     let patch: Partial<SubscriptionRow> = {};
 
@@ -110,6 +138,25 @@ function createPolicyScopedClient(role: "authenticated" | "service_role") {
         error: SupabaseError | null;
       }> => {
         if (!isWrite) {
+          if (readFails) {
+            return {
+              data: null,
+              error: {
+                code: "08006",
+                message: "connection to server was lost",
+              },
+            };
+          }
+          if (rowMissing) {
+            return {
+              data: null,
+              error: {
+                code: "PGRST116",
+                message:
+                  "JSON object requested, multiple (or no) rows returned",
+              },
+            };
+          }
           return { data: { ...stored }, error: null };
         }
 
@@ -179,6 +226,47 @@ import {
   reactivateSubscription,
   updateSubscription,
 } from "@/lib/stripe/subscription";
+import { BillingRefusal } from "@/lib/billing/billing-refusal";
+
+/** The provider answers every test starts from (shared by both suites below). */
+function armStripeDefaults() {
+  mockStripeRetrieve.mockResolvedValue({
+    id: STRIPE_SUBSCRIPTION_ID,
+    metadata: { user_id: "user-1" },
+    items: { data: [{ id: "si_1", price: { id: CURRENT_PRICE_ID } }] },
+  });
+
+  mockStripeUpdate.mockImplementation(async () => {
+    effects.push("stripe.update");
+    return {
+      id: STRIPE_SUBSCRIPTION_ID,
+      status: "active",
+      cancel_at: null,
+      canceled_at: null,
+      latest_invoice: { status: "paid", hosted_invoice_url: null },
+      items: {
+        data: [
+          {
+            id: "si_1",
+            price: { id: TARGET_PRICE_ID },
+            current_period_start: 1785484800,
+            current_period_end: 1788163200,
+          },
+        ],
+      },
+    };
+  });
+
+  mockStripeCancel.mockImplementation(async () => {
+    effects.push("stripe.cancel");
+    return {
+      id: STRIPE_SUBSCRIPTION_ID,
+      status: "canceled",
+      cancel_at: null,
+      canceled_at: 1785484800,
+    };
+  });
+}
 
 describe("A-6: subscription writes run under the caller's RLS policy set", () => {
   beforeEach(() => {
@@ -186,43 +274,10 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
     stored = seedRow();
     effects = [];
     allWritesBlocked = false;
+    rowMissing = false;
+    readFails = false;
 
-    mockStripeRetrieve.mockResolvedValue({
-      id: STRIPE_SUBSCRIPTION_ID,
-      metadata: { user_id: "user-1" },
-      items: { data: [{ id: "si_1", price: { id: CURRENT_PRICE_ID } }] },
-    });
-
-    mockStripeUpdate.mockImplementation(async () => {
-      effects.push("stripe.update");
-      return {
-        id: STRIPE_SUBSCRIPTION_ID,
-        status: "active",
-        cancel_at: null,
-        canceled_at: null,
-        latest_invoice: { status: "paid", hosted_invoice_url: null },
-        items: {
-          data: [
-            {
-              id: "si_1",
-              price: { id: TARGET_PRICE_ID },
-              current_period_start: 1785484800,
-              current_period_end: 1788163200,
-            },
-          ],
-        },
-      };
-    });
-
-    mockStripeCancel.mockImplementation(async () => {
-      effects.push("stripe.cancel");
-      return {
-        id: STRIPE_SUBSCRIPTION_ID,
-        status: "canceled",
-        cancel_at: null,
-        canceled_at: 1785484800,
-      };
-    });
+    armStripeDefaults();
   });
 
   /**
@@ -350,5 +405,284 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
 
     expect(mockStripeUpdate).not.toHaveBeenCalled();
     expect(stored.plan).toBe("pro");
+  });
+});
+
+/**
+ * s82 (s69 L5): the sentences these functions write for the customer are
+ * `BillingRefusal`s — the routes answer them with their own words and status
+ * and answer everything else generically. A refusal is decided before Stripe
+ * is touched.
+ */
+describe("s82: deliberate refusals are BillingRefusals", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    stored = seedRow();
+    effects = [];
+    allWritesBlocked = false;
+    rowMissing = false;
+    readFails = false;
+    armStripeDefaults();
+  });
+
+  async function refusalOf(promise: Promise<unknown>) {
+    const error = await promise.then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(BillingRefusal);
+    return error as BillingRefusal;
+  }
+
+  it("a change to the price already billed is a 409", async () => {
+    mockStripeRetrieve.mockResolvedValue({
+      id: STRIPE_SUBSCRIPTION_ID,
+      metadata: {},
+      items: { data: [{ id: "si_1", price: { id: TARGET_PRICE_ID } }] },
+    });
+
+    const refusal = await refusalOf(
+      updateSubscription("user-1", { planId: "starter" }),
+    );
+
+    expect(refusal.status).toBe(409);
+    expect(refusal.message).toBe("You are already on this plan");
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("no subscription to change, cancel or reactivate is a 404", async () => {
+    rowMissing = true;
+
+    const change = await refusalOf(
+      updateSubscription("user-1", { planId: "starter" }),
+    );
+    const cancel = await refusalOf(cancelSubscription("user-1"));
+    const reactivate = await refusalOf(reactivateSubscription("user-1"));
+
+    expect([change.status, cancel.status, reactivate.status]).toEqual([
+      404, 404, 404,
+    ]);
+    expect(change.message).toBe("No active subscription found");
+    expect(cancel.message).toBe("No active subscription found");
+    expect(reactivate.message).toBe("No subscription found");
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+    expect(mockStripeCancel).not.toHaveBeenCalled();
+  });
+
+  it("reactivating a subscription not set to cancel is a 409", async () => {
+    const refusal = await refusalOf(reactivateSubscription("user-1"));
+
+    expect(refusal.status).toBe(409);
+    expect(refusal.message).toBe(
+      "Subscription is not scheduled for cancellation",
+    );
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a failed subscription read is not a refusal: it is an error, before Stripe", async () => {
+    readFails = true;
+
+    const outcomes = await Promise.all(
+      [
+        updateSubscription("user-1", { planId: "starter" }),
+        cancelSubscription("user-1"),
+        reactivateSubscription("user-1"),
+      ].map((promise) =>
+        promise.then(
+          () => null,
+          (reason: unknown) => reason,
+        ),
+      ),
+    );
+
+    for (const error of outcomes) {
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(BillingRefusal);
+    }
+    expect(mockStripeRetrieve).not.toHaveBeenCalled();
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+    expect(mockStripeCancel).not.toHaveBeenCalled();
+  });
+
+  it("a failed database write is not a refusal: its text stays server-side", async () => {
+    allWritesBlocked = true;
+
+    const error = await updateSubscription("user-1", {
+      planId: "starter",
+    }).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(BillingRefusal);
+  });
+});
+
+/**
+ * s82, Devin Review on PR #81 (finding 2): a plan change applied to a
+ * subscription scheduled to cancel kept the cancellation. An owner whose
+ * subscription was set to end — by them, or by a lifetime purchase — switched
+ * up to Agency, paid the prorated difference, and still lost Agency at period
+ * end. Buying another plan means keeping it: the change clears the scheduled
+ * cancellation in the same Stripe update, and the row stops saying it ends.
+ */
+describe("s82: a plan change keeps a subscription scheduled to cancel", () => {
+  const PERIOD_END = 1788163200; // 2026-09-01T00:00:00Z
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    stored = { ...seedRow(), cancel_at: "2026-09-01T00:00:00.000Z" };
+    effects = [];
+    allWritesBlocked = false;
+    rowMissing = false;
+    readFails = false;
+    armStripeDefaults();
+  });
+
+  function scheduledInStripe(fields: Record<string, unknown>) {
+    mockStripeRetrieve.mockResolvedValue({
+      id: STRIPE_SUBSCRIPTION_ID,
+      metadata: { user_id: "user-1" },
+      items: { data: [{ id: "si_1", price: { id: CURRENT_PRICE_ID } }] },
+      ...fields,
+    });
+  }
+
+  it("clears a cancellation at period end in the same update that changes the price", async () => {
+    scheduledInStripe({ cancel_at_period_end: true, cancel_at: PERIOD_END });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    expect(mockStripeUpdate).toHaveBeenCalledTimes(1);
+    expect(mockStripeUpdate).toHaveBeenCalledWith(
+      STRIPE_SUBSCRIPTION_ID,
+      expect.objectContaining({
+        items: [{ id: "si_1", price: TARGET_PRICE_ID }],
+        cancel_at_period_end: false,
+      }),
+    );
+    // Stripe answers with no cancellation; the row stops saying it ends.
+    expect(stored.cancel_at).toBeNull();
+  });
+
+  it("clears a cancellation date set elsewhere (the Stripe dashboard)", async () => {
+    scheduledInStripe({
+      cancel_at_period_end: false,
+      cancel_at: PERIOD_END + 86400,
+    });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    const [, params] = mockStripeUpdate.mock.calls[0];
+    expect(params).toEqual(expect.objectContaining({ cancel_at: "" }));
+    expect(params).not.toHaveProperty("cancel_at_period_end");
+  });
+
+  it("sends no cancellation field for a subscription that renews", async () => {
+    scheduledInStripe({ cancel_at_period_end: false, cancel_at: null });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    const [, params] = mockStripeUpdate.mock.calls[0];
+    expect(params).not.toHaveProperty("cancel_at_period_end");
+    expect(params).not.toHaveProperty("cancel_at");
+  });
+});
+
+describe("s82 review m-5: a plan change never undoes a chargeback's cancellation", () => {
+  const PERIOD_END = 1788163200; // 2026-09-01T00:00:00Z
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    stored = { ...seedRow(), cancel_at: "2026-09-01T00:00:00.000Z" };
+    effects = [];
+    allWritesBlocked = false;
+    rowMissing = false;
+    readFails = false;
+    armStripeDefaults();
+  });
+
+  function inStripe(fields: Record<string, unknown>) {
+    mockStripeRetrieve.mockResolvedValue({
+      id: STRIPE_SUBSCRIPTION_ID,
+      items: { data: [{ id: "si_1", price: { id: CURRENT_PRICE_ID } }] },
+      ...fields,
+    });
+  }
+
+  it("refuses, in words, to switch a subscription set to end after a lost chargeback", async () => {
+    inStripe({
+      cancel_at_period_end: true,
+      cancel_at: PERIOD_END,
+      metadata: {
+        user_id: "user-1",
+        cancelled_reason: "chargeback",
+        disputeId: "dp_1",
+      },
+    });
+
+    const error = await updateSubscription("user-1", {
+      planId: "starter",
+    }).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(BillingRefusal);
+    expect((error as BillingRefusal).status).toBe(409);
+    expect((error as BillingRefusal).message).toBe(
+      "This subscription is ending after a disputed payment, so its plan can't be changed. Contact support if you'd like to keep it.",
+    );
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+    expect(stored.cancel_at).toBe("2026-09-01T00:00:00.000Z");
+  });
+
+  it("drops the stale reason when it clears a lifetime purchase's cancellation", async () => {
+    inStripe({
+      cancel_at_period_end: true,
+      cancel_at: PERIOD_END,
+      metadata: {
+        user_id: "user-1",
+        cancelled_reason: "lifetime_purchase",
+        paymentIntentId: "pi_lifetime",
+      },
+    });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    const [, params] = mockStripeUpdate.mock.calls[0];
+    expect(params).toEqual(
+      expect.objectContaining({ cancel_at_period_end: false }),
+    );
+    // "" is how Stripe unsets a metadata key.
+    expect(params.metadata).toEqual(
+      expect.objectContaining({ cancelled_reason: "", plan_id: "starter" }),
+    );
+  });
+
+  it("leaves the metadata's reasons alone on a subscription that renews", async () => {
+    inStripe({
+      cancel_at_period_end: false,
+      cancel_at: null,
+      metadata: { user_id: "user-1" },
+    });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    const [, params] = mockStripeUpdate.mock.calls[0];
+    expect(params.metadata).not.toHaveProperty("cancelled_reason");
+  });
+
+  it("allows the change once support has undone the chargeback's cancellation", async () => {
+    inStripe({
+      cancel_at_period_end: false,
+      cancel_at: null,
+      metadata: { user_id: "user-1", cancelled_reason: "chargeback" },
+    });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    expect(mockStripeUpdate).toHaveBeenCalledTimes(1);
   });
 });

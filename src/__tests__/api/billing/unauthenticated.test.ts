@@ -15,6 +15,11 @@
  * guard reaches billing work instead of failing on bad input. The signed-in
  * sibling of each case proves the 401 comes from the session check, not from
  * a mock that broke the route.
+ *
+ * s82: `payment-methods` is rate limited per IP before the session check, so
+ * its handlers read the request — GET included — and the limiter is mocked to
+ * let every call through: this file pins the session check, the limiter is
+ * pinned by payment-methods.test.ts.
  */
 
 import { NextRequest } from "next/server";
@@ -38,6 +43,10 @@ jest.mock("@/lib/stripe/customer", () => ({
 jest.mock("@/lib/stripe/payment-methods", () => ({
   listPaymentMethods: jest.fn(),
   setDefaultPaymentMethod: jest.fn(),
+}));
+
+jest.mock("@/lib/api/rate-limit", () => ({
+  enforceRateLimit: jest.fn(async () => null),
 }));
 
 jest.mock("@/lib/stripe/config", () => ({
@@ -93,7 +102,8 @@ interface Case {
 const CASES: Record<string, Case> = {
   "GET /api/billing/payment-methods": {
     work: getCustomerByUserId as jest.Mock,
-    call: () => paymentMethodsRoute.GET(),
+    call: () =>
+      paymentMethodsRoute.GET(request("GET", "/api/billing/payment-methods")),
   },
   "POST /api/billing/payment-methods": {
     work: getCustomerByUserId as jest.Mock,

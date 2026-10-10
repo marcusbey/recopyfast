@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { BillingDashboard } from "../BillingDashboard";
 import type { LifetimeGrantStatus } from "../LifetimeOfferCard";
 import type { BillingDashboardData, Subscription } from "@/types/billing";
@@ -205,6 +205,30 @@ describe("the plan card for a lifetime Founding Agency owner", () => {
     expect(screen.getByText("Lifetime access")).toBeInTheDocument();
   });
 
+  // s82 (s71 review N-1): the server resolves what the allowance becomes once
+  // the Agency subscription the owner is running out ends; the page passes it
+  // to the card's running-out row.
+  it("says the 250 that follows the Agency subscription it runs out", async () => {
+    await renderPlanCard(
+      payload({
+        creditWallet: wallet(1000),
+        includedAfterSubscription: 250,
+        subscription: subscription("agency", {
+          cancel_at_period_end: true,
+          // Midday, so the date reads October 10 in any test timezone.
+          current_period_end: "2026-10-10T12:00:00.000Z",
+        }),
+      }),
+      { kind: "granted", planIds: ["agency"] },
+    );
+
+    expect(
+      screen.getByText(
+        "Your Agency subscription ends October 10, 2026 — you won't be charged again. Without it, your plan includes 250 AI credits a month.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("does not restate an allowance it was not given", async () => {
     const { features } = await renderPlanCard(
       payload({ creditWallet: undefined }),
@@ -213,6 +237,102 @@ describe("the plan card for a lifetime Founding Agency owner", () => {
 
     expect(features.queryByText(/AI credits/)).toBeNull();
     expect(features.getAllByRole("listitem")).toHaveLength(5);
+  });
+});
+
+describe("the plan dialog for a lifetime Founding Agency owner", () => {
+  // s82 (s45 review #1): "Change plan" marked Agency "Current" at $49/month
+  // with 1,000 credits. The page now tells the dialog which plan is held for
+  // life and with what allowance; the dialog's own test proves the tile.
+  it("shows Agency as Lifetime access with the owner's 250, no price", async () => {
+    await renderPlanCard(payload({ creditWallet: wallet(250) }), {
+      kind: "granted",
+      planIds: ["agency"],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    const dialog = await screen.findByRole("dialog");
+    const tile = within(dialog).getByRole("radio", { name: /^Agency/ });
+
+    expect(tile).toHaveTextContent("Lifetime access");
+    expect(tile).toHaveTextContent("250 AI credits / month");
+    expect(tile).not.toHaveTextContent("$49");
+    expect(tile).not.toHaveTextContent("Current");
+  });
+
+  it("keeps Current and $49 for an Agency subscriber", async () => {
+    await renderPlanCard(
+      payload({
+        creditWallet: wallet(1000),
+        subscription: subscription("agency"),
+      }),
+      { kind: "none" },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    const dialog = await screen.findByRole("dialog");
+    const tile = within(dialog).getByRole("radio", { name: /^Agency/ });
+
+    expect(tile).toHaveTextContent("Current");
+    expect(tile).toHaveTextContent("$49");
+  });
+});
+
+describe("the plan dialog for a Lifetime Pro owner paying for Agency", () => {
+  // s82 review, finding 1: the page passes the account's grants to the
+  // dialog, so a plan a grant includes (Pro, under Lifetime Pro) is refused
+  // there as the server refuses it — even though Agency, not Pro, is the plan
+  // in force and nothing is "held for life" on the card.
+  it("refuses Pro, which Lifetime Pro already includes", async () => {
+    await renderPlanCard(
+      payload({
+        creditWallet: wallet(1000),
+        subscription: subscription("agency"),
+      }),
+      { kind: "granted", planIds: ["pro"] },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    const dialog = await screen.findByRole("dialog");
+    const pro = within(dialog).getByRole("radio", { name: /^Pro/ });
+    fireEvent.click(pro);
+
+    expect(pro).toHaveTextContent("Included");
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Included in your lifetime Pro",
+      }),
+    ).toBeDisabled();
+  });
+
+  // s82 review (second pass), m3: the page's grant read also says when a
+  // dated grant ends, and the dialog receives it — a grant that ends is never
+  // called lifetime.
+  it("says until when, not for life, when the Pro grant is dated", async () => {
+    await renderPlanCard(
+      payload({
+        creditWallet: wallet(1000),
+        subscription: subscription("agency"),
+      }),
+      {
+        kind: "granted",
+        planIds: ["pro"],
+        endsAt: { pro: "2026-11-19T12:00:00.000Z" },
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    const dialog = await screen.findByRole("dialog");
+    const pro = within(dialog).getByRole("radio", { name: /^Pro/ });
+    fireEvent.click(pro);
+
+    expect(pro).toHaveTextContent("Included until November 19, 2026");
+    expect(pro).not.toHaveTextContent("for life");
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Included in your plan until November 19, 2026",
+      }),
+    ).toBeDisabled();
   });
 });
 
@@ -320,5 +440,54 @@ describe("the empty payment-methods state on the billing page", () => {
     expect(
       screen.getByText("Add a card to start a subscription or buy AI credits"),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * s96, folded into s82 (Devin Review on PR #81, finding 3): the page already
+ * reads when a dated grant ends (`lifetimeGrant.endsAt`); the plan in force
+ * held only through one is never called lifetime, on the card or in its own
+ * dialog tile.
+ */
+describe("the plan in force held through a dated grant", () => {
+  const datedPro = (): LifetimeGrantStatus => ({
+    kind: "granted",
+    planIds: ["pro"],
+    // Midday, so the date reads November 19 in any test timezone.
+    endsAt: { pro: "2026-11-19T12:00:00.000Z" },
+  });
+
+  it("says Included until its end on the card, never Lifetime", async () => {
+    await renderPlanCard(
+      payload({ effectivePlanId: "pro", creditWallet: wallet(500) }),
+      datedPro(),
+    );
+
+    expect(
+      screen.getByText("Included until November 19, 2026"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Included")).toBeInTheDocument();
+    expect(screen.queryByText("Lifetime")).toBeNull();
+    expect(screen.queryByText("Lifetime access")).toBeNull();
+  });
+
+  it("says until when in its own dialog tile, which stays unbuyable", async () => {
+    await renderPlanCard(
+      payload({ effectivePlanId: "pro", creditWallet: wallet(500) }),
+      datedPro(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    const dialog = await screen.findByRole("dialog");
+    const pro = within(dialog).getByRole("radio", { name: /^Pro/ });
+    fireEvent.click(pro);
+
+    expect(pro).toHaveTextContent("Included until November 19, 2026");
+    expect(pro).not.toHaveTextContent(/lifetime/i);
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Included in your plan until November 19, 2026",
+      }),
+    ).toBeDisabled();
   });
 });
