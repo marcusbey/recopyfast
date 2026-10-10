@@ -22,8 +22,10 @@ import { User, LogOut, Settings } from "lucide-react";
 /**
  * The dashboard's frame: sidebar, sticky header, and the main column's width
  * and gutters (ADR 053). It is the body of `layout.tsx`, moved here verbatim in
- * s88's review so the layout itself can be a server component and export the
- * segment's metadata — a client module cannot.
+ * s88's review so the layout itself can be a server component: it exports the
+ * segment's metadata, and it awaits `connection()` so every dashboard page
+ * renders per request under the nonce policy (s79, ADR 059). A client module
+ * can do neither.
  */
 export function DashboardFrame({ children }: { children: React.ReactNode }) {
   const { user, loading, signOut } = useAuth();
@@ -183,12 +185,19 @@ export function DashboardFrame({ children }: { children: React.ReactNode }) {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
+                  {/* A full document navigation is deliberate here. CSP is
+                      document-scoped (ADR 059 recovery note), so these account
+                      destinations should receive their own fresh nonce rather
+                      than inherit one through a client transition. */}
+                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a href="/dashboard/settings" className="cursor-pointer">
                     <Settings className="mr-2 h-4 w-4" aria-hidden="true" />
                     <span>Settings</span>
                   </a>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
+                  {/* See the document-navigation rationale above. */}
+                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a href="/dashboard/billing" className="cursor-pointer">
                     <User className="mr-2 h-4 w-4" aria-hidden="true" />
                     <span>Billing</span>

@@ -1,7 +1,8 @@
 /**
  * Edit-mode fidelity measurement harness.
  *
- * Loaded only by public/embed/__fidelity__/index.html. It drives every scenario
+ * Loaded only by e2e/fixtures/embed-fidelity/index.html, which
+ * scripts/serve-embed-fidelity.mjs serves on loopback. It drives every scenario
  * through its full edit lifecycle and reports, per scenario, the numeric delta
  * between how the text renders in READ mode and how it renders in EDIT mode.
  *

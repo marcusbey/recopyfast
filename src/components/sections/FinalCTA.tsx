@@ -70,13 +70,15 @@ export default function FinalCTA({ offer }: { offer: FoundingOfferView }) {
           {/* Near-black rather than sky blue: on a warm background the darkest
               thing on screen is the strongest call to action, and it does not
               fight the sky for attention the way a saturated blue would. */}
-          <Link
+          {/* A native anchor establishes /signup as a fresh nonce document. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
             href="/signup"
             className="pressable group inline-flex items-center gap-2 rounded-full bg-slate-900 px-10 py-5 text-lg font-semibold text-white transition-colors hover:bg-slate-800"
           >
             <span>Get started</span>
             <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-          </Link>
+          </a>
 
           <Link
             href="/demo"

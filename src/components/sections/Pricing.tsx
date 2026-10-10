@@ -9,7 +9,6 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import Link from "next/link";
 import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
 import FoundingOfferCard from "./FoundingOfferCard";
 import { foundingOfferTrustLead } from "./founding-offer-copy";
@@ -298,7 +297,10 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                     ))}
                   </ul>
 
-                  <Link
+                  {/* Every plan CTA crosses from the static catalogue into the
+                      nonce-protected signup document. */}
+                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                  <a
                     href="/signup"
                     className={`block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all ${
                       plan.highlight
@@ -307,7 +309,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                     }`}
                   >
                     {plan.cta}
-                  </Link>
+                  </a>
                 </motion.div>
               );
             })}
@@ -346,12 +348,15 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                   </span>
                   <span className="text-slate-600">once</span>
                 </div>
-                <Link
+                {/* Logged-in purchases still start on a marketing document;
+                    billing must therefore install a fresh app policy. */}
+                {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                <a
                   href="/dashboard/billing"
                   className="pressable mt-5 block rounded-xl bg-sky-600 px-6 py-3 text-center font-semibold text-white hover:bg-sky-700"
                 >
                   Buy Lifetime Pro
-                </Link>
+                </a>
               </motion.div>
             )}
 
@@ -401,12 +406,16 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                     </p>
                     {pricing.foundingAgencyAvailability != null &&
                     !pricing.foundingAgencyAvailability.soldOut ? (
-                      <Link
-                        href="/dashboard/billing"
-                        className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800"
-                      >
-                        Buy founding access
-                      </Link>
+                      <>
+                        {/* Same static-to-app boundary as Lifetime Pro above. */}
+                        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                        <a
+                          href="/dashboard/billing"
+                          className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800"
+                        >
+                          Buy founding access
+                        </a>
+                      </>
                     ) : (
                       <button
                         type="button"

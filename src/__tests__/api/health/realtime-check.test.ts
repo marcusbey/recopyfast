@@ -53,17 +53,12 @@ jest.mock("@/lib/supabase/server", () => ({
 
 const REALTIME_ORIGIN = "wss://recopyfast-ws.fly.dev";
 
-/** The shape `server/index.js:129-136` actually answers with. */
+/** The status-only shape `server/index.js` has answered since s79. */
 function realtimeUp() {
   return Promise.resolve({
     ok: true,
     status: 200,
-    json: async () => ({
-      status: "ok",
-      connections: 3,
-      supabase: "connected",
-      message: "All systems operational",
-    }),
+    json: async () => ({ status: "ok" }),
   } as unknown as Response);
 }
 
@@ -100,16 +95,15 @@ describe("GET /api/health — the realtime check", () => {
     }
   });
 
-  it("reports realtime alongside the other checks when the service answers", async () => {
+  it("does not invent details from a status-only liveness response", async () => {
     const { response, body } = await callGet();
+    const realtime = body.checks.realtime;
 
     expect(response.status).toBe(200);
     expect(body.status).toBe("healthy");
-    expect(body.checks.realtime).toMatchObject({ status: "ok" });
-    expect(body.checks.realtime.details).toMatchObject({
-      connections: 3,
-      supabase: "connected",
-    });
+    expect(Object.keys(realtime).sort()).toEqual(["latency", "status"]);
+    expect(realtime.status).toBe("ok");
+    expect(realtime.latency).toEqual(expect.any(Number));
   });
 
   it("probes the service over https when the configured origin is a wss one", async () => {

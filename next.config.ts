@@ -106,6 +106,18 @@ const nextConfig: NextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=()',
           },
+          {
+            // s79 (s69 L19). Vercel's custom-domain default is
+            // `max-age=63072000` for the one host only; this adds its
+            // subdomains. Here and nowhere else: this block also reaches
+            // `_next/static`, which the middleware matcher skips, and a browser
+            // keeps the LAST policy it saw — one response without
+            // includeSubDomains switches it off again. No `preload`: that is a
+            // submission to browser vendors nobody has decided to make, and it
+            // cannot be quickly undone (src/__tests__/next-config-hsts.test.ts).
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains',
+          },
         ],
       },
     ];

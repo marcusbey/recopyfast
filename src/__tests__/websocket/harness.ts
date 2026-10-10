@@ -265,10 +265,16 @@ export interface HandshakeOptions {
   origin?: string | null;
   referer?: string | null;
   userAgent?: string;
+  /**
+   * Any other upgrade header — `Fly-Client-IP` in the s79 cases, standing in
+   * for the address Fly's proxy reports for a client.
+   */
+  headers?: Record<string, string>;
 }
 
 export function openSocket(options: HandshakeOptions): Socket {
   const extraHeaders: Record<string, string> = {
+    ...options.headers,
     "User-Agent": options.userAgent ?? TEST_USER_AGENT,
   };
   if (options.origin) extraHeaders.Origin = options.origin;

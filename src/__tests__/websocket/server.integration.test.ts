@@ -25,6 +25,7 @@ import type { Socket } from "socket.io-client";
 
 import { hashUserAgent } from "@/lib/auth/editor-crypto";
 import { createRealtimeServer } from "../../../server/index.js";
+import { addressBucket } from "../../../server/rate-limit.js";
 import {
   RecordingSupabase,
   TEST_USER_AGENT,
@@ -236,6 +237,95 @@ describe("realtime service lifecycle", () => {
 
     await blocked.release();
   }, 30_000);
+});
+
+/**
+ * s79 (s69 L13) — the service's HTTP surface says nothing it does not need to.
+ *
+ * Production answered `/health` with `X-Powered-By: Express`,
+ * `Access-Control-Allow-Origin: *` (an app-wide `cors()`) and the live
+ * connection count, to anyone, and sent no security header at all. Fly's
+ * check, the uptime workflow and the app's realtime probe need only a 2xx;
+ * nothing browser-side reads it, so it answers no CORS at all.
+ */
+describe("the HTTP surface", () => {
+  let server: ReturnType<typeof createRealtimeServer>;
+  let base: string;
+  let port: number;
+  const open: Socket[] = [];
+
+  beforeAll(async () => {
+    server = createRealtimeServer({
+      port: 0,
+      supabase: new RecordingSupabase({ sites: seedSites() }),
+    });
+    port = await server.listen();
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(async () => {
+    while (open.length > 0) {
+      open.pop()?.close();
+    }
+    await server.close();
+  });
+
+  it("answers /health with liveness only — no connection count", async () => {
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: { siteId: SITE_ID, token: SITE_TOKEN },
+    });
+    open.push(socket);
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}`) === 1,
+      "a socket to be connected, so a count would be non-zero",
+    );
+
+    const response = await fetch(`${base}/health`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ status: "ok" });
+  });
+
+  it("answers no CORS, to a simple request or a preflight", async () => {
+    const simple = await fetch(`${base}/health`, {
+      headers: { Origin: "https://evil.example" },
+    });
+    const preflight = await fetch(`${base}/health`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://evil.example",
+        "Access-Control-Request-Method": "GET",
+      },
+    });
+
+    expect(simple.headers.get("access-control-allow-origin")).toBeNull();
+    expect(preflight.headers.get("access-control-allow-origin")).toBeNull();
+    expect(preflight.headers.get("access-control-allow-methods")).toBeNull();
+  });
+
+  it.each(["/health", "/no-such-path"])(
+    "%s carries the security headers and no X-Powered-By",
+    async (requestPath) => {
+      const response = await fetch(`${base}${requestPath}`);
+
+      expect(response.headers.get("x-powered-by")).toBeNull();
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("x-frame-options")).toBe("DENY");
+      expect(response.headers.get("content-security-policy")).toBe(
+        "default-src 'none'; frame-ancestors 'none'",
+      );
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(response.headers.get("strict-transport-security")).toBe(
+        "max-age=63072000; includeSubDomains",
+      );
+      expect(response.headers.get("cross-origin-resource-policy")).toBe(
+        "same-origin",
+      );
+    },
+  );
 });
 
 describe("handshake authentication", () => {
@@ -546,6 +636,7 @@ describe("rate limiting", () => {
   async function bootWith(options: {
     rateLimitStore: { increment: (key: string) => Promise<number> };
     rateLimit?: Record<string, number>;
+    trustFlyClientIp?: boolean;
   }) {
     db = new RecordingSupabase({ sites: seedSites() });
     const server = createRealtimeServer({
@@ -553,19 +644,24 @@ describe("rate limiting", () => {
       supabase: db,
       rateLimitStore: options.rateLimitStore,
       rateLimit: options.rateLimit,
+      trustFlyClientIp: options.trustFlyClientIp,
     });
     const port = await server.listen();
     return { server, port };
   }
 
-  function connect(port: number) {
-    const socket = openSocket({
-      port,
-      origin: ORIGIN,
-      query: { siteId: SITE_ID, token: SITE_TOKEN },
-    });
+  function connect(
+    port: number,
+    query: Record<string, string> = { siteId: SITE_ID, token: SITE_TOKEN },
+    headers?: Record<string, string>,
+  ) {
+    const socket = openSocket({ port, origin: ORIGIN, query, headers });
     open.push(socket);
     return track(socket);
+  }
+
+  function sitesReads(): number {
+    return db.reads.filter((table) => table === "sites").length;
   }
 
   it("refuses a connection over the per-site limit", async () => {
@@ -588,10 +684,12 @@ describe("rate limiting", () => {
   });
 
   it("spends no database round trip on a connection it has already refused", async () => {
-    // The limiter is in front of the `sites` lookup, not behind it.
+    // The limiter is in front of the `sites` lookup, not behind it. Since s79
+    // that limiter is the per-address pre-auth bucket: the per-site one sits
+    // behind verification on purpose (see "verify before the per-site bucket").
     const { server, port } = await bootWith({
       rateLimitStore: memoryStore(),
-      rateLimit: { maxConnectionsPerSite: 0 },
+      rateLimit: { maxHandshakesPerAddress: 0 },
     });
 
     const handshake = connect(port);
@@ -600,6 +698,223 @@ describe("rate limiting", () => {
     expect(db.reads).toEqual([]);
 
     await server.close();
+  });
+
+  /**
+   * s79 (s69 L14) — verify before the per-site bucket.
+   *
+   * The per-site bucket (120/min) was spent before the token was even
+   * present-checked, so 121 handshakes carrying nothing locked every real
+   * editor of that site out of realtime for a minute — the cheapest possible
+   * denial of service on a named customer. Authorization still costs a
+   * `sites` lookup, so a limiter must still stand in front of it (AGENTS.md):
+   * a per-ADDRESS bucket, which a flood exhausts for itself only.
+   */
+  describe("verify before the per-site bucket", () => {
+    it("an unauthenticated flood does not lock a real editor out", async () => {
+      const { server, port } = await bootWith({
+        rateLimitStore: memoryStore(),
+        rateLimit: { maxConnectionsPerSite: 2 },
+      });
+
+      const bareHandshakes: Array<Record<string, string>> = [
+        { siteId: SITE_ID },
+        { siteId: SITE_ID, token: "garbage" },
+        { siteId: SITE_ID, token: buildSiteToken(SITE_ID, "not-the-key") },
+      ];
+      for (const query of bareHandshakes) {
+        const refusal = await connect(port, query).refused();
+        expect(refusal).not.toMatch(/rate limit/i);
+      }
+
+      connect(port);
+      await waitFor(
+        () => roomSize(server, `site:${SITE_ID}`) === 1,
+        "the real editor to be admitted after the flood",
+      );
+
+      await server.close();
+    });
+
+    it("bounds the database work an address can cause, before the lookup", async () => {
+      const { server, port } = await bootWith({
+        rateLimitStore: memoryStore(),
+        rateLimit: { maxHandshakesPerAddress: 2 },
+      });
+      const forged = {
+        siteId: SITE_ID,
+        token: buildSiteToken(SITE_ID, "not-the-key"),
+      };
+
+      expect(await connect(port, forged).refused()).toBe("Invalid site token");
+      expect(await connect(port, forged).refused()).toBe("Invalid site token");
+      expect(sitesReads()).toBe(2);
+
+      expect(await connect(port, forged).refused()).toMatch(/rate limit/i);
+      expect(sitesReads()).toBe(2);
+
+      await server.close();
+    });
+
+    it("keys the address on Fly-Client-IP behind Fly's proxy", async () => {
+      // Every client reaches a Fly machine from fly-proxy's address, so the
+      // TCP peer would make this one bucket for the whole world.
+      const { server, port } = await bootWith({
+        rateLimitStore: memoryStore(),
+        rateLimit: { maxHandshakesPerAddress: 1 },
+        trustFlyClientIp: true,
+      });
+      const forged = {
+        siteId: SITE_ID,
+        token: buildSiteToken(SITE_ID, "not-the-key"),
+      };
+      const flooder = { "Fly-Client-IP": "203.0.113.7" };
+
+      expect(await connect(port, forged, flooder).refused()).toBe(
+        "Invalid site token",
+      );
+      expect(await connect(port, forged, flooder).refused()).toMatch(
+        /rate limit/i,
+      );
+
+      connect(port, undefined, { "Fly-Client-IP": "198.51.100.20" });
+      await waitFor(
+        () => roomSize(server, `site:${SITE_ID}`) === 1,
+        "another client address to be admitted",
+      );
+
+      await server.close();
+    });
+
+    /**
+     * s79 review F7. One subscriber line is handed a whole IPv6 /64, so keyed
+     * on the full address a single client rotating through its own block got
+     * a fresh bucket — and a fresh `sites` read — on every handshake. An IPv6
+     * client is now counted by its /64, as an IPv4 client is by its address.
+     */
+    it("counts an IPv6 client by its /64, however it writes the address", async () => {
+      const { server, port } = await bootWith({
+        rateLimitStore: memoryStore(),
+        rateLimit: { maxHandshakesPerAddress: 1 },
+        trustFlyClientIp: true,
+      });
+      const forged = {
+        siteId: SITE_ID,
+        token: buildSiteToken(SITE_ID, "not-the-key"),
+      };
+
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "2001:db8:abcd:12::1",
+        }).refused(),
+      ).toBe("Invalid site token");
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "2001:0DB8:ABCD:0012:ffff:ffff:ffff:fffe",
+        }).refused(),
+      ).toMatch(/rate limit/i);
+      expect(sitesReads()).toBe(1);
+
+      // The next /64 is another subscriber, with a bucket of its own.
+      connect(port, undefined, { "Fly-Client-IP": "2001:db8:abcd:13::1" });
+      await waitFor(
+        () => roomSize(server, `site:${SITE_ID}`) === 1,
+        "a client in another /64 to be admitted",
+      );
+
+      await server.close();
+    });
+
+    it("fail-closes malformed trusted addresses into one bounded bucket", async () => {
+      const { server, port } = await bootWith({
+        rateLimitStore: memoryStore(),
+        rateLimit: { maxHandshakesPerAddress: 1 },
+        trustFlyClientIp: true,
+      });
+      const forged = {
+        siteId: SITE_ID,
+        token: buildSiteToken(SITE_ID, "not-the-key"),
+      };
+
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "not-an-ip-address",
+        }).refused(),
+      ).toBe("Invalid site token");
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "still-not-an-ip-address",
+        }).refused(),
+      ).toMatch(/rate limit/i);
+      expect(sitesReads()).toBe(1);
+
+      await server.close();
+    });
+
+    it("ignores Fly-Client-IP off Fly, where any client could send it", async () => {
+      const { server, port } = await bootWith({
+        rateLimitStore: memoryStore(),
+        rateLimit: { maxHandshakesPerAddress: 1 },
+      });
+      const forged = {
+        siteId: SITE_ID,
+        token: buildSiteToken(SITE_ID, "not-the-key"),
+      };
+
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "203.0.113.7",
+        }).refused(),
+      ).toBe("Invalid site token");
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "203.0.113.8",
+        }).refused(),
+      ).toMatch(/rate limit/i);
+
+      await server.close();
+    });
+  });
+
+  describe("the address bucket (s79 review F7)", () => {
+    it.each([
+      ["2001:db8:abcd:12::1", "2001:db8:abcd:12::/64"],
+      ["2001:0DB8:ABCD:0012:FFFF:0:0:1", "2001:db8:abcd:12::/64"],
+      ["2001:db8::1", "2001:db8:0:0::/64"],
+      ["2001:db8:0:0:5::", "2001:db8:0:0::/64"],
+      ["::1", "0:0:0:0::/64"],
+      ["fe80::1%eth0", "fe80:0:0:0::/64"],
+    ])("groups the IPv6 address %s by its /64", (address, bucket) => {
+      expect(addressBucket(address)).toBe(bucket);
+    });
+
+    it.each([
+      ["203.0.113.7", "203.0.113.7"],
+      // How Node reports an IPv4 peer on a dual-stack listener. Read as IPv6,
+      // every IPv4 client in the world would share the bucket `0:0:0:0::/64`.
+      ["::ffff:203.0.113.7", "203.0.113.7"],
+      ["::FFFF:198.51.100.20", "198.51.100.20"],
+      // The same mapped addresses are valid in hexadecimal form. Treating
+      // these as ordinary IPv6 would collapse every one into the mapped
+      // `0:0:0:ffff::/64` and let one IPv4 caller exhaust everybody's bucket.
+      ["::ffff:cb00:7107", "203.0.113.7"],
+      ["0:0:0:0:0:ffff:c633:6414", "198.51.100.20"],
+    ])("keeps the IPv4 address %s whole", (address, bucket) => {
+      expect(addressBucket(address)).toBe(bucket);
+    });
+
+    it.each([
+      [""],
+      [undefined],
+      ["not an address"],
+      ["2001:db8::1::2"],
+      ["fe80::1%bad zone"],
+    ])(
+      "fail-closes an absent or malformed address into the shared unknown bucket (%p)",
+      (address) => {
+        expect(addressBucket(address)).toBe("unknown");
+      },
+    );
   });
 
   it("refuses every connection when the store is unreachable (fail closed)", async () => {
@@ -1500,15 +1815,13 @@ describe("revocation reaches a live socket", () => {
 
     db.rows("site_editors")[0].revoked_at = new Date().toISOString();
 
-    await waitFor(
-      () => editor.socket.disconnected,
-      "the sweep to drop the removed mixed-case editor",
-    );
+    // `refused()`, not a wait on `socket.disconnected` — see the note in
+    // "drops an admitted silent socket … TTL" below (s79).
+    expect(await editor.refused()).toMatch(/revoked/i);
     await waitFor(
       () => roomSize(server, `site:${SITE_ID}:staging`) === 0,
       "the server to remove the dropped socket from the staging room",
     );
-    expect(editor.authErrors[0]?.error).toMatch(/revoked/i);
   });
 
   /**
@@ -1545,16 +1858,12 @@ describe("revocation reaches a live socket", () => {
 
     db.failingReads.add("site_editors");
 
-    await waitFor(
-      () => editor.socket.disconnected,
-      "the sweep to drop the socket it could not re-verify",
-    );
+    // `refused()`, not a wait on `socket.disconnected` — see the note in
+    // "drops an admitted silent socket … TTL" below (s79).
+    expect(await editor.refused()).toBe("Editor access could not be verified");
     await waitFor(
       () => roomSize(server, `site:${SITE_ID}:staging`) === 0,
       "the server to remove the dropped socket from the staging room",
-    );
-    expect(editor.authErrors[0]?.error).toBe(
-      "Editor access could not be verified",
     );
   });
 
@@ -1725,14 +2034,257 @@ describe("staging admission is device-bound", () => {
 
     db.rows("staging_access")[0].verified_at = hoursAgoIso(13);
 
-    await waitFor(
-      () => editor.socket.disconnected,
-      "the sweep to drop the socket whose verification went stale",
-    );
+    // `refused()` rather than waiting on `socket.disconnected`, which is also
+    // true BEFORE the client has processed its CONNECT: under load that wait
+    // returned at once and the auth-error had not arrived yet when it was read
+    // (seen once in s79's runs). `refused()` waits for the server's disconnect
+    // and returns the auth-error that preceded it.
+    expect(await editor.refused()).toMatch(/verification required/i);
     await waitFor(
       () => roomSize(server, `site:${SITE_ID}:staging`) === 0,
       "the server to remove the dropped socket from the staging room",
     );
-    expect(editor.authErrors[0]?.error).toMatch(/verification required/i);
+  });
+});
+
+/**
+ * s79 — rotating a site's key reaches the sockets already open with the old
+ * one (ADR 027's follow-up, with the test it asks for).
+ *
+ * "Regenerate snippet" writes a new `sites.api_key`, and from then on every
+ * token signed with the old key fails `verifySiteToken` — at the handshake.
+ * An open socket kept its handshake token forever: `revalidateSocket` returned
+ * early for anything but a staging socket, the sweep visited staging sockets
+ * only, and the message handlers compared the echoed token with the handshake
+ * one, never with the key. The sweep now re-verifies every socket's token
+ * against the current key, reading `sites` once per site per pass (the widget
+ * opens a socket for every visitor, so per-socket reads would scale with
+ * traffic), and an editor's next message does the same.
+ *
+ * Most cases drive the sweep directly (`revalidateAll`) with the timer set
+ * out of reach, so they assert what one pass does rather than racing it; the
+ * first proves the timer runs the same pass for a viewer.
+ */
+describe("key rotation reaches a live socket", () => {
+  const ROTATED_KEY = "rotated-api-key";
+  const STAGING_TOKEN = "staging-token-rotation";
+
+  let db: RecordingSupabase;
+  let server: ReturnType<typeof createRealtimeServer>;
+  let port: number;
+  const open: Socket[] = [];
+
+  async function boot(revalidationIntervalMs: number) {
+    db = new RecordingSupabase({
+      sites: seedSites(),
+      staging_access: [
+        {
+          id: "access-rotation",
+          token: STAGING_TOKEN,
+          site_id: SITE_ID,
+          is_active: true,
+          revoked_at: null,
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          email_verified: true,
+          email: "rotation@example.com",
+          ...boundToTestBrowser(),
+          permissions: ["edit"],
+        },
+      ],
+      site_editors: [],
+    });
+    server = createRealtimeServer({
+      port: 0,
+      supabase: db,
+      revalidationIntervalMs,
+    });
+    port = await server.listen();
+  }
+
+  afterEach(async () => {
+    while (open.length > 0) {
+      open.pop()?.close();
+    }
+    await server.close();
+  });
+
+  function site(id = SITE_ID): Row {
+    const row = db.rows("sites").find((candidate) => candidate.id === id);
+    if (!row) throw new Error(`Expected seeded site ${id}`);
+    return row;
+  }
+
+  async function connectViewer(
+    token = SITE_TOKEN,
+    siteId = SITE_ID,
+    origin = ORIGIN,
+  ) {
+    const room = `site:${siteId}`;
+    const expected = roomSize(server, room) + 1;
+    const socket = openSocket({ port, origin, query: { siteId, token } });
+    open.push(socket);
+    const tracked = track(socket);
+    await waitFor(
+      () => roomSize(server, room) >= expected,
+      "the viewer to join its site room",
+    );
+    return tracked;
+  }
+
+  async function connectEditor() {
+    const room = `site:${SITE_ID}:staging`;
+    const expected = roomSize(server, room) + 1;
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: STAGING_TOKEN,
+      },
+    });
+    open.push(socket);
+    const tracked = track(socket);
+    await waitFor(
+      () => roomSize(server, room) >= expected,
+      "the editor to join the staging room",
+    );
+    return tracked;
+  }
+
+  function sitesReads(): number {
+    return db.reads.filter((table) => table === "sites").length;
+  }
+
+  it("drops a socket holding the old token within one sweep, and admits the new token", async () => {
+    await boot(50);
+    const viewer = await connectViewer();
+
+    site().api_key = ROTATED_KEY;
+
+    expect(await viewer.refused()).toBe("Site token revoked");
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}`) === 0,
+      "the server to remove the dropped viewer from its room",
+    );
+
+    const renewed = await connectViewer(buildSiteToken(SITE_ID, ROTATED_KEY));
+    // Waited on, not read at once: the server joins the room before the
+    // client has necessarily processed its CONNECT.
+    await waitFor(
+      () => renewed.socket.connected,
+      "the new-token socket to be connected",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(renewed.socket.connected).toBe(true);
+    expect(renewed.authErrors).toEqual([]);
+  });
+
+  it("refuses an editor's next content-update after rotation, and broadcasts nothing", async () => {
+    await boot(60 * 60 * 1000);
+    const editor = await connectEditor();
+    const listener = await connectEditor();
+    const received: unknown[] = [];
+    listener.socket.on("content-update", (data) => received.push(data));
+
+    site().api_key = ROTATED_KEY;
+    // No ack is awaited: the refusal disconnects the socket, as every other
+    // revocation here does, so an ack could never arrive.
+    editor.socket.emit("content-update", {
+      elementId: "headline",
+      content: "After rotation",
+      persisted: true,
+      token: SITE_TOKEN,
+    });
+
+    expect(await editor.refused()).toBe("Site token revoked");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(received).toEqual([]);
+  });
+
+  /**
+   * s79 review F8. `content-map` compared the message's token with the one the
+   * socket connected with, never with the site's current key, so a socket
+   * holding a rotated-out token could keep telling the dashboard what pages and
+   * how many elements it saw until the next sweep. It re-checks the token
+   * against the current key now, as `content-update` does.
+   */
+  it("refuses a viewer's next content-map after rotation, and notifies no dashboard", async () => {
+    await boot(60 * 60 * 1000);
+    const dashboard = await connectEditor();
+    dashboard.socket.emit("join-dashboard", { siteId: SITE_ID });
+    await waitFor(
+      () => roomSize(server, `dashboard:${SITE_ID}`) === 1,
+      "the dashboard listener to join the dashboard room",
+    );
+    const notified: unknown[] = [];
+    dashboard.socket.on("content-map-updated", (data) => notified.push(data));
+    const viewer = await connectViewer();
+
+    site().api_key = ROTATED_KEY;
+    viewer.socket.emit("content-map", {
+      url: "https://example.com/pricing",
+      token: SITE_TOKEN,
+      contentMap: { headline: { selector: "h1", content: "Hi", type: "text" } },
+    });
+
+    expect(await viewer.refused()).toBe("Site token revoked");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notified).toEqual([]);
+  });
+
+  it("drops the sockets of a deleted site", async () => {
+    await boot(60 * 60 * 1000);
+    const viewer = await connectViewer();
+
+    db.tables.sites = db.rows("sites").filter((row) => row.id !== SITE_ID);
+    await server.revalidateAll();
+
+    expect(await viewer.refused()).toBe("Site token revoked");
+  });
+
+  it("fails closed when the site cannot be read", async () => {
+    await boot(60 * 60 * 1000);
+    const viewer = await connectViewer();
+
+    db.failingReads.add("sites");
+    await server.revalidateAll();
+
+    expect(await viewer.refused()).toBe("Site verification failed");
+  });
+
+  it("keeps a socket whose token still verifies", async () => {
+    await boot(60 * 60 * 1000);
+    const viewer = await connectViewer();
+    await waitFor(() => viewer.socket.connected, "the viewer to be connected");
+
+    await server.revalidateAll();
+    await server.revalidateAll();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(viewer.socket.connected).toBe(true);
+    expect(viewer.authErrors).toEqual([]);
+  });
+
+  it("reads each site once per sweep, however many sockets it has", async () => {
+    await boot(60 * 60 * 1000);
+    for (let index = 0; index < 4; index += 1) await connectViewer();
+    await connectEditor();
+    await connectViewer(
+      buildSiteToken(OTHER_SITE_ID, "other-key"),
+      OTHER_SITE_ID,
+      "https://other.example",
+    );
+    await connectViewer(
+      buildSiteToken(OTHER_SITE_ID, "other-key"),
+      OTHER_SITE_ID,
+      "https://other.example",
+    );
+
+    const before = sitesReads();
+    await server.revalidateAll();
+
+    expect(sitesReads() - before).toBe(2);
   });
 });
