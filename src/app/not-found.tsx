@@ -35,12 +35,14 @@ export default function NotFound() {
               </Button>
             </Link>
 
-            <Link href="/dashboard">
-              <Button variant="outline" className="w-full">
+            <Button variant="outline" className="w-full" asChild>
+              {/* This boundary can be reached from a static 404 document. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a href="/dashboard">
                 <LayoutDashboard className="w-4 h-4 mr-2" />
                 Go to dashboard
-              </Button>
-            </Link>
+              </a>
+            </Button>
           </div>
         </CardContent>
       </Card>

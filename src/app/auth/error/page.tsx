@@ -38,9 +38,11 @@ export default function AuthErrorPage() {
           </p>
 
           <div className="flex flex-col gap-3">
-            <Link href="/login">
-              <Button className="w-full">Back to login</Button>
-            </Link>
+            <Button className="w-full" asChild>
+              {/* /auth/error is static; /login must establish a nonce document. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a href="/login">Back to login</a>
+            </Button>
 
             <Link href="/">
               <Button variant="outline" className="w-full">

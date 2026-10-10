@@ -404,13 +404,15 @@ noise; a comment that says *what broke last time* is the asset.
   hash to it: either makes browsers ignore `'unsafe-inline'`, which is what lets a prerendered
   page's inline scripts run.
 
-The policy belongs to the current **document**, not to React's current route. A client-side
-`<Link>` navigation from a marketing document into `/signup` or `/dashboard` does not install the
-destination response's nonce policy; that tab keeps the static policy until a full document load.
-This is an accepted limitation of ADR 059's split, observed after the decision: auth callbacks are
-full redirects and commonly establish the nonce document, while a marketing-to-app client
-navigation remains under the weaker working policy. Changing those links into document loads or
-changing the policy boundary needs its own validated plan. ADR 059 itself remains immutable.
+The policy belongs to the current **document**, not merely to React's current route. Every
+transition from a static/marketing document into `/login`, `/signup`, `/edit`, `/dashboard` or the
+`/settings` redirect alias therefore uses a native anchor and loads a new document; otherwise a
+Next client transition would render the app route while retaining marketing's `'unsafe-inline'`
+policy. App-internal navigation stays on `Link`/the router and retains the nonce document already
+installed. The shared marketing header sends Sign in and Get started to `/login` and `/signup`
+rather than mounting credential forms inside the static document. The source guard in
+`app-document-boundary-links.test.ts` and the production-browser transition in `e2e/csp.spec.ts`
+pin that boundary. ADR 059 itself remains immutable; this enforces its app-surface decision.
 
 Both derive `connect-src` from env rather than widening to `https:`/`wss:`. Adding an outbound
 origin means adding it there or the browser blocks it silently. HSTS

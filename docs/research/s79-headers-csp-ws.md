@@ -173,12 +173,14 @@ https://evil.example` → `x-powered-by: Express`, `access-control-allow-origin:
 
 These findings post-date the 2026-10-09 research and are kept separate from that snapshot:
 
-- A browser keeps the CSP of its current document across an App Router client navigation. A
-  marketing-document `<Link>` to `/signup` or `/dashboard` renders the destination under the
-  marketing policy until a full document load. This is an accepted limitation of ADR 059's
-  split, not a reason to rewrite the accepted ADR: auth callbacks are full redirects, and changing
-  navigation behavior needs a separately validated plan. The canonical current-state note is in
-  `docs/architecture.md`.
+- A browser keeps the CSP of its current document across an App Router client navigation. The
+  first recovery pass incorrectly recorded marketing-to-app policy persistence as accepted. PR
+  #85 reproduced the security consequence in a production build: after the real homepage CTA
+  changed the route to `/signup`, a harmless inline handler still executed and no `/signup`
+  document response existed; a direct request did carry a nonce. The repair uses native anchors at
+  every static-to-app boundary, sends the shared Header's auth actions to `/login` and `/signup`
+  instead of mounting credential forms in the static document, and keeps app-internal client
+  navigation. The accepted ADR is unchanged; the mechanism now enforces its stated app policy.
 - Unknown URLs below a nonce segment were served by static `/_not-found`, whose scripts had no
   nonce and did not hydrate. Segment-local `[...missing]/page.tsx` catch-alls make those 404s pass
   through the segment's `connection()` layout and render per request.
@@ -190,3 +192,6 @@ These findings post-date the 2026-10-09 research and are kept separate from that
   It now reuses `revalidateSocket` before fan-out, at the cost of one bounded `sites` read.
 - `server/security-headers.js` is Express middleware. Engine.IO answers `/socket.io/` before
   Express, so its own response headers and CORS were never covered by s79 and remain unchanged.
+- The realtime server's status-only `/health` response made the app probe's old defaults
+  (`connections: 0`, `supabase: "unknown"`) invented telemetry. The consumer now treats 2xx as
+  liveness and publishes only its measured status and latency.

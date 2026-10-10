@@ -187,6 +187,10 @@ signed-in owner (`owner-session.ts`, CI's disposable stack) loads `/dashboard` a
 `securitypolicyviolation` (init script) and console. On the integrated base the contract is
 86 → 91 in `playwright.config.ts`, every place in `.github/workflows/ci.yml` and
 `src/__tests__/e2e/playwright-ci-contract.test.ts`.
+PR #85 extends the existing marketing case without changing that count: a harmless inline handler
+runs on the static document, the actual Hero and Header auth links each produce a new document
+response with a fresh nonce, the handler is blocked there, and `/signup` → `/login` still works as
+an app-internal client transition.
 Run (1)–(4) locally against `next build` + `next start` (`CI=1`, `PLAYWRIGHT_BASE_URL`); (5) is
 CI's.
 
@@ -197,9 +201,10 @@ CI's.
 `docs/architecture.md` (Two deploy targets: `/health` shape; CSP section: the two policies,
 HSTS, pointers by symbol), `server/README.md` (Verify `/health`, HTTP surface, handshake order,
 rotation sweep, `FLY_APP_NAME`), `server/fly.toml` header pointers by symbol, ADR 059,
-s69 stub marks. Review recovery records the document-scoped client-navigation limitation in the
-architecture and the dated research addendum. ADR 059 stays untouched because accepted ADRs are
-immutable and this observation changes neither its policy nor its rationale.
+s69 stub marks. Review recovery records that CSP is document-scoped. PR #85 replaces the earlier
+agent-authored "accepted limitation" note with the enforcement mechanism: native anchors only at
+static-to-app boundaries, app-internal client navigation unchanged. ADR 059 stays untouched because
+accepted ADRs are immutable; this repair implements its existing app-surface policy.
 
 - [x] Task 11
 
@@ -217,6 +222,20 @@ of pretending to own the real `/dashboard` route. Delete `.next`, `test-results/
 `playwright-report/`.
 
 - [x] Task 12
+
+## PR #85 automated-review repair (2026-10-10)
+
+Human-authorized fix mode after the validated plan and first review; the frontmatter remains the
+historical validation of Tasks 1–12, not a claim that these later findings were in that checkpoint.
+
+- [x] The app's realtime probe consumes s79's status-only `/health` contract as liveness and
+  reports status/latency only—no fabricated connection count or Supabase mode. The health test
+  double now returns the real `{ status: "ok" }` shape and asserts `details` is absent.
+- [x] Every static/marketing entry into the nonce surface uses a native anchor, preserving the
+  existing href, query and hash semantics plus ordinary modifier-key/accessibility behavior. The
+  shared Header no longer mounts owner auth forms under the marketing policy. A source guard covers
+  the finite boundary inventory; the existing CSP browser case proves the Hero and Header paths
+  load nonce documents, blocks the harmless inline probe there, and keeps app-internal navigation.
 
 ## Rollout
 

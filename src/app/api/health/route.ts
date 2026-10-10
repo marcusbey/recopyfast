@@ -230,20 +230,14 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
       };
     }
 
-    const payload = (await response.json().catch(() => ({}))) as {
-      status?: string;
-      connections?: number;
-      supabase?: string;
-    };
-
     return {
       status: "ok",
       latency,
-      details: {
-        connections: payload.connections ?? 0,
-        supabase: payload.supabase ?? "unknown",
-        reported: payload.status ?? "unknown",
-      },
+      // TOMBSTONE — s79 reduced the realtime `/health` contract to liveness:
+      // a 2xx with `{ status: "ok" }`. Its live connection count and Supabase
+      // mode were removed. Defaulting those absent fields to `0` and
+      // `"unknown"` made this endpoint publish invented measurements, so a
+      // successful probe reports only what this app measured: status + latency.
     };
   } catch (error) {
     const isTimeout =

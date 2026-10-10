@@ -94,13 +94,15 @@ export default async function Blog() {
             Drop one script tag into any site and make its copy editable — no
             migration, no rebuild.
           </p>
-          <Link
+          {/* Static marketing -> nonce app: this must replace the document. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
             href="/signup"
             className="inline-flex items-center px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
           >
             Get started free
             <ArrowRight className="ml-2 h-4 w-4" />
-          </Link>
+          </a>
         </div>
       </main>
 

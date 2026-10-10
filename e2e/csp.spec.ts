@@ -72,6 +72,28 @@ async function isHydrated(page: Page): Promise<boolean> {
   );
 }
 
+/**
+ * A harmless stand-in for an injected inline event handler. The marketing
+ * document deliberately allows it today; a nonce app document must block it.
+ */
+async function inlineHandlerRuns(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const probeWindow = window as typeof window & {
+      __rcfCspInlineProbe?: boolean;
+    };
+    delete probeWindow.__rcfCspInlineProbe;
+
+    const probe = document.createElement("button");
+    probe.hidden = true;
+    probe.setAttribute("onclick", "window.__rcfCspInlineProbe = true");
+    document.body.appendChild(probe);
+    probe.click();
+    probe.remove();
+
+    return probeWindow.__rcfCspInlineProbe === true;
+  });
+}
+
 function nonceOf(policy: string | undefined): string | undefined {
   return NONCE_SOURCE.exec(policy ?? "")?.[1];
 }
@@ -98,8 +120,9 @@ function expectEveryNextScriptStamped(html: string, nonce: string): void {
 }
 
 test.describe("s79 content security policy", () => {
-  test("the marketing surface: / and /pricing hydrate under the static policy", async ({
+  test("the marketing surface stays static and enters the app through a nonce document", async ({
     page,
+    request,
   }) => {
     const violations = await watchScriptViolations(page);
 
@@ -120,6 +143,89 @@ test.describe("s79 content security policy", () => {
     await expect(page).toHaveURL(/\/#pricing$/);
     await expect.poll(() => isHydrated(page)).toBe(true);
     expect(await violations()).toEqual([]);
+
+    // A direct request establishes the app policy we expect the normal
+    // homepage CTA to establish too. Before this repair Next's client Link
+    // changed the route without replacing the marketing document, so the tab
+    // kept `'unsafe-inline'` for the credential page.
+    const directSignup = await request.get("/signup");
+    const directSignupNonce = nonceOf(
+      directSignup.headers()["content-security-policy"],
+    );
+    expect(directSignupNonce).toBeTruthy();
+
+    await page.goto("/", { waitUntil: "load" });
+    expect(await inlineHandlerRuns(page)).toBe(true);
+
+    const signupDocuments: string[] = [];
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (
+        response.request().resourceType() === "document" &&
+        url.pathname === "/signup"
+      ) {
+        signupDocuments.push(
+          response.headers()["content-security-policy"] ?? "",
+        );
+      }
+    });
+
+    await page
+      .getByRole("link", { name: "Start your free trial", exact: true })
+      .first()
+      .click();
+    await expect(page).toHaveURL(/\/signup$/);
+
+    expect(await inlineHandlerRuns(page)).toBe(false);
+    expect(signupDocuments).toHaveLength(1);
+    const linkedSignupNonce = nonceOf(signupDocuments[0]);
+    expect(linkedSignupNonce).toBeTruthy();
+    expect(linkedSignupNonce).not.toBe(directSignupNonce);
+
+    // Once inside the nonce surface, its ordinary client navigation remains
+    // useful and safe: /signup -> /login changes the app route without another
+    // document request, retaining the nonce policy already installed.
+    const appInternalDocuments: string[] = [];
+    page.on("response", (response) => {
+      if (response.request().resourceType() === "document") {
+        appInternalDocuments.push(new URL(response.url()).pathname);
+      }
+    });
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    expect(appInternalDocuments).toEqual([]);
+    expect(await inlineHandlerRuns(page)).toBe(false);
+
+    // The shared Header used to open LoginForm/SignupForm directly inside the
+    // static marketing document. Its visible Sign in action now crosses the
+    // same document boundary as the Hero CTA.
+    const directLogin = await request.get("/login");
+    const directLoginNonce = nonceOf(
+      directLogin.headers()["content-security-policy"],
+    );
+    expect(directLoginNonce).toBeTruthy();
+
+    await page.goto("/", { waitUntil: "load" });
+    const loginDocuments: string[] = [];
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (
+        response.request().resourceType() === "document" &&
+        url.pathname === "/login"
+      ) {
+        loginDocuments.push(
+          response.headers()["content-security-policy"] ?? "",
+        );
+      }
+    });
+
+    await page.getByRole("link", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    expect(loginDocuments).toHaveLength(1);
+    const linkedLoginNonce = nonceOf(loginDocuments[0]);
+    expect(linkedLoginNonce).toBeTruthy();
+    expect(linkedLoginNonce).not.toBe(directLoginNonce);
+    expect(await inlineHandlerRuns(page)).toBe(false);
   });
 
   for (const path of ["/login", "/signup", "/edit"]) {

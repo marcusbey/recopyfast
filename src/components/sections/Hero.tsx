@@ -215,13 +215,16 @@ export default function Hero({ offer }: { offer: FoundingOfferView }) {
             truth free to drift from it — which is exactly how Stripe ended up
             describing Pro as 3 sites.
           */}
-          <Link
+          {/* Crossing from static marketing into /signup must replace the
+              document so the credential page receives its nonce policy. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
             href="/signup"
             className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-sky-700"
           >
             <span>Start your free trial</span>
             <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-          </Link>
+          </a>
 
           <Link
             href="/demo"

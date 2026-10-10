@@ -12,7 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Settings, LogOut, LayoutDashboard } from "lucide-react";
-import Link from "next/link";
 
 export function UserMenu() {
   const { user, signOut } = useAuth();
@@ -48,16 +47,21 @@ export function UserMenu() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link href="/dashboard" className="cursor-pointer">
+          {/* This menu is mounted in the static marketing header. Force a new
+              document so /dashboard installs its nonce response policy. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/dashboard" className="cursor-pointer">
             <LayoutDashboard className="mr-2 h-4 w-4" />
             <span>Dashboard</span>
-          </Link>
+          </a>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href="/settings" className="cursor-pointer">
+          {/* /settings redirects to the nonce-protected dashboard settings
+              page; a document request must own both hops. */}
+          <a href="/settings" className="cursor-pointer">
             <Settings className="mr-2 h-4 w-4" />
             <span>Settings</span>
-          </Link>
+          </a>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem

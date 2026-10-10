@@ -4058,6 +4058,11 @@ Acceptance criteria:
   `src/__tests__/middleware-csp.test.ts`, `src/__tests__/security/nonce-routes-render-dynamically.test.tsx`.
 - [x] Marketing pages (`/`, `/compare/*`, `/blog`, `/docs/install`, `/privacy`, `/terms`, `/demo`,
   `/try`) stay statically prerendered with today's `script-src 'self' 'unsafe-inline'` — ADR 059.
+- [x] A normal marketing CTA, comparison/blog/demo/try/docs entry, auth-error/not-found recovery,
+  or signed-in marketing menu entry into `/login`, `/signup`, `/edit` or `/dashboard` loads a new
+  nonce document; the Header collects no owner credentials under the marketing policy. Internal
+  app navigation remains client-side. Tests: `app-document-boundary-links.test.ts`,
+  `Header.test.tsx`, and the existing production-build case in `e2e/csp.spec.ts`.
 - [ ] A production build loads `/`, `/pricing` (→ `/#pricing`), `/login`, `/signup`, `/edit` and a
   signed-in `/dashboard` with no CSP violation and hydrated, and the nonce pages' served HTML
   carries the header's nonce on every script but the hashed theme script. Test: `e2e/csp.spec.ts`
@@ -4073,6 +4078,9 @@ Acceptance criteria:
   surface, sends `nosniff`, `X-Frame-Options: DENY`, `default-src 'none'`, `no-referrer`, HSTS and
   `Cross-Origin-Resource-Policy: same-origin`, and `/health` answers `200 {"status":"ok"}` with
   `no-store` and no connection count. Test: `src/__tests__/websocket/server.integration.test.ts`.
+- [x] The app's realtime health probe treats that status-only response as liveness and exposes
+  status plus measured latency, without inventing retired connection or Supabase details. Test:
+  `src/__tests__/api/health/realtime-check.test.ts`.
 - [x] A handshake is metered per client address before any database work, and spends the per-site
   bucket only once its token and origin verified: unauthenticated handshakes beyond the per-site
   cap leave a real editor's connection admitted; the per-address cap bounds the `sites` lookups;
