@@ -52,6 +52,13 @@ export interface EnforceRateLimitOptions {
   identifierType?: "user" | "ip" | "api_key";
   /** Defaults to "deny" — the safe choice; opt into "allow" deliberately. */
   onStoreFailure?: RateLimitFailureMode;
+  /**
+   * Replaces the preset's ceiling (its window is kept) for a bucket whose
+   * ceiling is data — an API key's own `rate_limit_per_minute` (s44). Anything
+   * but a positive integer is ignored and the preset applies: a 0 or NaN read
+   * off a row must not silently refuse every request, or none.
+   */
+  maxRequests?: number | null;
   /** Client-facing message on 429. */
   message?: string;
 }
@@ -101,12 +108,19 @@ export async function enforceRateLimit(
   } = options;
 
   const identifier = options.identifier ?? getClientIp(request);
-  const config = createRateLimitConfig(
+  const presetConfig = createRateLimitConfig(
     identifier,
     identifierType,
     limit,
     endpoint,
   );
+  const { maxRequests } = options;
+  const config =
+    typeof maxRequests === "number" &&
+    Number.isInteger(maxRequests) &&
+    maxRequests > 0
+      ? { ...presetConfig, maxRequests }
+      : presetConfig;
 
   let result;
   try {

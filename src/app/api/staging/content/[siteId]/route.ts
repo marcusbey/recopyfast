@@ -14,13 +14,78 @@ import {
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { sanitizeIncomingContent } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import {
+  canonicalSiteId,
+  validateContentAttributePatch,
+} from "@/lib/api/validation";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
+
+/**
+ * s77 (s69 L7) — per IP, before anything is decided about the caller.
+ *
+ * Both handlers authorize first (a session lookup and a `site_permissions`
+ * read, then the editor-token validation). PUT metered only after that, behind
+ * the grade; GET was not metered at all. The per-site limiters stay behind
+ * authorization (an anonymous caller must not spend the customer's budget);
+ * this guard is what bounds the authorizer.
+ *
+ * 200/min per address, shared by GET and PUT and by every site the address
+ * edits — the per-site edit ceiling is 50, and a polling tab reads 12 a minute
+ * (see the GET limiter), so one office address holds 16 polling tabs (192).
+ * Fails CLOSED: each handler's per-site limiter behind it fails closed too, so
+ * in an outage an editor is refused there anyway — failing open here would only
+ * hand a flood the authorizer.
+ */
+function shedIpFlood(request: NextRequest) {
+  return enforceRateLimit(request, {
+    limit: "IP_GENERAL",
+    endpoint: "staging/content:ip",
+    identifierType: "ip",
+    onStoreFailure: "deny",
+  });
+}
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stagedMetadata(value: unknown) {
+  const metadata = jsonObject(value);
+  const stagingAttributes = jsonObject(metadata.staging_attributes);
+  const publishedMetadata = { ...metadata };
+  delete publishedMetadata.staging_attributes;
+
+  return {
+    metadata: { ...publishedMetadata, ...stagingAttributes },
+    hasAttributeChanges: Object.entries(stagingAttributes).some(
+      ([key, value]) => publishedMetadata[key] !== value,
+    ),
+  };
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
-    const { siteId } = await params;
+    const shed = await shedIpFlood(request);
+    if (shed) return withPublicCors(shed, request);
+
+    const canonical = canonicalSiteId((await params).siteId);
+    if (!canonical.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        request,
+      );
+    }
+    const siteId = canonical.value;
 
     // Same first-party path as PUT below. Without it the owner could save a
     // draft and then be refused when reading it back, which is a worse state
@@ -55,22 +120,68 @@ export async function GET(
       access = validation.access;
     }
 
+    // s77 (s69 L7). Per site, fail closed, behind the permission grade — ADR 002
+    // rule 4, which this service-role read of the site's staged copy went
+    // without. Behind authorization for the reason PUT gives below: the bucket
+    // is the customer's.
+    //
+    // Who reads this (s77 review m1): the widget, whenever the page load can
+    // reach staging (a staging or edit-session link, or a stored editor grant)
+    // — once per page view and once per new path of a single-page app
+    // (`hydrateStoredContent` through `loadRows`, cached per path), plus every
+    // 5 s per tab in `startPolling`, the fallback taken only when the socket
+    // cannot even be constructed (no bundled socket.io client).
+    // 100/min per site, shared by every editor tab of the site: 100 editor page
+    // views a minute, or 8 polling tabs (8 × 12 = 96) with a few page views on
+    // top. A refusal costs one 5 s tick, or shows one page as authored until
+    // the next visit asks again — never a write.
+    const limited = await enforceRateLimit(request, {
+      limit: "USER_GENERAL",
+      endpoint: "staging/content-read",
+      identifier: siteId,
+      identifierType: "api_key",
+      onStoreFailure: "deny",
+      message: "Staging read rate limit exceeded for this site.",
+    });
+    if (limited) return withPublicCors(limited, request);
+
     const supabase = createServiceRoleClient();
 
     // Get language and variant from query params
     const searchParams = request.nextUrl.searchParams;
     const language = searchParams.get("language") || "en";
     const variant = searchParams.get("variant") || "default";
+    const requestedPagePath = searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath && !normalizedPagePath.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        request,
+      );
+    }
+    const pagePath = normalizedPagePath?.value ?? null;
 
-    // Fetch content elements with staging content
-    const { data: contentElements, error } = await supabase
-      .from("content_elements")
-      .select(
-        "id, site_id, element_id, selector, staging_content, published_content, original_content, language, variant, metadata, staging_updated_at, staging_updated_by, published_at",
-      )
-      .eq("site_id", siteId)
-      .eq("language", language)
-      .eq("variant", variant);
+    const { data: contentElements, error } = await fetchPageScopedRows(
+      (scope) => {
+        let query = supabase
+          .from("content_elements")
+          .select(
+            "id, site_id, element_id, selector, staging_content, published_content, original_content, language, variant, page_path, metadata, staging_updated_at, staging_updated_by, published_at",
+          )
+          .eq("site_id", siteId)
+          .eq("language", language)
+          .eq("variant", variant);
+
+        if (scope.kind === "page") {
+          query = query.eq("page_path", scope.pagePath);
+        } else if (scope.kind === "shared") {
+          query = query.is("page_path", null);
+        }
+        return query;
+      },
+      pagePath,
+    );
 
     if (error) {
       console.error("Error fetching staging content:", error);
@@ -84,15 +195,22 @@ export async function GET(
     }
 
     // Transform content: use staging_content if available, otherwise published_content
-    const transformedContent = (contentElements || []).map((element) => ({
-      ...element,
-      // For display, use staging_content if it exists, otherwise published_content
-      current_content: element.staging_content ?? element.published_content,
-      // Include flags for UI
-      has_staging_changes:
-        element.staging_content !== null &&
-        element.staging_content !== element.published_content,
-    }));
+    const transformedContent = (contentElements || []).map((element) => {
+      const projection = stagedMetadata(element.metadata);
+
+      return {
+        ...element,
+        metadata: projection.metadata,
+        // For display, use staging_content if it exists, otherwise published_content
+        current_content: element.staging_content ?? element.published_content,
+        // Attribute-only edits must remain visible and publishable even when the
+        // editor did not change the element's text in the same save.
+        has_staging_changes:
+          projection.hasAttributeChanges ||
+          (element.staging_content !== null &&
+            element.staging_content !== element.published_content),
+      };
+    });
 
     return withPublicCors(
       NextResponse.json({
@@ -116,7 +234,18 @@ export async function PUT(
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
-    const { siteId } = await params;
+    const shed = await shedIpFlood(request);
+    if (shed) return withPublicCors(shed, request);
+
+    const canonical = canonicalSiteId((await params).siteId);
+    if (!canonical.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        request,
+      );
+    }
+    const siteId = canonical.value;
+
     const requestBody = (await request.json()) as Record<string, unknown>;
     const elementId =
       typeof requestBody.elementId === "string" ? requestBody.elementId : "";
@@ -125,6 +254,14 @@ export async function PUT(
       typeof requestBody.language === "string" ? requestBody.language : "en";
     const variant =
       typeof requestBody.variant === "string" ? requestBody.variant : "default";
+    const attributePatch = validateContentAttributePatch(requestBody);
+
+    if (!attributePatch.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: attributePatch.error }, { status: 400 }),
+        request,
+      );
+    }
 
     // The site's own owner is signed in and holds a `site_permissions` row; they
     // carry no editor token and never can, so validating tokens alone refused
@@ -211,6 +348,9 @@ export async function PUT(
     // 50/min because a human is typing. The editor saves per element on blur,
     // not per keystroke (recopyfast.src.js persists on commit), so a real
     // session is nowhere near it and a refusal is retried by the next save.
+    //
+    // Keyed on the canonical id (s77, s69 R1): every spelling of one site
+    // spends this one bucket — see `canonicalSiteId` (src/lib/api/validation.ts).
     const limited = await enforceRateLimit(request, {
       limit: "USER_CONTENT_EDIT",
       endpoint: "staging/content-update",
@@ -221,44 +361,41 @@ export async function PUT(
     });
     if (limited) return withPublicCors(limited, request);
 
+    // Saving needs the SITE OWNER's plan (s51, ADR 041) — keyed by the owner,
+    // never by this caller, whose device grant may have no account at all.
+    // After authorization and the limiter, never before: a "plan ended" answer
+    // to an anonymous caller would tell anyone holding the public site id
+    // whether this customer lapsed. And 402, never 401/403: the widget sends
+    // those to `handleTerminalWriteFailure` (recopyfast.src.js), which forgets
+    // the edit link and says "Session ended" — while any other status alerts
+    // the body's own message and keeps the link for when the owner pays.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return withPublicCors(ownerCanEditRefusal(ownerCanEdit), request);
+    }
+
     const sanitizedContent = sanitizeIncomingContent(String(content));
     const supabase = createServiceRoleClient();
 
-    // Get current element for history
-    const { data: currentElement } = await supabase
-      .from("content_elements")
-      .select("id, staging_content")
-      .eq("site_id", siteId)
-      .eq("element_id", elementId)
-      .eq("language", language)
-      .eq("variant", variant)
-      .single();
+    // The draft and its audit entry are one database operation. This used to
+    // update content_elements first and insert staging_history second; a failed
+    // insert therefore returned 500 after the draft had already committed.
+    const { data: savedRows, error: saveError } = await supabase.rpc(
+      "save_staging_content_atomic",
+      {
+        p_site_id: siteId,
+        p_element_id: elementId,
+        p_language: language,
+        p_variant: variant,
+        p_staging_content: sanitizedContent,
+        p_attribute_patch: attributePatch.value,
+        p_staging_access_id: access.stagingAccessId || null,
+        p_user_email: access.email || access.userId || access.kind,
+      },
+    );
 
-    if (!currentElement) {
-      return withPublicCors(
-        NextResponse.json(
-          { error: "Content element not found" },
-          { status: 404 },
-        ),
-        request,
-      );
-    }
-
-    // Update staging content
-    const { error: updateError } = await supabase
-      .from("content_elements")
-      .update({
-        staging_content: sanitizedContent,
-        staging_updated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("site_id", siteId)
-      .eq("element_id", elementId)
-      .eq("language", language)
-      .eq("variant", variant);
-
-    if (updateError) {
-      console.error("Error updating staging content:", updateError);
+    if (saveError) {
+      console.error("Error saving staging content atomically:", saveError);
       return withPublicCors(
         NextResponse.json(
           { error: "Failed to update staging content" },
@@ -268,23 +405,25 @@ export async function PUT(
       );
     }
 
-    // Record in staging history
-    await supabase.from("staging_history").insert({
-      content_element_id: currentElement.id,
-      // Null for a first-party edit: the owner's change is not attributable to
-      // any staging invite, and pointing it at one would misattribute the edit.
-      staging_access_id: access.stagingAccessId || null,
-      previous_content: currentElement.staging_content,
-      new_content: sanitizedContent,
-      user_email: access.email || access.userId || access.kind,
-      action: currentElement.staging_content ? "update" : "create",
-    });
+    const saved = Array.isArray(savedRows) ? savedRows[0] : null;
+    if (!saved) {
+      return withPublicCors(
+        NextResponse.json(
+          { error: "Content element not found" },
+          { status: 404 },
+        ),
+        request,
+      );
+    }
 
     return withPublicCors(
       NextResponse.json({
         success: true,
         elementId,
-        updatedAt: new Date().toISOString(),
+        updatedAt:
+          typeof saved.updated_at === "string"
+            ? saved.updated_at
+            : new Date().toISOString(),
       }),
       request,
     );

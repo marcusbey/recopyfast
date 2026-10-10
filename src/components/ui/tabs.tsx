@@ -13,11 +13,12 @@ const TabsList = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
-    // `max-w-full` + horizontal scroll: Settings has five triggers, which
-    // overflow a 390px viewport. Previously they were simply clipped.
+    // Underline tabs that wrap (s66a). The segmented pill before this scrolled
+    // sideways behind a hidden scrollbar, so on Settings at 375px two of five
+    // tabs were off-screen with nothing to say they existed (s66 research,
+    // fact 6). Never hide overflow here: wrap it.
     className={cn(
-      "inline-flex h-10 max-w-full items-center justify-start gap-1 overflow-x-auto rounded-lg border border-border bg-surface-2 p-1 text-muted-foreground",
-      "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+      "flex w-full flex-wrap items-end gap-x-4 border-b border-border text-muted-foreground",
       className,
     )}
     {...props}
@@ -32,12 +33,13 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium",
-      "transition-[color,background-color,box-shadow] duration-200 ease-out",
+      // `-mb-px` lays the 2px underline over the list's 1px rule.
+      "-mb-px inline-flex h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-none border-b-2 border-transparent px-0.5 text-sm font-medium",
+      "transition-[color,border-color] duration-200 ease-out",
       "hover:text-foreground",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       "disabled:pointer-events-none disabled:opacity-50",
-      "data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs",
+      "data-[state=active]:border-primary data-[state=active]:text-foreground",
       className,
     )}
     {...props}

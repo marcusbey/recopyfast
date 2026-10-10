@@ -26,6 +26,7 @@ const mockSupabase = {
     for (const method of [
       "select",
       "eq",
+      "in",
       "gt",
       "gte",
       "or",

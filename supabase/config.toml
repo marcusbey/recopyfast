@@ -24,8 +24,11 @@ max_rows = 1000
 [db]
 port = 54322
 shadow_port = 54320
-# Match the hosted project's Postgres major version.
-major_version = 15
+# Match the hosted project's Postgres major version: production is 17.4. This was
+# 15 until s75, so every e2e DB suite ran on a parser production does not use.
+# The CI replay image and scripts/db/replay-checks.mjs must say the same major —
+# src/__tests__/ci/release-gates.test.ts holds all three together.
+major_version = 17
 
 [db.pooler]
 enabled = false

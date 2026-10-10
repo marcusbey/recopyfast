@@ -2,304 +2,42 @@ import { createServerClient } from "@supabase/ssr";
 import { NextRequest } from "next/server";
 import { createHash } from "crypto";
 
-interface RateLimitConfig {
-  windowMs: number; // Time window in milliseconds
-  maxRequests: number; // Maximum requests per window
-  keyGenerator?: (req: NextRequest) => string;
-}
-
-interface RateLimitResult {
-  allowed: boolean;
-  remaining: number;
-  resetTime: number;
-  total: number;
-}
-
-export class APIRateLimiter {
-  private _supabase: ReturnType<typeof createServerClient> | null = null;
-
-  // Lazy: construct the Supabase client on first use, not at instantiation. This
-  // module exports a singleton at import time, and createServerClient throws on
-  // empty url/key — which crashed Vercel's "Collecting page data" build phase when
-  // Supabase env vars are absent. Deferring avoids the import-time throw.
-  private get supabase() {
-    if (!this._supabase) {
-      this._supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        {
-          cookies: {
-            get: () => "",
-            set: () => {},
-            remove: () => {},
-          },
-        },
-      );
-    }
-    return this._supabase;
-  }
-
-  /**
-   * Check rate limit for API key
-   */
-  async checkAPIKeyLimit(
-    apiKeyId: string,
-    config?: RateLimitConfig,
-  ): Promise<RateLimitResult> {
-    try {
-      // Get API key with rate limit settings
-      const { data: apiKey, error } = await this.supabase
-        .from("api_keys")
-        .select("rate_limit, rate_limit_per_minute, is_active")
-        .eq("id", apiKeyId)
-        .single();
-
-      if (error || !apiKey || !apiKey.is_active) {
-        return {
-          allowed: false,
-          remaining: 0,
-          resetTime: Date.now(),
-          total: 0,
-        };
-      }
-
-      const maxRequests =
-        config?.maxRequests ||
-        apiKey.rate_limit_per_minute ||
-        apiKey.rate_limit ||
-        1000;
-      const windowMs = config?.windowMs || 60 * 60 * 1000; // 1 hour default
-
-      return await this.checkLimit(
-        `api_key:${apiKeyId}`,
-        maxRequests,
-        windowMs,
-      );
-    } catch (error) {
-      console.error("Rate limit check error:", error);
-      return {
-        allowed: false,
-        remaining: 0,
-        resetTime: Date.now(),
-        total: 0,
-      };
-    }
-  }
-
-  /**
-   * Check rate limit for IP address
-   */
-  async checkIPLimit(
-    ipAddress: string,
-    config: RateLimitConfig,
-  ): Promise<RateLimitResult> {
-    return await this.checkLimit(
-      `ip:${ipAddress}`,
-      config.maxRequests,
-      config.windowMs,
-    );
-  }
-
-  /**
-   * Check rate limit for user
-   */
-  async checkUserLimit(
-    userId: string,
-    config: RateLimitConfig,
-  ): Promise<RateLimitResult> {
-    return await this.checkLimit(
-      `user:${userId}`,
-      config.maxRequests,
-      config.windowMs,
-    );
-  }
-
-  /**
-   * Generic rate limit checker.
-   * Public: createRateLimitMiddleware drives it directly with a custom key.
-   */
-  async checkLimit(
-    key: string,
-    maxRequests: number,
-    windowMs: number,
-  ): Promise<RateLimitResult> {
-    const now = Date.now();
-    const windowStart = now - windowMs;
-
-    try {
-      // Clean up old entries
-      await this.supabase
-        .from("rate_limits")
-        .delete()
-        .lt("timestamp", new Date(windowStart).toISOString());
-
-      // Count current requests in window
-      const { count, error: countError } = await this.supabase
-        .from("rate_limits")
-        .select("*", { count: "exact", head: true })
-        .eq("key", key)
-        .gte("timestamp", new Date(windowStart).toISOString());
-
-      if (countError) {
-        throw countError;
-      }
-
-      const currentCount = count || 0;
-      const allowed = currentCount < maxRequests;
-      const remaining = Math.max(0, maxRequests - currentCount - 1);
-
-      if (allowed) {
-        // Record this request
-        await this.supabase.from("rate_limits").insert({
-          key,
-          timestamp: new Date(now).toISOString(),
-        });
-      }
-
-      return {
-        allowed,
-        remaining,
-        resetTime: windowStart + windowMs,
-        total: maxRequests,
-      };
-    } catch (error) {
-      // FAIL CLOSED IN PRODUCTION. (H-4)
-      //
-      // This catch used to end with "In case of error, allow the request but log
-      // it" and `allowed: true`. Any error on the `rate_limits` table — a dead
-      // connection, a timeout, the table missing — therefore removed the limit
-      // silently, and the only endpoint behind this limiter is /api/v1/content,
-      // which reads and WRITES `content_elements` with the service-role key. A
-      // limiter that disappears without saying so is worse than none: nothing
-      // downstream can tell the difference between "metered" and "unmetered".
-      //
-      // Permissive outside production, deliberately, and it is the same call
-      // `@/lib/security/rate-limiter` already makes about a missing REDIS_URL:
-      // strict where the traffic is real, out of the way on a developer's
-      // machine that has no local store. Two different conventions for "the
-      // meter is down" would be one too many.
-      //
-      // The caller sees an ordinary refusal rather than a distinct "store
-      // unavailable" signal, because RateLimitResult has no channel for one.
-      // /api/v1/content answers 429; a 503 would be more precise and is not
-      // worth widening this interface for.
-      const isProduction = process.env.NODE_ENV === "production";
-
-      console.error(
-        `Rate limit store unavailable (policy: ${isProduction ? "deny" : "allow"}):`,
-        error,
-      );
-
-      if (isProduction) {
-        return {
-          allowed: false,
-          remaining: 0,
-          resetTime: windowStart + windowMs,
-          total: maxRequests,
-        };
-      }
-
-      return {
-        allowed: true,
-        remaining: maxRequests - 1,
-        resetTime: windowStart + windowMs,
-        total: maxRequests,
-      };
-    }
-  }
-
-  /**
-   * Reset rate limit for a key
-   */
-  async resetLimit(key: string): Promise<void> {
-    try {
-      await this.supabase.from("rate_limits").delete().eq("key", key);
-    } catch (error) {
-      console.error("Reset rate limit error:", error);
-    }
-  }
-
-  /**
-   * Get rate limit status without incrementing
-   */
-  async getStatus(
-    key: string,
-    maxRequests: number,
-    windowMs: number,
-  ): Promise<RateLimitResult> {
-    const now = Date.now();
-    const windowStart = now - windowMs;
-
-    try {
-      const { count, error } = await this.supabase
-        .from("rate_limits")
-        .select("*", { count: "exact", head: true })
-        .eq("key", key)
-        .gte("timestamp", new Date(windowStart).toISOString());
-
-      if (error) {
-        throw error;
-      }
-
-      const currentCount = count || 0;
-      const remaining = Math.max(0, maxRequests - currentCount);
-
-      return {
-        allowed: currentCount < maxRequests,
-        remaining,
-        resetTime: windowStart + windowMs,
-        total: maxRequests,
-      };
-    } catch (error) {
-      console.error("Get rate limit status error:", error);
-      return {
-        allowed: true,
-        remaining: maxRequests,
-        resetTime: windowStart + windowMs,
-        total: maxRequests,
-      };
-    }
-  }
-}
+/*
+ * TOMBSTONE — the Postgres rate limiter that lived here (s44).
+ *
+ * This module used to export `APIRateLimiter`, a limiter over the `rate_limits`
+ * table, and `/api/v1/content` metered every request through it. It could never
+ * have worked: it read `api_keys.rate_limit` and deleted, counted and inserted
+ * `rate_limits` rows by `key` and `timestamp`, and no schema this repository
+ * ever had contains any of those three columns — `rate_limits` is
+ * `identifier / identifier_type / requests_count / window_start …`
+ * (20250817000000_complete_database_setup.sql). PostgREST answered 42703, the
+ * limiter read every error as "over the limit", and in production a freshly
+ * created key's FIRST call got a 429 (2026-09-25). The endpoint had never
+ * served a request. Its suite stayed green because its Supabase stub accepted
+ * any column on any table.
+ *
+ * Do not bring a table-backed limiter back here. The route now meters through
+ * `enforceRateLimit` (`@/lib/api/rate-limit`) — the Redis-backed limiter every
+ * other route uses, with an explicit failure policy per call — and its tests
+ * run against `src/__tests__/helpers/schema-strict-supabase.ts`, which answers
+ * an unknown column the way PostgREST does. `rate_limits` is now unused by code.
+ *
+ * What remains is `validateAPIKey`, the API-key authentication for
+ * `/api/v1/content`.
+ */
 
 /**
- * Middleware for rate limiting
+ * The only `api_keys` columns authentication needs, named rather than `*`.
+ *
+ * `*` hid the bug above: a read of a column that does not exist comes back as
+ * `undefined` instead of an error, so `apiKey.rate_limit` looked like "unset"
+ * for as long as it was read. A named list fails loudly on a column that is not
+ * there, and keeps `key_hash` — the secret the lookup filters on — out of the
+ * row this function holds.
  */
-export function createRateLimitMiddleware(config: RateLimitConfig) {
-  const rateLimiter = new APIRateLimiter();
-
-  return async (req: NextRequest) => {
-    const key = config.keyGenerator
-      ? config.keyGenerator(req)
-      : getDefaultKey(req);
-    const result = await rateLimiter.checkLimit(
-      key,
-      config.maxRequests,
-      config.windowMs,
-    );
-
-    return {
-      rateLimitResult: result,
-      headers: {
-        "X-RateLimit-Limit": config.maxRequests.toString(),
-        "X-RateLimit-Remaining": result.remaining.toString(),
-        "X-RateLimit-Reset": Math.ceil(result.resetTime / 1000).toString(),
-      },
-    };
-  };
-}
-
-/**
- * Default key generator based on IP address
- */
-function getDefaultKey(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  // NextRequest no longer exposes .ip (removed in Next 15+); derive from headers.
-  const ip = forwarded
-    ? forwarded.split(",")[0]
-    : req.headers.get("x-real-ip") || "unknown";
-  return `ip:${ip}`;
-}
+const API_KEY_AUTH_COLUMNS =
+  "id, user_id, site_id, scopes, rate_limit_per_minute, expires_at";
 
 /**
  * API key extractor and validator
@@ -310,7 +48,8 @@ export async function validateAPIKey(req: NextRequest): Promise<{
     id: string;
     site_id: string;
     permissions: Record<string, boolean>;
-    rate_limit: number;
+    /** The key's own per-minute ceiling, as stored; `enforceRateLimit` vets it. */
+    rate_limit_per_minute: number | null;
     expires_at?: string;
   };
   error?: string;
@@ -347,7 +86,7 @@ export async function validateAPIKey(req: NextRequest): Promise<{
 
     const { data: apiKey, error } = await supabase
       .from("api_keys")
-      .select("*")
+      .select(API_KEY_AUTH_COLUMNS)
       .eq("key_hash", keyHash)
       .eq("is_active", true)
       .single();
@@ -359,6 +98,38 @@ export async function validateAPIKey(req: NextRequest): Promise<{
     // Check if key is expired
     if (apiKey.expires_at && new Date(apiKey.expires_at) < new Date()) {
       return { valid: false, error: "API key expired" };
+    }
+
+    // A key speaks for its creator, so it is only as good as the creator's
+    // standing on the site *now*. s42 made keys creatable for the first time,
+    // and its review (M1) found the gap: this function checked only the hash
+    // and is_active, so an admin who was demoted or removed kept a key with
+    // content_write — and could not be stopped, because the ex-admin is refused
+    // pause/delete and no other admin can see another user's key. Re-reading
+    // the admin row on every call makes removal the revocation. A key with no
+    // site cannot be checked at all, and a failed read fails closed; both get
+    // the same answer as an unknown key.
+    if (!apiKey.site_id || !apiKey.user_id) {
+      console.warn(`[api-keys] refused key ${apiKey.id}: not bound to a site`);
+      return { valid: false, error: "Invalid API key" };
+    }
+
+    const { data: adminRow, error: adminError } = await supabase
+      .from("site_permissions")
+      .select("user_id")
+      .eq("user_id", apiKey.user_id)
+      .eq("site_id", apiKey.site_id)
+      .eq("permission", "admin")
+      // No unique (site_id, user_id) index exists, so a duplicated admin row
+      // must not turn maybeSingle() into an error that refuses a real admin.
+      .limit(1)
+      .maybeSingle();
+
+    if (adminError || !adminRow) {
+      console.warn(
+        `[api-keys] refused key ${apiKey.id}: creator is not an admin of the site${adminError ? ` (${adminError.message})` : ""}`,
+      );
+      return { valid: false, error: "Invalid API key" };
     }
 
     // Update last used timestamp
@@ -378,7 +149,9 @@ export async function validateAPIKey(req: NextRequest): Promise<{
           content_read: scopes.includes("read") || scopes.includes("write"),
           content_write: scopes.includes("write"),
         },
-        rate_limit: apiKey.rate_limit_per_minute || apiKey.rate_limit || 1000,
+        // Not `|| apiKey.rate_limit || 1000`: `api_keys.rate_limit` never
+        // existed (see the tombstone at the top of this file).
+        rate_limit_per_minute: apiKey.rate_limit_per_minute ?? null,
         expires_at: apiKey.expires_at,
       },
     };
@@ -387,44 +160,3 @@ export async function validateAPIKey(req: NextRequest): Promise<{
     return { valid: false, error: "Internal error" };
   }
 }
-
-// Rate limiting configurations for different endpoints
-export const RATE_LIMIT_CONFIGS = {
-  // Public API endpoints
-  public: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 1000,
-  },
-
-  // Authentication endpoints
-  auth: {
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    maxRequests: 10,
-  },
-
-  // Content read operations
-  content_read: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 5000,
-  },
-
-  // Content write operations
-  content_write: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 1000,
-  },
-
-  // Bulk operations
-  bulk: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 10,
-  },
-
-  // Analytics
-  analytics: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 500,
-  },
-};
-
-export const rateLimiter = new APIRateLimiter();

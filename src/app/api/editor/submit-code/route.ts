@@ -36,6 +36,11 @@ import {
   readString,
 } from "@/lib/auth/editor-request";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+import { requireUuid } from "@/lib/api/validation";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 /** One message for every way a code can fail. Wrong, expired, never issued, spent — all the same. */
 function rejectCode(request: NextRequest) {
@@ -56,7 +61,7 @@ export async function POST(request: NextRequest) {
     const body = await readJsonBody(request);
     const rawEmail = readString(body, "email");
     const code = readString(body, "code");
-    const siteId = readString(body, "siteId");
+    const rawSiteId = readString(body, "siteId");
     const rememberDevice = body?.rememberDevice === true;
 
     if (!rawEmail || !isPlausibleEmail(rawEmail.trim()) || !code) {
@@ -67,6 +72,25 @@ export async function POST(request: NextRequest) {
         ),
         request,
       );
+    }
+
+    // s68b M3. Canonicalised BEFORE the limiter: the per-address bucket used to
+    // be keyed on the raw `siteId` while the code row is found through a `uuid`
+    // cast, so each spelling of one site id was a fresh five-guess budget
+    // against the same code. Malformed → 400; absent → hub mode, unchanged.
+    let siteId: string | null = null;
+    if (rawSiteId !== null) {
+      const canonical = requireUuid(body ?? {}, "siteId");
+      if (!canonical.ok) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: "invalid_request", message: "That site id isn't valid." },
+            { status: 400 },
+          ),
+          request,
+        );
+      }
+      siteId = canonical.value;
     }
 
     const email = normalizeEmail(rawEmail);
@@ -85,6 +109,13 @@ export async function POST(request: NextRequest) {
     }
 
     // ---- Hub sign-in ----------------------------------------------------
+    //
+    // `rememberDevice` used to be read above and ignored here: the hub cookie
+    // was 30 minutes whatever was ticked, and the flag reached the customer's
+    // site only through the hand-off body. s39 made the hub somewhere an editor
+    // comes back to, and a resumed session never shows the checkbox again — so
+    // the choice is signed into the session now, and the cookie lives as long
+    // as the editor asked it to.
     if (!siteId) {
       const sites = await listSitesForEditor(email);
       const response = withPublicCors(
@@ -92,6 +123,7 @@ export async function POST(request: NextRequest) {
           ok: true,
           mode: "hub",
           email,
+          remembered: rememberDevice,
           sites: sites.map((site) => ({
             siteId: site.siteId,
             name: site.siteName,
@@ -103,8 +135,8 @@ export async function POST(request: NextRequest) {
       );
       response.cookies.set(
         HUB_SESSION_COOKIE,
-        createHubSessionToken(email),
-        hubSessionCookieOptions(),
+        createHubSessionToken(email, rememberDevice),
+        hubSessionCookieOptions(rememberDevice),
       );
       return response;
     }
@@ -148,6 +180,17 @@ export async function POST(request: NextRequest) {
       // Reachable only if the editor was revoked between the code being issued
       // and used. The code is already spent, so this cannot be probed.
       return rejectCode(request);
+    }
+
+    // A grant on a lapsed owner's site would only be refused at its first
+    // save, so none is minted, and the code prompt shows the owner's message
+    // (s51, ADR 041). Only now — after the code is spent and the editor found
+    // — because before that the caller has proved nothing, and "plan ended"
+    // would be an oracle on a customer's billing. 402, never 401/403: the
+    // widget reads `message` either way and must not treat it as terminal.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return withPublicCors(ownerCanEditRefusal(ownerCanEdit), request);
     }
 
     const issued = await issueDeviceGrant({

@@ -7,12 +7,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
+  REMOVED_EDITOR_INVITE_MESSAGE,
   StagingAccessManager,
   StagingPermission,
   AccessType,
 } from "@/lib/auth/staging-access";
 import { sendStagingVerificationEmail } from "@/lib/email/resend";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { authorizeFirstPartyEditorAccess } from "@/lib/auth/editor-access";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
+import { optionalBoundedString } from "@/lib/api/validation";
+import { isPlausibleEmail } from "@/lib/auth/editor-directory";
+
+/** Longest invite label accepted (s68b M6) — it is mailed to the invitee. */
+const MAX_STAGING_LABEL_LENGTH = 80;
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,16 +58,16 @@ export async function POST(request: NextRequest) {
       type,
       email,
       permissions,
-      label,
       expiresInDays,
     }: {
       siteId: string;
       type: AccessType;
       email?: string;
       permissions: StagingPermission[];
-      label?: string;
       expiresInDays?: number;
     } = body;
+    // `label` is read below through `optionalBoundedString`, never trusted as
+    // typed here (s68b M6).
 
     // Validate required fields
     if (!siteId || !type || !permissions || permissions.length === 0) {
@@ -96,6 +107,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // s72. The invite's address becomes the `created_by` of every version its
+    // holder saves, and the embed's History tab rendered that as markup on the
+    // customer's origin (s70a review F1): this route checked only that an email
+    // was present, so a site admin could invite `<img/src/onerror=…>@x.co`. The
+    // address must now be a string holding a valid address (the shared rule the
+    // editor routes use), trimmed, refused before the site is read with a fixed
+    // message that never repeats what was sent. Advisory against an admin until
+    // s72b: an admin can still write `staging_access.email` directly through
+    // PostgREST. The embed rendering it as text is what makes a stored value
+    // harmless, rows written before this included.
+    const inviteEmail = typeof email === "string" ? email.trim() : email;
+    if (
+      type === "invite" &&
+      (typeof inviteEmail !== "string" || !isPlausibleEmail(inviteEmail))
+    ) {
+      return NextResponse.json(
+        { error: "Enter a valid email address." },
+        { status: 400 },
+      );
+    }
+
+    // s68b M6. The label is free text any site admin chooses, and it is mailed
+    // — beside a genuine code, from our domain — to an address that admin also
+    // chooses. The emails escape it; this bounds it before anything is created:
+    // a string, at most 80 characters, no control characters (no header-shaped
+    // `\r\nBcc:` lines). The text still reads as the admin wrote it.
+    const labelCheck = optionalBoundedString(body, "label", {
+      maxLength: MAX_STAGING_LABEL_LENGTH,
+      rejectControlCharacters: true,
+    });
+    if (!labelCheck.ok) {
+      return NextResponse.json({ error: labelCheck.error }, { status: 400 });
+    }
+
     // Get site info for staging URL
     const { data: site, error: siteError } = await supabase
       .from("sites")
@@ -105,6 +150,21 @@ export async function POST(request: NextRequest) {
 
     if (siteError || !site) {
       return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    }
+
+    // An invite onto a lapsed owner's site would only be refused at its first
+    // save, so none is issued (s51, ADR 041). The admin check lives inside
+    // `createStagingAccess`, which also inserts, so the caller's access is
+    // read first and only someone with a row on the site hears about its plan.
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
+      siteId,
+      "view",
+    );
+    if (firstPartyAccess) {
+      const ownerCanEdit = await checkOwnerCanEdit(siteId);
+      if (!ownerCanEdit.ok) {
+        return ownerCanEditRefusal(ownerCanEdit);
+      }
     }
 
     // Create staging access.
@@ -119,9 +179,9 @@ export async function POST(request: NextRequest) {
       result = await StagingAccessManager.createStagingAccess({
         siteId,
         accessType: type,
-        email,
+        email: inviteEmail,
         permissions,
-        label,
+        label: labelCheck.value,
         createdBy: user.id,
         expiresInDays,
       });
@@ -140,6 +200,11 @@ export async function POST(request: NextRequest) {
       }
       if (message === "Email is required for invite-type access") {
         return NextResponse.json({ error: message }, { status: 400 });
+      }
+      // The address's directory row for this site is revoked: the request is
+      // well-formed but conflicts with the site's current editors (s68c review).
+      if (message === REMOVED_EDITOR_INVITE_MESSAGE) {
+        return NextResponse.json({ error: message }, { status: 409 });
       }
 
       // Anything else — e.g. a raw database error — is logged server-side only.
@@ -167,9 +232,9 @@ export async function POST(request: NextRequest) {
     // dialog said "Link created".
     let emailDelivered: boolean | undefined;
 
-    if (type === "invite" && email && result.verificationCode) {
+    if (type === "invite" && inviteEmail && result.verificationCode) {
       const mail = await sendStagingVerificationEmail(
-        email,
+        inviteEmail,
         result.verificationCode,
         result.access.label ?? undefined,
       );

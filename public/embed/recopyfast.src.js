@@ -1,96 +1,80 @@
 (function() {
   'use strict';
 
-  // `document.currentScript` is only meaningful while this script is being
-  // parsed, so capture what we need from it up front. Everything that needs the
-  // embed's own URL later (e.g. loading socket.io) reads this instead.
-  var EMBED_SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
+  // One widget per page (s67). Two snippets on one page — a theme include plus
+  // a tag-manager copy is the usual way — used to boot two instances that each
+  // took the other's stamps for author-written ids and filed them as shared
+  // rows. The first instance wins. A real instance is recognised by its
+  // element map, not by truthiness: an element with id="ReCopyFast" makes
+  // `window.ReCopyFast` truthy through named access, and must not stop the
+  // widget from booting.
+  if (window.ReCopyFast && window.ReCopyFast.elements instanceof Map) return;
 
-  // Configuration
-  // Derive API/WS URLs from data attributes on the script tag, or window globals.
-  // Warn loudly rather than silently falling back to localhost.
-  (function() {
-    var script = document.currentScript;
-    function deriveApiUrl() {
-      if (!script || !script.src) return null;
-      try {
-        var url = new URL(script.src);
-        return url.origin + '/api';
-      } catch (e) {
-        return null;
-      }
-    }
-    if (!window.RECOPYFAST_API) {
-      var apiAttr = script && script.getAttribute('data-api-url');
-      if (apiAttr) {
-        window.RECOPYFAST_API = apiAttr;
-      } else if (deriveApiUrl()) {
-        window.RECOPYFAST_API = deriveApiUrl();
-      } else {
-        console.warn('ReCopyFast: RECOPYFAST_API is not set. Add a data-api-url attribute to the script tag or set window.RECOPYFAST_API before loading this script.');
-      }
-    }
-    if (!window.RECOPYFAST_WS) {
-      var wsAttr = script && script.getAttribute('data-ws-url');
-      if (wsAttr) {
-        window.RECOPYFAST_WS = wsAttr;
-      }
-      // Deliberately no derived fallback, and no warning.
-      //
-      // Guessing an endpoint from the script origin produced a URL that looked
-      // configured and was not, so the widget connected to nothing and retried
-      // — the absence of a real-time server presented as a flaky one. Real-time
-      // is opt-in now: set data-ws-url, or window.RECOPYFAST_WS, or it does not
-      // run. Nothing is wrong with a site that has neither; editing and
-      // publishing work entirely over HTTP.
-    }
-  })();
-  const RECOPYFAST_API = window.RECOPYFAST_API;
-  const RECOPYFAST_WS = window.RECOPYFAST_WS;
+  // Configuration: the API and realtime endpoints.
+  //
+  // TOMBSTONE — security review M8, DOM clobbering (s67-embed-spa-support).
+  // `window.RECOPYFAST_API` / `window.RECOPYFAST_WS` used to win over
+  // everything, on truthiness alone. Any markup the customer's page renders (a
+  // CMS post, a comment, a profile field) can create those globals through
+  // named access, just by giving an element that id: an
+  // `<a id="RECOPYFAST_API" href="https://evil.test/api">` stringifies to its
+  // href, and every widget request — site token in its Authorization header,
+  // editor grant beside it — went to whoever wrote the markup.
+  //
+  // A global is now honoured only when it is a STRING whose origin is the
+  // origin of this script's own `src`: whoever can serve the script can already
+  // point it anywhere. Anything else (an element, a cross-origin string, any
+  // global under a script with no `src`) is ignored, and the endpoint comes
+  // from `data-api-url` / `data-ws-url`, then, for the API only, from the
+  // script's own origin. The resolved values are still written back to
+  // `window`: realtime-additive.spec.ts reads `window.RECOPYFAST_WS`.
+  //
+  // Deliberately no derived WebSocket URL, and no warning when there is none.
+  // Guessing an endpoint from the script origin produced a URL that looked
+  // configured and was not, so the widget connected to nothing and retried —
+  // the absence of a real-time server presented as a flaky one. Real-time is
+  // opt-in: set data-ws-url, or it does not run. Nothing is wrong with a site
+  // that has neither; editing and publishing work entirely over HTTP.
+  const SCRIPT = document.currentScript;
+  let SCRIPT_ORIGIN = null;
+  try { SCRIPT_ORIGIN = new URL(SCRIPT.src).origin; } catch (e) {}
+  function configuredEndpoint(name, attribute) {
+    const value = window[name];
+    try {
+      if (typeof value === 'string' && new URL(value).origin === SCRIPT_ORIGIN) return value;
+    } catch (e) {}
+    return SCRIPT.getAttribute(attribute);
+  }
+  const RECOPYFAST_API = window.RECOPYFAST_API =
+    configuredEndpoint('RECOPYFAST_API', 'data-api-url') || (SCRIPT_ORIGIN && SCRIPT_ORIGIN + '/api');
+  const RECOPYFAST_WS = window.RECOPYFAST_WS = configuredEndpoint('RECOPYFAST_WS', 'data-ws-url');
+  if (!RECOPYFAST_API) console.warn('ReCopyFast: set data-api-url.');
 
   // socket.io must never come from a third-party CDN: customer sites (and our
   // own app) serve `script-src 'self'`, which blocks cross-origin scripts. The
   // production build inlines socket.io-client ahead of this file, so
-  // `window.__recopyfastSocketIO` is normally already there. When it isn't (raw
-  // unbuilt source), fall back to a copy served next to this script — "self"
-  // from the browser's point of view is the origin the embed was loaded from,
-  // not the customer's page origin.
-  const SOCKET_IO_FALLBACK_URL = (function() {
-    if (!EMBED_SCRIPT_SRC) return null;
-    try {
-      const url = new URL(EMBED_SCRIPT_SRC);
-      url.search = '';
-      url.hash = '';
-      url.pathname = url.pathname.replace(/[^/]*$/, 'socket.io-client.min.js');
-      return url.href;
-    } catch (e) {
-      return null;
-    }
-  })();
+  // `window.__recopyfastSocketIO` is there whenever the artifact runs.
+  //
+  // TOMBSTONE (s67-embed-spa-support). A fallback used to inject
+  // `socket.io-client.min.js` from next to this script when the bundled client
+  // was missing, and to borrow a `window.io` already on the customer's page.
+  // The artifact always prepends socket.io, so the loader only ever ran for the
+  // raw unbuilt source, and borrowing the host's `io` mixed socket.io versions
+  // silently. It was deleted, with its factory helper, to fund SPA support
+  // (−290 / −287 gz). Without the bundled client, establishConnection's read of
+  // `__recopyfastSocketIO.io` throws into its own catch, which falls back to
+  // HTTP polling (embed-startup-config.test.ts). Do not restore an injected
+  // <script>: it is also the one request a nonce- or hash-based CSP rejects.
 
-  function getSocketIOFactory() {
-    if (window.__recopyfastSocketIO && typeof window.__recopyfastSocketIO.io === 'function') {
-      return window.__recopyfastSocketIO.io;
-    }
-    // A socket.io build already on the customer's page is good enough.
-    if (typeof window.io === 'function') return window.io;
-    return null;
-  }
-  const SITE_ID = document.currentScript.getAttribute('data-site-id');
-  const SITE_TOKEN = document.currentScript.getAttribute('data-site-token');
+  const SITE_ID = SCRIPT.getAttribute('data-site-id');
+  const SITE_TOKEN = SCRIPT.getAttribute('data-site-token');
 
-  // Staging mode detection from URL parameters
+  // Staging mode detection from URL parameters. `let`, not `const`: on a load
+  // with no credential in the URL, the edit-link restore below fills them in.
   const urlParams = new URLSearchParams(window.location.search);
-  const STAGING_MODE = urlParams.get('rcf_staging') === '1';
-  const STAGING_TOKEN = urlParams.get('rcf_token');
-  const EDIT_SESSION_TOKEN = urlParams.get('rcf_edit_token');
-  // Boolean, not `(STAGING_MODE && STAGING_TOKEN) || ...`: that expression
-  // evaluates to the TOKEN STRING when a staging link is opened, and the value
-  // travels into the socket handshake as `stagingMode=<token>`, which the
-  // realtime service compares against the literal 'true' — so every
-  // invite-link editor connected as a NON-staging socket and had their
-  // realtime saves refused with "Live updates must be saved through staging".
-  const EDITOR_MODE = !!((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN);
+  let STAGING_MODE = urlParams.get('rcf_staging') === '1';
+  let STAGING_TOKEN = urlParams.get('rcf_token');
+  let EDIT_SESSION_TOKEN = urlParams.get('rcf_edit_token');
 
   // Immediately strip staging params from the visible URL so they don't persist
   // in browser history, bookmarks, or copy-pasted links.
@@ -104,6 +88,54 @@
     history.replaceState(history.state, '', cleanUrl);
   }
 
+  // An edit link has to survive the next page load (s41, ADR 036).
+  //
+  // TOMBSTONE. The credential used to live in this page's memory only: read
+  // above, stripped, never written down. Every later full-page load in the tab
+  // (an internal link, a reload, Edit Board's restore reload) found a clean URL
+  // and booted a visitor, so the owner's "Edit website" link and every Share
+  // Preview Link stopped working at the first click. Memory-only was the s41
+  // bug; do not "simplify" this back into it.
+  //
+  // sessionStorage, never localStorage. Both tokens are bearer credentials
+  // bound to no origin and no device (an edit session's IP check only logs).
+  // One tab is the most they may outlive their page; localStorage would survive
+  // restarts and hand the next person at a shared computer an editing session.
+  // The server re-validates on every load and every write, so its expiry and
+  // revocation stay the only lifetime: nothing here adds a client-side one.
+  //
+  // The strip above still runs on the URL values first, and nothing is ever
+  // written back into a URL: re-appending the token to links is the A-29 leak
+  // (history, Referer, access logs). Only a URL that itself establishes editor
+  // mode is stored, so an orphan `rcf_token` without `rcf_staging=1` stays out
+  // (editor-grant-requests.test.ts), and a token in the URL always replaces the
+  // stored one. Keyed per SITE_ID so two widgets on one origin never share a
+  // session. Every access sits in try/catch: merely touching sessionStorage
+  // throws when site data is blocked, and a throw here lands in the host page
+  // (non-negotiable #4). Blocked storage or a garbage value degrades to a
+  // visitor load; a dead token meets a 401 and is forgotten (forgetEditLink).
+  const EDIT_LINK_KEY = 'rcf_edit_link:' + SITE_ID;
+  function forgetEditLink() {
+    try { sessionStorage.removeItem(EDIT_LINK_KEY); } catch (e) {}
+  }
+  try {
+    if ((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN) {
+      sessionStorage.setItem(EDIT_LINK_KEY, JSON.stringify([STAGING_MODE ? STAGING_TOKEN : null, EDIT_SESSION_TOKEN]));
+    } else {
+      const kept = JSON.parse(sessionStorage.getItem(EDIT_LINK_KEY));
+      if (kept) { STAGING_TOKEN = kept[0]; STAGING_MODE = !!STAGING_TOKEN; EDIT_SESSION_TOKEN = kept[1]; }
+    }
+  } catch (e) {}
+
+  // Boolean, not `(STAGING_MODE && STAGING_TOKEN) || ...`: that expression
+  // evaluates to the TOKEN STRING when a staging link is opened, and the value
+  // travels into the socket handshake as `stagingMode=<token>`, which the
+  // realtime service compares against the literal 'true' — so every
+  // invite-link editor connected as a NON-staging socket and had their
+  // realtime saves refused with "Live updates must be saved through staging".
+  // Computed after the restore above, so a restored edit link counts.
+  const EDITOR_MODE = !!((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN);
+
   if (!SITE_ID) {
     console.error('ReCopyFast: No site ID provided');
     return;
@@ -112,13 +144,6 @@
   if (!SITE_TOKEN) {
     console.error('ReCopyFast: No site token provided');
     return;
-  }
-
-  // Helper to safely escape HTML for display
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
   }
 
   // ==========================================
@@ -682,6 +707,54 @@
     else element.addEventListener('load', pin, { once: true });
   }
 
+  /**
+   * What the embed's MutationObserver watches, on the body and on every open
+   * shadow root it scans. Text changes (`characterData`) because React and
+   * i18n libraries update text nodes in place — 85 such records in 7.5 s on
+   * openflows.ai, every one invisible to a `childList`-only observer. Never
+   * `attributes`: 688–722 records in the same 7.5 s, for little to gain.
+   */
+  const OBSERVED = { childList: true, characterData: true, subtree: true };
+
+  /**
+   * Put `text` into an element without replacing any node the host rendered.
+   *
+   * TOMBSTONE (s67-embed-spa-support, AC 13). Every runtime write used to be
+   * `element.textContent = text`, which removes all of the element's children
+   * and inserts one new text node. React owns those text nodes. The next time
+   * it re-rendered the element structurally — a conditional text removed
+   * (`Hello{show && ' world'}`), an element inserted before the text
+   * (`{icon && <b/>}Lead`) — it called removeChild / insertBefore on a node that
+   * was no longer there, got a NotFoundError, and React 19 unmounted the whole
+   * root: a blank customer page, measured on a client-rendered page and on a
+   * server-rendered one after hydration (docs/research/s67-embed-spa-support.md
+   * R1c, R1d, R3; embed-react-writes.test.tsx; e2e embed-spa E3, E4).
+   *
+   * So the text goes into the element's first direct text node, every other
+   * text node beneath the element is blanked, and a text node is appended only
+   * when there is no direct one. No node is removed, replaced or reordered:
+   * element children (an icon's <svg>) stay, with their text blanked. A DOM
+   * that already says `text` is not touched at all, so the embed's own writes
+   * never feed its own MutationObserver a change to react to.
+   *
+   * Every runtime text write goes through here: hydrate, realtime, A/B
+   * variants, and the editor's save, cancel and AI paths. Never assign a
+   * customer's element its textContent.
+   */
+  function writeText(element, text) {
+    if (element.textContent === text) return;
+    // The walker visits text nodes in document order, so the first one whose
+    // parent is the element is its first direct text node.
+    let first = null;
+    const walker = document.createTreeWalker(element, 4 /* NodeFilter.SHOW_TEXT */);
+    for (let node; (node = walker.nextNode());) {
+      if (!first && node.parentNode === element) first = node;
+      else if (node.nodeValue) node.nodeValue = '';
+    }
+    if (first) first.nodeValue = text;
+    else element.append(text);
+  }
+
   // ==========================================
   // STABLE ELEMENT IDENTITY
   // ==========================================
@@ -793,6 +866,20 @@
     return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
   }
 
+  function normalizedPagePath() {
+    let pathname = document.location.pathname;
+    try { pathname = decodeURI(pathname); } catch (e) {}
+    return pathname.replace(/(?:\/index\.html?|\/+)$/i, '') || '/';
+  }
+
+  // The page is a parameter, not read here: a route can change while a fetch
+  // is in flight, and the rows must be filed under the path they were asked
+  // for (s67).
+  function contentReadEndpoint(staged, token, path) {
+    return RECOPYFAST_API + (staged ? '/staging' : '') + '/content/' + SITE_ID +
+      (staged && token ? token + '&' : '?') + 'page_path=' + encodeURIComponent(path);
+  }
+
   /**
    * A deterministic identifier for an element, stable across page loads.
    *
@@ -826,7 +913,11 @@
     const authored = element.getAttribute('data-rcf-id');
     if (authored) return authored;
 
-    return 'rcf-' + hashPath(structuralPath(element));
+    // A-14: structural twins on different pages used to alias one database row,
+    // so visiting /pricing could hydrate /about's copy into the same template.
+    // `pathname` excludes query/hash. Unreserved escapes and index documents are
+    // canonicalized, while reserved escapes and pathname case stay significant.
+    return 'rcf-' + hashPath(normalizedPagePath() + '\0' + structuralPath(element));
   }
 
   class ReCopyFast {
@@ -836,16 +927,21 @@
       this.observer = null;
       this.isInitialized = false;
       this.selectedElement = null;
-      /** Element-id set last reported, so rescans don't re-POST an identical map. */
-      this.lastContentMapFingerprint = null;
       /**
-       * Element ids the server is already known to hold, learned from the
-       * content GET every boot performs anyway. `null` means "not known" —
-       * hydration has not run yet or could not be read — in which case
-       * reporting proceeds, because failing to discover is worse than a
-       * redundant write. See postContentMap.
+       * Element ids the server is already known to hold: the union of every
+       * page's content GET (s67: a route change fetches its own rows, and
+       * never forgets the previous page's), plus the ids this page has
+       * already reported. An id outside it is what makes discovery worth a
+       * write. See postContentMap.
        */
-      this.serverKnownElementIds = null;
+      this.serverKnownElementIds = new Set();
+      // Set by loadRows, deliberately not here (bytes, s67): `rows[path]` is
+      // the promise of the published rows of one normalized path, indexed by
+      // element id and fetched once per path; `rows` stays unset until init's
+      // first fetch, which is how checkRoute tells "before init" apart.
+      // `index` is the resolved object every rescan and re-apply reads
+      // synchronously.
+
 
       // Staging mode properties
       this.stagingMode = EDITOR_MODE;
@@ -874,6 +970,16 @@
       try {
         await this.waitForDOM();
 
+        // The observer is attached FIRST, before staging, auth, fonts and every
+        // fetch (s67, AC 1). It used to be attached at the end of this chain,
+        // after up to four network round trips and a font wait: on openflows.ai
+        // that was 864–1,230 ms after DOMContentLoaded, while React rendered at
+        // ~450 ms, so the render was never seen and the page ended with 0
+        // editable elements. Everything below keeps its order, so a static or
+        // server-rendered page loads exactly as before (AC 6).
+        this.pagePath = normalizedPagePath();
+        this.setupMutationObserver();
+
         if (this.stagingMode && (this.stagingToken || this.editSessionToken)) {
           await this.initStagingMode();
         } else {
@@ -900,11 +1006,12 @@
         // A/B pipeline so that a running test's variant copy wins over the
         // published baseline, and before the socket handshake so a visitor sees
         // current copy whether or not realtime is reachable.
-        await this.hydrateStoredContent();
+        await this.loadRows();
 
-        // A/B testing pipeline (non-blocking for staging mode)
+        // A/B testing pipeline (non-blocking for staging mode). The visitor id
+        // is not minted here: bucketVisitor mints it, and only once a test is
+        // active (s55).
         if (!this.stagingMode) {
-          this.initVisitorId();
           await this.fetchActiveTests();
           await this.bucketVisitor();
           this.applyVariants();
@@ -925,14 +1032,11 @@
         // already attached and gets the same map fanned out in the same pass.
         this.sendContentMap();
 
-        this.setupMutationObserver();
-
         if (this.editMode) {
           this.setupEditMode();
         }
 
         this.isInitialized = true;
-        console.log('ReCopyFast initialized (' + (this.stagingMode ? 'staging' : 'live') + ' mode)');
       } catch (error) {
         console.error('ReCopyFast initialization error:', error);
       }
@@ -947,7 +1051,6 @@
         const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
         if (isDemoToken && isLocalhost) {
-          console.log('ReCopyFast: Demo mode enabled (test token on localhost)');
           this.stagingAccess = {
             verified: true,
             email: 'demo@recopyfast.local',
@@ -972,15 +1075,26 @@
         const result = await response.json();
 
         if (!result.valid) {
+          // A stored edit link (ADR 036) was valid on the page that stored it,
+          // so a 401/403 here means it expired or was revoked: forget it, and
+          // the modal below is shown once, not on every page. Any other status
+          // (a 500 has no `valid` key at all) is our outage, not a verdict on
+          // the holder; forgetting on it would sign an editor out mid-session,
+          // the same reasoning as the grant client's validate().
+          if (response.status === 401 || response.status === 403) forgetEditLink();
           this.showStagingError('Invalid or expired staging link.');
           return;
         }
 
-        if (result.requiresEmail) {
-          await this.showEmailCaptureUI();
-          return;
-        }
-
+        // TOMBSTONE. A `requiresEmail` branch here opened an email-capture
+        // modal. No server path has sent `requiresEmail: true` since 747d210
+        // (2026-08-01): a link row without an email is now refused outright
+        // (`valid: false`) rather than letting whoever opened the URL first
+        // name themselves the editor. The modal was unreachable, and s41
+        // deleted it to pay for edit-link persistence. The server side of that
+        // is pinned in staging-access.device-binding.test.ts ("requiresEmail
+        // is never emitted"); do not restore the modal without first making
+        // the server send it again, deliberately.
         if (result.requiresVerification) {
           await this.showVerificationUI(result.email);
           return;
@@ -1040,7 +1154,7 @@
       try {
         outcome = await EditorAuth.boot(HANDOFF_CODE);
       } catch (error) {
-        console.warn('ReCopyFast: editor sign-in check failed; continuing as a visitor.', error);
+        console.warn('ReCopyFast: editor auth failed; visitor mode.', error);
         return;
       }
 
@@ -1103,15 +1217,13 @@
      * The banner's save status: "Saving…" while a write is in flight, "Saved"
      * when it lands, blank when it did not.
      *
-     * Text only, and it never claims more than "written". Whether the write
-     * went to staging or straight live is a distinction this audience should
-     * not have to learn — the whole point of an invited editor is that there is
-     * no mode to understand.
+     * Text only, and it never claims more than "written". Staging keeps its
+     * permanent mode badge beside this transient status.
      */
     setEditorSaveStatus(text) {
       // A later in-flight response must not erase the terminal recovery state.
       if (this.isMutationLocked) return;
-      const status = document.querySelector('#rcf-editor-banner .rcf-editor-banner-status');
+      const status = document.querySelector('.rcf-editor-banner-status');
       if (status) status.textContent = text;
     }
 
@@ -1125,6 +1237,10 @@
      */
     handleTerminalWriteFailure(error, elementId, content) {
       if (!error || (error.status !== 401 && error.status !== 403)) return false;
+      // The server refused the credential itself, so the tab must not present
+      // it again on the next page load (ADR 036). Past the status filter on
+      // purpose: 5xx and offline stay retryable and keep the edit link.
+      forgetEditLink();
       if (this.isMutationLocked) return true;
 
       this.isMutationLocked = true;
@@ -1267,6 +1383,16 @@
       if (!document.querySelector('#rcf-editor-banner-styles')) {
         const style = document.createElement('style');
         style.id = 'rcf-editor-banner-styles';
+        // CSS notes live out here, not in the literal: a comment inside the
+        // string ships as bytes on every customer page (s39 moved them out).
+        //   .rcf-editor-banner-mark — Brand mark: flat teal tile, no gradient
+        //     (design-system.md).
+        //   .rcf-editor-banner-email — Truncating is a layout decision; losing
+        //     the address is not — the full value stays in the title attribute.
+        //   @media (max-width: 480px) — Found live after s39 shipped: at 360px
+        //     the claim wrapped onto four lines and squeezed the address down
+        //     to "r…". On a phone the claim and its divider give way, so the
+        //     address (whose session this is) gets the room.
         style.textContent = `
           #rcf-editor-banner, #rcf-editor-banner * { box-sizing: border-box; }
           #rcf-editor-banner {
@@ -1287,7 +1413,6 @@
             font-size: 13px;
             line-height: 1.4;
           }
-          /* Brand mark: flat teal tile, no gradient (design-system.md). */
           #rcf-editor-banner .rcf-editor-banner-mark {
             flex: none;
             display: inline-flex;
@@ -1309,8 +1434,6 @@
           #rcf-editor-banner .rcf-editor-banner-email {
             font-weight: 600;
             color: hsl(174 48% 68%);
-            /* Truncating is a layout decision; losing the address is not —
-               the full value stays in the title attribute. */
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -1344,6 +1467,10 @@
           #rcf-editor-banner .rcf-editor-banner-publish:hover {
             background: hsl(174 48% 58%);
           }
+          @media (max-width: 480px) {
+            #rcf-editor-banner .rcf-editor-banner-claim,
+            #rcf-editor-banner .rcf-editor-banner-divider { display: none; }
+          }
         `;
         document.head.appendChild(style);
       }
@@ -1366,6 +1493,7 @@
       // failure the deleted note above was a symptom of.
       if (this.editMode) {
         const claim = document.createElement('span');
+        claim.className = 'rcf-editor-banner-claim';
         claim.textContent = 'You can edit this page';
         banner.appendChild(claim);
 
@@ -1385,6 +1513,26 @@
       status.className = 'rcf-editor-banner-status';
       status.setAttribute('role', 'status');
       banner.appendChild(status);
+
+      // s39: the bar had no way back to the list. An editor invited to several
+      // sites, done with this one, could only hide the bar — reaching the next
+      // site meant retyping recopyfast.com/edit and waiting for a new code.
+      // The hub now resumes a live session, so this is one click. A <button>,
+      // not an <a>, to inherit the dismiss styling already hardened against
+      // host CSS. try/catch because a throw here lands in the host page's
+      // window (non-negotiable #4). The unsaved-edit beforeunload guard still
+      // fires on the way out.
+      const allSites = document.createElement('button');
+      allSites.type = 'button';
+      allSites.className = 'rcf-editor-banner-dismiss';
+      allSites.textContent = 'All sites';
+      allSites.setAttribute('aria-label', 'Back to all your sites');
+      allSites.onclick = function() {
+        try {
+          window.location.href = new URL('/edit', RECOPYFAST_API).toString();
+        } catch (e) {}
+      };
+      banner.appendChild(allSites);
 
       const permissions = this.editorAuth.permissions || [];
       if (permissions.indexOf('publish') !== -1 || permissions.indexOf('admin') !== -1) {
@@ -1642,124 +1790,6 @@
       });
     }
 
-    showEmailCaptureUI() {
-      return new Promise((resolve) => {
-        const overlay = this.createOverlay();
-        const modal = document.createElement('div');
-        modal.className = 'rcf-modal';
-
-        // Build modal using DOM methods for security
-        const iconContainer = document.createElement('div');
-        iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
-
-        const icon = document.createElement('div');
-        icon.className = 'rcf-modal-icon';
-        icon.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%)';
-        icon.style.border = '1px solid rgba(59, 130, 246, 0.3)';
-        icon.textContent = '🔐';
-
-        const title = document.createElement('h2');
-        title.className = 'rcf-modal-title';
-        title.textContent = 'Staging Access';
-
-        const subtitle = document.createElement('p');
-        subtitle.className = 'rcf-modal-subtitle';
-        subtitle.textContent = 'Enter your email to access the staging environment';
-
-        iconContainer.appendChild(icon);
-        iconContainer.appendChild(title);
-        iconContainer.appendChild(subtitle);
-
-        const formContainer = document.createElement('div');
-        formContainer.style.cssText = 'margin-bottom: 24px;';
-
-        const label = document.createElement('label');
-        label.className = 'rcf-modal-label';
-        label.textContent = 'Email Address';
-
-        const emailInput = document.createElement('input');
-        emailInput.type = 'email';
-        emailInput.id = 'rcf-email-input';
-        emailInput.className = 'rcf-modal-input';
-        emailInput.placeholder = 'your@email.com';
-
-        const errorEl = document.createElement('p');
-        errorEl.id = 'rcf-email-error';
-        errorEl.className = 'rcf-modal-error';
-
-        formContainer.appendChild(label);
-        formContainer.appendChild(emailInput);
-        formContainer.appendChild(errorEl);
-
-        const submitBtn = document.createElement('button');
-        submitBtn.id = 'rcf-email-submit';
-        submitBtn.className = 'rcf-modal-btn rcf-modal-btn-primary';
-        const btnText = document.createElement('span');
-        btnText.textContent = 'Continue';
-        const btnArrow = document.createElement('span');
-        btnArrow.textContent = '→';
-        submitBtn.appendChild(btnText);
-        submitBtn.appendChild(btnArrow);
-
-        modal.appendChild(iconContainer);
-        modal.appendChild(formContainer);
-        modal.appendChild(submitBtn);
-
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-        emailInput.focus();
-
-        const submit = async () => {
-          const email = emailInput.value.trim();
-
-          if (!email || !email.includes('@')) {
-            errorEl.textContent = 'Please enter a valid email address';
-            errorEl.style.display = 'block';
-            return;
-          }
-
-          submitBtn.disabled = true;
-          submitBtn.innerHTML = '<span>Sending code...</span>';
-
-          try {
-            const response = await fetch(RECOPYFAST_API + '/staging/verify', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                token: this.stagingToken,
-                email: email,
-                action: 'capture'
-              })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-              document.body.removeChild(overlay);
-              await this.showVerificationUI(email);
-              resolve();
-            } else {
-              errorEl.textContent = result.error || 'Failed to send verification code';
-              errorEl.style.display = 'block';
-              submitBtn.disabled = false;
-              submitBtn.innerHTML = '<span>Continue</span><span>→</span>';
-            }
-          } catch (error) {
-            errorEl.textContent = 'Network error. Please try again.';
-            errorEl.style.display = 'block';
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = '<span>Continue</span><span>→</span>';
-          }
-        };
-
-        submitBtn.onclick = submit;
-        emailInput.onkeydown = function(e) {
-          if (e.key === 'Enter') submit();
-        };
-      });
-    }
-
     showVerificationUI(email) {
       const self = this;
       return new Promise((resolve) => {
@@ -1879,12 +1909,11 @@
               document.body.removeChild(overlay);
               self.showStagingBanner();
 
-              if (self.editMode) {
-                self.setupEditMode();
-                self.elements.forEach(function(data) {
-                  data.element.classList.add('rcf-editable');
-                });
-              }
+              // TOMBSTONE (s67). Every mapped element used to get an
+              // `rcf-editable` class here and in scanForContent. No CSS rule
+              // and no reader ever used it; deleted to fund SPA support. Edit
+              // affordances hang off `[data-rcf-id]` and `.rcf-hovering`.
+              if (self.editMode) self.setupEditMode();
 
               resolve();
             } else {
@@ -1993,6 +2022,11 @@
       if (!document.querySelector('#rcf-banner-styles')) {
         const style = document.createElement('style');
         style.id = 'rcf-banner-styles';
+        // CSS notes live out here, not in the literal: a comment inside the
+        // string ships as bytes on every customer page (s39 moved them out).
+        //   @media (max-width: 1000px / 840px …) — Metadata sheds from least to
+        //     most important as the bar narrows, so the actions on the right
+        //     are never pushed off-screen.
         style.textContent = `
           #rcf-staging-banner, #rcf-staging-banner * {
             box-sizing: border-box;
@@ -2137,8 +2171,6 @@
             background: hsl(174 52% 65%);
             border-color: hsl(174 52% 65%);
           }
-          /* Metadata sheds from least to most important as the bar narrows,
-             so the actions on the right are never pushed off-screen. */
           @media (max-width: 1000px) {
             .rcf-banner-meta-expiry,
             .rcf-banner-divider-expiry { display: none; }
@@ -2185,9 +2217,10 @@
       const modeLabel = document.createElement('span');
       modeLabel.textContent = 'Staging';
 
-      statusContainer.appendChild(statusDot);
-      statusContainer.appendChild(modeLabel);
-      infoDiv.appendChild(statusContainer);
+      statusContainer.append(statusDot, modeLabel);
+      const saveStatus = document.createElement('span');
+      saveStatus.className = 'rcf-editor-banner-status';
+      infoDiv.append(statusContainer, saveStatus);
 
       infoDiv.appendChild(divider('email'));
 
@@ -2269,11 +2302,14 @@
 
       document.body.style.paddingTop = (banner.offsetHeight + parseInt(document.body.style.paddingTop || 0)) + 'px';
 
+      // `noopener` is load-bearing since s41 (ADR 036). Per the HTML spec, a
+      // window.open that keeps its opener copies this tab's sessionStorage,
+      // edit link included, so "live" would have opened as another staging
+      // tab. The address bar is already clean (stripped at parse time), which
+      // is why the two searchParams.delete calls that used to sit here, both
+      // no-ops, are gone.
       previewBtn.onclick = function() {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('rcf_staging');
-        url.searchParams.delete('rcf_token');
-        window.open(url.toString(), '_blank');
+        window.open(window.location.href, '_blank', 'noopener');
       };
     }
 
@@ -2283,64 +2319,19 @@
       const overlay = this.createOverlay();
       const modal = document.createElement('div');
       modal.className = 'rcf-modal';
-
-      const iconContainer = document.createElement('div');
-      iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
-
-      const icon = document.createElement('div');
-      icon.className = 'rcf-modal-icon';
-      icon.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%)';
-      icon.style.border = '1px solid rgba(16, 185, 129, 0.3)';
-      icon.textContent = '🚀';
-
-      const title = document.createElement('h2');
-      title.className = 'rcf-modal-title';
-      title.textContent = 'Publish Changes';
-
-      const subtitle = document.createElement('p');
-      subtitle.className = 'rcf-modal-subtitle';
-      subtitle.textContent = 'This will make your staging changes live on the website.';
-
-      iconContainer.appendChild(icon);
-      iconContainer.appendChild(title);
-      iconContainer.appendChild(subtitle);
-
-      const statusEl = document.createElement('div');
-      statusEl.id = 'rcf-publish-status';
-      statusEl.style.cssText = 'margin-bottom: 24px; padding: 16px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px;';
-      const statusText = document.createElement('p');
-      statusText.style.cssText = 'margin: 0; color: #94a3b8; text-align: center; font-size: 14px;';
-      statusText.textContent = 'Loading pending changes...';
-      statusEl.appendChild(statusText);
-
-      const buttonsContainer = document.createElement('div');
-      buttonsContainer.style.cssText = 'display: flex; gap: 12px;';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
-      cancelBtn.style.flex = '1';
-      cancelBtn.innerHTML = '<span>Cancel</span>';
-
-      const confirmBtn = document.createElement('button');
-      confirmBtn.className = 'rcf-modal-btn rcf-modal-btn-success';
-      confirmBtn.style.flex = '1';
-      confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
-
-      buttonsContainer.appendChild(cancelBtn);
-      buttonsContainer.appendChild(confirmBtn);
-
-      modal.appendChild(iconContainer);
-      modal.appendChild(statusEl);
-      modal.appendChild(buttonsContainer);
+      modal.style.textAlign = 'center';
+      modal.innerHTML = '<h2 class="rcf-modal-title">Publish Changes Live?</h2>' +
+        '<div id="rcf-publish-status" style="margin-bottom:24px"><p>Counting changes...</p></div>' +
+        '<div style="display:flex;gap:12px"><button class="rcf-modal-btn rcf-modal-btn-ghost">Cancel</button>' +
+        '<button class="rcf-modal-btn rcf-modal-btn-success">Publish Now</button></div>';
+      const statusText = modal.querySelector('#rcf-publish-status p');
+      const cancelBtn = modal.querySelector('.rcf-modal-btn-ghost');
+      const confirmBtn = modal.querySelector('.rcf-modal-btn-success');
 
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
 
-      const close = function() {
-        if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
-        }
-      };
+      const close = function() { overlay.remove(); };
 
       cancelBtn.onclick = close;
       overlay.onclick = function(e) { if (e.target === overlay) close(); };
@@ -2362,23 +2353,27 @@
       try {
         const publishPreviewUrl =
           RECOPYFAST_API + '/staging/publish?siteId=' + SITE_ID +
+          '&page_path=' + encodeURIComponent(normalizedPagePath()) +
           self.editorTokenQuery().replace('?', '&');
         const response = await fetch(publishPreviewUrl, { headers: self.editorAuthHeaders() });
         if (self.handleTerminalWriteFailure(response)) { close(); return; }
         const result = await response.json();
 
         if (result.success && result.pendingChanges === 0) {
-          statusText.textContent = '✅ No pending changes to publish.';
+          statusText.textContent = '✅ No pending changes.';
           // Stays disabled: there is genuinely nothing to publish.
         } else {
           if (result.success) {
-            statusText.textContent = '📝 ' + result.pendingChanges + ' element(s) with changes';
+            statusText.textContent = result.currentPageChanges == null
+              ? result.pendingChanges + ' site changes'
+              : result.currentPageChanges + ' changes on this page, ' +
+                result.otherPageChanges + ' on other pages';
           }
           confirmBtn.disabled = false;
           confirmBtn.style.opacity = '';
         }
       } catch (error) {
-        statusText.textContent = 'Failed to load pending changes.';
+        statusText.textContent = 'Could not count changes.';
         statusText.style.color = '#ef4444';
         // Re-enabled deliberately. Failing to *preview* the pending changes
         // does not mean there are none, and the publish request is authorised
@@ -2391,7 +2386,7 @@
       confirmBtn.onclick = async function() {
         if (self.isMutationLocked) return;
         confirmBtn.disabled = true;
-        confirmBtn.innerHTML = '<span>Publishing...</span>';
+        confirmBtn.textContent = 'Publishing...';
 
         try {
           const response = await fetch(RECOPYFAST_API + '/staging/publish', {
@@ -2406,21 +2401,21 @@
           const result = await response.json();
 
           if (result.success) {
-            statusText.textContent = '✅ Published ' + result.published + ' change(s) successfully!';
+            statusText.textContent = '✅ Published ' + result.published + ' changes.';
             statusText.style.color = '#10b981';
-            confirmBtn.innerHTML = '<span>✓ Done!</span>';
+            confirmBtn.textContent = '✓ Done!';
             setTimeout(close, 2000);
           } else {
             statusText.textContent = result.error || 'Failed to publish changes.';
             statusText.style.color = '#f87171';
             confirmBtn.disabled = false;
-            confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
+            confirmBtn.textContent = 'Publish Now';
           }
         } catch (error) {
           statusText.textContent = 'Network error. Please try again.';
           statusText.style.color = '#f87171';
           confirmBtn.disabled = false;
-          confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
+          confirmBtn.textContent = 'Publish Now';
         }
       };
     }
@@ -2642,7 +2637,13 @@
 
       const all = scope.querySelectorAll('*');
       for (let i = 0; i < all.length; i++) {
-        if (all[i].shadowRoot) this.queryDeep(selector, all[i].shadowRoot, results);
+        const shadow = all[i].shadowRoot;
+        if (!shadow) continue;
+        // A body observer does not see inside a shadow root, so each one the
+        // scan enters is observed too. Observing a root again only replaces
+        // its options: one registration per root, however many rescans.
+        if (this.observer) this.observer.observe(shadow, OBSERVED);
+        this.queryDeep(selector, shadow, results);
       }
 
       return results;
@@ -2650,48 +2651,85 @@
 
     scanForContent() {
       const self = this;
+      this.stale = false;
+      const path = normalizedPagePath();
       const selector = 'h1, h2, h3, h4, h5, h6, p, span, li, td, th, label, button, ' +
                        'a.rcf-editable-link, img, div[data-rcf-content]';
       const textElements = this.queryDeep(selector);
 
       textElements.forEach(function(element) {
+        // Already mapped under its own stamp: nothing to re-derive. Without
+        // this, every rescan recomputed the structural id and the selector of
+        // every element on the page — 1.3–1.4 s per rescan for 3,005
+        // candidates at 4× CPU, and a rescan every ~1.3 s on a live page pins
+        // the main thread (research, "Scan cost"). The same lookup decides the
+        // page path below (one lookup, not two: s67 re-review, byte funding).
+        const stampedId = element.getAttribute('data-rcf-id');
+        const stamped = self.elements.get(stampedId);
+        if (stamped && stamped.element === element) return;
         if (self.shouldSkipElement(element)) return;
 
         // An <img> is identified by its source, not by text content.
         const isImage = element.tagName === 'IMG';
-        const text = isImage ? (element.getAttribute('src') || '') : self.getElementText(element);
+        const text = self.getElementText(element);
         if (!text || text.trim().length < 2) return;
 
         // Deterministic — see computeStableElementId. The same element yields
         // the same id on every load, which is what lets saved content find its
         // way back onto the page.
+        const pagePath = stamped ? stamped.path : stampedId === null ? path : null;
         const elementId = computeStableElementId(element);
         element.setAttribute('data-rcf-id', elementId);
 
-        self.elements.set(elementId, {
+        const elementData = {
           element: element,
           originalContent: text,
           selector: self.generateSelector(element),
-          type: element.tagName.toLowerCase()
-        });
-
-        if (self.editMode) {
-          element.classList.add('rcf-editable');
-        }
+          type: element.tagName.toLowerCase(),
+          path: pagePath
+        };
+        elementData.extras = isImage && element.hasAttribute('alt') ? { alt: element.getAttribute('alt') } :
+          element.tagName === 'A' && element.hasAttribute('href') ? { href: element.getAttribute('href') } : null;
+        self.elements.set(elementId, elementData);
       });
 
-      console.log('ReCopyFast: Found ' + this.elements.size + ' editable elements');
+      // Entries whose element left the document. A single-page app replaces
+      // whole subtrees on every render; kept, they piled up (241 entries,
+      // 212 of them detached, after one navigation on openflows.ai).
+      this.elements.forEach(function(data, id) {
+        if (!data.element.isConnected) self.dropEntry(data, id);
+      });
     }
 
+    /**
+     * THE RULE: every root the embed appends to `body` carries
+     * `data-rcf-ignore` or matches the `closest()` selector below, with one
+     * named exception: the container hint (`showContainerHint`) is a bare `div`
+     * that discovery's scan selector never matches, so it carries neither (s70a
+     * review F4: a marker measured +7 / +8 bytes for no behaviour). Give it a
+     * marker the day it gains a child the scan selector can match. Discovery
+     * scans the whole document, so a root that does neither has its labels
+     * mapped, stamped `data-rcf-id` and POSTed as the customer's authored copy
+     * — and the upsert ignores duplicates, so a junk row, once written, stays.
+     * A new modal, panel or popover gets `data-rcf-ignore` on its root; it is
+     * the cheapest of the two.
+     */
     shouldSkipElement(element) {
       const skipTags = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED'];
       if (skipTags.includes(element.tagName)) return true;
-      if (element.hasAttribute('data-rcf-ignore')) return true;
-      if (element.closest('[contenteditable="true"]')) return true;
-      if (element.closest('#rcf-staging-banner')) return true;
-      if (element.closest('#rcf-edit-board')) return true;
-      if (element.closest('.rcf-overlay')) return true;
-      if (element.closest('[data-rcf-ignore]')) return true;
+      // TOMBSTONE (s70a). Six checks used to sit here, and three surfaces got
+      // through them anyway: the owner's Content page listed "🪄" and "Failed
+      // to generate suggestions. Please try again." as site copy (production,
+      // 2026-10-08). `#rcf-edit-board` named no element — the panel
+      // is `#rcf-edit-board-panel` — so the whole Edit Board was content,
+      // including the History tab's "by <editor email>", which then sat in a
+      // row `GET /api/published/<site>` serves to anyone with the site id. The
+      // AI suggestions modal and the form-field popover had no marker at all;
+      // they carry `data-rcf-ignore` now. A separate
+      // `hasAttribute('data-rcf-ignore')` also sat here: `closest()` matches
+      // the element itself, so it was redundant. One selector, which also paid
+      // for the fix in bytes. Pinned by embed-ui-not-content.test.ts.
+      if (element.closest('[data-rcf-ignore],[contenteditable="true"],#rcf-staging-banner,#rcf-edit-board-panel,.rcf-overlay')) return true;
 
       // Images carry no text, so the "has real text" test below would reject
       // every one of them. Filter on rendered size instead: tracking pixels,
@@ -2709,10 +2747,12 @@
       return hasOnlyElements && !element.hasAttribute('data-rcf-content');
     }
 
+    /** What the element shows now: its value, its image source, or its text. */
     getElementText(element) {
       if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
         return element.value;
       }
+      if (element.tagName === 'IMG') return element.getAttribute('src') || '';
       return element.textContent;
     }
 
@@ -2749,25 +2789,13 @@
      * own, so the app and the widget cannot drift.
      */
 
-    /**
-     * Should we intervene to keep this element's text readable while editing,
-     * and if so what is the smallest intervention?
-     *
-     * Returns a verdict whose `scrim` is null in the common case: text that is
-     * already legible is left completely alone, because an unnecessary scrim is
-     * a visible design change.
-     */
-    assessReadability(element) {
-      return Rules.assessReadability(element);
-    }
-
-    /**
-     * Caret / selection / outline colours for the surface this element sits on.
-     * These paint around and through the text, never replacing it.
-     */
-    getEditingColors(element) {
-      return Rules.resolveAffordances(element);
-    }
+    // TOMBSTONE (s67, the byte budget's second-line reserve). Two adapters
+    // stood here: `assessReadability(element)`, which nothing called (the
+    // editor calls `Rules.assessReadability` directly), and
+    // `getEditingColors(element)`, a one-line wrapper over
+    // `Rules.resolveAffordances`. Their callers now call the shared rules
+    // directly; no rule changed. Readability verdicts still say "leave legible
+    // text alone"; affordances still paint around the text, never replacing it.
 
     // Determine element type for appropriate edit handler
     getElementEditType(element) {
@@ -2833,7 +2861,12 @@
       const path = [];
       let current = element;
 
-      while (current && current !== document.body) {
+      // Stops at a shadow root as well as at <body> (s67). The walk used to
+      // climb onto the ShadowRoot itself, which has no tagName, and threw a
+      // TypeError for every element inside a web component: on a page with
+      // any open shadow-root text, init's first scan aborted (no published
+      // copy, no discovery) and so did every rescan.
+      while (current && current.nodeType === 1 && current !== document.body) {
         let selector = current.tagName.toLowerCase();
 
         if (current.id) {
@@ -2933,32 +2966,38 @@
 
       this.setEditorSaveStatus('Saving…');
 
-      let response;
+      // Older supported browsers have AbortController but no timeout helper.
+      // They keep saving without a client deadline instead of losing editing.
+      const signal = AbortSignal.timeout ? AbortSignal.timeout(15000) : new AbortController().signal;
       try {
-        response = await fetch(RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery(), {
+        const response = await fetch(RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery(), {
           method: 'PUT',
           headers: Object.assign({ 'Content-Type': 'application/json' }, this.editorAuthHeaders()),
           body: JSON.stringify(Object.assign({
             elementId: elementId,
             content: content
-          }, this.editorTokenBody(), extra || {}))
+          }, this.editorTokenBody(), extra)),
+          signal: signal
         });
+        const result = await response.json().catch(function(error) {
+          if (signal.aborted) throw error;
+          return {};
+        });
+        if (!response.ok || result.error) {
+          const error = new Error(result.error || 'Save failed.');
+          error.status = response.status;
+          this.handleTerminalWriteFailure(error, elementId, content);
+          throw error;
+        }
       } catch (error) {
         // Never leave "Saving…" standing over a write that will never land.
         this.setEditorSaveStatus('');
-        throw error;
-      }
-
-      const result = await response.json().catch(function() { return {}; });
-      if (!response.ok || result.error) {
-        this.setEditorSaveStatus('');
-        const error = new Error(result.error || 'Failed to save content');
-        error.status = response.status;
-        this.handleTerminalWriteFailure(error, elementId, content);
+        if (signal.aborted) throw new Error('Save timed out.');
         throw error;
       }
 
       this.setEditorSaveStatus('Saved');
+      this.rememberRow(elementId, content, extra);
 
       this.emitRealtimeContentUpdate(Object.assign({
         siteId: SITE_ID,
@@ -2967,11 +3006,9 @@
         token: SITE_TOKEN,
         stagingMode: this.stagingMode,
         stagingToken: this.stagingToken || '',
-        editToken: this.editSessionToken || '',
-        persisted: true
-      }, extra || {}));
+        editToken: this.editSessionToken || ''
+      }, extra));
 
-      return result;
     }
 
     emitRealtimeContentUpdate(payload) {
@@ -2983,18 +3020,18 @@
         if (typeof this.socket.timeout === 'function') {
           this.socket.timeout(2000).emit('content-update', payload, function(err, response) {
             if (err || (response && response.error)) {
-              console.warn('ReCopyFast: Realtime fanout failed:', err || response.error);
+              console.warn('ReCopyFast: realtime failed', err || response.error);
             }
           });
         } else {
           this.socket.emit('content-update', payload, function(response) {
             if (response && response.error) {
-              console.warn('ReCopyFast: Realtime fanout failed:', response.error);
+              console.warn('ReCopyFast: realtime failed', response.error);
             }
           });
         }
       } catch (error) {
-        console.warn('ReCopyFast: Realtime fanout failed:', error);
+        console.warn('ReCopyFast: realtime failed', error);
       }
     }
 
@@ -3019,7 +3056,9 @@
       }
 
       try {
-        const io = await this.loadSocketIO();
+        // Throws when the client is not bundled (raw source): see the tombstone
+        // above SITE_ID. The catch below turns that into HTTP polling.
+        const io = window.__recopyfastSocketIO.io;
 
         this.socket = io(RECOPYFAST_WS, {
           query: {
@@ -3037,7 +3076,6 @@
         });
 
         this.socket.on('connect', function() {
-          console.log('ReCopyFast: Connected to server');
           self.sendContentMap();
         });
 
@@ -3047,10 +3085,6 @@
 
         this.socket.on('ab-test-update', function(data) {
           self.handleABTestUpdate(data);
-        });
-
-        this.socket.on('disconnect', function() {
-          console.log('ReCopyFast: Disconnected from server');
         });
 
         this.socket.on('error', function(error) {
@@ -3070,47 +3104,23 @@
       }
     }
 
-    loadSocketIO() {
-      return new Promise(function(resolve, reject) {
-        const existing = getSocketIOFactory();
-        if (existing) {
-          resolve(existing);
-          return;
-        }
-
-        if (!SOCKET_IO_FALLBACK_URL) {
-          reject(new Error('socket.io-client is unavailable and its URL could not be derived from the embed script src'));
-          return;
-        }
-
-        const script = document.createElement('script');
-        script.src = SOCKET_IO_FALLBACK_URL;
-        script.async = true;
-        script.crossOrigin = 'anonymous';
-        script.onload = function() {
-          const factory = getSocketIOFactory();
-          if (factory) {
-            resolve(factory);
-          } else {
-            reject(new Error('socket.io-client loaded but exposed no client factory'));
-          }
-        };
-        script.onerror = function() {
-          reject(new Error('Failed to load socket.io-client from ' + SOCKET_IO_FALLBACK_URL));
-        };
-        document.head.appendChild(script);
-      });
-    }
-
     sendContentMap() {
+      // Only once the current path's rows have settled (s67): until then the
+      // embed cannot know what the server already holds for this page, and a
+      // report made before an app moved itself to another path files the
+      // first path's elements as discoveries (research: openflows.ai moves `/`
+      // to `/fr` while the first fetch is in flight).
+      if (this.rowsPath !== this.pagePath) return;
       const contentMap = {};
 
       this.elements.forEach(function(data, elementId) {
-        contentMap[elementId] = {
+        const entry = contentMap[elementId] = {
           selector: data.selector,
           content: data.originalContent,
-          type: data.type
+          type: data.type,
+          page_path: data.path
         };
+        Object.assign(entry, data.extras);
       });
 
       // Report over HTTP, not over the socket.
@@ -3170,25 +3180,21 @@
         return;
       }
       const elementIds = Object.keys(contentMap);
-      if (elementIds.length === 0) {
-        return;
-      }
-
-      // Nothing has changed since the last report, so the request would be a
-      // no-op upsert. Rescans fire on every DOM mutation, and a page with a
-      // carousel or a live region can mutate many times a second.
-      const fingerprint = JSON.stringify(elementIds.slice().sort());
-      if (fingerprint === this.lastContentMapFingerprint) {
-        return;
-      }
 
       // Report only what the server does not already hold.
       //
       // This runs on a customer's page for every VISITOR, not just for editors,
       // so an unconditional POST turns their traffic into our write volume: one
-      // bulk upsert of every element on the page, per page view, forever. The
-      // fingerprint above only dedupes within a single page's lifetime, which
-      // never spans two visitors.
+      // bulk upsert of every element on the page, per page view, forever.
+      //
+      // TOMBSTONE (s67). A fingerprint of the last reported id set used to sit
+      // here, so rescans would not re-POST an identical map. It became
+      // redundant once the known-id set below stopped starting out `null` and
+      // stopped being reset by each page's GET: every reported id is claimed
+      // into it before the POST and given back if the POST fails, so a
+      // repeated map has nothing unknown and returns here, and a failed report
+      // is retried — exactly what the fingerprint and its restore did. It was
+      // removed to pay for SPA support.
       //
       // Discovery is a one-time event per element. `hydrateStoredContent` has
       // already fetched exactly the set the server holds, so once a site is
@@ -3196,19 +3202,30 @@
       // nothing at all; a genuinely new element still reports immediately.
       // The upsert stays `ignoreDuplicates`, so re-reporting remains harmless —
       // this is about not paying for a write that can only be a no-op.
-      if (this.serverKnownElementIds) {
-        let hasUnknownElement = false;
-        for (let i = 0; i < elementIds.length; i++) {
-          if (!this.serverKnownElementIds.has(elementIds[i])) {
-            hasUnknownElement = true;
-            break;
-          }
+      const known = this.serverKnownElementIds;
+      const claimed = elementIds.filter(function(id) { return !known.has(id); });
+      if (!claimed.length) return;
+
+      // Coalesced (s67). A page that keeps rendering — a live feed, an
+      // infinite scroll — finds new elements on every rescan, and research's
+      // prototype sent 33 reports in 10 s from ONE visitor. The per-site
+      // discovery limit is 100/min and fails closed, so a handful of visitors
+      // would have locked discovery for the whole site. The first report of a
+      // page view goes at once; later ones at most once per 10 s (one trailing
+      // report picks up everything found meanwhile) and at most 10 per page view.
+      const wait = this.lastReport + 10000 - Date.now();
+      if (this.reports > 9) return;
+      if (wait > 0) {
+        if (!this.reportTimer) {
+          this.reportTimer = setTimeout(() => {
+            this.reportTimer = 0;
+            try { this.sendContentMap(); } catch (error) {}
+          }, wait);
         }
-        if (!hasUnknownElement) {
-          this.lastContentMapFingerprint = fingerprint;
-          return;
-        }
+        return;
       }
+      this.reports = ~~this.reports + 1;
+      this.lastReport = Date.now();
 
       // Claimed before the request, and given back if the request fails.
       //
@@ -3216,25 +3233,18 @@
       // mutate the DOM many times a second — from firing a second POST while
       // the first is still in flight. But a claim that is never released is a
       // claim that outlives its reason: on a page that never reloads, one
-      // transient failure would leave the fingerprint set, every later rescan
-      // short-circuit on it, and the site sit at "no content yet" for as long
-      // as the visitor stays. A multi-page site papers over this by reloading;
-      // an SPA does not.
-      const previousFingerprint = this.lastContentMapFingerprint;
-      this.lastContentMapFingerprint = fingerprint;
-
-      const known = this.serverKnownElementIds;
-      const claimed = [];
-      if (known) {
-        for (let i = 0; i < elementIds.length; i++) {
-          if (!known.has(elementIds[i])) {
-            known.add(elementIds[i]);
-            claimed.push(elementIds[i]);
-          }
-        }
-      }
-
-      const self = this;
+      // transient failure would leave the ids claimed, every later rescan
+      // short-circuit on them, and the site sit at "no content yet" for as
+      // long as the visitor stays. A multi-page site papers over this by
+      // reloading; an SPA does not.
+      //
+      // The body carries only the claimed ids, so an id is reported once per
+      // page lifetime however many reports the page makes (s67).
+      const report = {};
+      claimed.forEach(function(id) {
+        known.add(id);
+        report[id] = contentMap[id];
+      });
 
       fetch(RECOPYFAST_API + '/content/' + encodeURIComponent(SITE_ID), {
         method: 'POST',
@@ -3248,19 +3258,14 @@
         // sites would never report their content and would sit on "no content
         // yet" forever. This runs on load rather than on unload, so there is
         // nothing for keepalive to buy.
-        body: JSON.stringify(contentMap)
+        body: JSON.stringify(report)
       }).catch(function() {
         // Offline, blocked by an extension, or the site was deleted. Nothing
         // useful to say on a customer's page — but give the claim back, so the
         // next rescan or navigation retries instead of inheriting a report that
         // never happened. Only the ids this call added are removed; ones the
         // server already held are not ours to forget.
-        self.lastContentMapFingerprint = previousFingerprint;
-        if (known) {
-          for (let i = 0; i < claimed.length; i++) {
-            known.delete(claimed[i]);
-          }
-        }
+        claimed.forEach(function(id) { known.delete(id); });
       });
     }
 
@@ -3269,6 +3274,13 @@
     // ==========================================
 
     initVisitorId() {
+      // Idempotent. bucketVisitor calls this on every pass, and
+      // handleABTestUpdate can run it more than once per page: unguarded, a
+      // cookie write that did not stick would mint a second id for the same
+      // visitor mid-page. ab-bucketing-parity.test.ts presets visitorId and
+      // calls bucketVisitor directly — an unguarded mint overwrites it there.
+      if (this.visitorId) return;
+
       // Read existing cookie
       var cookies = document.cookie.split(';');
       for (var i = 0; i < cookies.length; i++) {
@@ -3300,13 +3312,25 @@
         this.activeTests = data.tests || [];
       } catch (error) {
         // Silent failure — A/B tests won't run if fetch fails
-        console.log('ReCopyFast: A/B tests unavailable');
         this.activeTests = [];
       }
     }
 
     async bucketVisitor() {
-      if (!this.activeTests.length || !this.visitorId) return;
+      if (!this.activeTests.length) return;
+
+      // The visitor id is minted here, past the guard, and nowhere else.
+      //
+      // init used to call initVisitorId one line before fetchActiveTests, so
+      // the id and its one-year rcf_vid cookie were read and written on every
+      // page load of every customer site — before anything knew whether a test
+      // was running. A persistent identifier on a site with no experiment is a
+      // cookie-consent exposure the customer never chose. Both callers, init
+      // and handleABTestUpdate, pass through this line, and only once a test
+      // is active; minting in init alone left a test that went active later
+      // bucketing nobody (visitorId stayed null). Do not move it back into
+      // init.
+      this.initVisitorId();
 
       try {
         var response = await fetch(
@@ -3342,7 +3366,7 @@
         // client-side fallback below stays — but it is a degraded path, and one
         // warning makes it visible to anyone who looks at the console instead
         // of leaving it indistinguishable from a normal load.
-        console.warn('ReCopyFast: A/B bucketing unavailable');
+        console.warn('ReCopyFast: A/B unavailable');
       }
 
       // Client-side fallback using FNV-1a hash
@@ -3435,12 +3459,12 @@
         var elementData = self.elements.get(targetElementId);
         if (!elementData || !elementData.element) return;
 
-        // Replace content
-        if (elementData.element.tagName === 'INPUT' || elementData.element.tagName === 'TEXTAREA') {
-          elementData.element.value = variant.variant_content;
-        } else {
-          elementData.element.textContent = variant.variant_content;
-        }
+        // Replace content. Through the one writer of applied copy, so the
+        // write is recorded like a row's: dropEntry puts the authored copy
+        // back when the route changes (PR #69 review, D2). It also leaves an
+        // element being edited alone, and swaps an image's source instead of
+        // appending text to the <img>.
+        self.applyContentToElement(elementData, variant.variant_content);
 
         // Add data attributes for debugging/tracking
         elementData.element.setAttribute('data-rcf-test', test.id);
@@ -3587,8 +3611,9 @@
 
       const elementData = this.elements.get(elementId);
       if (!elementData) return;
+      this.rememberRow(elementId, content, data);
 
-      if (!this.applyContentToElement(elementData, content, data.alt)) return;
+      if (!this.applyContentToElement(elementData, content, data)) return;
 
       elementData.element.classList.add('rcf-updated');
       setTimeout(function() {
@@ -3603,11 +3628,35 @@
      * below, so both agree on how each element type is written and on what is
      * off-limits. Returns whether the write happened.
      */
-    applyContentToElement(elementData, content, alt) {
+    applyContentToElement(elementData, content, attributes) {
       const target = elementData.element;
 
       // Never overwrite what someone is actively typing.
       if (target.getAttribute('data-rcf-editing')) return false;
+
+      const attribute = target.tagName === 'A' ? 'href' : target.tagName === 'IMG' ? 'alt' : null;
+      let value = null;
+      if (attribute) {
+        value = attributes && attributes[attribute];
+        if (typeof value === 'string') {
+          value = value.trim();
+          const isHref = attribute === 'href';
+          if (value.length > (isHref ? 2048 : 2000) || /[\0-\x1f\x7f-\x9f]/.test(value) ||
+              (isHref && /\\|^\/\/|^(?!(?:https?|mailto|tel):)[a-z][\w+.-]*:/i.test(value))) value = null;
+        } else value = null;
+        if (value !== null) target.setAttribute(attribute, value);
+      }
+
+      // Compared with what the element shows NOW, not with
+      // `elementData.originalContent`. That field used to be overwritten with
+      // every applied value so it could double as "current text", which made
+      // the comparison stale the moment the host re-rendered, and made
+      // discovery and the route-change restore read published copy as if it
+      // were authored (s65a's invariant). It now stays the first-seen authored
+      // text (s67).
+      if (content == null || content === this.getElementText(target)) return value !== null;
+      elementData.writes = ~~elementData.writes + 1;
+      elementData.written = content;
 
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
         target.value = content;
@@ -3615,15 +3664,188 @@
         // Same no-reflow swap the editor uses, so a realtime update from another
         // session cannot resize the page under the reader.
         applyImageSource(target, content);
-        if (alt !== undefined && alt !== null) target.alt = alt;
       } else {
-        target.textContent = content;
+        writeText(target, content);
       }
-
-      // Keep the map in step with the DOM: the edit board and the content map
-      // both read `originalContent` as "what this element currently says".
-      elementData.originalContent = content;
       return true;
+    }
+
+    /**
+     * Has the page moved to another path? If so, treat it as a full page load.
+     *
+     * Route changes are detected without patching anything (ADR 049, AC 9): a
+     * path check on every observer batch, on the Navigation API's
+     * `currententrychange` where the browser has it, and at the start of an
+     * edit-mode click. No history method is wrapped — a wrapper misses every
+     * router that captured `pushState` before a late-loaded snippet ran, forms
+     * order-dependent chains with routers that wrap it themselves, cannot be
+     * removed by destroy(), and a throw in it breaks the host's navigation.
+     * Nothing polls.
+     *
+     * Full-load equivalence, because ids hash the path: a node that persists
+     * across routes kept the old page's stamp (stamps are sticky), so an edit
+     * made after an in-app navigation was saved under the wrong page. Every
+     * page-scoped entry therefore gets back the authored copy the embed put
+     * over it, loses its stamp and is dropped, and the next scan re-identifies
+     * what is on the page under the new path. Author-written ids are shared
+     * across pages and stay; their write counters restart with the page view.
+     * An element being edited is left alone.
+     *
+     * The new DOM is not scanned here: the path change can be seen before
+     * the router has rendered anything (the Navigation API's check runs in
+     * the microtask after `pushState`, and most routers render later), and
+     * scanning then would file the old page's elements under the new path.
+     * `stale` makes the next observer batch that adds nodes rescan at once, in
+     * the microtask the render runs in, so a cached route paints published
+     * copy in its first frame; a batch that only changes text (a param route
+     * reusing its components) schedules the debounced rescan; an edit click
+     * rescans too.
+     *
+     * The authored-copy restores below are DOM writes, so the observer sees
+     * them. Reached from an observer batch or an edit click, they trail a
+     * host change that has already been handled, and only re-arm the same
+     * debounce. Reached from the Navigation API's check, they are discarded:
+     * when the host has done nothing yet, they would be a text-only batch of
+     * their own, before the router has rendered (setupMutationObserver; s67
+     * re-review, finding A).
+     *
+     * The row load is not awaited, so its rejection is caught here: a throw
+     * while applying rows would otherwise be an `unhandledrejection` on the
+     * host page (non-negotiable 4; s67 review, finding 6).
+     */
+    checkRoute() {
+      const path = normalizedPagePath();
+      if (path === this.pagePath) return;
+      this.pagePath = path;
+      this.stale = true;
+      this.reports = this.lastReport = 0;
+      this.elements.forEach((data, id) => {
+        if (!data.path) data.writes = 0;
+        else if (!data.element.getAttribute('data-rcf-editing')) this.dropEntry(data, id);
+      });
+      // Before init's first fetch, init fetches for the path it finds.
+      if (this.rows) this.loadRows().catch(function() {});
+    }
+
+    /**
+     * Forget an entry. If the embed wrote it and it still shows that copy, the
+     * authored text comes back first: otherwise the old page's published copy
+     * would be discovered as the new page's authored copy (s65a's invariant).
+     *
+     * TOMBSTONE (PR #69 review, D2). The A/B markers used to stay. applyRow
+     * leaves every element marked `data-rcf-variant` to its variant, so a
+     * persistent element (a header tagline) carrying the old page's variant
+     * never received the new page's published copy; and the variant's copy,
+     * written outside the record compared here, stayed on the new page and
+     * was reported as its authored copy. The markers now leave with the entry,
+     * and the variant's write is recorded (applyVariants): the next rescan
+     * applies a variant only where a test targets the new page's id, and
+     * otherwise the new page's own row.
+     */
+    dropEntry(data, id) {
+      const element = data.element;
+      if (data.written === this.getElementText(element)) {
+        this.applyContentToElement(data, data.originalContent);
+      }
+      element.removeAttribute('data-rcf-variant');
+      element.removeAttribute('data-rcf-test');
+      if (data.path) element.removeAttribute('data-rcf-id');
+      this.elements.delete(id);
+    }
+
+    /**
+     * The rows of the current page: fetched once per normalized path, cached,
+     * then applied to every element mapped now.
+     *
+     * The path is captured when the fetch starts, and the rows are applied
+     * only if the page is still on it when they arrive: openflows.ai moves
+     * itself from `/` to `/fr` while the first fetch is in flight, and one
+     * page's rows must never land on another page's elements. A failed fetch
+     * is forgotten so the next visit to that path asks again.
+     */
+    loadRows() {
+      const path = this.pagePath;
+      const cache = this.rows || (this.rows = {});
+      if (!cache[path]) {
+        cache[path] = this.hydrateStoredContent().then((index) => {
+          if (!index) delete cache[path];
+          return index;
+        });
+      }
+      return cache[path].then((index) => {
+        if (path !== this.pagePath) return;
+        this.index = index;
+        this.rowsPath = path;
+        this.applyRows();
+        // Discovery waited for these rows (sendContentMap). init reports for
+        // itself, after the socket is up; a route change reports here.
+        if (this.isInitialized) this.sendContentMap();
+      });
+    }
+
+    applyRows() {
+      this.elements.forEach((data, id) => this.applyRow(data, id));
+    }
+
+    /**
+     * Apply one element's published row from the cache.
+     *
+     * AC 11 (owner decision 1, 2026-10-08): only a row somebody EDITED writes
+     * page text — `current_content !== original_content`, with a missing
+     * `original_content` counting as edited (legacy rows). Discovery stores
+     * `published = original =` whatever one visitor's page happened to say,
+     * so applying every row froze dynamic text (a reordered post list, a live
+     * counter) to the first visitor's DOM; on a single-page app that is every
+     * page. Attribute rows (href, alt) apply as before.
+     *
+     * The write counter lives on the element's entry and counts every text
+     * write the embed makes to it (applyContentToElement). It resets with the
+     * page view: a route change drops page-scoped entries and zeroes the
+     * shared ones.
+     *
+     * An element carrying an A/B variant is left to the variant: the
+     * published re-apply after a rescan would otherwise overwrite it
+     * (visitor-cookie.test.ts caught exactly that in research's prototype).
+     */
+    applyRow(data, id) {
+      const row = this.index && this.index[id];
+      if (!row || data.element.hasAttribute('data-rcf-variant')) return;
+      const content = row.current_content;
+      // Blanking the page is the one outcome worth guarding against, and an
+      // empty string here means every stored column was null — a data gap,
+      // not somebody deliberately publishing nothing.
+      if (!content || typeof content !== 'string') return;
+      // AC 4 (owner decision 2): published copy wins over a host re-render, up
+      // to 10 text writes per element per page view. A second enforcer — machine
+      // translation, an i18n layer, another A/B tool — then converges on its
+      // copy instead of ping-ponging with ours forever.
+      const edited = content !== row.original_content && !(data.writes > 9);
+      this.applyContentToElement(data, edited ? content : null, row.metadata);
+    }
+
+    /**
+     * Keep the cached row in step with a save or a realtime update (AC 7).
+     *
+     * Every host re-render re-applies the cached row, so a row left as it was
+     * before the save would put the pre-save copy straight back over what the
+     * editor just saved. `original_content` is kept: the row stays edited.
+     * Called by persistContentUpdate (text, image and form saves) and by
+     * handleContentUpdate; the href/alt the update carries go to metadata.
+     */
+    rememberRow(id, content, attributes) {
+      const index = this.index;
+      if (!index) return;
+      const row = index[id] || (index[id] = {});
+      row.current_content = content;
+      row.metadata = Object.assign({}, row.metadata, attributes);
+    }
+
+    /** A rescan: map what is new, give it the cached rows and variants, report. */
+    rescan() {
+      this.scanForContent();
+      this.applyRows();
+      this.applyVariants();
+      this.sendContentMap();
     }
 
     /**
@@ -3646,14 +3868,21 @@
      * response is malformed, or if a row carries no content, the original
      * markup simply stays. Rows for elements that are not on this page are
      * skipped, and elements with no row keep whatever the author wrote.
+     *
+     * s67: this is now the fetch for ONE page path (`pagePath` when called),
+     * resolving to the rows indexed by element id, or undefined on failure.
+     * Applying moved to applyRows, because a single-page app shows elements
+     * after this ran and changes route without a page load: loadRows caches
+     * the result per path and applies it to whatever is on the page then, and
+     * again after every rescan. It stays immediately above
+     * setupMutationObserver: site-token-refusal.test.ts slices it out by
+     * those two method headers.
      */
     async hydrateStoredContent() {
       if (!RECOPYFAST_API) return;
 
       const staged = this.canReachStagingContent();
-      const endpoint = staged
-        ? RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery()
-        : RECOPYFAST_API + '/content/' + SITE_ID;
+      const endpoint = contentReadEndpoint(staged, this.editorTokenQuery(), this.pagePath);
 
       let rows;
       try {
@@ -3673,69 +3902,130 @@
         const body = await response.json();
         rows = staged ? (body && body.content) : body;
       } catch (error) {
-        console.warn('ReCopyFast: could not load saved content; showing the page as authored.', error);
+        console.warn('ReCopyFast: saved content unavailable; showing authored page.', error);
         return;
       }
 
       if (!Array.isArray(rows)) return;
 
-      // Everything the server already holds for this site. Discovery is only
-      // worth a write when the page shows something absent from this set.
-      this.serverKnownElementIds = new Set();
-      for (let i = 0; i < rows.length; i++) {
-        if (rows[i] && rows[i].element_id) {
-          this.serverKnownElementIds.add(rows[i].element_id);
+      // Everything the server already holds for this site joins the union:
+      // discovery is only worth a write when the page shows something absent
+      // from it. The rows themselves are indexed by id for loadRows' cache.
+      const index = Object.create(null);
+      for (const row of rows) {
+        if (row && row.element_id) {
+          this.serverKnownElementIds.add(row.element_id);
+          index[row.element_id] = row;
         }
       }
-
-      let applied = 0;
-
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        if (!row || !row.element_id) continue;
-
-        const elementData = this.elements.get(row.element_id);
-        if (!elementData) continue; // stored, but not present on this page
-
-        const content = row.current_content;
-        // Blanking the page is the one outcome worth guarding against, and an
-        // empty string here means every stored column was null — a data gap,
-        // not somebody deliberately publishing nothing.
-        if (typeof content !== 'string' || content === '') continue;
-        if (content === elementData.originalContent) continue;
-
-        if (this.applyContentToElement(elementData, content, row.metadata && row.metadata.alt)) {
-          applied++;
-        }
-      }
-
-      console.log('ReCopyFast: applied ' + applied + ' saved element(s) of ' + rows.length + ' stored');
+      return index;
     }
 
+    /**
+     * The one trigger for everything a page does after the first scan (ADR 049).
+     *
+     * Each batch, synchronously, inside the microtask the host's own change
+     * runs in — so before the browser paints:
+     *   - every mapped element the batch touched gets its edited row back
+     *     (AC 4). A framework re-render, a translation layer or a host script
+     *     writing the authored copy back is undone before it is ever seen:
+     *     0 of 10 frames showed authored copy in research's fixture. The write
+     *     compares with the live DOM first, so the batch the embed's own write
+     *     causes writes nothing, and the count per element is capped (applyRow);
+     *   - added nodes schedule a rescan, debounced 200 ms but never later than
+     *     1,000 ms after the first change (AC 5). The old 500 ms debounce was
+     *     reset by every batch, so a 100 ms ticker postponed it forever: one
+     *     element found, ever.
+     *
+     * TOMBSTONE: the callback and the rescan timer used to run bare. An
+     * exception in either is outside init's try/catch and lands on the host
+     * page's `window` (non-negotiable 4), so both are wrapped.
+     */
     setupMutationObserver() {
       const self = this;
-      this.observer = new MutationObserver(function(mutations) {
-        let shouldRescan = false;
-
-        mutations.forEach(function(mutation) {
-          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-            shouldRescan = true;
+      const onRecords = function(records) {
+        try {
+          self.checkRoute();
+          let added = false;
+          records.forEach(function(record) {
+            if (record.addedNodes.length) added = true;
+            let node = record.target;
+            if (node.nodeType !== 1) node = node.parentElement;
+            const element = node && node.closest('[data-rcf-id]');
+            const id = element && element.getAttribute('data-rcf-id');
+            const data = self.elements.get(id);
+            if (data && data.element === element) self.applyRow(data, id);
+          });
+          // The first batch that adds nodes after a route change is the new
+          // page: map it now, before it paints (see checkRoute).
+          if (added && self.stale) return self.rescan();
+          // 200 ms after the last change, never more than 1,000 ms after the first.
+          //
+          // TOMBSTONE (s67 review, finding 1). Only added nodes used to get
+          // here. A param route (`/blog/:slug`) reuses its components, and React
+          // writes a lone text child with `nodeValue`, so that page arrives as
+          // text changes only: the route change unstamped its elements and
+          // nothing ever rescanned them — 0 mapped, its published copy never
+          // applied. Any batch while stale now schedules the rescan. Debounced,
+          // not at once: the batch can be host text that is not the new page
+          // (a ticker, a loading label) arriving before the router renders.
+          // An empty batch — the Navigation API handler's, when the host had
+          // nothing pending — is no host change at all.
+          if (added || self.stale && records.length) {
+            clearTimeout(self.rescanTimer);
+            self.firstChange = self.firstChange || Date.now();
+            self.rescanTimer = setTimeout(function() {
+              self.firstChange = 0;
+              try { self.rescan(); } catch (error) {}
+            }, Math.min(200, self.firstChange + 1000 - Date.now()));
           }
+        } catch (error) {}
+      };
+      (this.observer = new MutationObserver(onRecords)).observe(document.body, OBSERVED);
+
+      // Every same-document navigation, by anyone, including routers that
+      // captured `pushState` before this script ran (Chromium 102+, Safari
+      // 26.2, Firefox 2026). Older browsers rely on the batch check above.
+      //
+      // The check waits for a microtask, so the task that changed the path has
+      // run to its end. A record the host queued before the navigation put the
+      // observer's own delivery ahead of this microtask; otherwise this one
+      // takes what the host did after it. Either way the whole task reaches the
+      // callback as one batch, exactly as without the Navigation API, and the
+      // callback's path check sees it. What the callback itself wrote then (the
+      // route change's authored-copy restores, a rescan's writes) is discarded
+      // with `takeRecords`: nothing else runs in between. The callback catches
+      // everything itself (non-negotiable 4). A destroy() in the same task
+      // removes `offNavigate`, and the check does not run.
+      //
+      // TOMBSTONE (s67 re-review, finding A). This handler used to call
+      // checkRoute and stop. The restores then reached the observer as a
+      // text-only batch of their own, and any batch while stale schedules the
+      // rescan: a router rendering more than 200 ms after `pushState` had the
+      // old page scanned under the new path first — the new page's published
+      // copy on the old page, an authored first frame, and the old page's text
+      // reported as the new page's authored copy, kept for good (the upsert
+      // ignores duplicates).
+      //
+      // TOMBSTONE (s67 verification, finding B). It then ran the check inside
+      // `pushState`, with the records pending there, as if what the host did
+      // before the path change were the new page. It is when the router
+      // renders, then pushes. It is not when the task added something else
+      // first (a spinner, an announcer, an analytics tag) and renders after the
+      // push: that batch added nodes while stale, so the OLD page was rescanned
+      // under the new path — the new page unmapped in its first frame and,
+      // with its rows back within 200 ms, the old page's text reported as its
+      // authored copy, kept for good.
+      const navigation = window.navigation;
+      if (navigation && navigation.addEventListener) {
+        const onNavigate = () => queueMicrotask(() => {
+          if (!this.offNavigate) return;
+          onRecords(this.observer.takeRecords());
+          this.observer.takeRecords();
         });
-
-        if (shouldRescan) {
-          clearTimeout(self.rescanTimeout);
-          self.rescanTimeout = setTimeout(function() {
-            self.scanForContent();
-            self.sendContentMap();
-          }, 500);
-        }
-      });
-
-      this.observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
+        navigation.addEventListener('currententrychange', onNavigate);
+        this.offNavigate = () => navigation.removeEventListener('currententrychange', onNavigate);
+      }
     }
 
     setupEditMode() {
@@ -3746,6 +4036,12 @@
 
       document.addEventListener('click', function(e) {
         if (self.isMutationLocked) return;
+        // A route change nothing else noticed (no DOM change, no Navigation
+        // API) must not let this click edit the old page's id (s67).
+        try {
+          self.checkRoute();
+          if (self.stale) self.rescan();
+        } catch (error) {}
         const element = e.target.closest('[data-rcf-id]');
         if (!element) return;
 
@@ -3844,6 +4140,23 @@
        * flat, like the icon tile, using the surface token hsl(200 18% 10%).
        */
       const style = document.createElement('style');
+      // The rule above, applied to the notes that used to sit inside the CSS
+      // (s39 moved them out; wording kept):
+      //   .rcf-editing:focus — The outline colour is set inline per element
+      //     from the backdrop.
+      //   .rcf-actions-inline — Inline edit toolbar — fixed, floats above the
+      //     edited element.
+      //   .rcf-char-counter-inline — Character counter for in-place editing.
+      //   .rcf-field-panel — Extra scalar fields (a link's href) for the
+      //     in-place renderer. Fixed to the viewport and parented to <body>, so
+      //     the edited element is never wrapped or reparented to host them.
+      //   .rcf-animation-indicator — Animation indicator — fixed to the
+      //     viewport, never a child of the edited element (its label used to
+      //     leak into the saved content).
+      //   .rcf-form-popover — Form popover.
+      //   @keyframes rcf-hintFadeIn — Container hint animation.
+      //   @keyframes rcf-modal-in — Modal animation.
+      //   .rcf-modal img — Image editor specific.
       style.textContent = `
         .rcf-hovering {
           cursor: pointer !important;
@@ -3875,12 +4188,10 @@
         }
         .rcf-editing:focus,
         .rcf-editing:focus-visible {
-          /* The outline colour is set inline per element from the backdrop. */
           outline-style: solid !important;
           outline-width: 2px !important;
           outline-offset: 2px !important;
         }
-        /* Inline edit toolbar — fixed, floats above the edited element */
         .rcf-actions-inline {
           position: fixed;
           display: flex;
@@ -3915,7 +4226,6 @@
         .rcf-actions-inline button:active {
           transform: scale(0.98);
         }
-        /* Character counter for in-place editing */
         .rcf-char-counter-inline {
           position: fixed;
           font-size: 11px;
@@ -3997,11 +4307,6 @@
           50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.3); }
           100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
-        /*
-         * Extra scalar fields (a link's href) for the in-place renderer. Fixed
-         * to the viewport and parented to <body>, so the edited element is never
-         * wrapped or reparented to host them.
-         */
         .rcf-field-panel {
           position: fixed;
           z-index: 10000;
@@ -4035,8 +4340,6 @@
         .rcf-field-panel input:focus {
           border-color: rgba(59, 130, 246, 0.6);
         }
-        /* Animation indicator — fixed to the viewport, never a child of the
-           edited element (its label used to leak into the saved content). */
         .rcf-animation-indicator {
           position: fixed;
           transform: translateX(-50%);
@@ -4051,12 +4354,10 @@
           font-family: ui-sans-serif, system-ui, sans-serif;
           white-space: nowrap;
         }
-        /* Form popover */
         .rcf-form-popover input:focus {
           border-color: rgba(59, 130, 246, 0.5);
           background: rgba(255, 255, 255, 0.08);
         }
-        /* Container hint animation */
         @keyframes rcf-hintFadeIn {
           from { opacity: 0; transform: translateX(-50%) translateY(8px); }
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -4064,12 +4365,10 @@
         .rcf-container-hint {
           animation: rcf-hintFadeIn 0.3s ease forwards;
         }
-        /* Modal animation */
         @keyframes rcf-modal-in {
           from { opacity: 0; transform: scale(0.95); }
           to { opacity: 1; transform: scale(1); }
         }
-        /* Image editor specific */
         .rcf-modal img {
           transition: opacity 0.2s ease;
         }
@@ -4271,7 +4570,7 @@
       element.classList.remove('rcf-hovering');
       if (this.hideHoverHint) this.hideHoverHint();
 
-      const editSessionId = 'rcf-edit-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      const editSessionId = Math.random();
       element.setAttribute('data-rcf-edit-session', editSessionId);
 
       // ---------------------------------------------------------------------
@@ -4279,7 +4578,6 @@
       // participate in layout, so none of them can move a single glyph.
       // ---------------------------------------------------------------------
       const selectionStyle = document.createElement('style');
-      selectionStyle.id = editSessionId + '-styles';
       const sel = '[data-rcf-edit-session="' + editSessionId + '"]';
       selectionStyle.textContent = [
         sel + '::selection { background: ' + colors.selectionBackground + '; color: ' + colors.selectionColor + '; }',
@@ -4331,24 +4629,20 @@
       const aiBtn = document.createElement('button');
       aiBtn.className = 'rcf-btn-ai';
       aiBtn.type = 'button';
-      aiBtn.title = 'AI Suggestions';
+      aiBtn.title = 'AI tools';
       aiBtn.textContent = '🪄 AI';
 
-      const saveBtn = document.createElement('button');
+      const saveBtn = aiBtn.cloneNode();
       saveBtn.className = 'rcf-btn-save';
-      saveBtn.type = 'button';
-      saveBtn.title = 'Save changes (Cmd/Ctrl + Enter)';
+      saveBtn.title = 'Save (Cmd/Ctrl+Enter)';
       saveBtn.textContent = '✓ Save';
 
-      const cancelBtn = document.createElement('button');
+      const cancelBtn = aiBtn.cloneNode();
       cancelBtn.className = 'rcf-btn-cancel';
-      cancelBtn.type = 'button';
-      cancelBtn.title = 'Cancel editing (Esc)';
+      cancelBtn.title = 'Cancel (Esc)';
       cancelBtn.textContent = '✕ Cancel';
 
-      actionsDiv.appendChild(aiBtn);
-      actionsDiv.appendChild(saveBtn);
-      actionsDiv.appendChild(cancelBtn);
+      actionsDiv.append(aiBtn, saveBtn, cancelBtn);
 
       const counter = document.createElement('div');
       counter.className = 'rcf-char-counter-inline';
@@ -4383,15 +4677,13 @@
           input.style.color = colors.chromeText;
           input.style.borderColor = colors.chromeBorder;
 
-          fieldsPanel.appendChild(label);
-          fieldsPanel.appendChild(input);
+          fieldsPanel.append(label, input);
           fieldInputs.push({ def: def, input: input, initial: input.value });
         });
       }
 
-      document.body.appendChild(actionsDiv);
-      document.body.appendChild(counter);
-      if (fieldsPanel) document.body.appendChild(fieldsPanel);
+      document.body.append(actionsDiv, counter);
+      if (fieldsPanel) document.body.append(fieldsPanel);
 
       // ---------------------------------------------------------------------
       // Positioning. Fixed viewport coordinates, recomputed whenever anything
@@ -4449,13 +4741,16 @@
         });
       };
 
+      const session = new AbortController();
+      const active = { signal: session.signal };
+
       reposition();
 
       window.addEventListener('scroll', scheduleReposition, true);
-      window.addEventListener('resize', scheduleReposition);
+      window.addEventListener('resize', scheduleReposition, active);
       if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', scheduleReposition);
-        window.visualViewport.addEventListener('scroll', scheduleReposition);
+        window.visualViewport.addEventListener('resize', scheduleReposition, active);
+        window.visualViewport.addEventListener('scroll', scheduleReposition, active);
       }
 
       let resizeObserver = null;
@@ -4463,9 +4758,6 @@
         resizeObserver = new ResizeObserver(scheduleReposition);
         resizeObserver.observe(element);
       }
-
-      // A web font landing mid-edit reflows the element under the toolbar.
-      Rules.whenFontsReady(window).then(scheduleReposition);
 
       // ---------------------------------------------------------------------
       // Content
@@ -4502,10 +4794,13 @@
       Rules.whenFontsReady(window).then(function() {
         maxChars = self.calculateMaxChars(element);
         updateCounter();
+        scheduleReposition();
       });
 
-      element.addEventListener('input', updateCounter);
-      element.addEventListener('input', scheduleReposition);
+      element.addEventListener('input', function() {
+        updateCounter();
+        scheduleReposition();
+      }, active);
       updateCounter();
 
       // preventScroll: focusing an element inside a scroll container otherwise
@@ -4527,34 +4822,15 @@
       // ---------------------------------------------------------------------
       // Lifecycle
       // ---------------------------------------------------------------------
-      let isCleaningUp = false;
-      let unloadGuard = null;
+      let isSaving = false;
 
       const cleanup = function() {
-        if (isCleaningUp) return;
-        isCleaningUp = true;
-
-        if (unloadGuard) {
-          window.removeEventListener('beforeunload', unloadGuard);
-          unloadGuard = null;
-        }
-
         window.removeEventListener('scroll', scheduleReposition, true);
-        window.removeEventListener('resize', scheduleReposition);
-        if (window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', scheduleReposition);
-          window.visualViewport.removeEventListener('scroll', scheduleReposition);
-        }
         if (resizeObserver) resizeObserver.disconnect();
         if (frame) cancelAnimationFrame(frame);
-        document.removeEventListener('mousedown', outsideClickHandler);
-
-        element.removeAttribute('contenteditable');
-        element.removeAttribute('spellcheck');
-        element.removeAttribute('role');
-        element.removeAttribute('aria-multiline');
-        element.removeAttribute('data-rcf-editing');
-        element.removeAttribute('data-rcf-edit-session');
+        ['contenteditable', 'spellcheck', 'role', 'aria-multiline', 'data-rcf-editing', 'data-rcf-edit-session'].forEach(function(attr) {
+          element.removeAttribute(attr);
+        });
         element.classList.remove('rcf-editing');
 
         // Verbatim restore — puts back exactly the inline styles the page had,
@@ -4562,16 +4838,16 @@
         if (originalStyleAttr === null) element.removeAttribute('style');
         else element.setAttribute('style', originalStyleAttr);
 
-        [actionsDiv, counter, fieldsPanel].forEach(function(node) {
-          if (node && node.parentNode) node.parentNode.removeChild(node);
-        });
+        actionsDiv.remove();
+        counter.remove();
+        if (fieldsPanel) fieldsPanel.remove();
 
-        const dynamicStyle = document.getElementById(editSessionId + '-styles');
-        if (dynamicStyle) dynamicStyle.remove();
+        selectionStyle.remove();
+        session.abort();
 
-        teardown.forEach(function(fn) {
+        for (const fn of teardown) {
           try { fn(); } catch (e) { console.warn('ReCopyFast: edit teardown failed', e); }
-        });
+        }
       };
 
       const fieldsDirty = function() {
@@ -4585,18 +4861,27 @@
        * confirmation is the only thing that can interrupt a navigation, and it
        * only fires if a handler is registered while the work is actually dirty.
        */
-      unloadGuard = function(event) {
-        if (isCleaningUp) return undefined;
+      window.addEventListener('beforeunload', function(event) {
         if (sanitizeContent() === originalText && !fieldsDirty()) return undefined;
         event.preventDefault();
         // Legacy browsers require returnValue to be set for the prompt to show.
         event.returnValue = '';
         return '';
+      }, active);
+
+      const freeze = function(value) {
+        isSaving = value;
+        element.setAttribute('contenteditable', !value);
+        for (const f of fieldInputs) f.input.readOnly = value;
+        aiBtn.disabled = value;
       };
-      window.addEventListener('beforeunload', unloadGuard);
 
       const save = async function() {
-        if (self.isMutationLocked) return;
+        // Save can be reached from three independent inputs: the toolbar,
+        // Enter, and an outside mousedown. Publish begins with that mousedown,
+        // so a second PUT from this closure can otherwise land after Publish
+        // cleared staging and silently resurrect the draft it just published.
+        if (self.isMutationLocked || isSaving) return;
         const newContent = sanitizeContent();
         const textChanged = newContent !== originalText;
 
@@ -4620,8 +4905,11 @@
         }
 
         const values = {};
-        fieldInputs.forEach(function(f) { values[f.def.key] = f.input.value.trim(); });
+        for (const f of fieldInputs) {
+          if (f.input.value !== f.initial) values[f.def.key] = f.input.value.trim();
+        }
 
+        freeze(true);
         try {
           await self.persistContentUpdate(
             elementId,
@@ -4630,18 +4918,37 @@
           );
         } catch (error) {
           if (self.isMutationLocked) return;
-          alert(error.message || 'Failed to save content. Please try again.');
+          freeze(false);
+          alert(error.message || 'Save failed.');
           return;
         }
 
+        // TOMBSTONE (s67 review, finding 5). Saves used to overwrite
+        // `originalContent` with the saved copy and never record the write.
+        // A persistent element (a header tagline) edited, then left by an
+        // in-app navigation, kept the saved copy and was discovered on the next
+        // page with it as authored copy (s65a's invariant). `originalContent`
+        // stays the authored text; `written` is what checkRoute's restore
+        // compares with, exactly as for a row the embed applied. Same in the
+        // image save. The form save records the field's value, which is what
+        // dropEntry compares for an input (getElementText); it recorded the
+        // placeholder, which never matched (s67 re-review, minor 1). No test
+        // reaches it, because no page does: the scan maps no input, textarea
+        // or select (its selector has none) and a button goes to the inline
+        // editor, so startFormEdit finds no entry for the field and returns.
+        // Only an author who gives a field the same data-rcf-id as a mapped
+        // element opens the popover, on that other element's entry.
         if (textChanged) {
-          element.textContent = newContent;
-          elementData.originalContent = newContent;
+          writeText(element, newContent);
+          elementData.written = newContent;
         }
-        fieldInputs.forEach(function(f) {
-          if (f.input.value !== f.initial) f.def.set(element, f.input.value.trim());
-        });
+        for (const f of fieldInputs) {
+          if (f.input.value !== f.initial) f.def.set(element, values[f.def.key]);
+        }
 
+        // Cleanup closes the session, but the request lock still resets first:
+        // later refactors must not turn successful completion into a sticky lock.
+        isSaving = false;
         cleanup();
 
         element.classList.add('rcf-updated');
@@ -4649,24 +4956,24 @@
       };
 
       const cancel = function() {
-        if (self.isMutationLocked) return;
+        if (self.isMutationLocked || isSaving) return;
         // textContent restore is only safe when we would otherwise be leaving
         // edited text behind; if nothing changed, leave the DOM (and any author
         // markup inside it) exactly as it was.
-        if (sanitizeContent() !== originalText) element.textContent = originalText;
+        if (sanitizeContent() !== originalText) writeText(element, originalText);
         cleanup();
       };
 
-      saveBtn.onclick = function(e) { e.preventDefault(); e.stopPropagation(); save(); };
-      cancelBtn.onclick = function(e) { e.preventDefault(); e.stopPropagation(); cancel(); };
-      aiBtn.onclick = function(e) {
+      saveBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); save(); }, active);
+      cancelBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); cancel(); }, active);
+      aiBtn.addEventListener('click', function(e) {
         e.preventDefault();
         e.stopPropagation();
         self.showAISuggestions({
           get value() { return sanitizeContent(); },
-          set value(v) { element.textContent = v; updateCounter(); scheduleReposition(); }
+          set value(v) { writeText(element, v); updateCounter(); scheduleReposition(); }
         }, elementId);
-      };
+      }, active);
 
       // Enter saves only where a newline would be meaningless. Multi-line is
       // anything that already contains one, preserves whitespace, or renders
@@ -4676,31 +4983,29 @@
                           floor.preservesWhitespace ||
                           floor.minHeight > lineHeight * 2;
 
-      element.addEventListener('keydown', function(e) {
+      const keydownHandler = function(e) {
         if (e.key === 'Escape') {
           e.preventDefault();
           cancel();
-        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          save();
-        } else if (e.key === 'Enter' && !e.shiftKey && !isMultiline) {
+        } else if (e.key === 'Enter' &&
+                   (e.currentTarget !== element || e.metaKey || e.ctrlKey || (!e.shiftKey && !isMultiline))) {
           e.preventDefault();
           save();
         }
-      });
+      };
+      element.addEventListener('keydown', keydownHandler, active);
 
-      element.addEventListener('paste', function(e) {
+      const pasteHandler = function(e) {
+        if (isSaving) return;
         e.preventDefault();
         const text = (e.clipboardData || window.clipboardData).getData('text/plain');
         document.execCommand('insertText', false, text);
         updateCounter();
-      });
+      };
+      element.addEventListener('paste', pasteHandler, active);
 
       fieldInputs.forEach(function(f) {
-        f.input.addEventListener('keydown', function(e) {
-          if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-          else if (e.key === 'Enter') { e.preventDefault(); save(); }
-        });
+        f.input.addEventListener('keydown', keydownHandler, active);
       });
 
       const outsideClickHandler = function(e) {
@@ -4714,7 +5019,7 @@
       };
 
       setTimeout(function() {
-        document.addEventListener('mousedown', outsideClickHandler);
+        document.addEventListener('mousedown', outsideClickHandler, active);
       }, 100);
     }
 
@@ -4737,7 +5042,7 @@
 
       const isImg = element.tagName.toLowerCase() === 'img';
       const currentSrc = isImg ? element.src : (element.style.backgroundImage || '').replace(/url\(['"]?([^'"]+)['"]?\)/, '$1');
-      const currentAlt = isImg ? element.alt : '';
+      const currentAlt = isImg ? (element.getAttribute('alt') || '') : '';
       const imgComputed = window.getComputedStyle(element);
       const currentWidth = Math.round(parseFloat(imgComputed.width) || 0);
       const currentHeight = Math.round(parseFloat(imgComputed.height) || 0);
@@ -4969,33 +5274,31 @@
 
       saveBtn.onclick = async function() {
         const newSrc = urlInput.value.trim();
-        if (!newSrc) {
-          alert('Please enter an image URL');
-          return;
-        }
 
         // A data URI would be stored verbatim in the content row and again in
         // content_history on every subsequent edit — a 2 MB photo becomes ~2.7 MB
         // of base64 per revision. Uploads go through /api/upload/image and come
         // back as a URL; anything else here is a bug or a hand-pasted blob.
-        if (/^data:/i.test(newSrc)) {
-          alert('Inline image data cannot be saved. Use "Upload New Image" so the file is hosted, or paste an image URL.');
+        if (!newSrc || /^data:/i.test(newSrc)) {
+          alert(newSrc ? 'Data URLs unsupported.' : 'Enter or upload an image.');
           return;
         }
+        const newAlt = isImg ? altInput.value.trim() : null;
+        const imagePatch = {
+          contentType: 'image',
+          alt: isImg && altInput.value !== currentAlt ? newAlt : undefined,
+          width: uploadedDimensions ? uploadedDimensions.width : undefined,
+          height: uploadedDimensions ? uploadedDimensions.height : undefined
+        };
 
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
 
         try {
-          await self.persistContentUpdate(elementId, newSrc, {
-            contentType: 'image',
-            alt: isImg ? altInput.value : null,
-            width: uploadedDimensions ? uploadedDimensions.width : undefined,
-            height: uploadedDimensions ? uploadedDimensions.height : undefined
-          });
+          await self.persistContentUpdate(elementId, newSrc, imagePatch);
         } catch (error) {
           if (self.isMutationLocked) return;
-          alert(error.message || 'Failed to save image. Please try again.');
+          alert(error.message || 'Save failed.');
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save Changes';
           return;
@@ -5003,14 +5306,14 @@
 
         if (isImg) {
           applyImageSource(element, newSrc);
-          if (altInput) {
-            element.alt = altInput.value;
+          if (altInput && altInput.value !== currentAlt) {
+            element.alt = newAlt;
           }
         } else {
           element.style.backgroundImage = 'url("' + newSrc + '")';
         }
 
-        elementData.originalContent = newSrc;
+        elementData.written = newSrc;
 
         element.classList.add('rcf-updated');
         setTimeout(function() {
@@ -5048,9 +5351,9 @@
           type: 'url',
           placeholder: 'https://example.com',
           get: function(el) { return el.getAttribute('href') || ''; },
-          set: function(el, value) { if (value) el.setAttribute('href', value); }
+          set: (el, value) => el.setAttribute('href', value)
         }],
-        payload: function(values) { return { href: values.href }; }
+        payload: values => values
       });
     }
 
@@ -5104,7 +5407,7 @@
       }
 
       // Get adaptive colors based on background luminance
-      const editColors = this.getEditingColors(element);
+      const editColors = Rules.resolveAffordances(element);
       const isLightBg = editColors.backdropIsLight;
 
       // For input/textarea, edit placeholder and value
@@ -5119,6 +5422,8 @@
       const rect = element.getBoundingClientRect();
       const popover = document.createElement('div');
       popover.className = 'rcf-form-popover';
+      // Editor chrome, never site copy (s70a; see shouldSkipElement).
+      popover.setAttribute('data-rcf-ignore', '');
       const popoverBg = isLightBg ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
       const popoverBorder = isLightBg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
       popover.style.cssText = 'position: fixed; left: ' + rect.left + 'px; top: ' + (rect.bottom + 8) + 'px; background: ' + popoverBg + '; border-radius: 12px; padding: 16px; box-shadow: 0 12px 36px rgba(0,0,0,0.4); border: 1px solid ' + popoverBorder + '; backdrop-filter: blur(20px); z-index: 10000; min-width: 280px;';
@@ -5196,14 +5501,15 @@
           });
         } catch (error) {
           if (self.isMutationLocked) return;
-          alert(error.message || 'Failed to save form content. Please try again.');
+          alert(error.message || 'Save failed.');
           return;
         }
 
         element.placeholder = placeholderInput.value;
         element.value = valueInput.value;
 
-        elementData.originalContent = placeholderInput.value;
+        // dropEntry compares the value (getElementText); see the text save.
+        elementData.written = valueInput.value;
 
         element.classList.add('rcf-updated');
         setTimeout(function() {
@@ -5244,7 +5550,7 @@
       element.classList.remove('rcf-hovering');
 
       // Get adaptive colors based on background luminance
-      const editColors = this.getEditingColors(element);
+      const editColors = Rules.resolveAffordances(element);
       const isLightBg = editColors.backdropIsLight;
 
       const rect = element.getBoundingClientRect();
@@ -5274,6 +5580,8 @@
     showAISuggestions(inputElement, elementId) {
       const self = this;
       const overlay = document.createElement('div');
+      // Editor chrome, never site copy (s70a; see shouldSkipElement).
+      overlay.setAttribute('data-rcf-ignore', '');
       overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 10001; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
 
       const modal = document.createElement('div');
@@ -5394,18 +5702,28 @@
         generateBtn.style.opacity = '0.7';
 
         try {
+          // Editor credentials, not the site token (s40). The site token is
+          // public — it is in this page's source — so it never authorised AI
+          // spend, and sent alone it is refused: the route bills the site
+          // OWNER, and only an editor it can grade may spend on their behalf.
+          // This request used to send only `Bearer SITE_TOKEN`, against a route
+          // that wanted a dashboard cookie this cross-origin fetch can never
+          // carry, so every suggestion failed for everyone.
+          //
+          // The credential rides in `X-RCF-Editor-Grant` (a device grant) or in
+          // the body (an edit-session or staging token) — never in the URL,
+          // where it would land in history, `Referer` and access logs. Do not
+          // swap `editorTokenBody()` for `editorTokenQuery()` here.
           const response = await fetch(RECOPYFAST_API + '/ai/suggest', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + SITE_TOKEN,
-            },
-            body: JSON.stringify({
+            headers: Object.assign({ 'Content-Type': 'application/json' }, self.editorAuthHeaders()),
+            body: JSON.stringify(Object.assign({
+              siteId: SITE_ID,
               text: currentText,
               context: 'website content',
               goal: goal,
               tone: 'professional'
-            }),
+            }, self.editorTokenBody())),
           });
 
           const data = await response.json();
@@ -5452,7 +5770,7 @@
           } else {
             const errorP = document.createElement('p');
             errorP.style.cssText = 'color: #f87171; margin: 0; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px;';
-            errorP.textContent = 'Failed to generate suggestions. Please try again.';
+            errorP.textContent = data.error || 'Failed to generate suggestions. Please try again.';
             suggestionsList.textContent = '';
             suggestionsList.appendChild(errorP);
           }
@@ -5479,12 +5797,10 @@
 
     startPolling() {
       const self = this;
-      setInterval(async function() {
+      this.pollTimer = setInterval(async function() {
         try {
           const staged = self.canReachStagingContent();
-          const endpoint = staged
-            ? RECOPYFAST_API + '/staging/content/' + SITE_ID + self.editorTokenQuery()
-            : RECOPYFAST_API + '/content/' + SITE_ID;
+          const endpoint = contentReadEndpoint(staged, self.editorTokenQuery(), self.pagePath);
 
           const response = await fetch(endpoint, {
             headers: Object.assign({
@@ -5512,6 +5828,19 @@
       }
       if (this.observer) {
         this.observer.disconnect();
+      }
+      // Everything the widget left running (s67): a rescan already scheduled
+      // would otherwise stamp and report a page it was told to leave alone.
+      // clearTimeout clears the polling interval too: timeouts and intervals
+      // share one list of active timers (HTML), and the repeat gzips smaller.
+      clearTimeout(this.rescanTimer);
+      clearTimeout(this.reportTimer);
+      clearTimeout(this.pollTimer);
+      // The Navigation API listener, and the path check it may have queued
+      // for the next microtask (setupMutationObserver).
+      if (this.offNavigate) {
+        this.offNavigate();
+        this.offNavigate = null;
       }
       this.elements.clear();
 
@@ -5962,8 +6291,13 @@
 
           const cardDesc = document.createElement('div');
           cardDesc.className = 'rcf-eb-card-desc';
-          const previewText = data.originalContent.substring(0, 100);
-          cardDesc.textContent = previewText + (data.originalContent.length > 100 ? '...' : '');
+          // What the element shows now: its text, its image source or its
+          // value. originalContent is the authored copy discovery reports and
+          // no longer follows applied copy (s67), so an image card read from it
+          // showed the first-seen src, not the published one (s67 review,
+          // finding 4).
+          const live = self.rcf.getElementText(data.element);
+          cardDesc.textContent = live.substring(0, 100) + (live.length > 100 ? '...' : '');
 
           cardContent.appendChild(cardTitle);
           cardContent.appendChild(cardDesc);
@@ -6100,16 +6434,6 @@
         }
       });
 
-      const autoTranslateLabel = document.createElement('label');
-      autoTranslateLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 13px; color: #94a3b8;';
-
-      const autoTranslateCheck = document.createElement('input');
-      autoTranslateCheck.type = 'checkbox';
-      autoTranslateCheck.className = 'rcf-eb-checkbox';
-      autoTranslateCheck.checked = true;
-      autoTranslateLabel.appendChild(autoTranslateCheck);
-      autoTranslateLabel.appendChild(document.createTextNode('Auto-translate with AI'));
-
       const addBtn = document.createElement('button');
       addBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
       addBtn.style.marginTop = '10px';
@@ -6129,8 +6453,7 @@
             },
             body: JSON.stringify({
               siteId: SITE_ID,
-              languageCode: select.value,
-              autoTranslate: autoTranslateCheck.checked
+              languageCode: select.value
             })
           });
 
@@ -6143,7 +6466,6 @@
       };
 
       addSection.appendChild(select);
-      addSection.appendChild(autoTranslateLabel);
       addSection.appendChild(addBtn);
       content.appendChild(addSection);
     }
@@ -6195,7 +6517,19 @@
 
           const date = new Date(version.created_at);
           const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-          cardMeta.innerHTML = '<span>' + dateStr + '</span><span>by ' + (version.created_by || 'Unknown') + '</span>';
+          // TOMBSTONE (s72). This line was `cardMeta.innerHTML = '<span>' + dateStr +
+          // '</span><span>by ' + created_by + '</span>'`. created_by is a staging
+          // invite's address, which a site admin chose unchecked and could verify
+          // without its mailbox: an address shaped like `<img src=x onerror=…>` ran
+          // on the customer's origin when an editor opened History, beside the edit
+          // link's bearer tokens (s70a review F1). Text, never markup, for anything
+          // a response carries. The date goes in as a bare string: `.rcf-eb-card-meta`
+          // is a flex row, a text run is its own flex item, so the 8px gap still
+          // separates the two. Pinned by edit-board-history-xss.test.ts and
+          // html-sinks-are-literal.test.ts.
+          const by = document.createElement('span');
+          by.textContent = 'by ' + (version.created_by || 'Unknown');
+          cardMeta.append(dateStr, by);
 
           const restoreBtn = document.createElement('button');
           restoreBtn.className = 'rcf-eb-btn rcf-eb-btn-ghost';
@@ -6266,13 +6600,15 @@
         const result = await response.json();
 
         if (result.success) {
-          content.innerHTML = '<div class="rcf-eb-empty">Restored ' + result.elementsRestored + ' elements</div>';
+          // restore_content_version returns a boolean, so the count printed "true".
+          content.innerHTML = '<div class="rcf-eb-empty">Version restored</div>';
 
           setTimeout(() => {
             window.location.reload();
           }, 1500);
         } else {
-          content.innerHTML = '<div class="rcf-eb-empty">' + (result.error || 'Failed to restore') + '</div>';
+          content.innerHTML = '<div class="rcf-eb-empty"></div>';
+          content.firstChild.textContent = result.error || 'Failed to restore';
         }
       } catch (error) {
         console.error('Error restoring version:', error);

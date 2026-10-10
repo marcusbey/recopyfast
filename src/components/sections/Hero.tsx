@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { ArrowRight, Play } from "lucide-react";
+import { ArrowRight, Play, Rocket } from "lucide-react";
 import Link from "next/link";
+import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
+import { foundingOfferHeadline } from "./founding-offer-copy";
 
 const editableWords = [
   "headline",
@@ -14,7 +17,79 @@ const editableWords = [
   "any text",
 ];
 
-export default function Hero() {
+/**
+ * The announcement pill above the headline: the founding offer while spots
+ * remain, the 14-day trial once they are gone or the count is unknown (s47b).
+ *
+ * Loading is an empty placeholder, not a link — an empty link is an unlabelled
+ * focus stop — and it promises neither grant, so the server-rendered first
+ * paint never says one thing that hydration then takes back.
+ */
+function FoundingOfferPill({ offer }: { offer: FoundingOfferView }) {
+  if (offer.status === "loading") {
+    return (
+      <div
+        aria-hidden="true"
+        className="glass h-[38px] w-[17rem] animate-pulse rounded-full motion-reduce:animate-none md:w-[22rem]"
+      />
+    );
+  }
+
+  const { full, short } = pillLines(offer);
+
+  return (
+    <a
+      href="#pricing"
+      className="glass inline-flex items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-800"
+    >
+      <Rocket className="h-4 w-4 text-teal-700" />
+      {/* The full line is about 580 px wide and does not fit a phone. */}
+      <span className="hidden md:inline">{full}</span>
+      <span className="md:hidden">{short}</span>
+    </a>
+  );
+}
+
+function pillLines(offer: Exclude<FoundingOfferView, { status: "loading" }>): {
+  full: ReactNode;
+  short: ReactNode;
+} {
+  if (offer.status === "closed") {
+    return {
+      full: "Every new account gets 14 days of Pro, free",
+      short: "14 days of Pro, free",
+    };
+  }
+
+  const isLastSpot = offer.remaining === 1;
+  const count = (text: string) => (
+    <span className="tabular font-semibold text-teal-800">{text}</span>
+  );
+  return {
+    full: (
+      <>
+        {foundingOfferHeadline(offer.limit)} ·{" "}
+        {count(
+          isLastSpot
+            ? "Last spot left"
+            : `${offer.remaining} of ${offer.limit} spots left`,
+        )}
+      </>
+    ),
+    short: (
+      <>
+        Pro free for 3 months ·{" "}
+        {count(
+          isLastSpot
+            ? "Last spot left"
+            : `${offer.remaining} of ${offer.limit} left`,
+        )}
+      </>
+    ),
+  };
+}
+
+export default function Hero({ offer }: { offer: FoundingOfferView }) {
   const [currentWord, setCurrentWord] = useState(0);
   const [isTyping, setIsTyping] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,6 +136,18 @@ export default function Hero() {
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-1/2 -z-10 h-[130%] -translate-y-1/2 [background:radial-gradient(58%_52%_at_50%_50%,rgba(255,255,255,0.5),rgba(255,255,255,0.18)_58%,transparent_78%)]"
         />
+
+        {/* A fixed-height slot, so the headline does not move when the count
+            arrives. It enters with the headline; its contents swap with no
+            motion of their own. */}
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8 }}
+          className="mb-6 flex h-[38px] justify-center"
+        >
+          <FoundingOfferPill offer={offer} />
+        </motion.div>
 
         <motion.h1
           initial={{ opacity: 0, y: 24 }}
@@ -117,9 +204,11 @@ export default function Hero() {
             editing for free" — was untrue: `free` is retired and resolves to no
             entitlement, so an account was worth nothing until a paid plan was
             on it. It is a trial, not a free plan, that makes a free-sounding
-            CTA honest, and there is now one: 14 days of Pro granted at sign-in
-            with no card (src/lib/billing/trial.ts). Hence "Start your free
-            trial", which names the thing that actually happens.
+            CTA honest, and there is now one: Pro granted at sign-in with no
+            card (src/lib/billing/trial.ts). The first `limit` accounts get 90
+            days of it instead of 14 (s47a's founding offer); either way it is
+            a free trial. Hence "Start your free trial", which names the thing
+            that actually happens.
 
             It still names no price. The catalogue is fetched live in
             Pricing.tsx, and a number hardcoded here would be a second source of
@@ -145,13 +234,16 @@ export default function Hero() {
           </Link>
         </motion.div>
 
+        {/* This line used to name the 14 days. The pill above the headline now
+            carries the part that varies with the founding-offer count (s47b);
+            this line says only what is true under both grants. */}
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.8, delay: 0.4 }}
           className="mt-4 text-sm text-slate-600"
         >
-          14 days of Pro. No credit card required.
+          No credit card required.
         </motion.p>
       </motion.div>
 

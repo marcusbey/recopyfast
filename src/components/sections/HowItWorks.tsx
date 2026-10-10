@@ -12,16 +12,21 @@ import { Copy, Check, Code2, Scan, MousePointerClick } from "lucide-react";
     a site id. That host has never existed, and the widget aborts in its own
     entry guard when `data-site-token` is missing — so the snippet a visitor
     copied from this page could not have started even against the right origin.
-    The shape below mirrors buildEmbedScript() in src/lib/sites/embed-script.ts,
-    which now omits `data-ws-url` entirely while no WebSocket origin is
-    configured — the current deployment state — with the two per-site values
-    left as placeholders so nobody mistakes the template for an installable tag.
+    The template shows the host the dashboard issues, `www.recopyfa.st`: the
+    apex 308-redirects to www, and a CORS preflight cannot follow a redirect,
+    so a tag on the apex makes the widget look dead on every customer site
+    (canonicalizePublicAppUrl() in src/lib/sites/embed-script.ts, B-11). Until
+    s50 it still showed the apex. The production tag also carries
+    `data-ws-url`; the template leaves it out because realtime is additive and
+    serves editing sessions only (ADR 004, ADR 022). The two per-site values
+    stay placeholders so nobody mistakes the template for an installable tag.
+    homepage-truth.test.tsx pins the template to buildEmbedScript().
   - Step 2 claimed links were editable. scanForContent() selects
     `a.rcf-editable-link`, not `a` — links are opt-in on purpose, because the
     alternative is every nav item and footer link becoming an edit target.
-  - Steps 2 and 3 promised real-time. Real-time is gone: establishConnection()
-    returns before loading socket.io because no endpoint is configured, and a
-    visitor picks up published copy from GET /api/content/:siteId on page load.
+  - Steps 2 and 3 promised real-time. Realtime exists again, but for editing
+    sessions only: a visitor picks up published copy from
+    GET /api/content/:siteId on page load, so no step promises it to visitors.
 */
 const steps = [
   {
@@ -30,10 +35,10 @@ const steps = [
     title: "Copy one line of code",
     description:
       "Register your site and the dashboard hands you the tag with your site ID and site token already filled in. Paste it before the closing body tag. No build step, no framework change, no backend.",
-    code: `<script src="https://recopyfa.st/embed/recopyfast.js"
+    code: `<script src="https://www.recopyfa.st/embed/recopyfast.js"
         data-site-id="YOUR_SITE_ID"
         data-site-token="YOUR_SITE_TOKEN"
-        data-api-url="https://recopyfa.st/api"></script>`,
+        data-api-url="https://www.recopyfa.st/api"></script>`,
     visual: "code",
   },
   {
@@ -95,7 +100,7 @@ export default function HowItWorks() {
           <h2 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-6">
             Three steps.
             <br />
-            <span className="text-slate-400">Five minutes.</span>
+            <span className="text-slate-400">A few minutes.</span>
           </h2>
           <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto">
             No complex migration. No learning curve. Just direct content
@@ -212,10 +217,11 @@ export default function HowItWorks() {
             </span>
             {/* "Average setup time: 3 minutes 32 seconds" was a statistic to
                 the second that nothing measures — we collect no install
-                telemetry. The estimate below is the same one FinalCTA makes,
-                and it is offered as an estimate. */}
+                telemetry. Its replacement, "under five minutes", was dropped
+                in s50 for the same reason: nothing measures install time, so
+                no number is offered. FinalCTA makes the same claim. */}
             <span className="font-semibold text-sky-700">
-              Set up in under five minutes
+              Set up in minutes
             </span>
           </div>
         </motion.div>

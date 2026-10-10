@@ -26,13 +26,8 @@ export default function AnalyticsPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  return <AnalyticsDashboard sites={sites} />;
+  // The frame renders while the sites load; only its body waits. This used
+  // to return a bare spinner here, so the page had no title at all for its
+  // first request (s66b1, ADR 053).
+  return <AnalyticsDashboard sites={sites} isLoadingSites={loading} />;
 }

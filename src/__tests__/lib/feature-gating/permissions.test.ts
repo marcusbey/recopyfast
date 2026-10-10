@@ -5,6 +5,7 @@ import {
   canUseAIFeatures,
   canUseTranslation,
   consumeFeatureUsage,
+  resolveSiteOwnerId,
 } from "@/lib/feature-gating/permissions";
 
 /**
@@ -368,6 +369,36 @@ describe("Feature Gating Permissions", () => {
       expect(result.error).toBe("Insufficient credits");
       expect(mockInsert).not.toHaveBeenCalled();
     });
+
+    // s48: a refund is keyed by the receipt of the charge it undoes, so the
+    // route that charged must get that receipt back from here.
+    it("consumeFeatureUsage passes the charge receipt through", async () => {
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(100));
+      const charge = {
+        usageId: "usage-1",
+        userId: testUserId,
+        credits: CREDIT_COSTS.AI_SUGGESTION,
+      };
+      asMock(consumeCredits).mockResolvedValue({
+        success: true,
+        remainingCredits: 99,
+        charge,
+      });
+
+      const result = await consumeFeatureUsage(testUserId, "ai_suggestion");
+
+      expect(result).toEqual({ success: true, charge });
+    });
+
+    it("collaboration returns no receipt", async () => {
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
+
+      const result = await consumeFeatureUsage(testUserId, "collaboration");
+
+      expect(result).toEqual({ success: true });
+      expect(consumeCredits).not.toHaveBeenCalled();
+    });
   });
 
   /**
@@ -568,6 +599,56 @@ describe("Feature Gating Permissions", () => {
 
       asMock(getEffectivePlan).mockResolvedValue(CREDIT_HOLDER);
       expect((await canCreateWebsite(testUserId)).allowed).toBe(false);
+    });
+  });
+
+  describe("resolveSiteOwnerId", () => {
+    it("resolveSiteOwnerId picks the earliest admin row, so a manager added later is never the payer", async () => {
+      // Sites do get two `admin` rows: sharing as `manager` inserts one
+      // (share/route.ts). An unordered `.limit(1)` returned whichever
+      // PostgREST produced first, so a paying agency could be refused — or
+      // billed — because its client's row came back first (s51).
+      const calls: Array<[string, unknown[]]> = [];
+      const chain: Record<string, unknown> = {};
+      for (const method of ["select", "eq", "order", "limit"]) {
+        chain[method] = jest.fn((...args: unknown[]) => {
+          calls.push([method, args]);
+          return chain;
+        });
+      }
+      chain.maybeSingle = jest.fn(() =>
+        Promise.resolve({ data: { user_id: "creator" }, error: null }),
+      );
+      const client = {
+        from: (table: string) => {
+          calls.push(["from", [table]]);
+          return chain;
+        },
+      };
+
+      const ownerId = await resolveSiteOwnerId(
+        client as unknown as Parameters<typeof resolveSiteOwnerId>[0],
+        "site-1",
+      );
+
+      expect(ownerId).toBe("creator");
+      expect(calls[0]).toEqual(["from", ["site_permissions"]]);
+      const order = calls.map(([method]) => method);
+      expect(calls).toContainEqual(["eq", ["permission", "admin"]]);
+      expect(calls).toContainEqual([
+        "order",
+        ["created_at", { ascending: true }],
+      ]);
+      expect(calls).toContainEqual(["order", ["id"]]);
+      const byCreatedAt = calls.findIndex(
+        ([method, args]) => method === "order" && args[0] === "created_at",
+      );
+      const byId = calls.findIndex(
+        ([method, args]) => method === "order" && args[0] === "id",
+      );
+      expect(byCreatedAt).toBeLessThan(byId);
+      expect(byId).toBeLessThan(order.indexOf("limit"));
+      expect(calls).toContainEqual(["limit", [1]]);
     });
   });
 });

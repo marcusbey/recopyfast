@@ -1,6 +1,7 @@
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { selectByMode, stripeEnvVar } from "./mode";
 import {
+  findPlanHeldByPurchase,
   isPaidPlanId,
   isSubscriptionPlanId,
   PAID_PLAN_IDS,
@@ -37,6 +38,70 @@ export * from "./plan-types";
  * appear without needing a deploy or a cache-busting endpoint.
  */
 const CATALOGUE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Catalogue rows understood by each deployed loader generation.
+ *
+ * The database can gain rows before every application instance has restarted.
+ * Keeping the pre-Agency boundary explicit lets the compatibility deployment
+ * prove that old code ignores the new rows instead of taking pricing, checkout
+ * and every feature gate down during the migration window.
+ */
+const CATALOGUE_LOADER_KNOWN_IDS = {
+  "v1-pre-agency": new Set([
+    "free",
+    "starter",
+    "pro",
+    "credits",
+    "lifetime_pro",
+  ]),
+  "v2-agency": new Set([
+    "free",
+    "starter",
+    "pro",
+    "agency",
+    "credits",
+    "lifetime_pro",
+    "lifetime_agency",
+  ]),
+} as const;
+
+export type CatalogueLoaderVersion = keyof typeof CATALOGUE_LOADER_KNOWN_IDS;
+
+const warnedUnknownCatalogueRows = new Set<string>();
+
+/**
+ * Unknown active rows are a forward-compatibility event, not catalogue
+ * corruption. The s33 rollout adds Agency rows before all code is promoted;
+ * the previous throw turned that safe migration order into a site-wide billing
+ * outage. Known rows remain strictly parsed below, so malformed prices or
+ * limits still fail closed.
+ */
+export function filterPlanRowsForLoaderVersion<
+  T extends { id: string; kind: string },
+>(rows: readonly T[], version: CatalogueLoaderVersion): T[] {
+  const knownIds = CATALOGUE_LOADER_KNOWN_IDS[version];
+
+  return rows.filter((row) => {
+    if (knownIds.has(row.id)) {
+      return true;
+    }
+
+    const warningKey = `${version}:${row.kind}:${row.id}`;
+    if (!warnedUnknownCatalogueRows.has(warningKey)) {
+      warnedUnknownCatalogueRows.add(warningKey);
+      console.warn(
+        `Ignoring unknown active plans row "${row.id}" (${row.kind}) in catalogue loader ${version}.`,
+      );
+    }
+    return false;
+  });
+}
+
+/** Defaults on; setting exactly `false` withdraws only the Agency sales UI. */
+export function isAgencyCheckoutEnabled(): boolean {
+  return process.env.AGENCY_CHECKOUT_ENABLED !== "false";
+}
 
 interface CachedCatalogue {
   catalogue: PlanCatalogue;
@@ -81,6 +146,16 @@ const PRICE_ID_ENV_VARS = {
       live: "STRIPE_PRO_YEARLY_PRICE_ID_LIVE",
     },
   },
+  agency: {
+    monthly: {
+      test: "STRIPE_AGENCY_PRICE_ID",
+      live: "STRIPE_AGENCY_PRICE_ID_LIVE",
+    },
+    yearly: {
+      test: "STRIPE_AGENCY_YEARLY_PRICE_ID",
+      live: "STRIPE_AGENCY_YEARLY_PRICE_ID_LIVE",
+    },
+  },
   credits: {
     monthly: {
       test: "STRIPE_TICKETS_PRICE_ID",
@@ -91,6 +166,12 @@ const PRICE_ID_ENV_VARS = {
     monthly: {
       test: "STRIPE_LIFETIME_PRICE_ID",
       live: "STRIPE_LIFETIME_PRICE_ID_LIVE",
+    },
+  },
+  lifetime_agency: {
+    monthly: {
+      test: "STRIPE_LIFETIME_AGENCY_PRICE_ID",
+      live: "STRIPE_LIFETIME_AGENCY_PRICE_ID_LIVE",
     },
   },
 } as const satisfies Record<
@@ -111,6 +192,7 @@ interface PlanRow {
   description: string;
   price_monthly: string | number;
   price_yearly_monthly_equivalent: string | number | null;
+  price_yearly_total?: string | number | null;
   stripe_price_id_test: string | null;
   stripe_price_id_live: string | null;
   stripe_yearly_price_id_test: string | null;
@@ -140,8 +222,10 @@ function toNumber(value: string | number | null, field: string): number {
   return parsed;
 }
 
-function toOptionalNumber(value: string | number | null): number | null {
-  if (value === null) return null;
+function toOptionalNumber(
+  value: string | number | null | undefined,
+): number | null {
+  if (value === null || value === undefined) return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -202,6 +286,57 @@ function toPlanLimits(
   };
 }
 
+/**
+ * The plan-limit columns a granting product may override, and the camelCase
+ * field each one lands on. The same six keys `toPlanLimits` reads.
+ */
+const GRANT_LIMIT_KEYS = {
+  websites: { field: "websites", type: "number" },
+  collaborators: { field: "collaborators", type: "number" },
+  ai_features: { field: "aiFeatures", type: "boolean" },
+  translations: { field: "translations", type: "number" },
+  ab_testing: { field: "abTesting", type: "boolean" },
+  monthly_credits: { field: "monthlyCredits", type: "number" },
+} as const satisfies Record<
+  string,
+  { field: keyof PlanLimits; type: "number" | "boolean" }
+>;
+
+/**
+ * A granting product's `limits`, read as overrides of the plan it grants
+ * (ADR 038, s45). Strict for the same reason every other known row is: a key
+ * that is not a plan limit, or a value of the wrong type, is a typo in a money
+ * boundary. Ignoring `monthly_credit: 250` would hand every lifetime Founding
+ * Agency owner Agency's full 1,000 credits with nothing to notice it, so it
+ * fails the load instead.
+ *
+ * `Object.hasOwn`, not `key in`: a JSONB `{"__proto__": …}` arrives from
+ * PostgREST as an own key, and `GRANT_LIMIT_KEYS["__proto__"]` is
+ * Object.prototype — truthy.
+ */
+function toGrantLimits(
+  limits: Record<string, unknown>,
+  productId: string,
+): Partial<PlanLimits> {
+  const overrides: Partial<Record<keyof PlanLimits, number | boolean>> = {};
+
+  for (const key of Object.keys(limits)) {
+    if (!Object.hasOwn(GRANT_LIMIT_KEYS, key)) {
+      throw new Error(
+        `plans.limits."${key}" on "${productId}" is not a plan limit it can override`,
+      );
+    }
+    const { field, type } =
+      GRANT_LIMIT_KEYS[key as keyof typeof GRANT_LIMIT_KEYS];
+    overrides[field] =
+      type === "number"
+        ? requireNumber(limits, key, productId)
+        : requireBoolean(limits, key, productId);
+  }
+
+  return overrides as Partial<PlanLimits>;
+}
+
 function toSubscriptionPlan(row: PlanRow): SubscriptionPlan {
   if (!isSubscriptionPlanId(row.id)) {
     throw new Error(
@@ -218,6 +353,14 @@ function toSubscriptionPlan(row: PlanRow): SubscriptionPlan {
     yearlyPrice:
       toOptionalNumber(row.price_yearly_monthly_equivalent) ??
       toNumber(row.price_monthly, `price_monthly (${row.id})`),
+    yearlyTotal:
+      toOptionalNumber(row.price_yearly_total) ??
+      Math.round(
+        (toOptionalNumber(row.price_yearly_monthly_equivalent) ??
+          toNumber(row.price_monthly, `price_monthly (${row.id})`)) *
+          12 *
+          100,
+      ) / 100,
     features: toFeatures(row.features, row.id),
     limits: toPlanLimits(row.limits, row.id),
     additionalSitePrice: toOptionalNumber(row.additional_site_price),
@@ -226,7 +369,11 @@ function toSubscriptionPlan(row: PlanRow): SubscriptionPlan {
 }
 
 function isOneTimeProductId(value: string): value is OneTimeProductId {
-  return value === "credits" || value === "lifetime_pro";
+  return (
+    value === "credits" ||
+    value === "lifetime_pro" ||
+    value === "lifetime_agency"
+  );
 }
 
 function toOneTimeProduct(row: PlanRow): OneTimeProduct {
@@ -250,8 +397,36 @@ function toOneTimeProduct(row: PlanRow): OneTimeProduct {
     price: toNumber(row.price_monthly, `price_monthly (${row.id})`),
     features: toFeatures(row.features, row.id),
     grantsPlanId: row.grants_plan_id,
+    // Only a product that grants a plan has anything to override. The credits
+    // row's `limits` is its pack sizing, read separately below.
+    ...(row.grants_plan_id !== null
+      ? { grantLimits: toGrantLimits(row.limits, row.id) }
+      : {}),
     sortOrder: row.sort_order,
   };
+}
+
+/**
+ * At most one active product may grant a given plan. `findPlanHeldByPurchase`
+ * reads the overrides of THE product granting a plan, and with two of them it
+ * would be answering with whichever the iteration order reached first —
+ * permanently, for every owner. Only reachable by repointing a known row
+ * (unknown ids are filtered out before this), so it fails the load loudly.
+ */
+function assertOneGrantingProductPerPlan(
+  products: readonly OneTimeProduct[],
+): void {
+  const seen = new Set<string>();
+  for (const product of products) {
+    if (product.grantsPlanId === null) continue;
+    if (seen.has(product.grantsPlanId)) {
+      throw new Error(
+        `more than one active one-time product grants "${product.grantsPlanId}"; ` +
+          `a purchased grant could not tell whose limits apply`,
+      );
+    }
+    seen.add(product.grantsPlanId);
+  }
 }
 
 /**
@@ -280,27 +455,31 @@ async function loadPlanCatalogue(): Promise<PlanCatalogue> {
     );
   }
 
-  const subscriptions = data
+  const knownRows = filterPlanRowsForLoaderVersion(data, "v2-agency");
+  const subscriptions = knownRows
     .filter((row) => row.kind === "subscription")
     .map(toSubscriptionPlan);
-  const oneTimeProducts = data
+  const oneTimeProducts = knownRows
     .filter((row) => row.kind === "one_time")
     .map(toOneTimeProduct);
+  assertOneGrantingProductPerPlan(oneTimeProducts);
 
   // The PaidPlanId union is what every API boundary validates against, so a
   // seed that no longer contains one of them has to fail loudly here rather
   // than at the moment a customer clicks Upgrade.
   const seededIds = new Set(subscriptions.map((plan) => plan.id));
-  const missing = PAID_PLAN_IDS.filter((id) => !seededIds.has(id));
+  const missing = PAID_PLAN_IDS.filter(
+    (id) => id !== "agency" && !seededIds.has(id),
+  );
   if (missing.length > 0) {
     throw new Error(
       `The plans table is missing active row(s): ${missing.join(", ")}`,
     );
   }
 
-  priceIdOverrides = new Map(data.map((row) => [row.id, row]));
+  priceIdOverrides = new Map(knownRows.map((row) => [row.id, row]));
 
-  const creditsRow = data.find((row) => row.id === "credits");
+  const creditsRow = knownRows.find((row) => row.id === "credits");
   if (!creditsRow) {
     throw new Error('The plans table has no active "credits" product row');
   }
@@ -398,6 +577,18 @@ export async function findPlanById(
 }
 
 /**
+ * `findPlanById` for an account that holds the plan through a purchase only:
+ * the same row with the granting product's limit overrides applied (ADR 038).
+ * A lifetime Founding Agency owner gets Agency with 250 monthly AI credits;
+ * an Agency subscriber keeps asking `findPlanById` and gets 1,000.
+ */
+export async function findPurchasedPlanById(
+  planId: string | null | undefined,
+): Promise<SubscriptionPlan | null> {
+  return findPlanHeldByPurchase(await getPlanCatalogue(), planId) ?? null;
+}
+
+/**
  * Plan config for a paid plan id. Throws on unknown ids so callers never
  * silently fall through to the FREE plan.
  */
@@ -431,7 +622,7 @@ export async function getPlanCyclePrice(
 ): Promise<number> {
   const plan = await getPaidPlan(planId);
   return billingPeriod === "yearly"
-    ? Math.round(plan.yearlyPrice * 12 * 100) / 100
+    ? (plan.yearlyTotal ?? Math.round(plan.yearlyPrice * 12 * 100) / 100)
     : plan.price;
 }
 

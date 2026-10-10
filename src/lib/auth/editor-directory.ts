@@ -22,6 +22,20 @@ export interface SiteEditor {
   createdAt: Date;
 }
 
+export interface SiteEditorActivation {
+  editor: SiteEditor;
+  didActivate: boolean;
+}
+
+export class EditorActivationUnavailableError extends Error {
+  readonly code = "ACTIVATION_RPC_UNAVAILABLE";
+
+  constructor() {
+    super("activate_site_editor is unavailable");
+    this.name = "EditorActivationUnavailableError";
+  }
+}
+
 export interface EditorSiteSummary {
   siteEditorId: string;
   siteId: string;
@@ -36,12 +50,33 @@ export function normalizeEmail(email: string): string {
 }
 
 /**
+ * The WHATWG HTML "valid e-mail address" with a dotted domain whose last label
+ * has two characters or more, at most 254 characters. The character set and
+ * the label shape are the ones Supabase Auth applies to its own users
+ * (docs/research/s72-edit-board-history-xss.md, "Supabase Auth"): no `<`, `>`,
+ * `"`, whitespace or non-ASCII.
+ */
+const EMAIL_PATTERN =
+  /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])$/;
+
+/**
  * Practical email validation. Deliberately not RFC 5322 — the address only has
  * to be deliverable, and the emailed code is the real check on whether it is
  * the right one.
+ *
+ * TOMBSTONE (s72). The rule was `/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/`: anything
+ * but whitespace around an `@`. It accepted `<svg/onload=alert(1)>@x.co` — no
+ * whitespace needed — and quoted local parts, empty and hyphen-led labels and
+ * non-ASCII. A site admin chooses the addresses of staging invites and site
+ * editors, a staging invite's address becomes a version's `created_by`, and the
+ * embed's History tab rendered that as markup on the customer's origin (s70a
+ * review F1). The embed renders it as text now; this rule keeps the address an
+ * address, for every route that calls it: staging invites, adding an editor,
+ * requesting and submitting a code. Length is checked first, so the pattern
+ * never runs on an unbounded string.
  */
 export function isPlausibleEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 254;
+  return email.length <= 254 && EMAIL_PATTERN.test(email);
 }
 
 /**
@@ -90,9 +125,16 @@ export async function listSitesForEditor(
     .eq("email", normalizeEmail(email))
     .is("revoked_at", null);
 
+  // Throw, never `[]`. An empty list is a statement — "this address edits
+  // nothing" — and the hub renders it as "No sites yet … ask the site owner".
+  // s39 made /edit read this on every load, so a transient Supabase error
+  // told real editors they had been removed (s39 review M1). Every caller
+  // (sites, submit-code, request-code) already turns a throw into a 500, and a
+  // failed read fails the same way for known and unknown addresses, so
+  // request-code's no-oracle rule holds.
   if (error) {
     console.error("[editor-directory] site list failed:", error.message);
-    return [];
+    throw new Error(`[editor-directory] site list failed: ${error.message}`);
   }
 
   type Row = {
@@ -168,6 +210,73 @@ export async function upsertSiteEditor(params: {
     email: data.email,
     permissions: normalizePermissions(data.permissions),
     createdAt: new Date(data.created_at),
+  };
+}
+
+/**
+ * Atomically add, restore, or update an editor and report whether access moved
+ * from inactive to active in this transaction.
+ *
+ * Email delivery must key off `didActivate`, never a lookup performed before
+ * this call. Two simultaneous requests can both observe no active row, and the
+ * old lookup also deliberately returns null on database errors. The RPC
+ * serializes the site/address pair so only the transaction that inserts or
+ * restores the row earns the invitation send.
+ */
+export async function activateSiteEditor(params: {
+  siteId: string;
+  email: string;
+  permissions: EditorPermission[];
+  invitedBy: string | null;
+}): Promise<SiteEditorActivation | null> {
+  const supabase = createServiceRoleClient();
+  const email = normalizeEmail(params.email);
+  const permissions = normalizePermissions(params.permissions);
+
+  if (permissions.length === 0) {
+    console.error(
+      "[editor-directory] refusing to activate an empty permission set",
+    );
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .rpc("activate_site_editor", {
+      p_site_id: params.siteId,
+      p_email: email,
+      p_permissions: permissions,
+      p_invited_by: params.invitedBy,
+    })
+    .single<{
+      id: string;
+      site_id: string;
+      email: string;
+      permissions: string[] | null;
+      created_at: string;
+      did_activate: boolean;
+    }>();
+
+  if (error?.code === "PGRST202" || error?.code === "42883") {
+    // The application route depends on the additive migration. Treat a missing
+    // function as a release-order failure with a stable signal so the route can
+    // fail closed and tell operators what must happen before deployment.
+    throw new EditorActivationUnavailableError();
+  }
+
+  if (error) {
+    console.error("[editor-directory] activation failed:", error.message);
+    return null;
+  }
+
+  return {
+    editor: {
+      id: data.id,
+      siteId: data.site_id,
+      email: data.email,
+      permissions: normalizePermissions(data.permissions),
+      createdAt: new Date(data.created_at),
+    },
+    didActivate: data.did_activate,
   };
 }
 

@@ -71,3 +71,59 @@ number was wrong twice within one day, and the second time it went stale **insid
 purpose was fixing stale cites**. Nothing about the pin changed.
 
 `auto_stop_machines = false` and the one-machine decision are both unchanged and still correct.
+
+
+## ADR 014 — checkout reservation symbol superseded
+
+**Says:** trial conversion uses `claimSubscriptionReservation` / `withUserLock` in the subscription checkout branch.
+
+**Correction.** s28 replaces the removed `claimSubscriptionReservation` with `claimSubscriptionCheckoutIntent` in `src/lib/billing/checkout-reservation.ts`. `withUserLock` remains around the subscription branch. [ADR 028](./028-durable-subscription-checkout-intents.md) records the structural protocol change; the trial-grant decision and conversion-inside-the-lock constraint remain unchanged.
+
+## ADRs 028/029/019 — s34 supersession pointer
+
+[ADR 031](./031-checkout-hold-expiry-and-recoverable-subscriptions.md) records the decision
+changes for bounded unresolved founding holds, paid late completion, duplicate-account refunds
+and invoice/portal recovery that blocks replacement subscriptions without cancelling them. It
+also explicitly records the s33 fail-closed `getUserSubscription` behavior omitted from ADR
+029's supersession scope. This entry is only a pointer; the changed policy and rationale live in
+ADR 031.
+
+## Founding bind wrapper — historical deployment citation
+
+The comment above the three-argument `bind_founding_agency_checkout` wrapper in applied
+`20260924065000_agency_plan_and_founding_capacity.sql` incorrectly says previously deployed code
+called it. The earlier `040000` version was an unpublished draft. The wrapper preserves that
+function identity, but its presence is not evidence of a prior deployment. Applied migration
+history remains unchanged; the four-argument form carries the provider expiry.
+
+## s34 checkout claim overload — inaccurate rolling-deploy justification
+
+The comment above the two-argument `claim_subscription_checkout_intent(UUID, TIMESTAMPTZ)`
+overload in the unpublished `20260925100000_checkout_hardening.sql` draft said it had to remain
+safe because an older deployed application could call it during a rolling deploy. Deployed
+`main` already called only the five-argument catalogue-choice overload through
+`claimSubscriptionCheckoutIntent` in `src/lib/billing/checkout-reservation.ts`. Hardening the
+two-argument function was harmless, but it was not a deployed call-site compatibility measure.
+The final s34 migration removes the unused replacement rather than preserving a false historical
+claim. Applied migrations remain unchanged.
+
+
+## s38 branch ADR numbering after PR #32 integration (2026-09-25)
+
+PR #32 reached main with billing ADR 031 while s38 was being verified. Before merging s38,
+its branch-only column-privilege ADR moved from 031 to 033, and its follow-up portability/
+least-privilege ADR moved from 033 to 034. Only numbers and references changed; decisions
+are preserved. The immutable uncommitted s38 review refers to its historical 031 filename.
+
+## ADR 053 — the frame's markup moved out of `dashboard/layout.tsx` (s88 review, 2026-10-09)
+
+**Says:** *"`src/app/dashboard/layout.tsx` already draws a frame"* and, in Decision 1,
+*"`src/app/dashboard/layout.tsx` owns width and gutters"*.
+
+**Correction.** s88's review made `layout.tsx` a server component so the segment can export
+`robots: { index: false, follow: false }` (a client module cannot export metadata). Its client
+body moved verbatim to `src/app/dashboard/DashboardFrame.tsx` (`DashboardFrame`), which
+`layout.tsx` renders and nothing else does. The sidebar, the 56 px header, `max-w-[1180px]` and
+the gutters are now written there. The decision is unchanged: the layout — through the one frame
+it renders — owns width and gutters, and no page may. The page-shell guard's skip-link exemption
+(`FOCUS_SHADOW_FILE`) names the new file.

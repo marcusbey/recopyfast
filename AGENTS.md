@@ -105,8 +105,9 @@ npm run check:redis
    `npm run build:embed`. `--check` fails on a stale artifact.
 2. **`/embed/recopyfast.js` is a permanent public URL**, baked into every snippet ever issued.
    It can never move or break for existing installs.
-3. **Embed budget ≤ 30,000 bytes gzipped.** Currently breached at 46,781 — `s06` makes it a
-   build gate. Per-story allocation lives in `docs/stories.md` and nowhere else.
+3. **Embed budget ≤ 30,000 bytes gzipped.** Currently breached at 45,828 (bundle, 2026-10-09);
+   the `MAX_*` ceilings in `scripts/build-embed.mjs` are the build gate and only go down.
+   Per-story allocation lives in `docs/stories.md` and nowhere else.
 4. **The widget degrades, never breaks.** No uncaught exception may reach the host page's
    `window`; on failure the page keeps its authored copy. There is no error surface on their
    domain, so a broken branch presents as "editing stopped working on one site".
@@ -117,6 +118,14 @@ npm run check:redis
 7. **No hardcoded Stripe prices or fallback catalogue.** `plans` is the source of truth, price
    ids come from env. A previous fallback silently served drifted prices at checkout.
 8. **No secrets in code.** Env vars only; validate presence at startup and fail loudly.
+9. **Never rely on a column REVOKE alone.** PostgreSQL table SELECT overrides a column
+   revoke. The 20260813120000 migration left `sites.api_key` readable to collaborators until
+   the s38 correction. Revoke table-level access (including PUBLIC/inherited grants), clear
+   stale column grants, then grant an explicit reviewed non-secret column list. User-scoped
+   selects and embedded joins must name safe columns; only authorized service-role signing
+   paths may select HMAC secrets. Real database tests must cover effective role privileges
+   and compare granted columns with the current schema so new columns require a decision.
+   See [ADR 033](./docs/decisions/033-column-privileges-require-table-level-revoke.md).
 
 ## API routes
 
@@ -132,6 +141,8 @@ npm run check:redis
 - CORS: `src/lib/http/public-cors.ts` (`*`, token-authenticated, never cookies) vs per-route
   `withCors(res, allowedOrigin)` (one echoed origin, with credentials). Absence of the header
   is how "no grant" is expressed. `*` is never a fallback and never pairs with credentials.
+  `GET /api/published/[siteId]` uses `public-cors.ts` with no token at all, by
+  [ADR 046](./docs/decisions/046-unauthenticated-published-copy-snapshot.md).
 
 ## Validation
 
@@ -151,11 +162,31 @@ markup and is not sanitized as markup.
 | `supabase/client.ts` | browser, inside effects/handlers only | on |
 | `supabase/server.ts` | route acting as the signed-in user | on |
 | `supabase/service.ts` | widget paths where the caller is a site token | **off** |
+| `supabase/anon.ts` | server code with no user reading rows RLS makes public to `anon` (sitemap, `/blog`); read-only, never user data — [ADR 058](./docs/decisions/058-cookie-less-anon-client-for-public-reads.md) | on |
 
 Service-role is an exception that must be earned per route: an explicit
 `authorizeSiteRequest` / `authorizeFirstPartySiteRequest` / `authorizeIngestRequest` call
 before any data access, plus a fail-closed per-site rate limiter. Do not write a fourth auth
 path. See [ADR 002](./docs/decisions/002-rls-tenant-boundary.md).
+`GET /api/published/[siteId]` is a named unauthenticated exception: no `authorize*` call, a
+fail-open per-IP limiter and a fixed public projection, by
+[ADR 046](./docs/decisions/046-unauthenticated-published-copy-snapshot.md) — not a pattern to copy.
+
+The one other principal that may reach the service role is a **signed-in site admin writing a
+service-role-only table from the dashboard**: IP guard → `getUser()` → fail-closed per-user limiter
+→ `admin` row read through the RLS client → only then the service client, scoped by the ids those
+checks established. See [ADR 037](./docs/decisions/037-dashboard-admin-service-role-writes.md).
+
+No web principal writes a content table (`content_elements`, the history tables, the A/B tables):
+a signed-in `edit`/`admin` member's content write is a route that runs a fail-closed limiter,
+`getUser()`, the permission read and `checkOwnerCanEdit`, and only then writes through the service
+client, scoped by the ids those checks established. See
+[ADR 042](./docs/decisions/042-content-writes-are-service-role-only.md).
+
+An edit session never exceeds its holder's live grant: only the service role writes
+`edit_sessions`, and every validation intersects the session's permissions with the holder's
+current `site_permissions` row. See
+[ADR 047](./docs/decisions/047-edit-session-authority-is-the-live-grant.md).
 
 Site ownership is an `admin` row in `site_permissions`, **never** a column on `sites`. Counting
 via `sites.user_id` returns 0 and passes every quota check — that bug already shipped.
@@ -196,8 +227,8 @@ the asset. When you fix something subtle, leave the tombstone.
 Jest + Testing Library, colocated in `__tests__/`. Playwright in `e2e/`.
 
 - Coverage thresholds in `jest.config.js` are a **ratchet, not a target**: they are the floor
-  measured today (22% lines). Raise them as tests are added; never lower them. 80% remains the
-  goal and cannot be declared before it is earned.
+  last measured (69% lines, 2026-10-09), and CI enforces them. Raise them as tests are added;
+  never lower them. 80% remains the goal and cannot be declared before it is earned.
 - `jest.setup.js:177-182` mocks `IntersectionObserver` globally with a no-op `observe`. Any
   test that depends on intersection behaviour must supply its own controllable mock or it
   passes vacuously.
@@ -207,8 +238,9 @@ Jest + Testing Library, colocated in `__tests__/`. Playwright in `e2e/`.
 ## Definition of Done (per feature)
 
 - Single PR, structured description, readable diff
-- `lint`, `type-check`, `format:check`, `build`, `test` all green (the pre-commit hook runs the
-  first four and the full suite; CI additionally runs `audit:prod` and `type-check:build`)
+- `lint`, `type-check`, `format:check`, `build`, `test` all green (the pre-commit hook runs
+  lint, type-check, format:check and the full suite; CI runs all five plus `audit:prod`,
+  `type-check:build`, the coverage ratchet and every migration replayed on PostgreSQL 17)
 - Passing tests on business logic; no regression on existing code
 - Review passed, no open critical issue
 - Deployed to production

@@ -2,6 +2,9 @@
   "name": "recopyfast",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "node scripts/dev-info.js && concurrently --prefix-colors \"blue,green\" --prefix-names \"NEXT,WS\" \"npm run dev:next\" \"npm run dev:ws\"",
     "dev:next": "next dev --turbopack",

@@ -2,6 +2,7 @@
 
 /**
  * The editor hub: email -> code -> pick a site -> land on it in edit mode.
+ * Or, when this browser still holds a live hub session: straight to the sites.
  *
  * Lives under `src/app/edit/` rather than `src/components/` because the whole
  * flow is specific to this one route and shares no state with the app shell —
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { IconTile } from "@/components/ui/icon-tile";
 import { ArrowRight, Globe, Loader2, Mail, ShieldCheck } from "lucide-react";
 
 interface EditorSite {
@@ -29,15 +31,26 @@ interface EditorSite {
   permissions: string[];
 }
 
-type Step = "email" | "code" | "sites";
+type Step = "checking" | "email" | "code" | "sites";
 
 const CODE_LENGTH = 6;
 
+const SESSION_CHECK_FAILED =
+  "We couldn't check your session. Sign in with your email to continue.";
+const SIGN_OUT_FAILED =
+  "We couldn't sign you out on this browser. The previous address may still be remembered here.";
+
 export function EditorSignIn() {
-  const [step, setStep] = useState<Step>("email");
+  // Starts at "checking", not "email": rendering the form first and swapping it
+  // for the site list a beat later would flash a sign-in form at someone who is
+  // already signed in.
+  const [step, setStep] = useState<Step>("checking");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [rememberDevice, setRememberDevice] = useState(true);
+  // Unticked by default, matching the in-page code modal (s39). This page
+  // defaulted to ticked while the modal did not, so the same person got a
+  // 7-day grant or a 12-hour one depending on which door they came through.
+  const [rememberDevice, setRememberDevice] = useState(false);
   const [sites, setSites] = useState<EditorSite[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -50,6 +63,66 @@ export function EditorSignIn() {
   useEffect(() => {
     if (step === "code") codeInputRef.current?.focus();
   }, [step]);
+
+  /**
+   * Resume a live hub session (s39).
+   *
+   * The return trip was designed and never wired: the hub cookie is
+   * SameSite=Lax precisely so it survives the navigation back from a customer
+   * site, and `GET /api/editor/sites` lists sites from it — but nothing called
+   * it, so an editor coming back from one site always had to wait for a new
+   * emailed code to reach the next. The editor bar now links back here.
+   *
+   * 401 is the ordinary cold start. Anything else that is not a usable list is
+   * an error, shown as one: an empty list here would read "you can't edit
+   * anything", which is the one thing a failed read must never claim.
+   *
+   * `isActive` drops an answer that lands after unmount — or, under
+   * StrictMode's double mount, after a newer check has already answered — so
+   * a stale 401 can never throw a signed-in editor back to the email step.
+   */
+  useEffect(() => {
+    let isActive = true;
+
+    async function resumeSession() {
+      try {
+        const response = await fetch("/api/editor/sites");
+        if (!isActive) return;
+
+        if (response.status === 401) {
+          setStep("email");
+          return;
+        }
+
+        const data = await response.json();
+        if (!isActive) return;
+
+        if (
+          !response.ok ||
+          typeof data?.email !== "string" ||
+          !Array.isArray(data?.sites)
+        ) {
+          setError(SESSION_CHECK_FAILED);
+          setStep("email");
+          return;
+        }
+
+        setEmail(data.email);
+        setSites(data.sites);
+        setRememberDevice(data.remembered === true);
+        setStep("sites");
+      } catch {
+        if (!isActive) return;
+        setError(SESSION_CHECK_FAILED);
+        setStep("email");
+      }
+    }
+
+    resumeSession();
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   async function requestCode(event: React.FormEvent) {
     event.preventDefault();
@@ -110,7 +183,13 @@ export function EditorSignIn() {
       const response = await fetch("/api/editor/submit-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), code: code.trim() }),
+        // The choice is signed into the hub session (s39), so a later visit
+        // that resumes the session hands off with it instead of the default.
+        body: JSON.stringify({
+          email: email.trim(),
+          code: code.trim(),
+          rememberDevice,
+        }),
       });
       const data = await response.json();
 
@@ -131,6 +210,44 @@ export function EditorSignIn() {
       inFlight.current = false;
       setIsLoading(false);
     }
+  }
+
+  /**
+   * Sign out of the hub, then start over at the email step.
+   *
+   * The server call is the point: the cookie is httpOnly, so resetting only
+   * this page's state — all this button did before s39 — would put the old
+   * address's site list straight back on the next visit now that the page
+   * resumes sessions. The reset happens even if the call fails, because the
+   * editor asked to leave this address; the error says the browser may still
+   * remember it rather than pretending it does not.
+   */
+  async function switchAddress() {
+    if (inFlight.current) return;
+
+    inFlight.current = true;
+    setIsLoading(true);
+    setError(null);
+
+    let didSignOut = false;
+    try {
+      const response = await fetch("/api/editor/sign-out", { method: "POST" });
+      didSignOut = response.ok;
+    } catch {
+      // Unreachable server: `didSignOut` stays false and the reset below still
+      // happens, with the error saying so.
+    } finally {
+      inFlight.current = false;
+      setIsLoading(false);
+    }
+
+    setStep("email");
+    setEmail("");
+    setCode("");
+    setSites([]);
+    setNotice(null);
+    setRememberDevice(false);
+    if (!didSignOut) setError(SIGN_OUT_FAILED);
   }
 
   async function openSite(site: EditorSite) {
@@ -167,15 +284,10 @@ export function EditorSignIn() {
   return (
     <div className="w-full max-w-md space-y-6">
       <header className="space-y-2 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-tone-accent-surface">
-          <ShieldCheck
-            className="h-6 w-6 text-tone-accent-text"
-            aria-hidden="true"
-          />
-        </div>
-        <h1 className="text-2xl font-semibold text-foreground">
-          Edit your site
-        </h1>
+        <IconTile tone="accent" size="lg" className="mx-auto flex">
+          <ShieldCheck aria-hidden="true" />
+        </IconTile>
+        <h1 className="text-page-title">Edit your site</h1>
         <p className="text-sm text-muted-foreground">
           Sign in with the email address the site owner added you with.
         </p>
@@ -185,6 +297,16 @@ export function EditorSignIn() {
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
+      )}
+
+      {step === "checking" && (
+        <div
+          role="status"
+          className="flex items-center justify-center py-8 text-muted-foreground"
+        >
+          <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+          <span className="sr-only">Checking your session</span>
+        </div>
       )}
 
       {step === "email" && (
@@ -220,7 +342,7 @@ export function EditorSignIn() {
 
       {step === "code" && (
         <form onSubmit={submitCode} className="space-y-4" noValidate>
-          <div className="rounded-lg bg-surface-1 p-4 text-center">
+          <div className="rounded-container bg-surface-1 p-4 text-center">
             <Mail
               className="mx-auto mb-2 h-6 w-6 text-muted-foreground"
               aria-hidden="true"
@@ -260,7 +382,7 @@ export function EditorSignIn() {
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-border"
+              className="h-4 w-4 rounded-control border-border"
               checked={rememberDevice}
               onChange={(event) => setRememberDevice(event.target.checked)}
               disabled={isLoading}
@@ -301,8 +423,13 @@ export function EditorSignIn() {
 
       {step === "sites" && (
         <div className="space-y-4">
+          <p className="text-center text-sm text-muted-foreground">
+            Signed in as{" "}
+            <span className="font-medium text-foreground">{email.trim()}</span>
+          </p>
+
           {sites.length === 0 ? (
-            <div className="rounded-lg border border-border p-6 text-center">
+            <div className="rounded-container border border-border p-6 text-center">
               <Globe
                 className="mx-auto mb-3 h-8 w-8 text-muted-foreground"
                 aria-hidden="true"
@@ -327,7 +454,7 @@ export function EditorSignIn() {
                       type="button"
                       onClick={() => openSite(site)}
                       disabled={handingOffTo !== null}
-                      className="flex w-full items-center justify-between rounded-lg border border-border p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-60"
+                      className="flex w-full items-center justify-between rounded-container border border-border p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-60"
                     >
                       <span className="min-w-0">
                         <span className="block truncate font-medium text-foreground">
@@ -354,6 +481,16 @@ export function EditorSignIn() {
               </ul>
             </>
           )}
+
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full"
+            onClick={switchAddress}
+            disabled={isLoading || handingOffTo !== null}
+          >
+            Use a different address
+          </Button>
         </div>
       )}
     </div>

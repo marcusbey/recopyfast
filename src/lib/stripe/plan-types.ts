@@ -26,11 +26,16 @@ export type BillingPeriod = "monthly" | "yearly";
  * `loadPlanCatalogue` verifies the database actually contains these ids, so the
  * union cannot silently drift from the seed.
  */
-export type PaidPlanId = "starter" | "pro";
+export type PaidPlanId = "starter" | "pro" | "agency";
 export type SubscriptionPlanId = "free" | PaidPlanId;
-export type OneTimeProductId = "credits" | "lifetime_pro";
+export type OneTimeProductId = "credits" | "lifetime_pro" | "lifetime_agency";
 
-export const PAID_PLAN_IDS: readonly PaidPlanId[] = ["starter", "pro"] as const;
+/** Ascending entitlement priority; later plans must include earlier access. */
+export const PAID_PLAN_IDS: readonly PaidPlanId[] = [
+  "starter",
+  "pro",
+  "agency",
+] as const;
 
 export const SUBSCRIPTION_PLAN_IDS: readonly SubscriptionPlanId[] = [
   "free",
@@ -57,6 +62,12 @@ export function isBillingPeriod(value: unknown): value is BillingPeriod {
   return value === "monthly" || value === "yearly";
 }
 
+export function isLifetimeProductId(
+  value: unknown,
+): value is Extract<OneTimeProductId, "lifetime_pro" | "lifetime_agency"> {
+  return value === "lifetime_pro" || value === "lifetime_agency";
+}
+
 /** `-1` means unlimited, matching the gates in src/lib/feature-gating. */
 export interface PlanLimits {
   websites: number;
@@ -76,6 +87,8 @@ export interface SubscriptionPlan {
   price: number;
   /** Monthly-equivalent price when billed annually. */
   yearlyPrice: number;
+  /** Exact amount Stripe charges once per annual billing cycle. */
+  yearlyTotal?: number;
   features: readonly string[];
   limits: PlanLimits;
   /** Per-month cost of each site beyond `limits.websites`; null if not sold. */
@@ -91,6 +104,13 @@ export interface OneTimeProduct {
   features: readonly string[];
   /** Subscription plan this purchase grants permanently, if any. */
   grantsPlanId: SubscriptionPlanId | null;
+  /**
+   * Limits this purchase overrides on the plan it grants, read from the
+   * product row's own `limits` (ADR 038). Absent or empty: the purchase confers
+   * the granted plan exactly. Founding Agency carries `{ monthlyCredits: 250 }`
+   * — everything in Agency, with 250 AI credits a month.
+   */
+  grantLimits?: Readonly<Partial<PlanLimits>>;
   sortOrder: number;
 }
 
@@ -130,6 +150,42 @@ export function findSubscriptionPlan(
   return catalogue.subscriptions.find((plan) => plan.id === planId);
 }
 
+/**
+ * The plan as an account holding it *through a purchase* gets it: the catalogue
+ * row with the granting product's `grantLimits` laid over its limits.
+ *
+ * s45: a lifetime Founding Agency owner holds `agency` — the plan id the grant
+ * function writes and every Agency check compares against — but with 250
+ * monthly AI credits instead of the subscription's 1,000. Only the limits
+ * differ, so every gate (they all read limits) sees Agency except the credit
+ * allowance. Who counts as holding a plan through a purchase is decided in
+ * `src/lib/billing/effective-plan.ts`, not here.
+ *
+ * Returns the catalogue object itself when the purchase overrides nothing, so
+ * Lifetime Pro — and Founding Agency before migration 20260926120000 — resolve
+ * exactly as before. `loadPlanCatalogue` guarantees at most one active product
+ * grants a given plan, which is what makes `find` an answer rather than a
+ * guess.
+ */
+export function findPlanHeldByPurchase(
+  catalogue: PlanCatalogue,
+  planId: string | null | undefined,
+): SubscriptionPlan | undefined {
+  const plan = findSubscriptionPlan(catalogue, planId);
+  if (!plan) {
+    return undefined;
+  }
+
+  const overrides = catalogue.oneTimeProducts.find(
+    (product) => product.grantsPlanId === plan.id,
+  )?.grantLimits;
+  if (!overrides || Object.keys(overrides).length === 0) {
+    return plan;
+  }
+
+  return { ...plan, limits: { ...plan.limits, ...overrides } };
+}
+
 export function findOneTimeProduct(
   catalogue: PlanCatalogue,
   productId: OneTimeProductId,
@@ -163,7 +219,7 @@ export function planCyclePrice(
   billingPeriod: BillingPeriod,
 ): number {
   return billingPeriod === "yearly"
-    ? roundToCents(plan.yearlyPrice * 12)
+    ? (plan.yearlyTotal ?? roundToCents(plan.yearlyPrice * 12))
     : plan.price;
 }
 

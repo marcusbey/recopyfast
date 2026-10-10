@@ -41,6 +41,13 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 const mockGetUser = jest.fn();
 const mockPermissionRow = jest.fn();
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(() =>
     Promise.resolve({
@@ -66,13 +73,13 @@ const mockCreateServiceRoleClient =
     typeof createServiceRoleClient
   >;
 
-const SITE_ID = "site-abc";
-const EDITOR_ID = "site-editor-1";
-const GRANT_ROW_ID = "grant-row-1";
+const SITE_ID = "11111111-1111-4111-8111-111111111111";
+const EDITOR_ID = "22222222-2222-4222-8222-222222222222";
+const GRANT_ROW_ID = "33333333-3333-4333-8333-333333333333";
 const ORIGIN = "https://helloworld.example";
 const USER_AGENT = "Mozilla/5.0 (Macintosh) Chrome/120";
 const EDITOR_EMAIL = "bob@corp.example";
-const OWNER_ID = "owner-1";
+const OWNER_ID = "44444444-4444-4444-8444-444444444444";
 
 const GRANT = encodeSignedToken("rcfg1", CRYPTO_DOMAIN.grant, {
   g: GRANT_ROW_ID,
@@ -198,7 +205,24 @@ function makeWorld(options: { sweepGrants: boolean }) {
 
   return {
     state,
-    client: { from } as unknown as ReturnType<typeof createServiceRoleClient>,
+    client: {
+      from,
+      rpc: async (name: string) => {
+        if (name !== "save_staging_content_atomic") {
+          return { data: [], error: null };
+        }
+        state.contentWrites += 1;
+        return {
+          data: [
+            {
+              content_element_id: "content-element-1",
+              updated_at: "2026-09-24T12:00:00.000Z",
+            },
+          ],
+          error: null,
+        };
+      },
+    } as unknown as ReturnType<typeof createServiceRoleClient>,
   };
 }
 

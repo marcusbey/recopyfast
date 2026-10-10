@@ -40,23 +40,27 @@ export function VersionTimelineItem({
 
   return (
     <div className="relative flex gap-4">
-      {/* Timeline connector */}
+      {/* Timeline connector. The dot is 8px, the size a status dot may stay
+          round at (design system, Radius); the connector is centred on it.
+          The current version is told apart by its colour alone: the dots
+          wore `ring-4` / `ring-2` halos, and a ring is a box-shadow, which
+          the app keeps for what floats and for focus (s66b2 R5). */}
       <div className="flex flex-col items-center">
         <div
-          className={`h-3 w-3 rounded-full ${
-            isFirst
-              ? "bg-success ring-4 ring-tone-success-surface"
-              : "bg-muted-foreground/40 ring-2 ring-muted"
+          className={`h-2 w-2 rounded-full ${
+            isFirst ? "bg-success" : "bg-muted-foreground/40"
           }`}
         />
         {!isLast && (
-          <div className="absolute left-[5px] top-4 h-full w-0.5 bg-border" />
+          <div className="absolute left-[3px] top-4 h-full w-0.5 bg-border" />
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 pb-6">
-        <div className="rounded-lg border border-border bg-card p-4 transition-shadow hover:shadow-md">
+        {/* A static panel: it grew a shadow on hover, and nothing in it is
+            a link (s66b2 R5, design system, Surfaces and elevation). */}
+        <div className="rounded-container border border-border bg-card p-4">
           {/* Header */}
           <div className="flex items-start justify-between mb-3">
             <div>

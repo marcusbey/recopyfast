@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -95,7 +96,7 @@ export function VersionPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Version {version.versionNumber} Preview
@@ -106,13 +107,13 @@ export function VersionPreviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <DialogBody className="space-y-6">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
             </div>
           ) : error ? (
-            <div className="p-4 rounded-lg border border-tone-danger-border bg-tone-danger-surface text-tone-danger-text text-sm">
+            <div className="p-4 rounded-container border border-tone-danger-border bg-tone-danger-surface text-tone-danger-text text-sm">
               {error}
             </div>
           ) : (
@@ -135,7 +136,7 @@ export function VersionPreviewDialog({
                 {snapshot.map((element) => (
                   <div
                     key={element.element_id}
-                    className="bg-surface-1 rounded-lg border border-border p-3"
+                    className="bg-surface-1 rounded-container border border-border p-3"
                   >
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-mono text-xs text-muted-foreground truncate">
@@ -165,7 +166,7 @@ export function VersionPreviewDialog({
 
               {/* Restore Confirmation */}
               {showConfirm ? (
-                <div className="bg-tone-warning-surface border border-tone-warning-border rounded-lg p-4">
+                <div className="bg-tone-warning-surface border border-tone-warning-border rounded-container p-4">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="w-5 h-5 text-tone-warning-text flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
@@ -221,7 +222,7 @@ export function VersionPreviewDialog({
               )}
             </>
           )}
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

@@ -66,7 +66,7 @@ export function EmptyState({
           {steps.map((step, index) => (
             <li key={step} className="flex gap-3 text-sm text-muted-foreground">
               <span
-                className="tabular mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-2 text-[0.6875rem] font-semibold text-foreground"
+                className="tabular mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-container bg-surface-2 text-[0.6875rem] font-semibold text-foreground"
                 aria-hidden="true"
               >
                 {index + 1}

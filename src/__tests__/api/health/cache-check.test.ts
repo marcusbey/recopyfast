@@ -28,7 +28,7 @@
 
 import { NextRequest } from "next/server";
 
-const mockSingle = jest.fn();
+const mockLimit = jest.fn();
 const mockGetBucket = jest.fn();
 const mockCheckLimit = jest.fn();
 
@@ -46,8 +46,7 @@ jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(async () => ({
     from: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    single: mockSingle,
+    limit: mockLimit,
     storage: { getBucket: mockGetBucket },
   })),
 }));
@@ -103,7 +102,7 @@ describe("A-30 /api/health does not check the rate-limit store", () => {
     delete process.env.NEXT_PUBLIC_WS_URL;
     jest.clearAllMocks();
     jest.spyOn(console, "error").mockImplementation(() => {});
-    mockSingle.mockResolvedValue({ data: { id: "site-1" }, error: null });
+    mockLimit.mockResolvedValue({ data: [{ id: "plan-1" }], error: null });
     mockGetBucket.mockResolvedValue({
       data: { name: "assets", public: false },
       error: null,
@@ -184,7 +183,7 @@ describe("A-30 /api/health does not check the rate-limit store", () => {
   );
 
   it("HEAD still answers 503 when the database is down (control)", async () => {
-    mockSingle.mockResolvedValue({
+    mockLimit.mockResolvedValue({
       data: null,
       error: { code: "08006", message: "connection failure" },
     });

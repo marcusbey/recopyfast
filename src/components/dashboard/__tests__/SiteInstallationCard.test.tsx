@@ -37,6 +37,17 @@ describe("SiteInstallationCard", () => {
     });
   });
 
+  it.each(["awaiting-install", "live", "stale"] as const)(
+    "links the full installation guide while the site is %s",
+    (status) => {
+      render(<SiteInstallationCard site={site({ status })} />);
+
+      expect(
+        screen.getByRole("link", { name: "Installation guide" }),
+      ).toHaveAttribute("href", "/docs/install");
+    },
+  );
+
   describe("awaiting install", () => {
     it("shows the state, the snippet and a copy control", () => {
       render(<SiteInstallationCard site={site()} />);
@@ -69,7 +80,13 @@ describe("SiteInstallationCard", () => {
       // navigator.clipboard for the whole file, which the copy test below owns.
       fireEvent.mouseDown(screen.getByRole("tab", { name: "Next.js" }));
 
-      expect(await screen.findByText(/app\/layout\.tsx/i)).toBeInTheDocument();
+      expect(
+        await screen.findByText(/after the page has hydrated/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/client-side route changes/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/rcf_handoff/i)).toBeInTheDocument();
     });
 
     it("confirms a copy in place, since there is nowhere else to put it", async () => {
@@ -82,7 +99,11 @@ describe("SiteInstallationCard", () => {
           EMBED_SCRIPT,
         );
       });
-      expect(await screen.findByText("Copied")).toBeInTheDocument();
+      // The CodeBlock announces "Copied" in its live region as well, so the
+      // confirmation is read off the button itself (s66c1).
+      expect(
+        await screen.findByRole("button", { name: /copy snippet/i }),
+      ).toHaveTextContent("Copied");
     });
 
     it("says the check is automatic, so nobody waits on us", () => {
@@ -131,16 +152,15 @@ describe("SiteInstallationCard", () => {
       expect(screen.getByText(/editing is on/i)).toBeInTheDocument();
     });
 
-    it("keeps the snippet available but out of the way", () => {
+    // s66c1 AC 5: the Install page is itself the disclosure, so a live
+    // site's snippet is shown, once, with no "View install snippet" step.
+    it("shows the snippet when live, with no disclosure to open", () => {
       render(<SiteInstallationCard site={liveSite} />);
 
-      expect(screen.queryByText(EMBED_SCRIPT)).not.toBeInTheDocument();
-
-      fireEvent.click(
-        screen.getByRole("button", { name: /view install snippet/i }),
-      );
-
       expect(screen.getByText(EMBED_SCRIPT)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /view install snippet/i }),
+      ).not.toBeInTheDocument();
     });
   });
 

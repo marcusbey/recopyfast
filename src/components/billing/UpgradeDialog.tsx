@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { Check } from "lucide-react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -22,12 +25,25 @@ import {
   type PlanCatalogue,
 } from "@/lib/stripe/plan-types";
 import { useCheckout } from "./useCheckout";
+import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 
 interface UpgradeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Plan in force, or null when the account has none. */
+  /**
+   * The plan the account keeps — through a subscription or a permanent grant —
+   * or null. Never a plan held only by a trial or the founding offer: that plan
+   * is exactly what the account is here to buy, so it must stay selectable.
+   */
   currentPlan: string | null;
+  /**
+   * Whether a live Stripe subscription exists to change in place. Passed in,
+   * never inferred from `currentPlan`: a trialling or founding offer account
+   * holds `pro` with no subscription at all, and inferring one sent its plan
+   * change to `PUT /api/billing/subscription`, which answered "No active
+   * subscription found" (PR #49 review, finding 1).
+   */
+  hasSubscription: boolean;
   /** Plan catalogue, resolved server-side from the `plans` table. */
   catalogue: PlanCatalogue;
   /**
@@ -35,7 +51,9 @@ interface UpgradeDialogProps {
    * not be offered it. Resolved by `resolveLifetimeOffer` in the dashboard so
    * the dialog and the sidebar card cannot disagree about who may see it.
    */
-  lifetimeOffer: OneTimeProduct | null;
+  lifetimeOffers: readonly OneTimeProduct[];
+  foundingAgencyAvailability: FoundingAgencyAvailability | null;
+  agencyCheckoutEnabled?: boolean;
   onSuccess: () => void;
 }
 
@@ -48,14 +66,21 @@ export function UpgradeDialog({
   open,
   onOpenChange,
   currentPlan,
+  hasSubscription,
   catalogue,
-  lifetimeOffer,
+  lifetimeOffers,
+  foundingAgencyAvailability,
+  agencyCheckoutEnabled = true,
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
   // catalogue for grandfathered accounts cannot be bought.
-  const plans = sellablePlans(catalogue).filter((plan) =>
-    isPaidPlanId(plan.id),
+  const plans = sellablePlans(catalogue).filter(
+    (plan) =>
+      isPaidPlanId(plan.id) && (agencyCheckoutEnabled || plan.id !== "agency"),
+  );
+  const visibleLifetimeOffers = lifetimeOffers.filter(
+    (product) => agencyCheckoutEnabled || product.id !== "lifetime_agency",
   );
   const [selectedPlan, setSelectedPlan] = useState<PaidPlanId>("pro");
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("monthly");
@@ -65,10 +90,9 @@ export function UpgradeDialog({
 
   const { startCheckout, isRedirecting, error: checkoutError } = useCheckout();
 
-  // No plan means no Stripe subscription to prorate, so the submit below has to
-  // open Checkout rather than change a plan in place. A credit holder is in
-  // exactly that position: money spent with us, but nothing to prorate.
-  const hasSubscription = currentPlan !== null;
+  // No subscription means nothing to prorate, so the submit below opens
+  // Checkout rather than changing a plan in place. A credit holder, a trial, the
+  // founding offer and a lifetime owner are all in that position.
   const isBusy = isRedirecting || isChangingPlan;
   const error = planChangeError ?? checkoutError;
   const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);
@@ -153,7 +177,7 @@ export function UpgradeDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6">
+        <DialogBody className="space-y-6">
           {error && (
             <Alert className="border-tone-danger-border bg-tone-danger-surface">
               <p className="text-tone-danger-text">{error}</p>
@@ -181,7 +205,7 @@ export function UpgradeDialog({
           <div
             role="radiogroup"
             aria-label="Billing period"
-            className="inline-flex rounded-lg border p-1"
+            className="inline-flex rounded-control border p-1"
           >
             {BILLING_PERIODS.map((period) => (
               <button
@@ -191,7 +215,7 @@ export function UpgradeDialog({
                 aria-checked={billingPeriod === period.id}
                 onClick={() => setBillingPeriod(period.id)}
                 disabled={isBusy}
-                className={`rounded-md px-4 py-1.5 text-sm transition-colors disabled:opacity-50 ${
+                className={`rounded-control px-4 py-1.5 text-sm transition-colors disabled:opacity-50 ${
                   billingPeriod === period.id
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:text-foreground"
@@ -205,7 +229,7 @@ export function UpgradeDialog({
           <div
             role="radiogroup"
             aria-label="Subscription plan"
-            className="grid grid-cols-1 md:grid-cols-2 gap-6"
+            className="grid grid-cols-1 md:grid-cols-3 gap-6"
           >
             {plans.map((plan) => {
               const isSelected = selectedPlan === plan.id;
@@ -219,10 +243,14 @@ export function UpgradeDialog({
                   aria-checked={isSelected}
                   onClick={() => setSelectedPlan(plan.id as PaidPlanId)}
                   disabled={isBusy}
-                  className={`p-6 border-2 rounded-lg text-left transition-colors disabled:opacity-60 ${
+                  // 1px, like every option toggle (design system, Borders):
+                  // selection is the accent border, the accent surface and
+                  // the tick on the badge, never a thicker border. These
+                  // tiles were `border-2` until s66b2.
+                  className={`p-6 border rounded-control text-left transition-colors disabled:opacity-60 ${
                     isSelected
                       ? "border-primary bg-tone-accent-surface"
-                      : "border-border hover:border-input"
+                      : "border-input hover:border-foreground/40"
                   }`}
                 >
                   <div className="flex justify-between items-start mb-4">
@@ -235,7 +263,12 @@ export function UpgradeDialog({
                     {isCurrent ? (
                       <Badge variant="secondary">Current</Badge>
                     ) : (
-                      isSelected && <Badge>Selected</Badge>
+                      isSelected && (
+                        <Badge>
+                          <Check className="mr-1 h-3 w-3" aria-hidden="true" />
+                          Selected
+                        </Badge>
+                      )
                     )}
                   </div>
 
@@ -275,8 +308,11 @@ export function UpgradeDialog({
             })}
           </div>
 
-          {lifetimeOffer && (
-            <div className="rounded-lg border border-border bg-surface-1 p-4">
+          {visibleLifetimeOffers.map((lifetimeOffer) => (
+            <div
+              key={lifetimeOffer.id}
+              className="rounded-container border border-border bg-surface-1 p-4"
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-medium">
@@ -288,17 +324,44 @@ export function UpgradeDialog({
                     {hasSubscription &&
                       " Your current subscription stops renewing once the purchase completes."}
                   </p>
+                  {lifetimeOffer.id === "lifetime_agency" && (
+                    <p className="mt-1 text-sm font-medium text-primary">
+                      {foundingAgencyAvailability == null
+                        ? "Availability temporarily unavailable"
+                        : foundingAgencyAvailability.soldOut
+                          ? "Sold out"
+                          : `${foundingAgencyAvailability.remaining} of ${foundingAgencyAvailability.limit} founding spots left`}
+                    </p>
+                  )}
                 </div>
                 <Button
                   variant="outline"
-                  onClick={() => startCheckout({ intent: "lifetime" })}
-                  disabled={isBusy}
+                  onClick={() =>
+                    startCheckout({
+                      intent: "lifetime",
+                      ...(lifetimeOffer.id === "lifetime_agency"
+                        ? { productId: lifetimeOffer.id }
+                        : {}),
+                    })
+                  }
+                  disabled={
+                    isBusy ||
+                    (lifetimeOffer.id === "lifetime_agency" &&
+                      (foundingAgencyAvailability == null ||
+                        foundingAgencyAvailability.soldOut))
+                  }
                 >
-                  Buy once
+                  {lifetimeOffer.id === "lifetime_agency" &&
+                  foundingAgencyAvailability == null
+                    ? "Availability unavailable"
+                    : lifetimeOffer.id === "lifetime_agency" &&
+                        foundingAgencyAvailability?.soldOut
+                      ? "Sold out"
+                      : "Buy once"}
                 </Button>
               </div>
             </div>
-          )}
+          ))}
 
           <div className="text-xs text-muted-foreground space-y-1">
             <p>• Cancel anytime — no long-term contracts</p>
@@ -307,25 +370,23 @@ export function UpgradeDialog({
               • Card details are handled entirely by Stripe — we never see them
             </p>
           </div>
+        </DialogBody>
 
-          <div className="flex gap-3 pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isBusy}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isBusy || currentPlan === selectedPlan}
-              className="flex-1"
-            >
-              {submitLabel()}
-            </Button>
-          </div>
-        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isBusy}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isBusy || currentPlan === selectedPlan}
+          >
+            {submitLabel()}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

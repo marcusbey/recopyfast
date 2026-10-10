@@ -5,6 +5,13 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { MAX_IMPORT_BYTES } from "@/lib/bulk/constants";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@supabase/ssr");
 // The route takes one `create_content_version` snapshot after a batch (ADR 008)
 // through the service-role client. Without this mock the suite builds a real
@@ -24,11 +31,32 @@ type QueryResult = { data?: unknown; error?: unknown };
  */
 let resultsByTable: Record<string, QueryResult> = {};
 const fromCalls: string[] = [];
+// Writes through the cookie (RLS) client: the `bulk_operations` row only.
 const upsertCalls: unknown[] = [];
 const insertCalls: unknown[] = [];
 const updateCalls: unknown[] = [];
+// Writes through the service client. Since s56 (ADR 042) it is the only writer
+// of `content_elements`: no web principal holds DML on a content table.
+const serviceUpsertCalls: unknown[] = [];
+const serviceInsertCalls: unknown[] = [];
 
-const makeBuilder = (result: QueryResult) => {
+interface WriteLog {
+  insert: unknown[];
+  upsert: unknown[];
+  update: unknown[];
+}
+const RLS_WRITES: WriteLog = {
+  insert: insertCalls,
+  upsert: upsertCalls,
+  update: updateCalls,
+};
+const SERVICE_WRITES: WriteLog = {
+  insert: serviceInsertCalls,
+  upsert: serviceUpsertCalls,
+  update: [],
+};
+
+const makeBuilder = (result: QueryResult, writes: WriteLog = RLS_WRITES) => {
   const settled = { data: null, error: null, ...result };
   const builder: Record<string, unknown> = {
     then: (
@@ -37,15 +65,15 @@ const makeBuilder = (result: QueryResult) => {
     ) => Promise.resolve(settled).then(resolve, reject),
     single: jest.fn(() => Promise.resolve(settled)),
     insert: jest.fn((payload: unknown) => {
-      insertCalls.push(payload);
+      writes.insert.push(payload);
       return builder;
     }),
     upsert: jest.fn((payload: unknown) => {
-      upsertCalls.push(payload);
+      writes.upsert.push(payload);
       return builder;
     }),
     update: jest.fn((payload: unknown) => {
-      updateCalls.push(payload);
+      writes.update.push(payload);
       return builder;
     }),
   };
@@ -96,9 +124,14 @@ describe("/api/bulk/import", () => {
     upsertCalls.length = 0;
     insertCalls.length = 0;
     updateCalls.length = 0;
+    serviceUpsertCalls.length = 0;
+    serviceInsertCalls.length = 0;
     mockSupabase.auth.getUser.mockResolvedValue({ data: { user: USER } });
     (createServiceRoleClient as jest.Mock).mockReturnValue({
       rpc: jest.fn(async () => ({ data: "version-1", error: null })),
+      from: jest.fn(() =>
+        makeBuilder({ data: null, error: null }, SERVICE_WRITES),
+      ),
     });
     (enforceRateLimit as jest.Mock).mockResolvedValue(null);
   });
@@ -138,8 +171,12 @@ describe("/api/bulk/import", () => {
         rows: [{ row: 1, elementId: "header-1", outcome: "created" }],
       });
       // overwrite_existing is false, so the element is inserted rather than upserted.
-      expect(insertCalls).toHaveLength(2); // bulk_operations row + content element
+      // s56: the bulk_operations row stays on the cookie client; the content
+      // element is written by the service client.
+      expect(insertCalls).toHaveLength(1);
+      expect(serviceInsertCalls).toHaveLength(1);
       expect(upsertCalls).toHaveLength(0);
+      expect(serviceUpsertCalls).toHaveLength(0);
     });
 
     it("should upsert when overwrite_existing is set", async () => {
@@ -155,8 +192,9 @@ describe("/api/bulk/import", () => {
       );
 
       expect(response.status).toBe(200);
-      expect(upsertCalls).toHaveLength(1);
-      expect(upsertCalls[0]).toMatchObject({
+      expect(upsertCalls).toHaveLength(0);
+      expect(serviceUpsertCalls).toHaveLength(1);
+      expect(serviceUpsertCalls[0]).toMatchObject({
         site_id: "site-123",
         element_id: "header-1",
         current_content: "Hello World",
@@ -195,6 +233,8 @@ describe("/api/bulk/import", () => {
       // No operation row, no writes: the request never got that far.
       expect(insertCalls).toHaveLength(0);
       expect(upsertCalls).toHaveLength(0);
+      expect(serviceInsertCalls).toHaveLength(0);
+      expect(serviceUpsertCalls).toHaveLength(0);
     });
 
     it("accepts a body under the size limit", async () => {
@@ -276,7 +316,7 @@ describe("/api/bulk/import", () => {
       expect(response.status).toBe(200);
       expect(result.results.failed).toBe(1);
       // The two well-formed rows are still written.
-      expect(upsertCalls).toHaveLength(2);
+      expect(serviceUpsertCalls).toHaveLength(2);
     });
 
     it("imports the valid rows when one CSV row is malformed", async () => {
@@ -299,7 +339,7 @@ describe("/api/bulk/import", () => {
 
       expect(response.status).toBe(200);
       expect(result.results.failed).toBe(1);
-      expect(upsertCalls).toHaveLength(2);
+      expect(serviceUpsertCalls).toHaveLength(2);
     });
 
     /**
@@ -327,9 +367,11 @@ describe("/api/bulk/import", () => {
       expect(response.status).toBe(400);
       expect(result.error).toContain("current_content");
       expect(upsertCalls).toHaveLength(0);
+      expect(serviceUpsertCalls).toHaveLength(0);
       expect(
         insertCalls.filter((call) => "element_id" in (call as object)),
       ).toHaveLength(0);
+      expect(serviceInsertCalls).toHaveLength(0);
       // The operation row is still closed out as failed — an import that was
       // started and refused is not an import still running.
       expect(updateCalls[0]).toMatchObject({ status: "failed" });
@@ -383,6 +425,8 @@ describe("/api/bulk/import", () => {
         failed: 0,
       });
       expect(upsertCalls).toHaveLength(0);
+      expect(serviceUpsertCalls).toHaveLength(0);
+      expect(serviceInsertCalls).toHaveLength(0);
     });
 
     it("rejects a non-object options value with 400", async () => {
@@ -399,6 +443,7 @@ describe("/api/bulk/import", () => {
 
       expect(response.status).toBe(400);
       expect(insertCalls).toHaveLength(0);
+      expect(serviceInsertCalls).toHaveLength(0);
     });
 
     /**
@@ -426,6 +471,7 @@ describe("/api/bulk/import", () => {
       expect(response.status).toBe(429);
       expect(mockSupabase.auth.getUser).not.toHaveBeenCalled();
       expect(insertCalls).toHaveLength(0);
+      expect(serviceInsertCalls).toHaveLength(0);
     });
   });
 

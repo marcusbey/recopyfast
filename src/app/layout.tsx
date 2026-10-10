@@ -6,6 +6,13 @@ import {
 } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_OPEN_GRAPH,
+  SITE_TITLE,
+} from "@/lib/seo/site-identity";
+import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 /**
  * Instrument Sans carries the UI. It is a grotesque with more character than
@@ -38,30 +45,20 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 /**
- * Canonical origin used to build absolute SEO URLs.
+ * Site-wide defaults. Every key set here is inherited by every page that does
+ * not set the same key itself — Next merges metadata per top-level key, and a
+ * page that omits `alternates` gets its parent's whole `alternates`.
  *
- * Resolution order: the explicitly configured app URL, then Vercel's stable
- * production domain, then the per-deployment URL, then the dev fallback.
- * Vercel exposes its URL vars as bare hostnames, but this project's `.env`
- * sets `VERCEL_URL` with a scheme, so both shapes are accepted.
+ * So nothing page-specific belongs here. Until s88 this object carried
+ * `alternates: { canonical: "/" }` and `openGraph.url: "/"`, and every page
+ * without its own — /blog, each blog post, /privacy, /terms, /demo, and /edit
+ * on top of its noindex — told search engines it was a duplicate of the
+ * homepage and pointed shared links at it. A page names its own canonical;
+ * one that does not gets none, which search engines resolve themselves, rather
+ * than a wrong one. The homepage sets its own in `src/app/page.tsx`.
+ * src/__tests__/app/seo-canonicals.test.ts resolves every public route through
+ * Next's own merge and fails if a page inherits the homepage again.
  */
-function resolveSiteUrl(): string {
-  const raw =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-    process.env.VERCEL_URL ||
-    "http://localhost:3000";
-
-  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-
-  return withScheme.replace(/\/+$/, "");
-}
-
-const SITE_NAME = "ReCopyFast";
-const SITE_TITLE = "ReCopyFast - Universal CMS Layer";
-const SITE_DESCRIPTION =
-  "Transform any website into an editable platform with a simple script tag";
-
 export const metadata: Metadata = {
   // Without this, every relative OG/Twitter image URL resolves against
   // localhost in production.
@@ -74,24 +71,13 @@ export const metadata: Metadata = {
   applicationName: SITE_NAME,
   keywords: [
     "CMS",
-    "headless CMS",
     "website editing",
     "content management",
     "no-code",
     "script tag",
     "live editing",
   ],
-  alternates: {
-    canonical: "/",
-  },
-  openGraph: {
-    type: "website",
-    url: "/",
-    siteName: SITE_NAME,
-    title: SITE_TITLE,
-    description: SITE_DESCRIPTION,
-    locale: "en_US",
-  },
+  openGraph: SITE_OPEN_GRAPH,
   twitter: {
     card: "summary_large_image",
     title: SITE_TITLE,

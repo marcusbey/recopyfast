@@ -1,10 +1,11 @@
-import { NextRequest } from "next/server";
+import { after, NextRequest } from "next/server";
 import { GET, POST, PUT, OPTIONS } from "@/app/api/content/[siteId]/route";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
+  SiteAuthError,
 } from "@/lib/security/site-auth";
 
 jest.mock("@/lib/supabase/service");
@@ -34,11 +35,22 @@ const mockAuthorizeSiteRequest = authorizeSiteRequest as jest.MockedFunction<
 const mockAuthorizeSiteOrigin = authorizeSiteOrigin as jest.MockedFunction<
   typeof authorizeSiteOrigin
 >;
+const mockAfter = after as jest.MockedFunction<typeof after>;
+
+async function runAfterTask(
+  task: Parameters<typeof after>[0] | undefined,
+): Promise<void> {
+  if (!task) throw new Error("Expected deferred work to be scheduled");
+  await (typeof task === "function" ? task() : task);
+}
 
 type MockServiceClient = {
   from: jest.Mock;
   select: jest.Mock;
   eq: jest.Mock;
+  is: jest.Mock;
+  order: jest.Mock;
+  range: jest.Mock;
   single: jest.Mock;
   upsert: jest.Mock;
   update: jest.Mock;
@@ -50,6 +62,9 @@ const mockServiceClient: MockServiceClient = {
   from: jest.fn(() => mockServiceClient),
   select: jest.fn(() => mockServiceClient),
   eq: jest.fn(() => mockServiceClient),
+  is: jest.fn(() => mockServiceClient),
+  order: jest.fn(() => mockServiceClient),
+  range: jest.fn(),
   single: jest.fn(),
   upsert: jest.fn(),
   update: jest.fn(() => mockServiceClient),
@@ -83,6 +98,9 @@ describe("/api/content/[siteId]", () => {
     mockServiceClient.from.mockReturnValue(mockServiceClient);
     mockServiceClient.select.mockReturnValue(mockServiceClient);
     mockServiceClient.eq.mockImplementation(() => mockServiceClient);
+    mockServiceClient.is.mockImplementation(() => mockServiceClient);
+    mockServiceClient.order.mockImplementation(() => mockServiceClient);
+    mockServiceClient.range.mockResolvedValue({ data: [], error: null });
     mockServiceClient.single.mockResolvedValue({
       data: { id: "site-123" },
       error: null,
@@ -107,12 +125,10 @@ describe("/api/content/[siteId]", () => {
     ];
 
     it("should fetch content elements with default parameters", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       const request = new NextRequest("http://localhost/api/content/site-123", {
         headers: {
@@ -134,12 +150,10 @@ describe("/api/content/[siteId]", () => {
     });
 
     it("should fetch content elements with custom language and variant", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       const request = new NextRequest(
         "http://localhost/api/content/site-123?language=es&variant=mobile",
@@ -164,13 +178,61 @@ describe("/api/content/[siteId]", () => {
       );
     });
 
+    it("requests an exact count for the public hydration pagination", async () => {
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+        count: mockContentElements.length,
+      });
+
+      const response = await GET(
+        new NextRequest("http://localhost/api/content/site-123?page_path=%2F", {
+          headers: {
+            Authorization: "Bearer token",
+            Origin: "https://example.com",
+          },
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.select).toHaveBeenCalledWith(
+        expect.stringContaining("published_content"),
+        { count: "exact" },
+      );
+    });
+
+    it("keeps legacy all-site hydration on unknown-count pagination", async () => {
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
+
+      const response = await GET(
+        new NextRequest("http://localhost/api/content/site-123", {
+          headers: {
+            Authorization: "Bearer token",
+            Origin: "https://example.com",
+          },
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.select).not.toHaveBeenCalledWith(
+        expect.stringContaining("published_content"),
+        { count: "exact" },
+      );
+      // Without an authoritative count the helper must retain its original
+      // terminal empty-page request, even when the first page is short.
+      expect(mockServiceClient.range).toHaveBeenCalledTimes(2);
+    });
+
     it("should return empty array when no content found", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient)
-        .mockImplementationOnce(() => mockServiceClient)
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: null, error: null }),
-        );
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: null,
+        error: null,
+      });
 
       const request = new NextRequest("http://localhost/api/content/site-123", {
         headers: {
@@ -188,9 +250,42 @@ describe("/api/content/[siteId]", () => {
       expect(data).toEqual([]);
     });
 
+    it("returns published attributes without leaking staged attribute drafts", async () => {
+      const row = {
+        ...mockContentElements[0],
+        metadata: {
+          type: "a",
+          href: "/published",
+          analytics_key: "keep-me",
+          staging_attributes: { href: "/draft", alt: "Draft alt" },
+        },
+      };
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: [row],
+        error: null,
+      });
+
+      const response = await GET(
+        new NextRequest("http://localhost/api/content/site-123", {
+          headers: {
+            Authorization: "Bearer token",
+            Origin: "https://example.com",
+          },
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+      const [element] = await response.json();
+
+      expect(element.metadata).toEqual({
+        type: "a",
+        href: "/published",
+        analytics_key: "keep-me",
+      });
+    });
+
     it("should return 401 when authorization fails", async () => {
       mockAuthorizeSiteRequest.mockRejectedValueOnce(
-        new Error("Missing site token"),
+        new SiteAuthError("Missing site token", "site_token_missing", 401),
       );
 
       const request = new NextRequest("http://localhost/api/content/site-123");
@@ -201,6 +296,25 @@ describe("/api/content/[siteId]", () => {
 
       expect(response.status).toBe(401);
       expect(data.error).toBe("Missing site token");
+      expect(data.code).toBe("site_token_missing");
+      expect(mockAfter).not.toHaveBeenCalled();
+      expect(mockServiceClient.update).not.toHaveBeenCalled();
+    });
+
+    it("does not reflect an untyped authorization exception", async () => {
+      mockAuthorizeSiteRequest.mockRejectedValueOnce(
+        new Error("Missing site token"),
+      );
+
+      const request = new NextRequest("http://localhost/api/content/site-123");
+      const response = await GET(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "Unauthorized" });
+      expect(mockAfter).not.toHaveBeenCalled();
+      expect(mockServiceClient.update).not.toHaveBeenCalled();
     });
 
     it("should authorize a first-party dashboard session without a token or Origin, and skip the widget path entirely", async () => {
@@ -208,12 +322,10 @@ describe("/api/content/[siteId]", () => {
         site: { id: "site-123", domain: "example.com", api_key: "api-key" },
         allowedOrigin: null,
       });
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       // No Authorization header, no Origin header, no ?token= — the dashboard
       // never sends these; only the session cookie authorizes this request.
@@ -246,18 +358,16 @@ describe("/api/content/[siteId]", () => {
      */
     describe("liveness", () => {
       const queueContentQuery = () => {
-        mockServiceClient.eq
-          .mockImplementationOnce(() => mockServiceClient) // site_id
-          .mockImplementationOnce(() => mockServiceClient) // language
-          .mockImplementationOnce(() =>
-            Promise.resolve({ data: mockContentElements, error: null }),
-          ); // variant
+        mockServiceClient.range.mockResolvedValueOnce({
+          data: mockContentElements,
+          error: null,
+        });
       };
 
-      it("records a report when the widget's own token authorized the read", async () => {
+      it("records a report after the widget's successful content response", async () => {
         queueContentQuery();
 
-        await GET(
+        const response = await GET(
           new NextRequest("http://localhost/api/content/site-123", {
             headers: {
               Authorization: "Bearer token",
@@ -267,9 +377,67 @@ describe("/api/content/[siteId]", () => {
           { params: Promise.resolve({ siteId: "site-123" }) },
         );
 
+        expect(response.status).toBe(200);
+        expect(mockAfter).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
+
+        const deferredWrite = mockAfter.mock.calls[0]?.[0];
+        expect(deferredWrite).toEqual(expect.any(Function));
+        await runAfterTask(deferredWrite);
+
         expect(mockServiceClient.update).toHaveBeenCalledWith({
           last_reported_at: expect.any(String),
         });
+      });
+
+      it("returns published content while the deferred liveness write is still pending", async () => {
+        queueContentQuery();
+
+        let releaseWrite!: (value: { error: null }) => void;
+        const pendingWrite = new Promise<{ error: null }>((resolve) => {
+          releaseWrite = resolve;
+        });
+        const finishUpdate = jest.fn(() => pendingWrite);
+        mockServiceClient.update.mockReturnValueOnce({
+          eq: finishUpdate,
+        });
+
+        let deferredWork: Promise<void> | null = null;
+        mockAfter.mockImplementationOnce((task) => {
+          deferredWork = runAfterTask(task);
+        });
+
+        const responsePromise = GET(
+          new NextRequest("http://localhost/api/content/site-123", {
+            headers: {
+              Authorization: "Bearer token",
+              Origin: "https://example.com",
+            },
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+        let responseSettled = false;
+        void responsePromise.then(() => {
+          responseSettled = true;
+        });
+        // Every dependency before the liveness write is an already-resolved
+        // test double. Let that microtask queue drain once; a handler awaiting
+        // the held write remains unsettled, while a deferred handler is done.
+        await new Promise((resolve) => setImmediate(resolve));
+        const responseSettledBeforeRelease = responseSettled;
+
+        // Always release the held write so a red test leaves no pending promise.
+        releaseWrite({ error: null });
+        const eventualResponse = await responsePromise;
+        if (deferredWork) await deferredWork;
+
+        expect(responseSettledBeforeRelease).toBe(true);
+        expect(eventualResponse.status).toBe(200);
+        expect(await eventualResponse.json()).toEqual(mockContentElements);
+        expect(
+          eventualResponse.headers.get("Access-Control-Allow-Origin"),
+        ).toBe("https://example.com");
+        expect(finishUpdate).toHaveBeenCalledWith("id", "site-123");
       });
 
       it("records nothing when the dashboard's own session authorized the read", async () => {
@@ -287,13 +455,17 @@ describe("/api/content/[siteId]", () => {
           params: Promise.resolve({ siteId: "site-123" }),
         });
 
+        expect(mockAfter).not.toHaveBeenCalled();
         expect(mockServiceClient.update).not.toHaveBeenCalled();
       });
 
-      it("serves the content even when the liveness write fails", async () => {
+      it("keeps the successful response unchanged when deferred liveness fails", async () => {
         // `stale` is advisory. Nothing about it may stand between a visitor and
         // the copy on the page they asked for.
         queueContentQuery();
+        const errorLog = jest
+          .spyOn(console, "error")
+          .mockImplementation(() => undefined);
         mockServiceClient.update.mockImplementation(() => {
           throw new Error("sites table unavailable");
         });
@@ -309,8 +481,43 @@ describe("/api/content/[siteId]", () => {
         );
         const data = await response.json();
 
+        expect(mockAfter).toHaveBeenCalledTimes(1);
+        const deferredWrite = mockAfter.mock.calls[0]?.[0];
+        expect(deferredWrite).toEqual(expect.any(Function));
+        await runAfterTask(deferredWrite);
+
         expect(response.status).toBe(200);
         expect(data).toEqual(mockContentElements);
+        expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+          "https://example.com",
+        );
+        expect(errorLog).toHaveBeenCalledWith(
+          "[content] liveness bump failed for site site-123:",
+          expect.any(Error),
+        );
+        errorLog.mockRestore();
+      });
+
+      it("schedules no liveness write when the content read fails", async () => {
+        mockServiceClient.range.mockResolvedValueOnce({
+          data: null,
+          error: { message: "content unavailable" },
+        });
+        jest.spyOn(console, "error").mockImplementation(() => undefined);
+
+        const response = await GET(
+          new NextRequest("http://localhost/api/content/site-123", {
+            headers: {
+              Authorization: "Bearer token",
+              Origin: "https://example.com",
+            },
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+
+        expect(response.status).toBe(500);
+        expect(mockAfter).not.toHaveBeenCalled();
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
       });
     });
   });
@@ -363,6 +570,144 @@ describe("/api/content/[siteId]", () => {
       );
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
         "https://example.com",
+      );
+    });
+
+    it("validates widget-normalized page paths without decoding them again", async () => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          "header-1": {
+            selector: "h1",
+            content: "Welcome",
+            type: "text",
+            page_path: "/index.html",
+          },
+          "header-2": {
+            selector: "h2",
+            content: "Reserved",
+            type: "text",
+            page_path: "/pricing%3Flegacy",
+          },
+          "header-3": {
+            selector: "h3",
+            content: "Literal percent",
+            type: "text",
+            page_path: "/%",
+          },
+          "header-4": {
+            selector: "h4",
+            content: "Encoded space text",
+            type: "text",
+            page_path: "/%20",
+          },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            element_id: "header-1",
+            page_path: "/index.html",
+          }),
+          expect.objectContaining({
+            element_id: "header-2",
+            page_path: "/pricing%3Flegacy",
+          }),
+          expect.objectContaining({
+            element_id: "header-3",
+            page_path: "/%",
+          }),
+          expect.objectContaining({
+            element_id: "header-4",
+            page_path: "/%20",
+          }),
+        ]),
+        expect.any(Object),
+      );
+    });
+
+    it.each([
+      ["a non-string path", 42],
+      ["a path over 1,024 characters", `/${"a".repeat(1024)}`],
+      ["a path over 1,024 UTF-8 bytes", `/${"é".repeat(512)}`],
+      ["an actual control character", "/pricing\n"],
+      ["a non-path string", "pricing"],
+      ["a raw query delimiter", "/pricing?plan=pro"],
+      ["a raw fragment delimiter", "/pricing#faq"],
+    ])("skips only the element with %s", async (_label, pagePath) => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          invalid: {
+            selector: "h1",
+            content: "Invalid",
+            type: "text",
+            page_path: pagePath,
+          },
+          valid: {
+            selector: "p",
+            content: "Valid",
+            type: "text",
+            page_path: "/about/",
+          },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.skippedCount).toBe(1);
+      expect(body.skipped).toEqual([
+        expect.objectContaining({ elementId: "invalid" }),
+      ]);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            element_id: "valid",
+            page_path: "/about/",
+          }),
+        ],
+        expect.any(Object),
+      );
+    });
+
+    it("retains NULL for author-declared shared elements", async () => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          shared: { selector: "nav", content: "Shared", type: "text" },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        [expect.objectContaining({ element_id: "shared", page_path: null })],
+        expect.any(Object),
       );
     });
 
@@ -499,7 +844,11 @@ describe("/api/content/[siteId]", () => {
 
       beforeEach(() => {
         mockAuthorizeSiteRequest.mockRejectedValue(
-          new Error("Origin not allowed"),
+          new SiteAuthError(
+            "Origin not allowed",
+            "site_origin_not_allowed",
+            403,
+          ),
         );
       });
 
@@ -529,7 +878,7 @@ describe("/api/content/[siteId]", () => {
 
       it("records nothing for a rejected token, which names no domain", async () => {
         mockAuthorizeSiteRequest.mockRejectedValue(
-          new Error("Invalid site token"),
+          new SiteAuthError("Invalid site token", "site_token_invalid", 401),
         );
 
         const response = await postFromWrongOrigin();
@@ -612,7 +961,7 @@ describe("/api/content/[siteId]", () => {
 
     it("should return 401 when the site token is rejected", async () => {
       mockAuthorizeSiteRequest.mockRejectedValueOnce(
-        new Error("Invalid token"),
+        new SiteAuthError("Invalid site token", "site_token_invalid", 401),
       );
 
       const response = await PUT(
@@ -622,12 +971,13 @@ describe("/api/content/[siteId]", () => {
       const data = await response.json();
 
       expect(response.status).toBe(401);
-      expect(data.error).toBe("Invalid token");
+      expect(data.error).toBe("Invalid site token");
+      expect(data.code).toBe("site_token_invalid");
     });
 
     it("should return 403 when the origin is rejected", async () => {
       mockAuthorizeSiteRequest.mockRejectedValueOnce(
-        new Error("Origin not allowed"),
+        new SiteAuthError("Origin not allowed", "site_origin_not_allowed", 403),
       );
 
       const response = await PUT(

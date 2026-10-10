@@ -74,6 +74,8 @@ test.describe("share edit publish flow", () => {
     return `${payload}.${signature}`;
   })();
   const editToken = `e2e_edit_${randomUUID()}`;
+  const ownerEmail = `e2e-owner-${siteId}@recopyfast.local`;
+  let ownerId: string | null = null;
 
   // Discovered from the running widget, never hand-authored. A real customer
   // page has no `data-rcf-id` in its markup, so pre-seeding one here would have
@@ -90,7 +92,10 @@ test.describe("share edit publish flow", () => {
     );
 
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    await withCoreSetupDiagnostic("seed site", () => seedSite());
+    await withCoreSetupDiagnostic("seed site", async () => {
+      await seedSite();
+      await seedPayingOwner();
+    });
     await withCoreSetupDiagnostic("seed invited editor", () =>
       seedInvitedEditor(),
     );
@@ -111,7 +116,11 @@ test.describe("share edit publish flow", () => {
         try {
           await restoreCapturedContent();
         } finally {
-          await deleteCoreFixture();
+          try {
+            await deleteCoreFixture();
+          } finally {
+            await deletePayingOwner();
+          }
         }
       }
     } finally {
@@ -246,6 +255,19 @@ test.describe("share edit publish flow", () => {
     }
 
     await expect(heading).toBeVisible();
+    // The banner and data-rcf-id appear before init finishes hydration,
+    // connection setup and edit-listener installation. Clicking on either
+    // earlier signal lost the only click and left no inline toolbar in the
+    // local repeat run.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window.ReCopyFast as unknown as { isInitialized?: boolean })
+              ?.isInitialized === true,
+        ),
+      )
+      .toBe(true);
     await heading.click();
     await expect(page.locator(".rcf-actions-inline")).toBeVisible();
 
@@ -282,10 +304,13 @@ test.describe("share edit publish flow", () => {
       .toBe(newText);
     await expect.poll(() => getContentColumn("staging_content")).toBeNull();
 
-    // A plain visitor load: no staging query, no socket broadcast in flight.
-    // The published copy has to arrive purely from the widget fetching it on
-    // init, and it has to land on an element the widget re-identified from
-    // scratch under the exact same id.
+    // A fresh load: no credential in the URL, no socket broadcast in flight.
+    // In this same tab it is not a visitor load: an invited editor's grant is
+    // stored, and since s41 an edit link is restored from the tab's
+    // sessionStorage (ADR 036). Either way the staging read falls back to
+    // published once staging_content is cleared, so the published copy has to
+    // arrive purely from the widget fetching it on init, and it has to land on
+    // an element the widget re-identified from scratch under the exact same id.
     await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
     await expect(heading).toHaveAttribute("data-rcf-id", elementId, {
       timeout: 20_000,
@@ -332,6 +357,44 @@ test.describe("share edit publish flow", () => {
     }
   }
 
+  /**
+   * s51: editing and publishing need the SITE OWNER's plan (ADR 041). This
+   * fixture used to be an ownerless site — no `admin` row — which the gate
+   * refuses as `no_owner`, and rightly: a real site always has one, written by
+   * sites/register. So the fixture says what a working site is: an owner
+   * account, its `admin` row, and a Pro grant with no expiry. Deleting the user
+   * in afterAll cascades both rows.
+   */
+  async function seedPayingOwner() {
+    if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
+
+    const { data, error } = await supabase.auth.admin.createUser({
+      email: ownerEmail,
+      email_confirm: true,
+    });
+    if (error) throw error;
+    if (!data.user) throw new Error("createUser returned no owner.");
+    ownerId = data.user.id;
+
+    const { error: permissionError } = await supabase
+      .from("site_permissions")
+      .insert({ site_id: siteId, user_id: ownerId, permission: "admin" });
+    if (permissionError) throw permissionError;
+
+    const { error: planError } = await supabase
+      .from("plan_entitlements")
+      .insert({ user_id: ownerId, plan_id: "pro", source: "e2e" });
+    if (planError) throw planError;
+  }
+
+  async function deletePayingOwner() {
+    if (!supabase || !ownerId) return;
+
+    const { error } = await supabase.auth.admin.deleteUser(ownerId);
+    if (error) throw error;
+    ownerId = null;
+  }
+
   async function seedInvitedEditor() {
     if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
 
@@ -365,8 +428,12 @@ test.describe("share edit publish flow", () => {
   async function seedEditSession(expiresAt: string) {
     if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
 
+    // s68a (ADR 047): a session grants at most its holder's live grant, so it
+    // must name one. This seed used to write no `user_id`; the validator now
+    // refuses that row. The owner's `admin` row is seeded first, in beforeAll.
     const { error: editError } = await supabase.from("edit_sessions").insert({
       site_id: siteId,
+      user_id: ownerId,
       token: editToken,
       permissions: ["view", "edit", "publish"],
       expires_at: expiresAt,

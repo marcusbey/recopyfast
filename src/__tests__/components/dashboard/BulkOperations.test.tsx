@@ -4,6 +4,7 @@ import {
   waitFor,
   within,
   fireEvent,
+  act,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BulkOperations } from "@/components/dashboard/BulkOperations";
@@ -302,19 +303,61 @@ describe("BulkOperations", () => {
       const file = envelopeOversizedFile();
       expect(file.size).toBeLessThan(MAX_IMPORT_BYTES);
 
-      const input = chooseFile(file);
+      // Full hooks under heavy host load started findByRole's default 1000 ms
+      // timeout before FileReader finished the real 2.2 MB file. Waiting for
+      // the real loadend inside act keeps the fixture, assertions and default
+      // timeouts intact while flushing the state update they are meant to test.
+      const originalReadAsText = FileReader.prototype.readAsText;
+      let finishRead!: Promise<void>;
+      const readSpy = jest
+        .spyOn(FileReader.prototype, "readAsText")
+        .mockImplementation(function (this: FileReader, blob: Blob) {
+          finishRead = new Promise<void>((resolve, reject) => {
+            let failure: Error | DOMException | null = null;
+            this.addEventListener(
+              "error",
+              () => {
+                failure = this.error ?? new Error("FileReader failed");
+              },
+              { once: true },
+            );
+            this.addEventListener(
+              "abort",
+              () => {
+                failure = new Error("FileReader was aborted");
+              },
+              { once: true },
+            );
+            this.addEventListener(
+              "loadend",
+              () => (failure ? reject(failure) : resolve()),
+              { once: true },
+            );
+          });
+          return originalReadAsText.call(this, blob);
+        });
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        /import limit is 4 MB/i,
-      );
-      expect(input.value).toBe("");
-      expect(
-        screen.getByRole("button", { name: /import content/i }),
-      ).toBeDisabled();
-      expect(fetchMock).not.toHaveBeenCalledWith(
-        "/api/bulk/import",
-        expect.anything(),
-      );
+      let input!: HTMLInputElement;
+      try {
+        await act(async () => {
+          input = chooseFile(file);
+          await finishRead;
+        });
+
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+          /import limit is 4 MB/i,
+        );
+        expect(input.value).toBe("");
+        expect(
+          screen.getByRole("button", { name: /import content/i }),
+        ).toBeDisabled();
+        expect(fetchMock).not.toHaveBeenCalledWith(
+          "/api/bulk/import",
+          expect.anything(),
+        );
+      } finally {
+        readSpy.mockRestore();
+      }
     });
 
     it("does not offer XML, which the import route cannot read", async () => {

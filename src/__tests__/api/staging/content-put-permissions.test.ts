@@ -20,6 +20,13 @@
 const mockGetUser = jest.fn();
 const mockMaybeSingle = jest.fn();
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(() =>
     Promise.resolve({
@@ -44,7 +51,7 @@ jest.mock("@/lib/supabase/service", () => ({
 import { PUT } from "@/app/api/staging/content/[siteId]/route";
 import { NextRequest } from "next/server";
 
-const SITE_ID = "site-1";
+const SITE_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
 
 function putContent(): Promise<Response> {
   return PUT(

@@ -15,6 +15,10 @@ import {
 } from "@/lib/auth/editor-access";
 import { withPublicCors } from "@/lib/http/public-cors";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -271,6 +275,16 @@ export async function POST(
       }
 
       restoredBy = validation.email ?? null;
+    }
+
+    // A restore rewrites every staged element on the site, so it needs the
+    // SITE OWNER's plan like any other save (s51, ADR 041). Only here, after
+    // the grade: the GET above and the snapshot list stay readable, and
+    // refusing an anonymous caller with "plan ended" would be an oracle. 402,
+    // never 401/403 — the widget treats those as a terminal "Session ended".
+    const ownerCanEdit = await checkOwnerCanEdit(version.site_id);
+    if (!ownerCanEdit.ok) {
+      return withCors(ownerCanEditRefusal(ownerCanEdit), origin);
     }
 
     // Two arguments, not three.

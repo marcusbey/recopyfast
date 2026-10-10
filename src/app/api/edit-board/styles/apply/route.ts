@@ -10,6 +10,11 @@ import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { aiService } from "@/lib/ai/openai-service";
 import { withPublicCors } from "@/lib/http/public-cors";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { canonicalSiteId } from "@/lib/api/validation";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -39,6 +44,9 @@ function withCors(response: NextResponse, origin?: string | null) {
  *
  * 10/min: applying a style to a page is a deliberate, slow action a human waits
  * for. Ten in a minute is already more than anyone does.
+ *
+ * Keyed on the canonical id: every handler passes `canonicalSiteId`'s value
+ * (s77, s69 R1), so each spelling of one site spends this one bucket.
  */
 function meterSite(request: NextRequest, siteId: string) {
   return enforceRateLimit(request, {
@@ -71,13 +79,13 @@ export async function POST(request: NextRequest) {
     }
 
     const {
-      siteId,
+      siteId: rawSiteId,
       styleId,
       elementIds,
       previewOnly = false,
     } = await request.json();
 
-    if (!siteId || !styleId) {
+    if (!rawSiteId || !styleId) {
       return withCors(
         NextResponse.json(
           { error: "Missing required fields: siteId, styleId" },
@@ -86,6 +94,16 @@ export async function POST(request: NextRequest) {
         origin,
       );
     }
+
+    // s77 (s69 R1): the canonical id, before the access check and the limiter.
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        origin,
+      );
+    }
+    const siteId = canonical.value;
 
     // Validate staging access (edit permission required)
     const validation = await StagingAccessManager.validateStagingAccess(
@@ -120,6 +138,16 @@ export async function POST(request: NextRequest) {
 
     const limited = await meterSite(request, siteId);
     if (limited) return withCors(limited, origin);
+
+    // Needs the SITE OWNER's plan (s51, ADR 041), and before the model is
+    // called: this route runs one uncharged OpenAI completion per element and
+    // then rewrites staged copy. After the access check and the limiter so it
+    // is no oracle for an anonymous caller; 402, never 401/403, so the widget
+    // shows the message rather than a terminal "Session ended".
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return withCors(ownerCanEditRefusal(ownerCanEdit), origin);
+    }
 
     const supabase = createServiceRoleClient();
 

@@ -27,6 +27,22 @@ export async function GET(
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
+    // s77 (s69 L7). Per IP, BEFORE authorization. The per-site limiter below has
+    // to sit behind `authorizeSiteRequest` (an anonymous caller must not spend a
+    // customer's bucket), which left the authorizer's `sites` lookup unmetered
+    // for anyone naming a site id. 200/min per address: the content GET on the
+    // same page view is already behind the same ceiling, so no visitor meets a
+    // new one here. Fails CLOSED: every request this route would serve passes
+    // the fail-closed per-site limiter anyway, so an outage refuses visitors
+    // there regardless — failing open would only hand a flood the authorizer.
+    const shed = await enforceRateLimit(request, {
+      limit: "IP_GENERAL",
+      endpoint: "ab-tests/bucket:ip",
+      identifierType: "ip",
+      onStoreFailure: "deny",
+    });
+    if (shed) return withCors(shed);
+
     const { siteId } = await params;
     const token = extractToken(request);
     const visitorId = request.nextUrl.searchParams.get("visitor_id");
@@ -38,13 +54,16 @@ export async function GET(
       );
     }
 
+    let authorizedSiteId: string;
     try {
-      await authorizeSiteRequest({
+      ({
+        site: { id: authorizedSiteId },
+      } = await authorizeSiteRequest({
         siteId,
         token,
         origin: request.headers.get("origin"),
         referer: request.headers.get("referer"),
-      });
+      }));
     } catch (authError) {
       return withCors(
         NextResponse.json(
@@ -69,10 +88,17 @@ export async function GET(
     // 1000/min: one call per visitor per page view, and the widget persists the
     // assignment, so a real site sits far below it. A refusal costs the visitor
     // their variant for that load, not the page.
+    //
+    // s68b M4: keyed on the AUTHORIZED id. The authorizer finds the site through
+    // a `uuid` cast (any case) and checks the token against the database's
+    // `site.id`, so the upper-case spelling of a real id authorizes with the
+    // genuine token — and metering the raw spelling gave every spelling its own
+    // bucket. Spellings are still accepted (installed snippets are permanent);
+    // they just share the one canonical bucket.
     const limited = await enforceRateLimit(request, {
       limit: "API_KEY_DEFAULT",
       endpoint: "ab-tests/bucket",
-      identifier: siteId,
+      identifier: authorizedSiteId,
       identifierType: "api_key",
       onStoreFailure: "deny",
       message: "A/B bucketing rate limit exceeded for this site.",

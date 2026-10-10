@@ -1,0 +1,198 @@
+const mockGetPlanCatalogue = jest.fn();
+const mockGetFoundingAgencyAvailability = jest.fn();
+const mockRetrievePrice = jest.fn();
+
+jest.mock("@/lib/stripe/config", () => ({
+  stripe: { prices: { retrieve: mockRetrievePrice } },
+}));
+
+jest.mock("@/lib/stripe/plans", () => ({
+  getPlanCatalogue: mockGetPlanCatalogue,
+  resolveOneTimePriceId: jest.fn(async () => "price_one_time"),
+  resolveStripePriceId: jest.fn(async () => "price_subscription"),
+  isAgencyCheckoutEnabled: () =>
+    process.env.AGENCY_CHECKOUT_ENABLED !== "false",
+  isPaidPlanId: (value: unknown) =>
+    value === "starter" || value === "pro" || value === "agency",
+}));
+
+jest.mock("@/lib/billing/founding-agency", () => ({
+  getFoundingAgencyAvailability: mockGetFoundingAgencyAvailability,
+}));
+
+const limits = {
+  websites: 10,
+  collaborators: -1,
+  aiFeatures: true,
+  translations: -1,
+  abTesting: true,
+  monthlyCredits: 1000,
+};
+
+const catalogue = {
+  subscriptions: [
+    {
+      id: "agency",
+      name: "Agency",
+      description: "For client work",
+      price: 49,
+      yearlyPrice: 40.83,
+      yearlyTotal: 490,
+      features: ["10 client websites"],
+      limits,
+      additionalSitePrice: 4,
+      sortOrder: 30,
+    },
+  ],
+  oneTimeProducts: [
+    {
+      id: "lifetime_agency",
+      name: "Founding Agency (lifetime)",
+      description: "Permanent Agency access",
+      price: 299,
+      features: ["Everything in Agency"],
+      grantsPlanId: "agency",
+      sortOrder: 35,
+    },
+  ],
+  creditPack: {
+    creditsPerPack: 1000,
+    maxPacksPerPurchase: 100,
+    pricePerPack: 10,
+  },
+};
+
+beforeEach(() => {
+  jest.resetModules();
+  jest.clearAllMocks();
+  mockGetPlanCatalogue.mockResolvedValue(catalogue);
+  mockGetFoundingAgencyAvailability.mockResolvedValue({
+    remaining: 17,
+    limit: 50,
+    soldOut: false,
+  });
+  mockRetrievePrice.mockRejectedValue(new Error("Use catalogue amounts"));
+});
+
+afterEach(() => {
+  delete process.env.AGENCY_CHECKOUT_ENABLED;
+  jest.restoreAllMocks();
+});
+
+describe("GET /api/pricing Agency payload", () => {
+  it("hides Agency sales surfaces when the checkout kill switch is disabled", async () => {
+    process.env.AGENCY_CHECKOUT_ENABLED = "false";
+
+    const { GET } = await import("@/app/api/pricing/route");
+    const body = await (
+      await GET(new Request("http://localhost/api/pricing"))
+    ).json();
+
+    expect(body.plans).toEqual([]);
+    expect(body.oneTimeProducts).toEqual([]);
+    expect(body.foundingAgencyAvailability).toBeNull();
+  });
+
+  it("returns exact annual pricing and the cached aggregate availability", async () => {
+    const { GET } = await import("@/app/api/pricing/route");
+    const response = await GET(new Request("http://localhost/api/pricing"));
+    const body = await response.json();
+
+    expect(body.plans).toEqual([
+      expect.objectContaining({
+        id: "agency",
+        monthlyPrice: 49,
+        yearlyPrice: 40.83,
+        yearlyTotal: 490,
+      }),
+    ]);
+    expect(body.foundingAgencyAvailability).toEqual({
+      remaining: 17,
+      limit: 50,
+      soldOut: false,
+    });
+    expect(Object.keys(body.foundingAgencyAvailability).sort()).toEqual([
+      "limit",
+      "remaining",
+      "soldOut",
+    ]);
+  });
+
+  it("keeps catalogue pricing available without inventing founding spots", async () => {
+    mockGetFoundingAgencyAvailability.mockRejectedValue(
+      new Error("aggregate unavailable"),
+    );
+    jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const { GET } = await import("@/app/api/pricing/route");
+    const response = await GET(new Request("http://localhost/api/pricing"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.plans[0].id).toBe("agency");
+    expect(body.foundingAgencyAvailability).toBeNull();
+  });
+
+  it("drops expired cached availability when a later catalogue refresh fails", async () => {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    const { GET } = await import("@/app/api/pricing/route");
+    const request = new Request("http://localhost/api/pricing");
+
+    const first = await (await GET(request)).json();
+    expect(first.foundingAgencyAvailability.remaining).toBe(17);
+
+    const afterCacheTtl = Date.now() + 5 * 60 * 1000 + 1;
+    jest.spyOn(Date, "now").mockReturnValue(afterCacheTtl);
+    mockGetPlanCatalogue.mockRejectedValue(new Error("catalogue unavailable"));
+
+    const stale = await (await GET(request)).json();
+
+    expect(stale.plans[0].id).toBe("agency");
+    expect(stale.foundingAgencyAvailability).toBeNull();
+  });
+
+  /**
+   * s45 — 250 monthly AI credits is a limits override on the founding row
+   * itself (ADR 038), not a hidden plan, so the public feed lists exactly the
+   * plans it always did and never publishes the override. The copy that states
+   * the allowance is the row's own description and bullets, passed through.
+   */
+  it("lists no extra plan and passes the founding copy through without its overrides", async () => {
+    const founding = {
+      ...catalogue.oneTimeProducts[0],
+      description:
+        "Pay once for permanent Agency access with 250 AI credits a month; " +
+        "limited to the first 50 completed sales",
+      features: [
+        "Everything in Agency, with 250 AI credits a month",
+        "One payment, no renewal",
+        "Founding offer limited to 50 completed sales",
+      ],
+      grantLimits: { monthlyCredits: 250 },
+    };
+    mockGetPlanCatalogue.mockResolvedValue({
+      ...catalogue,
+      oneTimeProducts: [founding],
+    });
+
+    const { GET } = await import("@/app/api/pricing/route");
+    const body = await (
+      await GET(new Request("http://localhost/api/pricing"))
+    ).json();
+
+    expect(body.plans.map((plan: { id: string }) => plan.id)).toEqual([
+      "agency",
+    ]);
+    expect(body.oneTimeProducts).toEqual([
+      {
+        id: "lifetime_agency",
+        name: "Founding Agency (lifetime)",
+        description: founding.description,
+        price: 299,
+        currency: "usd",
+        features: founding.features,
+        grantsPlanId: "agency",
+      },
+    ]);
+  });
+});

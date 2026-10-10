@@ -23,6 +23,13 @@ import { rateLimiter } from "@/lib/security/rate-limiter";
 import { authorizeFirstPartyEditorAccess } from "@/lib/auth/editor-access";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@/lib/auth/editor-access", () => {
   const actual = jest.requireActual("@/lib/auth/editor-access");
   return {
@@ -44,7 +51,9 @@ jest.mock("@/lib/security/rate-limiter", () => {
 import { PUT as putStagingContent } from "@/app/api/staging/content/[siteId]/route";
 import { POST as postPublish } from "@/app/api/staging/publish/route";
 
-const SITE_ID = "11111111-1111-1111-1111-111111111111";
+// RFC 4122 v4, as gen_random_uuid() issues: since s77 (s69 R1) these routes
+// refuse an id `requireUuid` rejects before any work.
+const SITE_ID = "11111111-1111-4111-8111-111111111111";
 
 const checkLimit = rateLimiter.checkLimit as jest.MockedFunction<
   typeof rateLimiter.checkLimit
@@ -82,9 +91,20 @@ function wireServiceClient() {
 
   const client = {
     from: jest.fn(() => chain),
-    rpc: jest.fn(() => {
+    rpc: jest.fn((name: string) => {
       calls.push("rpc");
-      return Promise.resolve({ data: [], error: null });
+      return Promise.resolve({
+        data:
+          name === "save_staging_content_atomic"
+            ? [
+                {
+                  content_element_id: "element-1",
+                  updated_at: "2026-09-24T12:00:00.000Z",
+                },
+              ]
+            : [],
+        error: null,
+      });
     }),
   };
 
@@ -168,18 +188,33 @@ describe("the staging service-role writes are metered per site", () => {
     it("buckets the limit by site, never by IP", async () => {
       await call();
 
-      const config = checkLimit.mock.calls[0][0];
+      // Since s77 a per-IP guard runs first (s69 L7, limiter-order.test.ts);
+      // this is the per-site bucket behind it.
+      const config = checkLimit.mock.calls
+        .map(([limitConfig]) => limitConfig)
+        .find((limitConfig) => limitConfig.identifierType !== "ip");
+      if (!config) throw new Error("no per-site limiter call");
       expect(config.identifier).toBe(SITE_ID);
       expect(config.identifierType).not.toBe("ip");
     });
 
     it("refuses over the limit without writing anything", async () => {
-      checkLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetTime: Date.now() + 30_000,
-        totalRequests: 51,
-      });
+      // Only the per-site bucket refuses, so the refusal is its own.
+      checkLimit.mockImplementation(async (config) =>
+        config.identifierType === "ip"
+          ? {
+              allowed: true,
+              remaining: 199,
+              resetTime: Date.now(),
+              totalRequests: 1,
+            }
+          : {
+              allowed: false,
+              remaining: 0,
+              resetTime: Date.now() + 30_000,
+              totalRequests: 51,
+            },
+      );
 
       const response = await call();
 
@@ -189,7 +224,18 @@ describe("the staging service-role writes are metered per site", () => {
     });
 
     it("refuses when the limiter store is unreachable", async () => {
-      checkLimit.mockRejectedValue(new Error("Redis unreachable"));
+      // Only the per-site bucket's store call fails, so the refusal is its own.
+      checkLimit.mockImplementation(async (config) => {
+        if (config.identifierType === "ip") {
+          return {
+            allowed: true,
+            remaining: 199,
+            resetTime: Date.now(),
+            totalRequests: 1,
+          };
+        }
+        throw new Error("Redis unreachable");
+      });
 
       const response = await call();
 

@@ -225,6 +225,32 @@ describe("OpenAIService", () => {
       expect(result.success).toBe(true);
       expect(result.data).toHaveLength(1); // Only successful translation
     });
+
+    it("reports failure when no element is translated", async () => {
+      // s48, defect 1: with the key missing every call throws, and the batch
+      // still answered `success: true` with no rows — so the route said
+      // "Successfully translated 0 elements" and kept the 5 credits.
+      mockCreate
+        .mockRejectedValueOnce(new Error("OPENAI_API_KEY is missing"))
+        .mockRejectedValueOnce(new Error("OPENAI_API_KEY is missing"));
+
+      const result = await service.batchTranslate(
+        [
+          { id: "1", text: "Hello" },
+          { id: "2", text: "World" },
+        ],
+        "English",
+        "Spanish",
+      );
+
+      // Our own sentence, never the provider's.
+      expect(result).toEqual({
+        success: false,
+        error: "No text could be translated.",
+        tokensUsed: 0,
+      });
+      expect(result).not.toHaveProperty("data");
+    });
   });
 
   describe("detectLanguage", () => {

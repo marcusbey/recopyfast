@@ -55,8 +55,68 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // never to let a branch through, and it is now pinned at what the merged tree
 // actually earned. A branch that is over is still over. `s06c-embed-shrink` is the
 // story that creates real headroom.
-const SEEDED_MAX_BUNDLE_GZ = 46681;
-const SEEDED_MAX_WIDGET_GZ = 33865;
+//
+// RATCHETED 2026-09-25 (s39), DOWNWARD: 46681 → 46226, 33865 → 33465. Pinned here
+// as well as in build-embed.mjs so a later commit cannot quietly hand the freed
+// bytes back by restoring the old constants.
+//
+//   46681 / 33865  ceilings before s39
+//   46635 / 33860  measured on main at 0b8014f, where s39 branched
+//   −465 / −452    CSS comments moved out of the widget's style template
+//                  strings (they shipped as string bytes; now JS comments)
+//   +56 / +57      the editor bar's "All sites" control
+//   46226 / 33465  measured on feature/s39-editor-back-to-sites
+//
+// RATCHETED 2026-09-25 (s40), DOWNWARD: 46226 → 46176, 33465 → 33420.
+//
+//   46226 / 33465  measured on main at 0e1d5bc (s39 merged), zero headroom
+//   +26 / +28      the AI modal sends editor credentials + shows the server's
+//                  message (alone, this was over both ceilings)
+//   −71 / −67      the Edit Board's "Auto-translate with AI" control removed
+//   46176 / 33420  measured on feature/s40-ai-widget-auth
+// RATCHETED 2026-09-25 (s41), DOWNWARD: 46176 → 45883, 33420 → 33122, merged
+// over s40. Dead email-capture modal −398/−394, `escapeHtml` −24/−22, edit-link
+// persistence + 401/403 clears + noopener +116/+121, Preview Live no-op deletes
+// −8/−11, ≤480px editor bar +26/+24 (itemised on s41's own base; the merged
+// tree measures −293/−298 in total).
+// RATCHETED 2026-09-28 (s55), DOWNWARD: 45883 → 45880, 33122 → 33120. rcf_vid
+// minted in bucketVisitor behind the active-test guard, init-time call removed.
+// RATCHETED 2026-10-08 (s67-embed-spa-support), DOWNWARD: 45880 → 45841,
+// 33120 → 33073, review, re-review, verification and PR #69 review fixes
+// included. SPA support (≤ +850 gross, net ≤ 0, docs/stories.md) paid in the
+// branch: CSS minified at build time, the socket.io fallback loader and the
+// `rcf-editable` class deleted (−805 / −838), then the reserve (−40 / −40).
+// Final gross of the SPA work against that funded floor (45037 / 32248):
+// +804 / +825 — the same figures build-embed.mjs quotes. Itemised there, the
+// review fix (+8 / +7) and its funding (−14 / −10), the re-review fix
+// (+22 / +21) and its funding (−30 / −29), the verification fix (+13 / +14)
+// and its funding (−22 / −22), the PR #69 review fix (+2 / +5) and its
+// funding (−4 / −5) included.
+// RATCHETED 2026-10-08 (s70a-embed-ui-not-content), DOWNWARD: 45841 → 45840,
+// 33073 → 33073. The embed stops recording its own UI as site copy:
+//
+//   45841 / 33073  ceilings before s70a = measured on main at 828970c
+//   +6 / +7        two markers (the AI suggestions overlay, the form-field
+//                  popover) and the corrected id (`#rcf-edit-board-panel`)
+//   −7 / −7        one `closest()` for the six skip checks
+//   45840 / 33073  measured on feature/s70a-embed-ui-not-content
+// The middle split carries up to 2 B of noise: the artifact's banner holds
+// the source's sha256, so even a comment edit moves the gzipped size. Only
+// the two ends are measurements of shipped bytes (build-embed.mjs, same note).
+// RATCHETED 2026-10-09 (s72-edit-board-history-xss), DOWNWARD: 45840 → 45828,
+// 33073 → 33062. A version's author, a restore's refusal and its result are
+// text, never markup:
+//
+//   45840 / 33073  ceilings before s72 = measured on main at 59d0596
+//   −6 / −4        the History meta line as a text node and a span
+//   −6 / −5        the restore refusal as text (R1) with "Version restored"
+//                  (R2); R1 alone measured +6 / +6
+//   0 / −2         the "THE RULE" comment (s70a review F4(a)), banner hash only
+//   45828 / 33062  measured on feature/s72-edit-board-history-xss
+// The middle lines carry the banner hash's ±2 B; only the two ends are
+// measurements of shipped bytes (build-embed.mjs, same note).
+const SEEDED_MAX_BUNDLE_GZ = 45828;
+const SEEDED_MAX_WIDGET_GZ = 33062;
 
 interface CheckRun {
   status: number;

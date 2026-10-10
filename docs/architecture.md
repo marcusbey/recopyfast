@@ -33,7 +33,7 @@ to it. See [ADR 001](./decisions/001-inherited-production-baseline.md).
 | Email | Resend | `^6.14` | `src/lib/email/resend.ts` |
 | Cache / limits | Redis | `^5.8` | rate limiting, sessions, intended pub/sub |
 | Realtime | Socket.io | `^4.8` | separate service in `server/`, deployed on Fly as `recopyfast-ws` (one machine) — see [ADR 004](./decisions/004-embed-transport-split.md) |
-| Errors | Sentry | `@sentry/nextjs ^10.32` | Only wired when `NEXT_PUBLIC_SENTRY_DSN` is set |
+| Errors | Sentry | `@sentry/nextjs ^10.32` | Only wired when `NEXT_PUBLIC_SENTRY_DSN` is set. Browser: errors + tracing, no Session Replay (s46). Files: see Integration points |
 | Tests | Jest 30 + Testing Library, Playwright `^1.58` | — | 374 test files, 1954 passing |
 | Embed build | esbuild `^0.25` | — | `scripts/build-embed.mjs`, runs on `prebuild` |
 
@@ -87,7 +87,9 @@ src/
 public/embed/
   recopyfast.src.js       SOURCE OF TRUTH, hand-edited, 5397 lines
   recopyfast.js           BUILD ARTIFACT — never hand-edit
-  socket.io-client.min.js standalone fallback copy
+  socket.io-client.min.js standalone socket.io build: the size gate's transport measure and a
+                          pinned public URL. The widget never loads it (its loader went in s67);
+                          socket.io is bundled into recopyfast.js
 server/                   Express + Socket.io service (own package.json, own Fly app)
 supabase/migrations/      43 SQL migrations, timestamp-prefixed
 scripts/                  build-embed, sync-stripe-catalogue, qa-journey, check-redis, install-hooks
@@ -155,13 +157,14 @@ any rejected value into a response or a log line.
 
 ### Data access
 
-Three Supabase clients, and picking the wrong one is a security bug:
+Four Supabase clients, and picking the wrong one is a security bug:
 
 | Client | Use | RLS |
 |---|---|---|
 | `supabase/client.ts` `createClient()` | Browser, inside effects/handlers only | enforced |
 | `supabase/server.ts` `createClient()` | Route handlers acting **as the signed-in user** | enforced |
 | `supabase/service.ts` `createServiceRoleClient()` | Widget-facing paths where the caller is a site token, not a user | **bypassed** |
+| `supabase/anon.ts` `createAnonClient()` | Server code with **no user** reading rows RLS makes public to `anon` — the sitemap and `/blog`. No cookies, no session, read-only, never user data ([ADR 058](./decisions/058-cookie-less-anon-client-for-public-reads.md)) | enforced |
 
 28 of 77 routes use the service-role client. Every one of them owes an explicit authorization
 call before it touches data. See [ADR 002](./decisions/002-rls-tenant-boundary.md).
@@ -352,6 +355,12 @@ noise; a comment that says *what broke last time* is the asset.
 - Multi-step writes go through a Postgres function, not two round trips (see
   `20260617000000_publish_staging_transaction.sql`, `20260803020000_restore_atomic_publish.sql`).
   `SECURITY DEFINER` functions are locked down explicitly — two migrations do only that.
+- **No web principal holds DML on a content table.** `anon`, `authenticated` and PUBLIC have no
+  write grant and no write policy on `content_elements`, `content_versions`, `content_history`,
+  `staging_history` or the five A/B tables. A member's direct PostgREST PATCH once bypassed the
+  owner-plan gate (s51 review, finding 1). Every content write is a route using the service
+  client after authorization and `checkOwnerCanEdit`; `src/__tests__/db/content-write-privileges.test.ts`
+  holds the line list-wide ([ADR 042](./decisions/042-content-writes-are-service-role-only.md)).
 
 ---
 
@@ -360,15 +369,15 @@ noise; a comment that says *what broke last time* is the asset.
 | Concern | Where | Notes |
 |---|---|---|
 | **Account auth** | Supabase Auth, cookie session, refreshed in `middleware.ts` | Protected: `/dashboard`, `/settings`. `/dashboard/billing` is deliberately never gated — it is Stripe's return URL on both success and cancel |
-| **Entitlement gate** | `middleware.ts` → `billing/effective-plan.ts` | Page routes only; API routes resolve entitlement themselves. Fails **open** — a Supabase blip must not lock a paying customer out |
+| **Entitlement gate** | `middleware.ts` → `billing/effective-plan.ts` (pages); `billing/owner-can-edit.ts` (writes) | Pages: routing only, fails **open** — a Supabase blip must not lock a paying customer out. Writes: every content write, AI spend and credential issuance (bar handoff redemption) calls `checkOwnerCanEdit`, which requires the **site owner's** entitlement to be `plan` and fails **closed** (402 `plan_ended`, 503 on a read error), after the route has authorised its caller. Public reads never read a plan ([ADR 041](./decisions/041-editing-needs-the-site-owners-plan.md)). The database holds the same line: no web principal can write a content table, so the Data API has no way around the gate ([ADR 042](./decisions/042-content-writes-are-service-role-only.md)) |
 | **Non-account editing** | `src/lib/auth/editor-*.ts`, `/api/editor/*`, `/api/edit-sessions/*` | Scoped, expiring grants. The highest-consequence surface in the product: a leaked grant is a defacement of a customer's live site |
-| **Payments** | `src/lib/stripe/*`, `/api/billing/*`, `/api/webhooks/stripe` | Checkout is serialized (`checkout-reservation.ts` + `user-lock.ts`); credit spend is compare-and-swap. Webhook replay must not double-grant — `billing_events` is the idempotency ledger |
-| **AI** | `src/lib/ai/`, `/api/ai/suggest`, `/api/ai/translate` | OpenAI, credit-metered. Credits cover **AI only** — a wallet balance is never a quota |
+| **Payments** | `src/lib/stripe/*`, `/api/billing/*`, `/api/webhooks/stripe` | Checkout is serialized (`checkout-reservation.ts` + `user-lock.ts`); credits are spent and refunded by database functions under a per-user lock ([ADR 040](./decisions/040-credits-spent-and-refunded-in-the-database.md)). Webhook replay must not double-grant — `billing_events` is the idempotency ledger |
+| **AI** | `src/lib/ai/`, `/api/ai/suggest`, `/api/ai/translate` | OpenAI, credit-metered. Credits cover **AI only**, and only once the site owner holds a plan — a wallet balance is never a quota, and credits are sold to plan holders only ([ADR 041](./decisions/041-editing-needs-the-site-owners-plan.md)). `/api/ai/suggest` is the widget's: authorised by editor credentials (`validateEditorTokenFromRequest`, graded `edit`), never the site token, and charged to the site owner through the service role ([ADR 035](./decisions/035-widget-ai-charged-to-site-owner.md)). `/api/ai/translate` has no widget caller |
 | **Email** | `src/lib/email/resend.ts` | Resend |
 | **Images** | `src/lib/images/`, `src/lib/storage/`, `/api/upload/image` | Supabase Storage, `20260801000000_storage_assets_bucket.sql`. Replace an existing `<img>` only |
 | **Realtime** | `server/index.js` (Socket.io) on Fly, one machine | `NEXT_PUBLIC_WS_URL` set in production ⇒ new snippets carry `data-ws-url` ⇒ the widget connects **in an editing session only**. HTTP stays authoritative and realtime is additive: unset the variable and redeploy and the product is its pre-`s07b` self. Reported as a `realtime` check in `GET /api/health` that can degrade the app but never make it unhealthy (ADR 004 "Watch"). See [ADR 004](./decisions/004-embed-transport-split.md), [ADR 022](./decisions/022-realtime-parity-is-editors-only.md), [`server/README.md`](../server/README.md) |
 | **Rate limit / cache** | Redis via `src/lib/api/rate-limit.ts` | `npm run check:redis` |
-| **Errors** | Sentry, 3 config files + `instrumentation.ts` | `next.config.ts` only wraps when the DSN is set, so CI builds without it |
+| **Errors** | Sentry. Browser: `src/instrumentation-client.ts`. Server: `src/instrumentation.ts` loads `sentry.server.config.ts` (Node) or `sentry.edge.config.ts` (Edge) and exports `onRequestError`. Browser events post same-origin to the `/monitoring` tunnel (`src/lib/monitoring/sentry-tunnel.ts`), rewritten to Sentry's ingest | `next.config.ts` only wraps when the DSN is set, so CI builds without it. No root `instrumentation.ts` or `sentry.client.config.ts`: under Turbopack a root copy shadows `src/`, and the client config is never bundled (s46) |
 | **Cron** | `vercel.json` → `/api/cron/generate-blog-post`; `/api/cron/ab-test-lifecycle` exists but is unscheduled | Cron platforms retry — every job must be idempotent |
 | **Outbound webhooks** | `src/lib/webhooks/`, `/api/webhooks` | Distinct from Stripe's inbound `/api/webhooks/stripe`. SSRF check needs `ipaddr.js` at config **and** delivery time |
 
@@ -420,7 +429,7 @@ assert the following. None of it is true, and each was checked:
 | Cloudflare Workers serve the embed at the edge | No Workers. Vercel static + Next middleware |
 | Socket.io with Redis pub/sub, running | Running since `s07b` — but on **one** machine and with **no** Redis pub/sub. A single process keeps rooms coherent without an adapter; adding a second machine is what would make one mandatory |
 | Script size < 30KB gz | 46,781 gz today |
-| Test coverage ≥ 80% | Jest floor is 22% lines, ratcheted from measured reality |
+| Test coverage ≥ 80% | Jest floor is 69% lines (68 / 61 / 65 / 69 statements / branches / functions / lines, measured 2026-10-09), enforced in CI and ratcheted from measured reality |
 
 Fixing the first three in `CLAUDE.md` and keeping this table honest is cheaper than the
 alternative: an agent reads the stale claim, writes a Zustand store, and now the assertion is

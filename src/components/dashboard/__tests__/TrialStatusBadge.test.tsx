@@ -122,3 +122,75 @@ describe("TrialStatusBadge", () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+/**
+ * s47a — the founding offer is the account's one trial row, so it rides the
+ * same `trial` payload with `offerId` set. Only the label and the tooltip
+ * change (docs/designs/s47a-founding-20-grant.md, screen 1); the pill, the
+ * icon, the tone rule and the link are the trial's.
+ */
+describe("TrialStatusBadge for a founding offer account", () => {
+  const ENDS_AT = "2026-12-26T15:00:00.000Z";
+
+  function foundingOffer(daysRemaining: number): EntitlementSummary {
+    return {
+      ...PRO,
+      trial: { daysRemaining, endsAt: ENDS_AT, offerId: "founding_20" },
+    };
+  }
+
+  it("names the offer and its days left, and points at billing", async () => {
+    respondWith(foundingOffer(64));
+
+    render(<TrialStatusBadge />);
+
+    const link = await screen.findByRole("link", {
+      name: "Founding offer — 64 days left",
+    });
+    expect(link).toHaveAttribute("href", "/dashboard/billing");
+    expect(screen.queryByText(/trial —/i)).toBeNull();
+  });
+
+  it("says what the offer gives, and never a trial, in the tooltip", async () => {
+    respondWith(foundingOffer(64));
+
+    render(<TrialStatusBadge />);
+
+    const badge = await screen.findByTitle(
+      "Your founding offer gives you Pro until Dec 26, 2026. Open billing to choose a plan.",
+    );
+    expect(badge.getAttribute("title")).not.toMatch(/trial|14/i);
+  });
+
+  it("says day, not days, on the last one", async () => {
+    respondWith(foundingOffer(1));
+
+    render(<TrialStatusBadge />);
+
+    expect(
+      await screen.findByRole("link", { name: "Founding offer — 1 day left" }),
+    ).toBeInTheDocument();
+  });
+
+  it("stays calm at four days and warns at three", async () => {
+    respondWith(foundingOffer(4));
+    const { unmount } = render(<TrialStatusBadge />);
+    const calm = await screen.findByText("Founding offer — 4 days left");
+    expect(calm.closest("[class]")?.className).toContain("tone-info");
+    unmount();
+
+    respondWith(foundingOffer(3));
+    render(<TrialStatusBadge />);
+    const urgent = await screen.findByText("Founding offer — 3 days left");
+    expect(urgent.closest("[class]")?.className).toContain("tone-warning");
+  });
+
+  it("sets the day count in tabular figures", async () => {
+    respondWith(foundingOffer(64));
+
+    render(<TrialStatusBadge />);
+
+    const badge = await screen.findByText("Founding offer — 64 days left");
+    expect(badge.closest("[class]")?.className).toContain("tabular");
+  });
+});

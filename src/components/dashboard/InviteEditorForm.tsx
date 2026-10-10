@@ -1,24 +1,24 @@
 "use client";
 
 import { useId, useState } from "react";
-import type { FormEvent } from "react";
-import { Button } from "@/components/ui/button";
+import type { FormEvent, ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  CheckCircle2,
-  Edit,
-  Eye,
-  Loader2,
-  Shield,
-  Upload,
-  UserPlus,
-} from "lucide-react";
+import { Check, Edit, Eye, Shield, Upload } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { EditorPermission } from "@/lib/auth/editor-access";
 
+export interface InviteEditorFormState {
+  /** The email field and the permission toggles. */
+  fields: ReactNode;
+  canSubmit: boolean;
+  isSubmitting: boolean;
+}
+
 interface InviteEditorFormProps {
+  autoFocus?: boolean;
+  initialPermissions?: readonly EditorPermission[];
   /**
    * Performs the enrolment. Resolves true when the editor was added, which is
    * the signal for this form to clear itself; false leaves the typed address in
@@ -28,6 +28,13 @@ interface InviteEditorFormProps {
     email: string,
     permissions: EditorPermission[],
   ) => Promise<boolean>;
+  /**
+   * Lays the form out. s66c1 moved it into `AddEditorDialog`, where the fields
+   * sit in the dialog's body and the submit button in its footer: one <form>
+   * must span both, and be the dialog's flex region itself (design system,
+   * Dialogs and sheets), so the caller places the pieces.
+   */
+  children: (form: InviteEditorFormState) => ReactNode;
 }
 
 const PERMISSION_CHOICES: ReadonlyArray<{
@@ -43,11 +50,16 @@ const PERMISSION_CHOICES: ReadonlyArray<{
 
 const DEFAULT_PERMISSIONS: readonly EditorPermission[] = ["view", "edit"];
 
-export function InviteEditorForm({ onInvite }: InviteEditorFormProps) {
+export function InviteEditorForm({
+  onInvite,
+  autoFocus = false,
+  initialPermissions = DEFAULT_PERMISSIONS,
+  children,
+}: InviteEditorFormProps) {
   const emailFieldId = useId();
   const [email, setEmail] = useState("");
   const [permissions, setPermissions] = useState<EditorPermission[]>([
-    ...DEFAULT_PERMISSIONS,
+    ...initialPermissions,
   ]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -72,51 +84,55 @@ export function InviteEditorForm({ onInvite }: InviteEditorFormProps) {
       const added = await onInvite(trimmedEmail, permissions);
       if (added) {
         setEmail("");
-        setPermissions([...DEFAULT_PERMISSIONS]);
+        setPermissions([...initialPermissions]);
       }
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4 border-t pt-4">
-      <div className="space-y-2">
+  const fields = (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
         <Label htmlFor={emailFieldId}>Editor email</Label>
         <Input
           id={emailFieldId}
           type="email"
           autoComplete="off"
+          autoFocus={autoFocus}
           placeholder="marketing@clientcompany.com"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
         />
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label>Permissions</Label>
         <div className="grid grid-cols-2 gap-2">
           {PERMISSION_CHOICES.map(({ key, icon: Icon, label }) => {
             const selected = permissions.includes(key);
             return (
+              // s66a's permission toggle (design system, Controls): 40 tall,
+              // 2px radius, 1px `border-input`; selected is the accent border
+              // and a tick, never a thicker border or a pill.
               <button
                 key={key}
                 type="button"
                 onClick={() => togglePermission(key)}
                 aria-pressed={selected}
                 className={cn(
-                  "flex items-center gap-2 rounded-lg border p-2 transition-all",
+                  "flex h-10 min-w-0 items-center gap-2 rounded-control border px-3 text-sm font-medium transition-colors",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                   selected
-                    ? "border-primary bg-tone-info-surface text-tone-info-text"
-                    : "border-border text-muted-foreground hover:border-input",
+                    ? "border-primary bg-tone-accent-surface text-tone-accent-text"
+                    : "border-input text-muted-foreground hover:border-foreground/40 hover:text-foreground",
                 )}
               >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-                <span className="text-sm font-medium">{label}</span>
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{label}</span>
                 {selected && (
-                  <CheckCircle2
-                    className="ml-auto h-4 w-4 text-tone-info-text"
+                  <Check
+                    className="ml-auto h-4 w-4 shrink-0"
                     aria-hidden="true"
                   />
                 )}
@@ -131,20 +147,12 @@ export function InviteEditorForm({ onInvite }: InviteEditorFormProps) {
           Higher permissions include the ones below them.
         </p>
       </div>
+    </div>
+  );
 
-      <Button type="submit" disabled={!canSubmit} className="w-full">
-        {submitting ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-            Adding editor...
-          </>
-        ) : (
-          <>
-            <UserPlus className="mr-2 h-4 w-4" aria-hidden="true" />
-            Add editor
-          </>
-        )}
-      </Button>
+  return (
+    <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+      {children({ fields, canSubmit, isSubmitting: submitting })}
     </form>
   );
 }

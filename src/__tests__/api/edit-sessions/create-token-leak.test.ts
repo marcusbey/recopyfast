@@ -33,6 +33,12 @@ jest.mock("@/lib/auth/edit-sessions", () => ({
   EditSessionManager: { createEditSession: jest.fn() },
 }));
 jest.mock("@/lib/api/rate-limit", () => ({ enforceRateLimit: jest.fn() }));
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/edit-sessions/create-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
 
 const mockCreateClient = createClient as jest.MockedFunction<
   typeof createClient
@@ -65,6 +71,12 @@ function supabaseFor(domain: string) {
     from: jest.fn(() => ({
       select: jest.fn().mockReturnThis(),
       eq: jest.fn().mockReturnThis(),
+      // The requesting user's own `site_permissions` row, read since s51 so
+      // only someone with access on the site is told about its plan.
+      maybeSingle: jest.fn().mockResolvedValue({
+        data: { permission: "admin" },
+        error: null,
+      }),
       single: jest.fn().mockResolvedValue({
         data: { id: SITE_ID, domain, name: "Example" },
         error: null,

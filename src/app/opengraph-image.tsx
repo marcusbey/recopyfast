@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const alt =
-  "ReCopyFast - Transform any website into an editable platform with a simple script tag";
+  "ReCopyFast - Make the copy on the site you already built editable, with one script tag.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -81,8 +81,8 @@ export default function OpenGraphImage() {
             maxWidth: 880,
           }}
         >
-          Transform any website into an editable platform with a simple script
-          tag
+          Make the copy on the site you already built editable, with one script
+          tag.
         </div>
 
         <div

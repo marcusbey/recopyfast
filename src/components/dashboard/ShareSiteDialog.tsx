@@ -1,28 +1,75 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, Loader2, Eye, Edit, Upload, Shield } from "lucide-react";
+import { NativeSelect } from "@/components/ui/native-select";
+import {
+  Check,
+  CheckCircle2,
+  Copy,
+  Loader2,
+  Eye,
+  Edit,
+  Upload,
+  Shield,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { ShareLinkCard, type ShareLink } from "./ShareLinkCard";
 import type { Site } from "@/types";
+import { cn } from "@/lib/utils/cn";
+
+/**
+ * "Share preview link": an emailed invite to review unpublished changes,
+ * written to `staging_access` and expiring on its own (s66c1 AC 6).
+ *
+ * Create-only since s66c1. The active links it used to list under its form
+ * moved to People & access (`PreviewLinksList`), with their fetch and revoke.
+ * The dialog is one of exactly two ways to give someone access, so it opens
+ * by saying which one it is (the ONE-OFF REVIEW explainer), and it grants
+ * View only unless the owner ticks more: a review link that could publish by
+ * default was the same power as an editor under a temporary name.
+ *
+ * Its success state is the only place a link can be copied (PR #72 review,
+ * D2). The link carries the access's secret token, which only the creation
+ * response holds: `GET /api/staging/access` leaves it out on purpose, and the
+ * list's old copy action rebuilt the URL from the row id instead, a link that
+ * never opened anything. "Copy link" here copies the response's own URL, and
+ * the URL is dropped when the dialog next opens.
+ */
+
+export const SHARE_PREVIEW_EXPLAINER =
+  "For a one-off review of unpublished changes. View only unless you allow more, and the link stops working after the time you choose.";
 
 interface ShareSiteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  site: Site;
+  site: Pick<Site, "id" | "domain" | "name">;
+  /** A link now exists: the caller refetches its list. */
+  onCreated?: () => void;
+  /**
+   * Where this site's links are managed. Set when the dialog opens away from
+   * that list (the Sites row menu), so a success can point at it.
+   */
+  manageHref?: string;
 }
 
 type Permission = "view" | "edit" | "publish" | "admin";
+
+const DEFAULT_GRANT: readonly Permission[] = ["view"];
+
+const DEFAULT_EXPIRY_DAYS = 7;
 
 const EXPIRY_OPTIONS = [
   { value: 1, label: "1 day" },
@@ -42,16 +89,42 @@ const PERMISSION_OPTIONS: ReadonlyArray<{
   { key: "admin", icon: Shield, label: "Admin" },
 ];
 
+/**
+ * The automatic copy right after a link is created. It answers whether the
+ * copy happened and never throws: the link exists by now, whatever the
+ * clipboard says.
+ *
+ * It used to be a bare `await navigator.clipboard.writeText` inside the
+ * creation's try (PR #72 review follow-up). The write runs after the POST's
+ * await, outside the click's user activation, so a browser may refuse it
+ * (permission denied; no `navigator.clipboard` at all in an insecure
+ * context). The refusal fell into the creation's catch, and a link that had
+ * been created was reported as failed: no success state, no Copy link, the
+ * list not refetched, the form still filled in, an invitation to create a
+ * second link for the same person.
+ */
+async function copyCreatedLink(url: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(url);
+    return true;
+  } catch (caught) {
+    console.error("Could not copy the new preview link automatically:", caught);
+    return false;
+  }
+}
+
 export function ShareSiteDialog({
   open,
   onOpenChange,
   site,
+  onCreated,
+  manageHref,
 }: ShareSiteDialogProps) {
-  const [activeLinks, setActiveLinks] = useState<ShareLink[]>([]);
-  const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // The created link's URL, from the creation response, for "Copy link".
+  const [createdUrl, setCreatedUrl] = useState<string | null>(null);
 
   // Form state.
   // Anonymous "Anyone with link" sharing was retired — a database trigger
@@ -60,40 +133,30 @@ export function ShareSiteDialog({
   // sends type "invite".
   const [email, setEmail] = useState("");
   const [permissions, setPermissions] = useState<Permission[]>([
-    "view",
-    "edit",
+    ...DEFAULT_GRANT,
   ]);
-  const [expiresInDays, setExpiresInDays] = useState(7);
+  const [expiresInDays, setExpiresInDays] = useState(DEFAULT_EXPIRY_DAYS);
   const [label, setLabel] = useState("");
+  const [wasOpen, setWasOpen] = useState(open);
 
-  const fetchActiveLinks = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await fetch(`/api/staging/access?siteId=${site.id}`);
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        // Swallowing this left the dialog showing "no active links" when the
-        // request had actually failed, hiding shares that do exist.
-        throw new Error(data.error || `Failed to load shares (${res.status})`);
-      }
-
-      setActiveLinks(data.accessList ?? []);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load active shares",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [site.id]);
-
-  useEffect(() => {
+  // Each opening starts on an empty form with no message (s66c1 review m4).
+  // People & access keeps this dialog mounted and only flips `open`, so a
+  // refusal, a success banner or a half-typed address from the last opening
+  // was still on screen in the next one, describing an invite that had not
+  // been sent yet. Cleared on opening, not on closing, so the closing dialog
+  // does not blank out while it animates away (the AddEditorDialog pattern).
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
-      fetchActiveLinks();
+      setError(null);
+      setSuccess(null);
+      setCreatedUrl(null);
+      setEmail("");
+      setLabel("");
+      setPermissions([...DEFAULT_GRANT]);
+      setExpiresInDays(DEFAULT_EXPIRY_DAYS);
     }
-  }, [open, fetchActiveLinks]);
+  }
 
   const handleCreateLink = async () => {
     if (!email) {
@@ -105,6 +168,7 @@ export function ShareSiteDialog({
       setCreating(true);
       setError(null);
       setSuccess(null);
+      setCreatedUrl(null);
 
       const res = await fetch("/api/staging/access", {
         method: "POST",
@@ -136,19 +200,24 @@ export function ShareSiteDialog({
             "provider configuration.",
         );
       } else if (data.stagingUrl) {
-        await navigator.clipboard.writeText(data.stagingUrl);
-        setSuccess("Link created and copied to clipboard!");
+        setCreatedUrl(data.stagingUrl);
+        const isCopied = await copyCreatedLink(data.stagingUrl);
+        setSuccess(
+          isCopied
+            ? "Link created and copied to clipboard!"
+            : "Link created — copy it with the Copy link button.",
+        );
       } else {
         setSuccess("Invite sent successfully!");
       }
 
-      // Reset form
+      // Reset form. The grant goes back to View only after every send, so
+      // the next reviewer never inherits the last one's Edit or Publish.
       setEmail("");
       setLabel("");
-      setPermissions(["view", "edit"]);
+      setPermissions([...DEFAULT_GRANT]);
 
-      // Refresh list
-      await fetchActiveLinks();
+      onCreated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create link");
     } finally {
@@ -156,30 +225,15 @@ export function ShareSiteDialog({
     }
   };
 
-  const handleCopyLink = async (link: ShareLink) => {
-    const siteUrl = site.domain.startsWith("http")
-      ? site.domain
-      : `https://${site.domain}`;
-    const stagingUrl = `${siteUrl}?rcf_staging=1&rcf_token=${link.token || link.id}`;
-
+  const handleCopyCreated = async () => {
+    if (!createdUrl) return;
     try {
-      await navigator.clipboard.writeText(stagingUrl);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
-
-  const handleRevokeLink = async (link: ShareLink) => {
-    try {
-      const res = await fetch(`/api/staging/access?accessId=${link.id}`, {
-        method: "DELETE",
-      });
-
-      if (res.ok) {
-        setActiveLinks((prev) => prev.filter((l) => l.id !== link.id));
-      }
-    } catch (err) {
-      console.error("Failed to revoke:", err);
+      await navigator.clipboard.writeText(createdUrl);
+    } catch (caught) {
+      console.error("Failed to copy the new preview link:", caught);
+      setError(
+        "Could not copy the link. Allow clipboard access, then try again.",
+      );
     }
   };
 
@@ -191,23 +245,20 @@ export function ShareSiteDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Share Preview Link</DialogTitle>
-          <DialogDescription>
-            Create a shareable link for others to preview and collaborate on
-            your site.
-          </DialogDescription>
+          <DialogTitle>Share preview link</DialogTitle>
+          <DialogDescription>{SHARE_PREVIEW_EXPLAINER}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <DialogBody className="space-y-4">
           {/* Email invite is the only access type this dialog creates.
               "Anyone with link" sharing was retired — StagingAccessManager
               .createStagingAccess throws for it and the database rejects the
               row — so the Link Type toggle that used to offer it (and always
               failed) has been removed in favor of a single invite form. */}
-          <div className="space-y-2">
-            <Label htmlFor="email">Email Address</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Email address</Label>
             <Input
               id="email"
               type="email"
@@ -222,16 +273,19 @@ export function ShareSiteDialog({
               swap, so nothing announced them as toggles and nothing said which
               ones were on. They are a checkbox group rather than the radiogroup
               used in UpgradeDialog and ThemePicker because several permissions
-              hold at once — the default grant is view + edit — and radio
+              can hold at once — View is the default, Edit and Publish are a
+              tick away — and radio
               semantics would tell a screen reader the opposite, that choosing
               one clears the others. A checkbox group is also the pattern that
               needs no roving tabindex: every option stays in the tab order, and
               a native <button> already answers Space and Enter, which is the
-              whole keyboard contract for role="checkbox". */}
-          <div className="space-y-3">
-            <Label id="share-permissions-label" className="text-sm font-medium">
-              Permissions
-            </Label>
+              whole keyboard contract for role="checkbox".
+
+              s66a: 1px `border-input` tiles at the control radius. They used
+              `border-2`, and their unselected border was `--line` at 1.45:1,
+              because the unlayered border reset overrode every colour. */}
+          <div className="space-y-1.5">
+            <Label id="share-permissions-label">Permissions</Label>
             <div
               role="group"
               aria-labelledby="share-permissions-label"
@@ -248,21 +302,23 @@ export function ShareSiteDialog({
                       role="checkbox"
                       aria-checked={isGranted}
                       onClick={() => togglePermission(key)}
-                      className={`flex items-center gap-2 p-2 rounded-lg border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      className={cn(
+                        "flex h-10 min-w-0 items-center gap-2 rounded-control border px-3 text-sm font-medium transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                         isGranted
-                          ? "border-primary bg-tone-info-surface text-tone-info-text"
-                          : "border-border text-muted-foreground hover:border-input"
-                      }`}
+                          ? "border-primary bg-tone-accent-surface text-tone-accent-text"
+                          : "border-input text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                      )}
                     >
-                      <Icon className="w-4 h-4" aria-hidden="true" />
-                      <span className="text-sm font-medium">{permLabel}</span>
+                      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{permLabel}</span>
                       {/* Carries WCAG 1.4.1 on its own: the granted option is
                           the only one wearing a tick, so the state survives
                           when the teal border and surface do not read as
                           different. */}
                       {isGranted && (
-                        <CheckCircle2
-                          className="w-4 h-4 ml-auto text-tone-info-text"
+                        <Check
+                          className="ml-auto h-4 w-4 shrink-0"
                           aria-hidden="true"
                         />
                       )}
@@ -271,27 +327,27 @@ export function ShareSiteDialog({
                 },
               )}
             </div>
+            <p className="text-xs text-muted-foreground">
+              Edit and publish let the reviewer change unpublished copy.
+            </p>
           </div>
 
-          {/* Expiry */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="expiry">Expires in</Label>
-            <select
+            <NativeSelect
               id="expiry"
               value={expiresInDays}
               onChange={(e) => setExpiresInDays(Number(e.target.value))}
-              className="w-full h-10 px-3 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
               {EXPIRY_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
-          {/* Label */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="label">Label (optional)</Label>
             <Input
               id="label"
@@ -301,62 +357,56 @@ export function ShareSiteDialog({
             />
           </div>
 
-          {/* Error/Success messages */}
           {error && (
-            <div className="p-3 rounded-lg bg-tone-danger-surface text-tone-danger-text text-sm">
-              {error}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
           {success && (
-            <div className="p-3 rounded-lg bg-tone-success-surface text-tone-success-text text-sm flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" />
-              {success}
-            </div>
-          )}
-
-          {/* Create Button */}
-          <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateLink} disabled={creating}>
-              {creating ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                "Create Link"
-              )}
-            </Button>
-          </div>
-
-          {/* Active Links Section.
-              The loading branch used to be nested inside `activeLinks.length > 0`,
-              so it could only render when the list was already populated — i.e.
-              never on first open. The spinner now gates the section itself. */}
-          {(loading || activeLinks.length > 0) && (
-            <div className="border-t border-border pt-6">
-              <h3 className="font-medium text-foreground mb-4">Active Links</h3>
-              <div className="space-y-3">
-                {loading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : (
-                  activeLinks.map((link) => (
-                    <ShareLinkCard
-                      key={link.id}
-                      link={link}
-                      onCopy={handleCopyLink}
-                      onRevoke={handleRevokeLink}
-                    />
-                  ))
+            <Alert variant="success">
+              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              <AlertDescription className="space-y-1">
+                <p>{success}</p>
+                {createdUrl && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCopyCreated()}
+                  >
+                    <Copy aria-hidden="true" />
+                    Copy link
+                  </Button>
                 )}
-              </div>
-            </div>
+                {manageHref && (
+                  <Link
+                    href={manageHref}
+                    className="font-medium underline underline-offset-2"
+                  >
+                    See preview links
+                  </Link>
+                )}
+              </AlertDescription>
+            </Alert>
           )}
-        </div>
+        </DialogBody>
+
+        {/* The footer holds the actions so they stay put while the body
+            scrolls. */}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleCreateLink} disabled={creating}>
+            {creating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              "Create link"
+            )}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

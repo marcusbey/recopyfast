@@ -31,8 +31,7 @@ jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(async () => ({
     from: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    single: jest.fn().mockResolvedValue(
+    limit: jest.fn().mockResolvedValue(
       doubleOptions.databaseOk === false
         ? {
             data: null,

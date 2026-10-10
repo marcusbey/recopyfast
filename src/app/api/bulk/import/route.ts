@@ -14,6 +14,10 @@ import { MAX_IMPORT_BYTES, MAX_IMPORT_LABEL } from "@/lib/bulk/constants";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
+import {
   optionalBoolean,
   requireEnum,
   requireString,
@@ -106,6 +110,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // An import rewrites staged AND published copy, so it needs the SITE
+    // OWNER's plan (s51, ADR 041) — not the caller's: a collaborator with
+    // `edit` on a lapsed owner's site must not publish through the back door.
+    // After the permission check so it is no oracle, and before the
+    // `bulk_operations` row so a refused import leaves nothing behind.
+    const ownerCanEdit = await checkOwnerCanEdit(site_id);
+    if (!ownerCanEdit.ok) {
+      return ownerCanEditRefusal(ownerCanEdit);
+    }
+
+    // The row writes go through the service role (s56, ADR 042). No web
+    // principal holds DML on `content_elements` any more: a member's direct
+    // PostgREST write used to bypass the owner-plan gate above (s51 review,
+    // finding 1). Created only now — after `getUser()`, the `edit`/`admin`
+    // read and the gate — and every row it writes carries the `site_id` that
+    // read established, because RLS no longer re-checks it (ADR 037 step 5).
+    // The existence lookups and the `bulk_operations` rows stay on the
+    // caller's own client.
+    const writer = createServiceRoleClient();
+
     // Create bulk operation record
     const operationId = uuidv4();
     const { error: operationError } = await supabase
@@ -148,6 +172,7 @@ export async function POST(req: NextRequest) {
         site_id,
         options,
         supabase,
+        writer,
       );
 
       // A row that could not be read fails on its own, at the position it held
@@ -629,6 +654,7 @@ async function applyImportRows(
   siteId: string,
   options: BulkImportPayload["options"],
   supabase: SupabaseClient,
+  writer: SupabaseClient,
 ): Promise<BulkImportRowResult[]> {
   const results: BulkImportRowResult[] = [];
 
@@ -714,11 +740,14 @@ async function applyImportRows(
         updated_at: new Date().toISOString(),
       };
 
+      // `site_id` in `elementData` is the route's, never the file's, and the
+      // upsert's conflict key includes it: the service-role write cannot land
+      // on another site's row (s56).
       const { error } = options.overwrite_existing
-        ? await supabase.from("content_elements").upsert(elementData, {
+        ? await writer.from("content_elements").upsert(elementData, {
             onConflict: "site_id,element_id,language,variant",
           })
-        : await supabase.from("content_elements").insert(elementData);
+        : await writer.from("content_elements").insert(elementData);
 
       if (error) throw error;
 

@@ -42,6 +42,21 @@ Two details worth knowing:
   stack. Connecting and running DDL against that would be both wrong and rude,
   so the probe reports `wrong-schema` and gates out instead.
 
+## In CI
+
+A plain `npm test` gates every suite here out, so CI runs them **by name** (s75):
+
+- **Plain SQL** — `scripts/run-db-invariants.mjs` replays every migration on PostgreSQL 17
+  (production's major) and runs its `REPLAY_SUITES` list. It then hands Jest's JSON report to
+  `verifyReplayReport` (`scripts/db/replay-checks.mjs`, tested by `node --test`), which fails,
+  naming the suite, if one matched no file, registered a `[gated]` placeholder other than
+  "no PostgREST target configured" (the replay has no PostgREST by design), or ran no real
+  test. Locally: `RCF_POSTGRES_BIN=/opt/homebrew/opt/postgresql@17/bin node scripts/run-db-invariants.mjs`.
+- **PostgREST / GoTrue** — the e2e job's Supabase steps in `.github/workflows/ci.yml`.
+
+A new file here must be added to one of the two. `src/__tests__/ci/release-gates.test.ts` fails
+until it is.
+
 ## What is in here
 
 | File                                  | Finding                                                                      | Marker         |
@@ -49,6 +64,7 @@ Two details worth knowing:
 | `function-grants.test.ts`             | A-3, A-5 — SECURITY DEFINER functions executable with the published anon key | `test`         |
 | `site-delete-cascade.test.ts`         | A-35, A-13 — a site holding content could not be deleted at all              | `test`         |
 | `rls-policies.test.ts`                | P2 permissive-policy class                                                   | `test`         |
+| `content-write-privileges.test.ts`    | s56 — a member's direct PostgREST write bypassed the owner-plan gate         | `test`         |
 | `content-version-i18n.test.ts`        | A-15 — snapshot/restore collapse language and variant                        | `test.failing` |
 | `restore-reports-rows.test.ts`        | A-16 — restore reports success while restoring nothing                       | `test.failing` |
 | `content-version-concurrency.test.ts` | A-23 — `create_content_version` races its own UNIQUE constraint              | `test.failing` |

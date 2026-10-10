@@ -422,11 +422,15 @@ export const RATE_LIMIT_CONFIGS = {
   API_AUTH: { windowMs: 15 * 60 * 1000, maxRequests: 5 }, // 5 requests per 15 minutes
   API_CONTENT: { windowMs: 60 * 1000, maxRequests: 100 }, // 100 requests per minute
   API_UPLOAD: { windowMs: 60 * 1000, maxRequests: 10 }, // 10 requests per minute
+  CHECKOUT_IP: { windowMs: 15 * 60 * 1000, maxRequests: 20 }, // 20 checkout attempts per 15 minutes per IP
+  CHECKOUT_USER: { windowMs: 15 * 60 * 1000, maxRequests: 10 }, // 10 new Checkout Sessions per 15 minutes per user
 
   // User-specific limits
   USER_GENERAL: { windowMs: 60 * 1000, maxRequests: 100 }, // 100 requests per minute
   USER_CONTENT_EDIT: { windowMs: 60 * 1000, maxRequests: 50 }, // 50 edits per minute
   USER_DOMAIN_VERIFY: { windowMs: 5 * 60 * 1000, maxRequests: 3 }, // 3 verifications per 5 minutes
+  EDITOR_INVITE_OWNER: { windowMs: 60 * 60 * 1000, maxRequests: 20 }, // 20 invitation resends per owner per hour
+  EDITOR_INVITE_RECIPIENT: { windowMs: 60 * 60 * 1000, maxRequests: 3 }, // 3 invitation resends per editor per hour
 
   // IP-based limits (more restrictive)
   IP_GENERAL: { windowMs: 60 * 1000, maxRequests: 200 }, // 200 requests per minute per IP

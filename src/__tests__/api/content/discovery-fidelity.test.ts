@@ -74,7 +74,8 @@ interface StoredRow {
   published_content: string;
   language: string;
   variant: string;
-  metadata: { type?: string };
+  page_path: string | null;
+  metadata: { type?: string; href?: string; alt?: string };
 }
 
 let storedRows: StoredRow[] = [];
@@ -104,7 +105,14 @@ const serviceClient: MockServiceClient = {
 
 type ContentMap = Record<
   string,
-  { selector: string; content: unknown; type?: string }
+  {
+    selector: string;
+    content: unknown;
+    type?: string;
+    href?: string;
+    alt?: string | null;
+    page_path?: string | null;
+  }
 >;
 
 /**
@@ -642,6 +650,95 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       });
 
       expect(storedFor(rows, "rcf-headline").metadata).toEqual({ type: "h1" });
+    });
+
+    it("captures safe authored href and alt values as the published baseline", async () => {
+      const rows = await postContentMap({
+        "rcf-link": {
+          selector: "a",
+          content: "Documentation",
+          type: "a",
+          href: "  /docs/getting-started  ",
+          alt: "  Product documentation  ",
+        },
+      });
+
+      expect(storedFor(rows, "rcf-link").metadata).toEqual({
+        type: "a",
+        href: "/docs/getting-started",
+        alt: "Product documentation",
+      });
+    });
+
+    it("keeps a discovered element while omitting an unsafe authored href", async () => {
+      const rows = await postContentMap({
+        "rcf-link": {
+          selector: "a",
+          content: "Unsafe link",
+          type: "a",
+          href: "javascript:alert(1)",
+        },
+      });
+
+      expect(storedFor(rows, "rcf-link")).toMatchObject({
+        original_content: "Unsafe link",
+        metadata: { type: "a" },
+      });
+    });
+
+    it("normalizes authored alt tabs and newlines without dropping the image", async () => {
+      const rows = await postContentMap({
+        "rcf-image": {
+          selector: "img",
+          content: "https://cdn.example.com/hero.png",
+          type: "img",
+          alt: "  Product\tteam\nreviewing the launch  ",
+        },
+      });
+
+      expect(storedFor(rows, "rcf-image").metadata).toEqual({
+        type: "img",
+        alt: "Product team reviewing the launch",
+      });
+    });
+
+    it("keeps absent href and alt absent while recording page provenance", async () => {
+      const rows = await postContentMap({
+        "computed-id": {
+          selector: "p",
+          content: "Page-local",
+          type: "p",
+          page_path: "/pricing",
+        },
+        "author-id": {
+          selector: "p",
+          content: "Shared",
+          type: "p",
+          page_path: null,
+        },
+        legacy: {
+          selector: "p",
+          content: "Legacy",
+          type: "p",
+        },
+      });
+
+      expect(storedFor(rows, "computed-id")).toMatchObject({
+        page_path: "/pricing",
+        metadata: { type: "p" },
+      });
+      expect(storedFor(rows, "author-id")).toMatchObject({
+        page_path: null,
+        metadata: { type: "p" },
+      });
+      expect(storedFor(rows, "legacy")).toMatchObject({
+        page_path: null,
+        metadata: { type: "p" },
+      });
+      expect(storedFor(rows, "computed-id").metadata).not.toHaveProperty(
+        "href",
+      );
+      expect(storedFor(rows, "computed-id").metadata).not.toHaveProperty("alt");
     });
   });
 

@@ -52,6 +52,21 @@ const SITE: SiteRow = {
   api_key: "the-hmac-secret",
 };
 
+function emptyStatsQuery() {
+  const result = { data: [], count: 0, error: null };
+  const query: Record<string, unknown> = {
+    then: (
+      resolve: (value: typeof result) => unknown,
+      reject?: (reason: unknown) => unknown,
+    ) => Promise.resolve(result).then(resolve, reject),
+    maybeSingle: jest.fn(async () => ({ data: null, error: null })),
+  };
+  for (const method of ["select", "eq", "in", "order", "range", "limit"]) {
+    query[method] = jest.fn(() => query);
+  }
+  return query;
+}
+
 /** Answers the handful of reads this route makes, by table. */
 function installTables(permission: string) {
   mockFrom.mockImplementation((table: string) => {
@@ -74,17 +89,9 @@ function installTables(permission: string) {
       };
     }
 
-    // content_elements / content_history — counts only, uninteresting here.
-    return {
-      select: () => ({
-        eq: async () => ({ data: [], count: 0, error: null }),
-        in: () => ({
-          order: () => ({
-            limit: () => ({ single: async () => ({ data: null }) }),
-          }),
-        }),
-      }),
-    };
+    // content_elements / content_history — empty, but shaped like the real
+    // ordered pager so the route can request the terminating empty page.
+    return emptyStatsQuery();
   });
 }
 
@@ -148,4 +155,33 @@ describe("GET /api/sites — install credentials", () => {
 
     expect(response.status).toBe(401);
   });
+});
+
+/**
+ * PR #72 review (D1). "Edit website" asked every member for the owner's
+ * session (`["edit","admin"]`), and `createEditSession` refuses anything
+ * beyond the caller's live grant (ADR 047): an `edit` member could see a
+ * site and never open it. The dashboard can only ask for what the member
+ * holds if the list says what that is. The value is the caller's own row,
+ * nobody else's, and it grants nothing: the session route still checks it.
+ */
+describe("GET /api/sites — the caller's own grant", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each(["admin", "edit", "view"])(
+    "tells a member holding %s their own grant",
+    async (permission) => {
+      installTables(permission);
+
+      const body = await listSites();
+
+      expect(body.sites[0].permission).toBe(permission);
+    },
+  );
 });

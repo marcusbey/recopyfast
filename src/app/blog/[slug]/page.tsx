@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +7,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
+import { formatDate } from "@/lib/utils/format-date";
 
 interface BlogPost {
   id: string;
@@ -33,6 +35,21 @@ async function getBlogPost(slug: string): Promise<BlogPost | null> {
   }
 
   return data;
+}
+
+/**
+ * Each post is its own canonical. Until s88 every post inherited the root
+ * layout's canonical — the homepage — so search engines were told each article
+ * was a duplicate of it. The slug alone names the URL, so this reads nothing;
+ * an unknown slug still ends in `notFound()` below, whose response is noindex.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  return { alternates: { canonical: `/blog/${slug}` } };
 }
 
 export default async function BlogPostPage({
@@ -72,11 +89,7 @@ export default async function BlogPostPage({
             </Badge>
             <div className="flex items-center text-muted-foreground text-sm">
               <Calendar className="h-4 w-4 mr-2" />
-              {new Date(post.published_at).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
+              {formatDate(post.published_at)}
             </div>
             <div className="flex items-center text-muted-foreground text-sm">
               <Clock className="h-4 w-4 mr-2" />

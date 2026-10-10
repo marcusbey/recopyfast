@@ -5,38 +5,47 @@ import { useRef } from "react";
 import {
   MousePointerClick,
   Globe2,
-  Users2,
+  UserPlus,
   Wand2,
   History,
   Shield,
-  Languages,
-  FlaskConical,
+  ImagePlus,
+  Upload,
 } from "lucide-react";
 
 /**
- * The two capabilities that are genuinely hard to copy, and that the page never
- * mentioned before this. Both are shipped: translation runs through
- * `POST /api/ai/translate` (batched, writes the translated strings straight back
- * to the content table), and the variant loop runs `POST /api/ab-tests/generate`
- * → the embed buckets each visitor → `POST /api/ab-tests/track` → the results
- * route scores it and a cron closes the test out.
+ * Until s50 the two cards were Translate and Test, and this comment claimed
+ * both had shipped. Neither had a customer surface: the A/B page sits in the
+ * unrouted `src/app/dashboard/_ab-tests` folder and its lifecycle cron is not in
+ * vercel.json; the only translation UI is imported by tests alone, and visitors
+ * are always served `en`. A visitor could buy on the strength of either and
+ * find nothing behind it.
  *
- * Every claim below traces to one of those routes. Nothing here is aspirational.
+ * Each card now points at the code behind it: Invite at the invite form and
+ * the editor's one-time sign-in code, Rewrite at `POST /api/ai/suggest`. A/B
+ * testing and translation stay off this page until a customer can reach them.
+ *
+ * The Invite card first said "Publish stays off unless you grant it, so their
+ * edits wait as drafts for you", on the strength of `InviteEditorForm`'s View
+ * and Edit default. The dashboard's own "Invite a client" dialog
+ * (ActivationChecklist) pre-selects Publish, so on the first-run path the
+ * client published directly (s50 review). What holds on every path is that
+ * Publish is a per-editor permission, so the card says that and no more.
  */
 const headline = [
   {
-    icon: Languages,
-    eyebrow: "Translate",
-    title: "Every string on the site, in another language",
+    icon: UserPlus,
+    eyebrow: "Invite",
+    title: "Hand a client the words, not the site",
     description:
-      "Pick a language and translate the whole site in one pass — not string by string. Translations are written back as real content, so they stay editable afterwards.",
+      "Invite someone by email. They sign in with a one-time code, no account and no password, and change the words on the page, never the layout or the code. You choose, per editor, who can publish.",
   },
   {
-    icon: FlaskConical,
-    eyebrow: "Test",
-    title: "Find out which words actually win",
+    icon: Wand2,
+    eyebrow: "Rewrite",
+    title: "AI rewrites, in place",
     description:
-      "Generate variants of a headline, split your traffic across them, and let the test call it. Views, clicks and conversions are attributed per variant, and the winner stays live on its own.",
+      "Select any text and ask for a clearer, shorter, more professional or more casual version. Keep it, edit it, or keep yours.",
   },
 ];
 
@@ -52,33 +61,34 @@ const supporting = [
       "Open your site from the dashboard and edit in place. No CMS screens to learn.",
   },
   {
-    icon: Wand2,
-    title: "AI that writes like you",
+    icon: ImagePlus,
+    title: "Swap images too",
     description:
-      "Rewrite any string for a tone and a goal, without leaving the page.",
+      "Replace a photo by pasting a link or uploading a file, right on the page.",
   },
   {
-    icon: Users2,
-    title: "Your whole team",
+    icon: Upload,
+    title: "Draft, then publish",
     description:
-      "Role-based permissions, plus revocable edit access for contractors.",
+      "Edits stay a draft until someone with Publish access sets them live. Visitors only ever see published copy.",
   },
   {
     icon: Globe2,
-    title: "Works everywhere",
-    description: "React, Vue, WordPress, Webflow, static HTML. One script tag.",
+    title: "One script tag",
+    description:
+      "On the site you already built: React, Vue, WordPress, Webflow or plain HTML. Its Content Security Policy has to allow our script.",
   },
   {
     icon: History,
-    title: "Never lose a word",
+    title: "Save and restore",
     description:
-      "Full version history on every string. Roll back at any point.",
+      "Save a version of the site's copy before a big change, and restore it in one click.",
   },
   {
     icon: Shield,
     title: "Secure by default",
     description:
-      "Scoped API keys, per-site permissions, and an audit log of every edit.",
+      "Per-site tokens, per-site API keys, and per-editor permissions.",
   },
 ];
 
@@ -107,10 +117,11 @@ export default function Benefits() {
             Features
           </span>
           <h2 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-6">
-            Changing the words is the easy part
+            Changing the words should be the easy part
           </h2>
           <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto">
-            Knowing which words to use is the hard part. ReCopyFast does both.
+            With ReCopyFast it is: the people who own the copy change it on the
+            live page, and you decide who can publish.
           </p>
         </motion.div>
 

@@ -6,11 +6,17 @@ import {
   readScrollProgress,
   subscribeScrollProgress,
 } from "@/lib/hooks/useLenis";
+import { hasHardwareWebGL } from "./hardware-webgl";
 import SkyLayered from "./SkyLayered";
 import SkyVolumetric from "./SkyVolumetric";
 
 /**
  * Picks which sky to render and cross-fades between them.
+ *
+ * Before any of that: no GPU, no shader. A browser that can only draw WebGL in
+ * software gets the static gradient below and no canvas at all — on that path
+ * one frame of either shader cost 1–2 s of CPU and stalled the whole page (s74,
+ * see hardware-webgl.ts). Everything that follows assumes a GPU.
  *
  * The raymarcher is worth roughly five times the cheap path per frame, and it
  * is worth that only above the fold — nobody studies the sky behind a pricing
@@ -197,6 +203,11 @@ export default function SkyBackground({
   scrollProgress = 0,
   heroSelector = "#hero",
 }: SkyBackgroundProps) {
+  /* Decided once, before the first render commits, so a software renderer never
+     mounts the canvas even for a frame. Safe as a lazy initializer: this
+     component is client-only (`ssr: false` in src/app/page.tsx), so there is no
+     server render to disagree with. */
+  const [canDrawShaderSky] = useState(hasHardwareWebGL);
   const mouseRef = useRef({ x: 0.5, y: 0.5 });
   const [isHeroVisible, setIsHeroVisible] = useState(true);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
@@ -253,33 +264,45 @@ export default function SkyBackground({
     isHeroVisible && !isSmallScreen && !prefersReducedMotion;
 
   return (
-    <div className="fixed inset-0 -z-10" aria-hidden="true">
-      <Canvas
-        /* Half-ish resolution while raymarching. The clouds are a soft, low
-           frequency subject and the panes over them blur at 32px, so the
-           upscale is genuinely invisible — which is what makes the expensive
-           path affordable at all. */
-        dpr={wantsVolumetric ? MAX_DPR_VOLUMETRIC : MAX_DPR_LAYERED}
-        /* Both shaders are fullscreen quads that ignore the camera; this exists
-           only because R3F requires one. */
-        camera={{ position: [0, 0, 1], fov: 50 }}
-        gl={{ antialias: false, alpha: false, powerPreference: "low-power" }}
-        /* Reduced motion: render once and stop. Everything downstream still
-           renders, it simply stops advancing. */
-        frameloop={prefersReducedMotion ? "demand" : "always"}
-      >
-        <Scene
-          mouseRef={mouseRef}
-          fallbackProgress={scrollProgress}
-          wantsVolumetric={wantsVolumetric}
-          isAnimating={!prefersReducedMotion}
-        />
-        {prefersReducedMotion && <InvalidateOnScroll />}
-      </Canvas>
+    <div
+      className="fixed inset-0 -z-10"
+      aria-hidden="true"
+      /* Which sky this browser got. E2E-019 waits on it: the sky is a dynamic
+         import, so "no canvas yet" alone cannot tell the static sky from a
+         shader that has not mounted. Also the first thing to check in devtools
+         when someone reports a flat sky. */
+      data-sky={canDrawShaderSky ? "shader" : "static"}
+    >
+      {canDrawShaderSky && (
+        <Canvas
+          /* Half-ish resolution while raymarching. The clouds are a soft, low
+             frequency subject and the panes over them blur at 32px, so the
+             upscale is genuinely invisible — which is what makes the expensive
+             path affordable at all. */
+          dpr={wantsVolumetric ? MAX_DPR_VOLUMETRIC : MAX_DPR_LAYERED}
+          /* Both shaders are fullscreen quads that ignore the camera; this
+             exists only because R3F requires one. */
+          camera={{ position: [0, 0, 1], fov: 50 }}
+          gl={{ antialias: false, alpha: false, powerPreference: "low-power" }}
+          /* Reduced motion: render once and stop. Everything downstream still
+             renders, it simply stops advancing. */
+          frameloop={prefersReducedMotion ? "demand" : "always"}
+        >
+          <Scene
+            mouseRef={mouseRef}
+            fallbackProgress={scrollProgress}
+            wantsVolumetric={wantsVolumetric}
+            isAnimating={!prefersReducedMotion}
+          />
+          {prefersReducedMotion && <InvalidateOnScroll />}
+        </Canvas>
+      )}
 
-      {/* Sits behind the canvas and shows through only if WebGL is unavailable
-          or the context is lost. Matches the shader's horizon-to-zenith ramp so
-          the failure is a flatter sky, not a different one. */}
+      {/* The whole sky when the browser has no GPU; otherwise it sits behind
+          the canvas and shows through only if the context is lost. Matches the
+          shader's horizon-to-zenith ramp so the failure is a flatter sky, not a
+          different one. Same gradient classes as the loading placeholder in
+          src/app/page.tsx — keep the two ramps identical. */}
       <div className="absolute inset-0 -z-10 bg-gradient-to-b from-[#5a9ce4] via-[#aed3f4] to-[#d6eafa]" />
     </div>
   );

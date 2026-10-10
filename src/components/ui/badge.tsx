@@ -20,7 +20,9 @@ import { cn } from "@/lib/utils/cn";
  */
 const badgeVariants = cva(
   [
-    "inline-flex items-center rounded-full border",
+    // Square at the control radius (s66a, owner decision 2026-10-08); the
+    // leading dot below stays round, a listed exception (ADR 050).
+    "inline-flex items-center rounded-control border",
     "px-2 py-0.5 text-xs font-medium",
     "transition-colors duration-200 ease-out",
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",

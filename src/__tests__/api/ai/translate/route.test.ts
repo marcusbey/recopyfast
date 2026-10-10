@@ -1,4 +1,14 @@
 // Mock dependencies first before any imports
+
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: jest.fn(() =>
+    Promise.resolve({ ok: true, ownerId: "owner-1" }),
+  ),
+}));
+
 jest.mock("@/lib/ai/openai-service", () => ({
   aiService: {
     batchTranslate: jest.fn(),
@@ -8,6 +18,8 @@ jest.mock("@/lib/ai/openai-service", () => ({
   },
 }));
 jest.mock("@/lib/supabase/server");
+// The translated rows are written through the service role since s56 (ADR 042).
+jest.mock("@/lib/supabase/service");
 
 jest.mock("@/lib/feature-gating/permissions", () => ({
   consumeFeatureUsage: jest.fn(),
@@ -18,12 +30,22 @@ jest.mock("@/lib/api/rate-limit", () => ({
   getClientIp: jest.fn(() => "127.0.0.1"),
 }));
 
+// Without this mock the route's refund ran the real one against a placeholder
+// service client and failed silently, so no test could see a refund (s48).
+jest.mock("@/lib/credits/system", () => ({
+  CREDIT_COSTS: { AI_TRANSLATION: 5 },
+  refundCharge: jest.fn(),
+}));
+
 import { NextRequest, NextResponse } from "next/server";
 import { POST } from "@/app/api/ai/translate/route";
 import { aiService } from "@/lib/ai/openai-service";
 import { createClient } from "@/lib/supabase/server";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { refundCharge } from "@/lib/credits/system";
+import { createServiceRoleClient } from "@/lib/supabase/service";
+import { checkOwnerCanEdit } from "@/lib/billing/owner-can-edit";
 
 const TEST_USER = { id: "user-123", email: "user@example.com" };
 
@@ -38,12 +60,30 @@ const mockSupabase = {
   upsert: jest.fn().mockReturnThis(),
 };
 
+/**
+ * The service client. Since s56 (ADR 042) no web principal holds DML on
+ * `content_elements`, so the translated rows are upserted here, never on the
+ * cookie client above.
+ */
+const mockService = {
+  from: jest.fn(),
+  upsert: jest.fn(),
+};
+
 const mockCreateClient = createClient as jest.MockedFunction<
   typeof createClient
 >;
 const mockAiService = aiService as jest.Mocked<typeof aiService>;
 const mockConsumeFeatureUsage = consumeFeatureUsage as jest.Mock;
 const mockEnforceRateLimit = enforceRateLimit as jest.Mock;
+const mockRefundCharge = refundCharge as jest.Mock;
+
+/** What the mocked charge returns; every refund must be keyed by exactly this. */
+const RECEIPT = {
+  usageId: "usage-translate-1",
+  userId: TEST_USER.id,
+  credits: 5,
+};
 
 /** sites.id is a UUID column; the route rejects anything that is not one. */
 const VALID_SITE_ID = "7e3b2d6c-1ab1-46f3-92fd-493173fa3e17";
@@ -69,7 +109,14 @@ describe("/api/ai/translate - POST", () => {
       error: null,
     });
     mockEnforceRateLimit.mockResolvedValue(null);
-    mockConsumeFeatureUsage.mockResolvedValue({ success: true });
+    mockConsumeFeatureUsage.mockResolvedValue({
+      success: true,
+      charge: RECEIPT,
+    });
+    mockRefundCharge.mockResolvedValue({ success: true, refunded: 5 });
+    mockService.from.mockReturnValue(mockService);
+    mockService.upsert.mockResolvedValue({ error: null });
+    (createServiceRoleClient as jest.Mock).mockReturnValue(mockService);
   });
 
   it("should successfully translate elements", async () => {
@@ -101,7 +148,7 @@ describe("/api/ai/translate - POST", () => {
     });
 
     // Mock database upsert
-    mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+    mockService.upsert.mockResolvedValueOnce({ error: null });
 
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
@@ -133,8 +180,10 @@ describe("/api/ai/translate - POST", () => {
       "website homepage",
     );
 
-    // Verify database upsert
-    expect(mockSupabase.upsert).toHaveBeenCalledWith(
+    // Verify database upsert: on the service client, never the cookie client.
+    expect(mockSupabase.upsert).not.toHaveBeenCalled();
+    expect(mockService.from).toHaveBeenCalledWith("content_elements");
+    expect(mockService.upsert).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           site_id: VALID_SITE_ID,
@@ -277,6 +326,82 @@ describe("/api/ai/translate - POST", () => {
     expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
   });
 
+  /**
+   * s56 (ADR 042). The route used to accept ANY permission row, `view`
+   * included, and RLS was the only thing refusing a `view` member's upsert —
+   * after that member had been charged, with the error swallowed. RLS no
+   * longer sees this write (the service role makes it), so the route refuses
+   * `view` itself, before the per-site limiter, the gate, the charge and the
+   * model.
+   */
+  it("refuses a view member with 403 before any limiter, gate, charge, model call or write", async () => {
+    mockSupabase.single
+      .mockResolvedValueOnce({ data: { id: VALID_SITE_ID }, error: null })
+      .mockResolvedValueOnce({ data: { permission: "view" }, error: null });
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/ai/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          siteId: VALID_SITE_ID,
+          fromLanguage: "en",
+          toLanguage: "es",
+          elements: [{ id: "header-1", text: "Welcome" }],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Forbidden" });
+    // Only the per-IP limiter ran; the per-site one never did.
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(1);
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ endpoint: "ai/translate:ip" }),
+    );
+    expect(checkOwnerCanEdit).not.toHaveBeenCalled();
+    expect(mockConsumeFeatureUsage).not.toHaveBeenCalled();
+    expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+    expect(mockService.upsert).not.toHaveBeenCalled();
+    expect(mockSupabase.upsert).not.toHaveBeenCalled();
+  });
+
+  it("writes an edit member's translations through the service client, every row on this site", async () => {
+    allowSiteAccess();
+    mockAiService.batchTranslate.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: "header-1", originalText: "Welcome", translatedText: "Hola" },
+        { id: "btn-1", originalText: "Start", translatedText: "Empezar" },
+      ],
+      tokensUsed: 20,
+    });
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/ai/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          siteId: VALID_SITE_ID,
+          fromLanguage: "en",
+          toLanguage: "es",
+          elements: [
+            { id: "header-1", text: "Welcome" },
+            { id: "btn-1", text: "Start" },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockService.upsert).toHaveBeenCalledTimes(1);
+    const [rows] = mockService.upsert.mock.calls[0] as [
+      Array<{ site_id: string }>,
+    ];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.site_id === VALID_SITE_ID)).toBe(true);
+    expect(mockSupabase.upsert).not.toHaveBeenCalled();
+  });
+
   it("should return 403 when the plan quota rejects the translation", async () => {
     allowSiteAccess();
     mockConsumeFeatureUsage.mockResolvedValue({
@@ -300,6 +425,8 @@ describe("/api/ai/translate - POST", () => {
     expect(response.status).toBe(403);
     expect(data.requiresUpgrade).toBe(true);
     expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+    // A quota refusal charged nothing, so there is nothing to give back.
+    expect(mockRefundCharge).not.toHaveBeenCalled();
   });
 
   it("should short-circuit when the IP rate limiter rejects the request", async () => {
@@ -397,7 +524,7 @@ describe("/api/ai/translate - POST", () => {
     });
 
     // Mock database upsert failure
-    mockSupabase.upsert.mockResolvedValueOnce({
+    mockService.upsert.mockResolvedValueOnce({
       error: { message: "Database error" },
     });
 
@@ -436,7 +563,7 @@ describe("/api/ai/translate - POST", () => {
     });
 
     // Mock database upsert
-    mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+    mockService.upsert.mockResolvedValueOnce({ error: null });
 
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
@@ -550,6 +677,158 @@ describe("/api/ai/translate - POST", () => {
     expect(response.status).toBe(500);
     expect(data).toEqual({
       error: "Internal server error",
+    });
+    // s48: the charge had landed, so the catch gives it back.
+    expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT);
+  });
+
+  describe("charges and refunds (s48, defect 1)", () => {
+    const ORIGINAL_OPENAI_KEY = process.env.OPENAI_API_KEY;
+
+    afterEach(() => {
+      if (ORIGINAL_OPENAI_KEY === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = ORIGINAL_OPENAI_KEY;
+      }
+    });
+
+    const elementsOf = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        id: `el-${index}`,
+        text: `Text ${index}`,
+      }));
+
+    const translationsOf = (elements: Array<{ id: string; text: string }>) =>
+      elements.map((element) => ({
+        id: element.id,
+        originalText: element.text,
+        translatedText: `ES ${element.text}`,
+      }));
+
+    const translateRequest = (elements: Array<{ id: string; text: string }>) =>
+      new NextRequest("http://localhost/api/ai/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          siteId: VALID_SITE_ID,
+          fromLanguage: "en",
+          toLanguage: "es",
+          elements,
+        }),
+      });
+
+    it("AI key missing: 503, nothing charged, the model never called", async () => {
+      // jest.setup.js sets a key; this is the deploy that forgot it. The old
+      // route charged 5 credits and answered "Successfully translated 0
+      // elements" (next-dev-refund.log).
+      process.env.OPENAI_API_KEY = "  ";
+      jest.spyOn(console, "error").mockImplementation(() => {});
+      allowSiteAccess();
+
+      const response = await POST(translateRequest(elementsOf(1)));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "AI translation is not available right now.",
+      });
+      expect(mockConsumeFeatureUsage).not.toHaveBeenCalled();
+      expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining("OPENAI_API_KEY"),
+      );
+    });
+
+    it.each([
+      [
+        "a failed batch",
+        { success: false, error: "No text could be translated." },
+      ],
+      ["a batch with no rows", { success: true, data: [] }],
+    ])(
+      "nothing translated: failure and the whole charge refunded (%s)",
+      async (_label, batch) => {
+        allowSiteAccess();
+        mockAiService.batchTranslate.mockResolvedValueOnce(batch);
+
+        const response = await POST(translateRequest(elementsOf(2)));
+        const body = JSON.stringify(await response.json());
+
+        expect(response.status).toBe(500);
+        expect(body).not.toContain("Successfully translated");
+        expect(mockRefundCharge).toHaveBeenCalledTimes(1);
+        expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT);
+        expect(RECEIPT.credits).toBe(5);
+      },
+    );
+
+    it.each([
+      // [elements, translated, refunded]
+      [5, 3, 2], // 2 of 5 failed: 5 x 2/5 = 2
+      [3, 2, 2], // 1 of 3 failed: 5 x 1/3 = 1.67, rounded up — floor gives 1
+    ])(
+      "partial batch: the failed share is refunded, rounded up (%i sent, %i translated)",
+      async (sent, translated, refunded) => {
+        allowSiteAccess();
+        const elements = elementsOf(sent);
+        const rows = translationsOf(elements.slice(0, translated));
+        mockAiService.batchTranslate.mockResolvedValueOnce({
+          success: true,
+          data: rows,
+          tokensUsed: 10,
+        });
+        mockService.upsert.mockResolvedValueOnce({ error: null });
+
+        const response = await POST(translateRequest(elements));
+        const data = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(data.translations).toEqual(rows);
+        expect(mockRefundCharge).toHaveBeenCalledTimes(1);
+        expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT, refunded);
+      },
+    );
+
+    it("every element translated: nothing refunded", async () => {
+      allowSiteAccess();
+      const elements = elementsOf(3);
+      mockAiService.batchTranslate.mockResolvedValueOnce({
+        success: true,
+        data: translationsOf(elements),
+        tokensUsed: 10,
+      });
+      mockService.upsert.mockResolvedValueOnce({ error: null });
+
+      const response = await POST(translateRequest(elements));
+
+      expect(response.status).toBe(200);
+      expect(mockRefundCharge).not.toHaveBeenCalled();
+    });
+
+    it("an error after the charge refunds it in the catch", async () => {
+      jest.spyOn(console, "error").mockImplementation(() => {});
+      allowSiteAccess();
+      mockAiService.batchTranslate.mockRejectedValueOnce(
+        new Error("socket hang up"),
+      );
+
+      const response = await POST(translateRequest(elementsOf(2)));
+
+      expect(response.status).toBe(500);
+      expect(mockRefundCharge).toHaveBeenCalledTimes(1);
+      expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT);
+    });
+
+    it("an error before the charge refunds nothing", async () => {
+      jest.spyOn(console, "error").mockImplementation(() => {});
+      allowSiteAccess();
+      mockConsumeFeatureUsage.mockRejectedValueOnce(
+        new Error("credit_purchases read failed: connection reset"),
+      );
+
+      const response = await POST(translateRequest(elementsOf(2)));
+
+      expect(response.status).toBe(500);
+      expect(mockRefundCharge).not.toHaveBeenCalled();
     });
   });
 });

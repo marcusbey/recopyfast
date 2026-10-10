@@ -50,7 +50,9 @@ const mockCreateServiceRoleClient =
     typeof createServiceRoleClient
   >;
 
-const SITE_ID = "site-123";
+// RFC 4122 v4, as gen_random_uuid() issues: since s77 (s69 R1) these routes
+// refuse an id `requireUuid` rejects before any work.
+const SITE_ID = "3f1b2c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 const TOKEN = "staging-token-abc";
 const ORIGIN = "https://customer.example";
 const USER_AGENT = "Mozilla/5.0 (Macintosh) Chrome/120";

@@ -50,7 +50,12 @@ interface StatusDefinition {
 }
 
 export type SiteStatus = "awaiting-install" | "live" | "stale";
-export type ContentStatus = "original" | "edited" | "pending";
+/**
+ * A row's change state, as `public.content_changes.change_state` derives it
+ * (ADR 054). "Edited" was retired in s70b: it meant "published, different from
+ * the original", and the owner chose Pending + Published (2026-10-08).
+ */
+export type ContentStatus = "original" | "pending" | "published";
 /**
  * Keyed by the raw `content_versions.change_type` string, which is what
  * `VersionHistoryPanel` passes through unmodified. The key was `bulk`, a value
@@ -163,17 +168,17 @@ export const contentStatuses: Record<ContentStatus, StatusDefinition> = {
     icon: FileText,
     description: "Unchanged since ReCopyFast first read this element",
   },
-  edited: {
-    label: "Edited",
-    tone: "info",
-    icon: PencilLine,
-    description: "Edited and live on your site",
-  },
   pending: {
     label: "Pending",
     tone: "warning",
     icon: Clock,
-    description: "Edited in staging, not published yet",
+    description: "Saved as a draft, not live yet",
+  },
+  published: {
+    label: "Published",
+    tone: "success",
+    icon: Upload,
+    description: "Live on your site, different from the original",
   },
 };
 

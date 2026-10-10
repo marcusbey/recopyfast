@@ -61,12 +61,15 @@ describe("Auth Guards", () => {
   // SEC-002: All authenticated API routes return 401
   describe("SEC-002: API route authentication", () => {
     it("should list all routes requiring user session auth", () => {
+      // `/api/ai/suggest` is no longer here (s40): its only caller is the
+      // widget on a customer's origin, which has no session cookie, so it
+      // authorises editor credentials instead — see
+      // src/__tests__/api/ai/suggest/editor-credentials.test.ts.
       const authenticatedApiRoutes = [
         "/api/billing/subscription",
         "/api/teams",
         "/api/sites",
         "/api/api-keys",
-        "/api/ai/suggest",
         "/api/ai/translate",
         "/api/billing/dashboard",
         "/api/billing/payment-methods",

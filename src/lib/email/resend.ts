@@ -7,6 +7,7 @@
  */
 
 import { Resend } from "resend";
+import type { EditorPermission } from "@/lib/auth/editor-access";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 // Verified sender. Must be a domain/address verified in the Resend dashboard.
@@ -81,6 +82,94 @@ async function send(opts: {
   }
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+const PERMISSION_DESCRIPTIONS: Record<EditorPermission, string> = {
+  view: "View the site",
+  edit: "edit copy",
+  publish: "publish changes",
+  admin: "use administrator-level editing controls",
+};
+
+function describePermissions(permissions: EditorPermission[]): string {
+  return permissions
+    .map((permission) => PERMISSION_DESCRIPTIONS[permission])
+    .join(", ");
+}
+
+function tokenFreeHubUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Invite an editor to the hub after their allowlist row becomes active.
+ *
+ * The URL is deliberately stripped to origin + path before it reaches either
+ * body. Editor access is proved by the six-digit code sent later; putting a
+ * bearer token in an invitation would create a second, forwardable auth path.
+ */
+export async function sendEditorInvitationEmail(params: {
+  to: string;
+  inviterEmail: string;
+  siteName: string;
+  siteDomain: string;
+  permissions: EditorPermission[];
+  hubUrl: string;
+}): Promise<SendResult> {
+  const hubUrl = tokenFreeHubUrl(params.hubUrl);
+  if (!hubUrl) {
+    console.error(
+      "[email] Refusing editor invitation with an invalid hub URL.",
+    );
+    return { sent: false, error: "Invalid editor hub URL" };
+  }
+
+  const permissions = describePermissions(params.permissions);
+  // Site names are owner-controlled and registration historically imposed no
+  // length or control-character bound. Keep them out of mail headers and cap
+  // the rendered label so one name cannot create an oversized message.
+  const siteName = params.siteName
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  const subject = `${params.inviterEmail} invited you to edit ${siteName}`;
+  const text = [
+    `${params.inviterEmail} invited you to edit ${siteName} (${params.siteDomain}) in ReCopyFast.`,
+    "",
+    `You can: ${permissions}.`,
+    "",
+    `Open the editor hub: ${hubUrl}`,
+    "",
+    "Sign in with the 6-digit code sent to this email address, with no account or password.",
+  ].join("\n");
+  const html = `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
+      <h2 style="margin:0 0 12px;font-size:20px">You can now edit ${escapeHtml(siteName)}</h2>
+      <p style="margin:0 0 12px;color:#475569"><strong>${escapeHtml(params.inviterEmail)}</strong> invited you to edit ${escapeHtml(siteName)} at ${escapeHtml(params.siteDomain)}.</p>
+      <p style="margin:0 0 20px;color:#475569">You can: ${escapeHtml(permissions)}.</p>
+      <a href="${escapeHtml(hubUrl)}" style="display:inline-block;padding:10px 16px;border-radius:6px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600">Open the editor hub</a>
+      <p style="margin:20px 0 0;color:#475569">Sign in with the 6-digit code sent to this email address, with no account or password.</p>
+    </div>`;
+
+  return send({ to: params.to, subject, html, text });
+}
+
 /**
  * Deliver a staging-access verification code.
  * The code is a short-lived secret; it is only ever sent here, never returned
@@ -92,6 +181,10 @@ export async function sendStagingVerificationEmail(
   siteLabel?: string,
 ): Promise<SendResult> {
   const where = siteLabel ? ` for ${siteLabel}` : "";
+  // s68b M6: the label is admin-chosen free text mailed to an address the
+  // admin chooses. Raw in HTML it could plant a link beside a genuine code from
+  // our domain. Escaped in HTML only — the text body is plain text.
+  const htmlWhere = siteLabel ? ` for ${escapeHtml(siteLabel)}` : "";
   const subject = "Your ReCopyFast staging access code";
   const text = [
     `Your verification code${where} is: ${code}`,
@@ -101,7 +194,7 @@ export async function sendStagingVerificationEmail(
   const html = `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f172a">
       <h2 style="margin:0 0 12px;font-size:18px">Staging access code</h2>
-      <p style="margin:0 0 16px;color:#475569">Use this code to verify your access${where}:</p>
+      <p style="margin:0 0 16px;color:#475569">Use this code to verify your access${htmlWhere}:</p>
       <div style="font-size:32px;font-weight:700;letter-spacing:6px;padding:16px 0;text-align:center;background:#f1f5f9;border-radius:8px">${code}</div>
       <p style="margin:16px 0 0;color:#94a3b8;font-size:13px">Expires in 10 minutes. If you didn't request access, ignore this email.</p>
     </div>`;
@@ -122,6 +215,8 @@ export async function sendEditorAccessCode(
   siteLabel?: string,
 ): Promise<SendResult> {
   const where = siteLabel ? ` for ${siteLabel}` : "";
+  // Escaped in HTML for the reason given in sendStagingVerificationEmail.
+  const htmlWhere = siteLabel ? ` for ${escapeHtml(siteLabel)}` : "";
   const subject = "Your ReCopyFast editing code";
   const text = [
     `Your editing code${where} is: ${code}`,
@@ -132,7 +227,7 @@ export async function sendEditorAccessCode(
   const html = `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f172a">
       <h2 style="margin:0 0 12px;font-size:18px">Your editing code</h2>
-      <p style="margin:0 0 16px;color:#475569">Enter this code to start editing${where}:</p>
+      <p style="margin:0 0 16px;color:#475569">Enter this code to start editing${htmlWhere}:</p>
       <div style="font-size:32px;font-weight:700;letter-spacing:6px;padding:16px 0;text-align:center;background:#f1f5f9;border-radius:8px">${code}</div>
       <p style="margin:16px 0 0;color:#94a3b8;font-size:13px">Expires in 10 minutes and can be used once. If you didn't ask to edit, ignore this email — nothing has changed.</p>
     </div>`;

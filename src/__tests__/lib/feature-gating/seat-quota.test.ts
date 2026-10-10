@@ -92,6 +92,7 @@ function stubSeatTables({
 
     const chain: Record<string, unknown> = {
       select: jest.fn(() => chain),
+      order: jest.fn(() => chain),
       limit: jest.fn(() => chain),
       eq: jest.fn(() => chain),
       neq: jest.fn(() => chain),

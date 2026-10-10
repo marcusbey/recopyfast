@@ -266,6 +266,36 @@ describe("/api/webhooks", () => {
   });
 
   describe("PUT", () => {
+    it("never returns the signing secret even if the manager hands back an overbroad row", async () => {
+      manager.updateWebhook.mockResolvedValue({
+        id: WEBHOOK_ID,
+        site_id: SITE_ID,
+        url: "https://build.example.com/other",
+        secret_prefix: "deadbeef",
+        secret: "must-not-reach-the-collaborator",
+      } as never);
+
+      const response = await PUT(
+        jsonRequest("PUT", {
+          webhook_id: WEBHOOK_ID,
+          is_active: false,
+        }),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body).toEqual(
+        expect.objectContaining({
+          id: WEBHOOK_ID,
+          secret_prefix: "deadbeef",
+        }),
+      );
+      expect(body).not.toHaveProperty("secret");
+      expect(JSON.stringify(body)).not.toContain(
+        "must-not-reach-the-collaborator",
+      );
+    });
+
     it("never lets the caller set the secret or reset the failure count", async () => {
       manager.updateWebhook.mockResolvedValue({ id: WEBHOOK_ID } as never);
 

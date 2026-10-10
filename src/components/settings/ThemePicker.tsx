@@ -43,14 +43,21 @@ export function ThemePicker() {
               role="radio"
               aria-checked={isSelected}
               onClick={() => setTheme(option)}
-              className={`rounded-lg border-2 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              // 1px and square, selected like every option toggle: the
+              // accent border, the accent surface and the tick (design
+              // system, Borders). It was `border-2`, a thicker border for the
+              // selection, until s66b2. Unselected is a control boundary,
+              // `border-input` with the Input's hover: s66b2 first shipped
+              // `border-border`, the divider's `--line` at 1.45:1 on the card,
+              // so an option you could press drew like a rule (s66b2 review).
+              className={`rounded-control border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 isSelected
-                  ? "border-primary"
-                  : "border-border hover:border-line-strong"
+                  ? "border-primary bg-tone-accent-surface"
+                  : "border-input hover:border-foreground/40"
               }`}
             >
               <div
-                className={`mb-2 h-20 w-full rounded border border-border ${THEME_SWATCHES[option]}`}
+                className={`mb-2 h-20 w-full rounded-container border border-border ${THEME_SWATCHES[option]}`}
               />
               <p className="flex items-center justify-center gap-1 text-sm font-medium">
                 {THEME_LABELS[option]}

@@ -14,6 +14,9 @@ import { NextRequest, NextResponse } from "next/server";
  * server-side. So `*` grants a browser nothing that a plain server-to-server
  * request could not already do.
  *
+ * `GET /api/published/[siteId]`, the published-copy snapshot, verifies no
+ * token at all: it serves copy already public on the customer's page (ADR 046).
+ *
  * It deliberately does NOT reflect the caller's origin together with
  * `Access-Control-Allow-Credentials: true`. That combination lets ANY website
  * issue credentialed requests to these endpoints using the visitor's cookies.

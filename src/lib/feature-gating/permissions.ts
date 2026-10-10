@@ -1,13 +1,16 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   getEffectivePlan,
   hasAnyEntitlement,
 } from "@/lib/billing/entitlements";
+import { resolveEntitlement } from "@/lib/billing/effective-plan";
 import {
   getUserCreditBalance,
   consumeCredits,
   CREDIT_COSTS,
+  type CreditCharge,
 } from "@/lib/credits/system";
 
 /**
@@ -32,6 +35,14 @@ import {
  * exactly the denials already written below. Nothing in this file distinguishes
  * a trial from a purchase, deliberately: a second opinion about who is entitled
  * is how the two come to disagree.
+ *
+ * Editing needs a plan too — the SITE OWNER's, not the caller's (s51, ADR 041).
+ * Every content write, every AI spend and every credential issuance (bar
+ * handoff redemption, ADR 041) asks `checkOwnerCanEdit`
+ * (`@/lib/billing/owner-can-edit`), keyed by `resolveSiteOwnerId` below, and
+ * refuses unless the owner's entitlement is `plan`. Credits are kept but buy nothing on their own: AI spend happens only
+ * inside editing. Public delivery never reads a plan. The gates in this file
+ * still decide quotas and metering once that answer is yes.
  */
 
 export interface FeaturePermission {
@@ -62,18 +73,47 @@ const NO_ENTITLEMENT: FeaturePermission = {
  * The denial for a credit holder reaching for something credits do not buy.
  *
  * Distinct from `NO_ENTITLEMENT` because the remedy is different and so is the
- * truth: they have paid us for something, it works, and this particular thing
- * is not it. Sites and seats are plan-shaped — a quota, not metered usage — and
- * a wallet balance must never be mistaken for one.
+ * truth: they have paid us for something, and it is kept. Sites and seats are
+ * plan-shaped — a quota, not metered usage — and a wallet balance must never be
+ * mistaken for one. It used to say the credits "cover AI features"; since s51
+ * they do not on their own (AI spend needs the owner's plan, ADR 041), so the
+ * sentence no longer promises it.
  */
 const CREDITS_ARE_NOT_A_PLAN: FeaturePermission = {
   allowed: false,
   reason:
-    "Your credits cover AI features. Creating sites and inviting collaborators needs a plan.",
+    "Your credits are kept and work again once you choose a plan. Creating sites and inviting collaborators needs a plan.",
   upgradeRequired: true,
 };
 
 type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * The payer's entitlement — through the explicit client when one was given.
+ *
+ * `client` is s40's: the widget's AI route has no cookie session, so it
+ * authorises the editor, resolves the site owner, and passes a service-role
+ * client for that owner. See `consumeCredits` in `@/lib/credits/system` for
+ * who may pass one and why it is dangerous. Absent, this is `getEffectivePlan`
+ * exactly as before — and the existing billing suites mock only that, which is
+ * why the cookie path must keep calling it and nothing else.
+ */
+function resolvePayerEntitlement(userId: string, client?: SupabaseClient) {
+  return client ? resolveEntitlement(client, userId) : getEffectivePlan(userId);
+}
+
+/**
+ * `[client]` when an explicit payer client was given, `[]` when not.
+ *
+ * Spread into the calls this module makes to `@/lib/credits/system`, so the
+ * default (cookie) path calls them with exactly the arguments it always has
+ * rather than with a trailing `undefined`. That is not cosmetic: the suites that
+ * pin those calls compare argument lists, and "the cookie path did not move"
+ * is the property s40 promises to keep.
+ */
+function payerClientArg(client?: SupabaseClient): [] | [SupabaseClient] {
+  return client ? [client] : [];
+}
 
 /**
  * How many sites this user owns.
@@ -161,9 +201,25 @@ export async function canCreateWebsite(
  *
  * Throws rather than defaulting, for the same reason the site count does: a
  * lookup that failed must not be read as "nobody owns this, let it through".
+ *
+ * Exported for s40: `POST /api/ai/suggest` charges the widget's AI spend to
+ * this same payer, read with the service role because the editor calling it
+ * has no session and, for a device grant, no account at all. One definition of
+ * "who pays for this site", shared by seats, widget AI and — since s51 —
+ * editing itself (`checkOwnerCanEdit`), rather than several that could
+ * disagree.
+ *
+ * THE EARLIEST ADMIN ROW, DETERMINISTICALLY (s51). Sites do get more than one
+ * `admin` row: sharing a site as `manager` inserts one (sites/[siteId]/share).
+ * This used to be an unordered `.limit(1)` — "whichever PostgREST returns
+ * first" — so on an agency site shared with its client as manager, the
+ * client's row could come back first: the paying agency refused an edit, or
+ * seats and AI billed to the client's wallet. The registration row
+ * (sites/register) is always the oldest; a manager's row is always newer.
+ * `id` breaks a same-instant tie so the answer never flips between requests.
  */
-async function resolveSiteOwnerId(
-  supabase: SupabaseLike,
+export async function resolveSiteOwnerId(
+  supabase: SupabaseClient,
   siteId: string,
 ): Promise<string | null> {
   const { data, error } = await supabase
@@ -171,6 +227,8 @@ async function resolveSiteOwnerId(
     .select("user_id")
     .eq("site_id", siteId)
     .eq("permission", "admin")
+    .order("created_at", { ascending: true })
+    .order("id")
     .limit(1)
     .maybeSingle<{ user_id: string }>();
 
@@ -341,18 +399,24 @@ export async function canAddCollaborator(
  * with no plan and a wallet. That inversion is what this ordering removes: the
  * balance decides, and the flag only shapes what we say when the balance is
  * short.
+ *
+ * `client`: an explicit payer's client — see `resolvePayerEntitlement`.
  */
 export async function canUseAIFeatures(
   userId: string,
   creditsRequired: number = CREDIT_COSTS.AI_SUGGESTION,
+  client?: SupabaseClient,
 ): Promise<FeaturePermission> {
-  const entitlement = await getEffectivePlan(userId);
+  const entitlement = await resolvePayerEntitlement(userId, client);
 
   if (!hasAnyEntitlement(entitlement)) {
     return NO_ENTITLEMENT;
   }
 
-  const creditBalance = await getUserCreditBalance(userId);
+  const creditBalance = await getUserCreditBalance(
+    userId,
+    ...payerClientArg(client),
+  );
 
   if (creditBalance.total >= creditsRequired) {
     return { allowed: true };
@@ -382,12 +446,15 @@ export async function canUseAIFeatures(
 }
 
 /**
- * Check if user can use translation features
+ * Check if user can use translation features.
+ *
+ * `client`: an explicit payer's client — see `resolvePayerEntitlement`.
  */
 export async function canUseTranslation(
   userId: string,
+  client?: SupabaseClient,
 ): Promise<FeaturePermission> {
-  const entitlement = await getEffectivePlan(userId);
+  const entitlement = await resolvePayerEntitlement(userId, client);
 
   if (!hasAnyEntitlement(entitlement)) {
     return NO_ENTITLEMENT;
@@ -401,7 +468,10 @@ export async function canUseTranslation(
   if (translationLimit === 0) {
     // Plans with no included translation allowance can still pay per use out
     // of purchased credits.
-    const balance = await getUserCreditBalance(userId);
+    const balance = await getUserCreditBalance(
+      userId,
+      ...payerClientArg(client),
+    );
 
     if (balance.total >= 1) {
       return {
@@ -425,14 +495,21 @@ export async function canUseTranslation(
 }
 
 /**
- * Consume feature usage (for credit-based features)
+ * Consume feature usage (for credit-based features).
+ *
+ * `client` charges an explicit payer — the gate, the spend and the usage row
+ * all go through it. Only a route that has authorised an editor for the site
+ * and resolved the owner with `resolveSiteOwnerId` may pass a service-role
+ * client: it bypasses RLS, so `userId` alone decides whose wallet is spent.
+ * See `consumeCredits` for the incident that made it necessary.
  */
 export async function consumeFeatureUsage(
   userId: string,
   feature: "ai_suggestion" | "translation" | "collaboration",
   metadata?: Record<string, unknown>,
-): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient();
+  client?: SupabaseClient,
+): Promise<{ success: boolean; error?: string; charge?: CreditCharge }> {
+  const supabase = client ?? (await createClient());
 
   let creditsRequired = 0;
   if (feature === "ai_suggestion") {
@@ -442,12 +519,16 @@ export async function consumeFeatureUsage(
   }
 
   const permission = await (feature === "ai_suggestion"
-    ? canUseAIFeatures(userId, creditsRequired)
-    : canUseTranslation(userId));
+    ? canUseAIFeatures(userId, creditsRequired, client)
+    : canUseTranslation(userId, client));
 
   if (!permission.allowed) {
     return { success: false, error: permission.reason };
   }
+
+  // The receipt of the charge, handed back so the route that charged can
+  // refund exactly this charge if the model then fails (s48).
+  let charge: CreditCharge | undefined;
 
   if (feature === "ai_suggestion" || feature === "translation") {
     const result = await consumeCredits(
@@ -455,11 +536,13 @@ export async function consumeFeatureUsage(
       creditsRequired,
       feature,
       metadata,
+      ...payerClientArg(client),
     );
 
     if (!result.success) {
       return { success: false, error: result.error };
     }
+    charge = result.charge;
   }
 
   await supabase.from("usage_tracking").insert({
@@ -472,7 +555,7 @@ export async function consumeFeatureUsage(
     },
   });
 
-  return { success: true };
+  return charge ? { success: true, charge } : { success: true };
 }
 
 /**

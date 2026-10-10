@@ -19,6 +19,7 @@ import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { MAX_IMPORT_BYTES, MAX_IMPORT_LABEL } from "@/lib/bulk/constants";
 import {
   BulkOperation,
@@ -465,11 +466,13 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
       </CardHeader>
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList>
             <TabsTrigger value="export">Export</TabsTrigger>
             <TabsTrigger value="import">Import</TabsTrigger>
             <TabsTrigger value="batch">Batch Update</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
+            {/* s66c1: "History" also named the version history in the site
+                header. This is the import and export log. */}
+            <TabsTrigger value="history">Operation history</TabsTrigger>
           </TabsList>
 
           <TabsContent value="import" className="space-y-4">
@@ -488,20 +491,17 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
               <div className="space-y-4">
                 <div>
                   <Label htmlFor="import-format">Format</Label>
-                  {/* Native select: there is no `Select` primitive in
-                      `src/components/ui/` — recorded as gap 6 in the design
-                      system, to be built once, not freelanced here. */}
-                  <select
+                  <NativeSelect
                     id="import-format"
                     value={importFormat}
                     onChange={(e) =>
                       setImportFormat(e.target.value as "json" | "csv")
                     }
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
+                    wrapperClassName="mt-1"
                   >
                     <option value="json">JSON</option>
                     <option value="csv">CSV</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div>
@@ -512,7 +512,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
                     type="file"
                     accept={`.${importFormat},.txt`}
                     onChange={handleFileUpload}
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-control border border-input bg-card px-3 py-2 text-sm"
                   />
                   {importFile && (
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -605,18 +605,18 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
               <div className="space-y-4">
                 <div>
                   <Label htmlFor="export-format">Format</Label>
-                  <select
+                  <NativeSelect
                     id="export-format"
                     value={exportFormat}
                     onChange={(e) =>
                       setExportFormat(e.target.value as "json" | "csv" | "xml")
                     }
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
+                    wrapperClassName="mt-1"
                   >
                     <option value="json">JSON</option>
                     <option value="csv">CSV</option>
                     <option value="xml">XML</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 {/* Always shown: what is in the file is not data-dependent, and
@@ -628,7 +628,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
                     six it never mentioned — and `original_content` was one of
                     them, the column the site falls back to serving when
                     `published_content` is null. */}
-                <div className="rounded-lg border border-border bg-surface-1 p-4">
+                <div className="rounded-container border border-border bg-surface-1 p-4">
                   <p className="text-sm font-medium text-foreground">
                     What&apos;s in the file
                   </p>
@@ -770,7 +770,10 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
 
               <div className="space-y-4">
                 {batchOperations.map((operation, index) => (
-                  <div key={index} className="p-4 border rounded-lg space-y-3">
+                  <div
+                    key={index}
+                    className="p-4 border rounded-container space-y-3"
+                  >
                     <div className="flex justify-between items-center">
                       <h4 className="font-medium">Operation {index + 1}</h4>
                       {batchOperations.length > 1 && (
@@ -802,7 +805,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
 
                       <div>
                         <Label>Operation</Label>
-                        <select
+                        <NativeSelect
                           value={operation.operation}
                           onChange={(e) =>
                             updateBatchOperation(
@@ -811,13 +814,12 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
                               e.target.value,
                             )
                           }
-                          className="w-full px-3 py-2 border border-input rounded-md"
                         >
                           <option value="find_replace">Find & Replace</option>
                           <option value="append">Append</option>
                           <option value="prepend">Prepend</option>
                           <option value="set">Set Content</option>
-                        </select>
+                        </NativeSelect>
                       </div>
 
                       {operation.operation === "find_replace" ? (
@@ -921,7 +923,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
                     operations.map((operation) => (
                       <div
                         key={operation.id}
-                        className="flex items-center justify-between p-4 bg-surface-1 rounded-lg"
+                        className="flex items-center justify-between p-4 bg-surface-1 rounded-container"
                       >
                         <div className="flex items-center gap-3">
                           {getStatusIcon(operation.status)}
@@ -1125,7 +1127,7 @@ function ImportReport({
         // Semantic table composed from tokens: there is no `Table` primitive,
         // and one story is not where a shared one gets invented (design system
         // gap 8).
-        <div className="overflow-x-auto rounded-lg border border-border">
+        <div className="overflow-x-auto rounded-container border border-border">
           <table className="w-full text-sm">
             <thead className="bg-surface-1 text-left text-muted-foreground">
               <tr>

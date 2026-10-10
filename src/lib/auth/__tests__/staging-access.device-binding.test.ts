@@ -218,3 +218,84 @@ describe("validateStagingAccess — device binding", () => {
     expect(result.requiresVerification).toBe(true);
   });
 });
+
+/**
+ * s41 deleted the widget's email-capture modal to pay for edit-link
+ * persistence. That modal was reached only on `requiresEmail: true`, and no
+ * server path has emitted it since 747d210 (2026-08-01), when a link row
+ * without an email became `valid: false` instead of "tell us who you are".
+ * These cases pin that, so the deletion stays behaviour-free: if a future
+ * change starts sending `requiresEmail: true` again, it fails here instead of
+ * silently booting share-link holders into a view-only page with no prompt.
+ */
+describe("validateStagingAccess — requiresEmail is never emitted", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("refuses an emailless link row instead of asking for an email", async () => {
+    mockCreateServiceRoleClient.mockReturnValue(
+      mockSupabaseReturning(
+        verifiedRow({
+          access_type: "link",
+          email: null,
+          email_verified: false,
+          verified_user_agent_hash: null,
+          verified_at: null,
+        }),
+      ) as unknown as ReturnType<typeof createServiceRoleClient>,
+    );
+
+    const result = await StagingAccessManager.validateStagingAccess(
+      TOKEN,
+      SITE_ID,
+      invitee,
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.requiresEmail).not.toBe(true);
+  });
+
+  it("asks an unverified invitee for verification, not for an email", async () => {
+    mockCreateServiceRoleClient.mockReturnValue(
+      mockSupabaseReturning(
+        verifiedRow({
+          email_verified: false,
+          verified_user_agent_hash: null,
+          verified_at: null,
+        }),
+      ) as unknown as ReturnType<typeof createServiceRoleClient>,
+    );
+
+    const result = await StagingAccessManager.validateStagingAccess(
+      TOKEN,
+      SITE_ID,
+      invitee,
+    );
+
+    expect(result.requiresVerification).toBe(true);
+    expect(result.requiresEmail).not.toBe(true);
+  });
+
+  it("grants a verified, bound row without asking for an email", async () => {
+    mockCreateServiceRoleClient.mockReturnValue(
+      mockSupabaseReturning(verifiedRow()) as unknown as ReturnType<
+        typeof createServiceRoleClient
+      >,
+    );
+
+    const result = await StagingAccessManager.validateStagingAccess(
+      TOKEN,
+      SITE_ID,
+      invitee,
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.requiresEmail).not.toBe(true);
+  });
+});

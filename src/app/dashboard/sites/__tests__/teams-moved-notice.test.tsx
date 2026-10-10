@@ -32,15 +32,11 @@ jest.mock("@/contexts/AuthContext", () => ({
   useAuth: jest.fn(() => mockAuthValue),
 }));
 
-jest.mock("@/components/dashboard/SiteCard", () => ({
-  SiteCard: ({ site }: { site: { id: string; name: string } }) => (
-    <div data-testid={`site-card-${site.id}`}>{site.name}</div>
-  ),
-}));
-
-jest.mock("@/components/dashboard/SiteDetailView", () => ({
-  SiteDetailView: ({ site }: { site: { name: string } }) => (
-    <div data-testid="site-detail-view">{site.name}</div>
+// s66c1: the list's rows are SiteRow (SiteCard and its in-place detail view
+// are gone).
+jest.mock("@/components/dashboard/SiteRow", () => ({
+  SiteRow: ({ site }: { site: { id: string; name: string } }) => (
+    <li data-testid={`site-card-${site.id}`}>{site.name}</li>
   ),
 }));
 
@@ -87,7 +83,7 @@ describe("the teams-moved notice on /dashboard/sites", () => {
     render(<SitesPage />);
 
     expect(await screen.findByText(NOTICE_TITLE)).toBeInTheDocument();
-    expect(screen.getByText(/Share panel/i)).toBeInTheDocument();
+    expect(screen.getByText(/People & access/i)).toBeInTheDocument();
   });
 
   describe("renders in every list state, since it is about navigation, not data", () => {

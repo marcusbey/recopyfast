@@ -60,6 +60,28 @@ describe("Select", () => {
     ).toHaveTextContent("30 seconds (default)");
   });
 
+  it("draws the trigger like Input and NativeSelect (s66a)", () => {
+    renderSelect({});
+
+    const trigger = screen.getByRole("combobox", { name: "Batch window" });
+    expect(trigger).toHaveClass("bg-card", "rounded-control", "border-input");
+    expect(trigger.className).not.toContain("bg-transparent");
+  });
+
+  it("opens an opaque, square menu (s66a)", async () => {
+    const user = userEvent.setup();
+    renderSelect({ value: "30" });
+
+    await user.click(screen.getByRole("combobox", { name: "Batch window" }));
+
+    // Radix puts role="listbox" on the content element itself.
+    const content = screen.getByRole("listbox");
+    expect(content).toHaveClass("bg-popover", "rounded-container");
+    expect(screen.getByRole("option", { name: "5 minutes" })).toHaveClass(
+      "rounded-control",
+    );
+  });
+
   it("opens and reports the option the user picks", async () => {
     const user = userEvent.setup();
     const onValueChange = jest.fn();

@@ -2,10 +2,10 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "ReCopyFast - Universal CMS Layer",
+    name: "ReCopyFast - Edit your website copy in place",
     short_name: "ReCopyFast",
     description:
-      "Transform any website into an editable platform with a simple script tag",
+      "Make the copy on the site you already built editable, with one script tag.",
     start_url: "/",
     scope: "/",
     display: "standalone",

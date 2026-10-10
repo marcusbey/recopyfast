@@ -29,12 +29,14 @@ import { GET as getActive } from "@/app/api/ab-tests/active/[siteId]/route";
 import { GET as getBucket } from "@/app/api/ab-tests/bucket/[siteId]/route";
 import { POST as postTrack } from "@/app/api/ab-tests/track/route";
 
-const SITE_ID = "11111111-1111-1111-1111-111111111111";
+// v4-shaped ids, as gen_random_uuid() produces: since s68b (M5)
+// `ab-tests/track` refuses any id `requireUuid` rejects, before the database.
+const SITE_ID = "11111111-1111-4111-8111-111111111111";
 const API_KEY = "site-api-key";
 const REGISTERED_ORIGIN = "https://customer.example";
 const FOREIGN_ORIGIN = "https://attacker.example";
-const TEST_ID = "33333333-3333-3333-3333-333333333333";
-const VARIANT_ID = "aaaaaaaa-0000-0000-0000-000000000001";
+const TEST_ID = "33333333-3333-4333-8333-333333333333";
+const VARIANT_ID = "aaaaaaaa-0000-4000-8000-000000000001";
 
 function wireDatabase() {
   mockServiceClient(createServiceRoleClient as unknown as jest.Mock, {

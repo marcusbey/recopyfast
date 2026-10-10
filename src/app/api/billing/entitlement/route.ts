@@ -78,6 +78,9 @@ async function readTrialCountdown(
   return {
     daysRemaining: trialDaysRemaining(trial.expiresAt),
     endsAt: trial.expiresAt,
+    // s47a: spread, never `offerId: null`, so a plain trial's payload is
+    // byte-for-byte what it was before the founding offer existed.
+    ...(trial.offerId ? { offerId: trial.offerId } : {}),
   };
 }
 

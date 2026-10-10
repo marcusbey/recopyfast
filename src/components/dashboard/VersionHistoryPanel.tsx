@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useId, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { IconTile } from "@/components/ui/icon-tile";
 import { X, Loader2, History, ChevronDown } from "lucide-react";
 import { VersionTimelineItem, type Version } from "./VersionTimelineItem";
 import { VersionPreviewDialog } from "./VersionPreviewDialog";
@@ -125,7 +126,7 @@ export function VersionHistoryPanel({
     <>
       {/* Backdrop — Escape provides the keyboard equivalent of clicking it. */}
       <div
-        className="fixed inset-0 z-40 bg-black/40 transition-opacity"
+        className="fixed inset-0 z-40 bg-foreground/40 transition-opacity"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -136,7 +137,7 @@ export function VersionHistoryPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col bg-card shadow-2xl duration-300 animate-in slide-in-from-right"
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-md duration-300 animate-in slide-in-from-right"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border p-4">
@@ -167,14 +168,17 @@ export function VersionHistoryPanel({
               <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
             </div>
           ) : error ? (
-            <div className="p-4 rounded-lg border border-tone-danger-border bg-tone-danger-surface text-tone-danger-text text-sm">
+            <div className="p-4 rounded-container border border-tone-danger-border bg-tone-danger-surface text-tone-danger-text text-sm">
               {error}
             </div>
           ) : versions.length === 0 ? (
             <div className="text-center py-12">
-              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                <History className="w-8 h-8 text-muted-foreground" />
-              </div>
+              {/* s66c1: a square IconTile, not a circle around the icon
+                  (design system, Radius: "circles around icons" are not an
+                  exception). */}
+              <IconTile size="lg" className="mx-auto mb-4">
+                <History />
+              </IconTile>
               <h3 className="font-medium text-foreground mb-2">
                 No version history yet
               </h3>

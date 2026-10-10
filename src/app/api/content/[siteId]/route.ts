@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
   parseOrigin,
+  SiteAuthError,
 } from "@/lib/security/site-auth";
 import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
 import {
@@ -13,6 +14,9 @@ import {
   validateElementId,
 } from "@/lib/security/discovered-text";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { validateContentAttributePatch } from "@/lib/api/validation";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
 
 interface ContentElementRow {
   site_id: string;
@@ -23,7 +27,8 @@ interface ContentElementRow {
   published_content: string;
   language: string;
   variant: string;
-  metadata: { type?: string };
+  page_path: string | null;
+  metadata: Record<string, unknown>;
 }
 
 /** One element that could not be stored, and why. */
@@ -126,6 +131,40 @@ function buildDiscoveryRows(
       continue;
     }
 
+    const reported = data as Record<string, unknown>;
+    const attributes: Record<string, string> = {};
+
+    let pagePath: string | null = null;
+    if (reported.page_path !== undefined && reported.page_path !== null) {
+      const path = normalizePagePath(reported.page_path);
+      if (!path.ok) {
+        skipped.push({ elementId: id.value, reason: path.error });
+        continue;
+      }
+      pagePath = path.value;
+    }
+
+    // Discovery reports what the author already put on the page. A disallowed
+    // destination still must not become a published href, but dropping the
+    // entire element made its safe text impossible to edit. Validate each
+    // optional attribute independently and omit only the offending value.
+    if (reported.href !== undefined) {
+      const href = validateContentAttributePatch({ href: reported.href });
+      if (href.ok && href.value.href !== undefined) {
+        attributes.href = href.value.href;
+      }
+    }
+    if (reported.alt !== undefined && reported.alt !== null) {
+      const normalizedAlt =
+        typeof reported.alt === "string"
+          ? reported.alt.replace(/\s+/g, " ").trim()
+          : reported.alt;
+      const alt = validateContentAttributePatch({ alt: normalizedAlt });
+      if (alt.ok && alt.value.alt !== undefined) {
+        attributes.alt = alt.value.alt;
+      }
+    }
+
     rows.push({
       site_id: siteId,
       element_id: id.value,
@@ -135,7 +174,11 @@ function buildDiscoveryRows(
       published_content: element.value.content,
       language: "en",
       variant: "default",
-      metadata: element.value.type ? { type: element.value.type } : {},
+      page_path: pagePath,
+      metadata: {
+        ...(element.value.type ? { type: element.value.type } : {}),
+        ...attributes,
+      },
     });
   }
 
@@ -171,13 +214,19 @@ function extractToken(request: NextRequest) {
   return token;
 }
 
-function withCors(response: NextResponse, allowedOrigin: string | null) {
+function withCors(
+  response: NextResponse,
+  allowedOrigin: string | null,
+  fallbackToAppOrigin = true,
+) {
   // "No grant" is expressed by the ABSENCE of the header, never by "*".
   // Refused preflights flow through here with a null origin, and
   // NEXT_PUBLIC_APP_URL is not guaranteed to be set on every deployment —
   // a "*" fallback would hand the grant this route just withheld to every
   // caller ("*" is also invalid alongside Allow-Credentials: true).
-  const originHeader = allowedOrigin || process.env.NEXT_PUBLIC_APP_URL || null;
+  const originHeader =
+    allowedOrigin ||
+    (fallbackToAppOrigin ? process.env.NEXT_PUBLIC_APP_URL || null : null);
   if (originHeader) {
     response.headers.set("Access-Control-Allow-Origin", originHeader);
     response.headers.set("Access-Control-Allow-Credentials", "true");
@@ -189,6 +238,24 @@ function withCors(response: NextResponse, allowedOrigin: string | null) {
   response.headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
   response.headers.set("Vary", "Origin");
   return response;
+}
+
+function siteAuthFailureResponse(error: unknown) {
+  const failure =
+    error instanceof SiteAuthError
+      ? error
+      : new SiteAuthError("Unauthorized", "site_token_invalid", 401);
+  return withCors(
+    NextResponse.json(
+      {
+        error: failure.message,
+        ...(error instanceof SiteAuthError ? { code: failure.code } : {}),
+      },
+      { status: failure.status },
+    ),
+    failure.allowedOrigin,
+    false,
+  );
 }
 
 /**
@@ -293,19 +360,7 @@ export async function GET(
         isWidgetRequest = true;
       } catch (authError) {
         console.error("Content GET authorization failed:", authError);
-        return NextResponse.json(
-          {
-            error:
-              authError instanceof Error ? authError.message : "Unauthorized",
-          },
-          {
-            status:
-              authError instanceof Error &&
-              authError.message === "Origin not allowed"
-                ? 403
-                : 401,
-          },
-        );
+        return siteAuthFailureResponse(authError);
       }
     }
 
@@ -313,16 +368,48 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const language = searchParams.get("language") || "en";
     const variant = searchParams.get("variant") || "default";
+    const requestedPagePath = searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath !== null && !normalizedPagePath.ok) {
+      return withCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        allowedOrigin,
+      );
+    }
+    const pagePath =
+      normalizedPagePath === null ? null : normalizedPagePath.value;
 
-    // Fetch content elements - use published_content for live sites
-    const { data: contentElements, error } = await supabase
-      .from("content_elements")
-      .select(
-        "id, site_id, element_id, selector, published_content, original_content, language, variant, metadata, published_at",
-      )
-      .eq("site_id", siteId)
-      .eq("language", language)
-      .eq("variant", variant);
+    // A scoped page read includes author-declared ids (page_path IS NULL),
+    // while an omitted path keeps old widgets working. Both paths paginate:
+    // once ids became page-scoped, an all-site unbounded read crossed the
+    // PostgREST 1,000-row cap on ordinary multi-page sites.
+    const { data: contentElements, error } = await fetchPageScopedRows(
+      (scope) => {
+        const contentElementsTable = supabase.from("content_elements");
+        let query = (
+          pagePath === null
+            ? contentElementsTable.select(
+                "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+              )
+            : contentElementsTable.select(
+                "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+                { count: "exact" },
+              )
+        )
+          .eq("site_id", siteId)
+          .eq("language", language)
+          .eq("variant", variant);
+
+        if (scope.kind === "page") {
+          query = query.eq("page_path", scope.pagePath);
+        } else if (scope.kind === "shared") {
+          query = query.is("page_path", null);
+        }
+        return query;
+      },
+      pagePath,
+    );
 
     if (error) {
       console.error("Error fetching content:", error);
@@ -334,11 +421,27 @@ export async function GET(
 
     // Transform: use published_content as current_content for backward compatibility
     // Fall back to original_content if published_content is null (for existing data)
-    const transformedContent = (contentElements || []).map((element) => ({
-      ...element,
-      current_content:
-        element.published_content ?? element.original_content ?? "",
-    }));
+    const transformedContent = (contentElements || []).map((element) => {
+      // Draft attributes share the metadata JSONB column with published ones,
+      // but they are private to staging until the atomic publish promotes them.
+      // Removing the nested patch here prevents a public visitor from learning
+      // or applying a destination that an editor has not published yet.
+      const metadata =
+        typeof element.metadata === "object" &&
+        element.metadata !== null &&
+        !Array.isArray(element.metadata)
+          ? (element.metadata as Record<string, unknown>)
+          : {};
+      const publishedMetadata = { ...metadata };
+      delete publishedMetadata.staging_attributes;
+
+      return {
+        ...element,
+        metadata: publishedMetadata,
+        current_content:
+          element.published_content ?? element.original_content ?? "",
+      };
+    });
 
     // The one ongoing "this site is still running our script" signal.
     //
@@ -352,9 +455,18 @@ export async function GET(
     // Not on the first-party branch: an owner opening their dashboard says
     // nothing about whether visitors' browsers are still running the script.
     if (isWidgetRequest) {
-      await bestEffortSiteWrite("liveness bump", siteId, () =>
-        recordSiteReport(supabase, siteId),
-      );
+      // This update is operational bookkeeping, not part of the content the
+      // visitor asked for. It used to add a complete Supabase write round trip
+      // after the published rows were already available, extending the visible
+      // authored-copy window on every customer page. `after()` keeps the write
+      // tied to this request's lifetime while allowing the response to commit
+      // first. Failure stays best-effort and log-visible; there is no response
+      // left to corrupt, which is exactly the boundary documented above.
+      after(async () => {
+        await bestEffortSiteWrite("liveness bump", siteId, () =>
+          recordSiteReport(supabase, siteId),
+        );
+      });
     }
 
     return withCors(NextResponse.json(transformedContent), allowedOrigin);
@@ -383,14 +495,17 @@ export async function POST(
     const referer = request.headers.get("referer");
 
     let allowedOrigin: string | null = null;
+    let authorizedSiteId = siteId;
 
     try {
-      ({ allowedOrigin } = await authorizeSiteRequest({
+      const authorized = await authorizeSiteRequest({
         siteId,
         token: token,
         origin,
         referer,
-      }));
+      });
+      allowedOrigin = authorized.allowedOrigin;
+      authorizedSiteId = authorized.site.id;
     } catch (authError) {
       console.error("Content POST authorization failed:", authError);
 
@@ -437,19 +552,7 @@ export async function POST(
         }
       }
 
-      return NextResponse.json(
-        {
-          error:
-            authError instanceof Error ? authError.message : "Unauthorized",
-        },
-        {
-          status:
-            authError instanceof Error &&
-            authError.message === "Origin not allowed"
-              ? 403
-              : 401,
-        },
-      );
+      return siteAuthFailureResponse(authError);
     }
 
     // The second limiter, behind authorization: bucketed by site, and fails
@@ -462,10 +565,17 @@ export async function POST(
     // per element (the widget reports only ids the server does not already hold),
     // so a legitimate site never approaches this, and a refused report is retried
     // by the next visitor's scan.
+    //
+    // s68b M4: keyed on the AUTHORIZED id. The authorizer finds the site through
+    // a `uuid` cast (any case) and checks the token against the database's
+    // `site.id`, so the upper-case spelling of a real id authorizes with the
+    // genuine token — and metering the raw spelling gave every spelling its own
+    // bucket. Spellings are still accepted (installed snippets are permanent);
+    // they just share the one canonical bucket.
     const limited = await enforceRateLimit(request, {
       limit: "API_CONTENT",
       endpoint: "content/discovery",
-      identifier: siteId,
+      identifier: authorizedSiteId,
       identifierType: "api_key",
       onStoreFailure: "deny",
       message: "Content discovery rate limit exceeded for this site.",
@@ -593,19 +703,7 @@ export async function PUT(
       }));
     } catch (authError) {
       console.error("Content PUT authorization failed:", authError);
-      return NextResponse.json(
-        {
-          error:
-            authError instanceof Error ? authError.message : "Unauthorized",
-        },
-        {
-          status:
-            authError instanceof Error &&
-            authError.message === "Origin not allowed"
-              ? 403
-              : 401,
-        },
-      );
+      return siteAuthFailureResponse(authError);
     }
 
     return withCors(

@@ -14,11 +14,64 @@ import {
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { canonicalSiteId } from "@/lib/api/validation";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 type PublishRpcRow = {
   element_id: string;
   content: string | null;
+  attributes: Record<string, string>;
 };
+
+function stagedMetadata(value: unknown) {
+  const metadata =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const stagingAttributes =
+    typeof metadata.staging_attributes === "object" &&
+    metadata.staging_attributes !== null &&
+    !Array.isArray(metadata.staging_attributes)
+      ? (metadata.staging_attributes as Record<string, unknown>)
+      : {};
+  const publishedMetadata = { ...metadata };
+  delete publishedMetadata.staging_attributes;
+
+  return {
+    metadata: { ...publishedMetadata, ...stagingAttributes },
+    hasAttributeChanges: Object.entries(stagingAttributes).some(
+      ([key, value]) => publishedMetadata[key] !== value,
+    ),
+  };
+}
+
+/**
+ * s77 (s69 L7) — per IP, before anything is decided about the caller.
+ *
+ * Both handlers authorize first — a session lookup and a `site_permissions`
+ * read, then the editor-token validation — and POST metered only after all of
+ * that, while GET (the publish dialog's preview) was not metered at all. The
+ * per-site limiters stay behind authorization (an anonymous caller must not
+ * spend the customer's budget); this guard is what bounds the authorizer.
+ *
+ * 200/min per address, shared by GET and POST: a person opens the dialog and
+ * clicks Publish. Fails CLOSED: each handler's per-site limiter behind it fails
+ * closed too, so in an outage an editor is refused there anyway — failing open
+ * here would only hand a flood the authorizer.
+ */
+function shedIpFlood(request: NextRequest) {
+  return enforceRateLimit(request, {
+    limit: "IP_GENERAL",
+    endpoint: "staging/publish:ip",
+    identifierType: "ip",
+    onStoreFailure: "deny",
+  });
+}
 
 function extractElementIds(value: unknown): string[] | null {
   if (!Array.isArray(value)) {
@@ -33,15 +86,27 @@ function extractElementIds(value: unknown): string[] | null {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as Record<string, unknown>;
-    const siteId = typeof body.siteId === "string" ? body.siteId : "";
+    const shed = await shedIpFlood(request);
+    if (shed) return withPublicCors(shed, request);
 
-    if (!siteId) {
+    const body = (await request.json()) as Record<string, unknown>;
+    const rawSiteId = typeof body.siteId === "string" ? body.siteId : "";
+
+    if (!rawSiteId) {
       return withPublicCors(
         NextResponse.json({ error: "Missing siteId" }, { status: 400 }),
         request,
       );
     }
+
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        request,
+      );
+    }
+    const siteId = canonical.value;
 
     // Shared with the staging content routes so "may this caller publish" is
     // answered by one graded permission model. The check this replaces spelled
@@ -118,6 +183,9 @@ export async function POST(request: NextRequest) {
     // 10/min, the tightest ceiling here, because publishing is a human clicking
     // a button — nobody publishes eleven times in a minute, and a legitimate
     // publisher who hits it waits seconds, not minutes.
+    //
+    // Keyed on the canonical id (s77, s69 R1): every spelling of one site
+    // spends this one bucket — see `canonicalSiteId` (src/lib/api/validation.ts).
     const limited = await enforceRateLimit(request, {
       limit: "API_UPLOAD",
       endpoint: "staging/publish",
@@ -128,10 +196,26 @@ export async function POST(request: NextRequest) {
     });
     if (limited) return withPublicCors(limited, request);
 
+    // Publishing needs the SITE OWNER's plan (s51, ADR 041): a lapsed owner's
+    // editors must not push copy live. Behind authorization and the limiter so
+    // it is no oracle for an anonymous caller, and 402 rather than 401/403 so
+    // the widget shows the message instead of treating it as "Session ended"
+    // and forgetting the edit link — see staging/content/[siteId] PUT.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return withPublicCors(ownerCanEditRefusal(ownerCanEdit), request);
+    }
+
     const elementIds = extractElementIds(body.elementIds);
     const serviceClient = createServiceRoleClient();
+
+    // Publish has always been a site-wide operator action. Page identity scopes
+    // what the editor reads and labels the confirmation counts below; it must
+    // not scope this mutation. Restore stages every page, and the s27 scoped
+    // RPC call once left a restored site half-live when Publish was clicked
+    // from only one of those pages.
     const { data, error } = await serviceClient.rpc(
-      "publish_staging_content_atomic",
+      "publish_staging_content_with_attributes_atomic",
       {
         p_site_id: siteId,
         p_element_ids: elementIds,
@@ -202,9 +286,22 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const siteId = request.nextUrl.searchParams.get("siteId");
+    const shed = await shedIpFlood(request);
+    if (shed) return withPublicCors(shed, request);
 
-    if (!siteId) {
+    const rawSiteId = request.nextUrl.searchParams.get("siteId");
+    const requestedPagePath = request.nextUrl.searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath && !normalizedPagePath.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        request,
+      );
+    }
+    const pagePath = normalizedPagePath?.value ?? null;
+
+    if (!rawSiteId) {
       return withPublicCors(
         NextResponse.json(
           { error: "Missing siteId parameter" },
@@ -213,6 +310,15 @@ export async function GET(request: NextRequest) {
         request,
       );
     }
+
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        request,
+      );
+    }
+    const siteId = canonical.value;
 
     let canPublish = false;
     const firstPartyAccess = await authorizeFirstPartyEditorAccess(
@@ -248,14 +354,32 @@ export async function GET(request: NextRequest) {
       canPublish = requireEditorPermission(validation.access, "publish");
     }
 
+    // s77 (s69 L7). Per site, fail closed, behind the permission grade — ADR 002
+    // rule 4, which this service-role read of every element on the site went
+    // without. Behind authorization for the reason POST gives: the bucket is the
+    // customer's. 100/min: the widget asks once each time the dialog opens.
+    const limited = await enforceRateLimit(request, {
+      limit: "USER_GENERAL",
+      endpoint: "staging/publish-preview",
+      identifier: siteId,
+      identifierType: "api_key",
+      onStoreFailure: "deny",
+      message: "Publish preview rate limit exceeded for this site.",
+    });
+    if (limited) return withPublicCors(limited, request);
+
     const serviceClient = createServiceRoleClient();
-    const { data: elementsWithChanges, error: fetchError } = await serviceClient
-      .from("content_elements")
-      .select(
-        "id, element_id, selector, staging_content, published_content, staging_updated_at, metadata",
-      )
-      .eq("site_id", siteId)
-      .not("staging_content", "is", null);
+    const { data: elementsWithChanges, error: fetchError } =
+      await fetchPageScopedRows(
+        () =>
+          serviceClient
+            .from("content_elements")
+            .select(
+              "id, element_id, selector, staging_content, published_content, staging_updated_at, page_path, metadata",
+            )
+            .eq("site_id", siteId),
+        null,
+      );
 
     if (fetchError) {
       console.error("Error fetching staging changes:", fetchError);
@@ -268,22 +392,44 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const changedElements = (elementsWithChanges || [])
-      .filter((el) => el.staging_content !== el.published_content)
-      .map((el) => ({
-        id: el.id,
-        elementId: el.element_id,
-        selector: el.selector,
-        stagingContent: el.staging_content,
-        publishedContent: el.published_content,
-        stagingUpdatedAt: el.staging_updated_at,
-        metadata: el.metadata,
-      }));
+    const changedRows = (elementsWithChanges || []).flatMap((el) => {
+      const projection = stagedMetadata(el.metadata);
+      const hasTextChanges =
+        el.staging_content !== null &&
+        el.staging_content !== el.published_content;
+      if (!projection.hasAttributeChanges && !hasTextChanges) {
+        return [];
+      }
+
+      return [
+        {
+          pagePath: el.page_path,
+          element: {
+            id: el.id,
+            elementId: el.element_id,
+            selector: el.selector,
+            stagingContent: el.staging_content,
+            publishedContent: el.published_content,
+            stagingUpdatedAt: el.staging_updated_at,
+            metadata: projection.metadata,
+          },
+        },
+      ];
+    });
+    const currentPageChanges =
+      pagePath === null
+        ? changedRows.length
+        : changedRows.filter(
+            (row) => row.pagePath === null || row.pagePath === pagePath,
+          ).length;
+    const changedElements = changedRows.map((row) => row.element);
 
     return withPublicCors(
       NextResponse.json({
         success: true,
         pendingChanges: changedElements.length,
+        currentPageChanges,
+        otherPageChanges: changedElements.length - currentPageChanges,
         elements: changedElements,
         canPublish,
       }),

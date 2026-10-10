@@ -131,7 +131,10 @@ describe("Edit Board tab bar", () => {
 });
 
 interface SlicedPanel {
-  rcf: { elements: Map<string, unknown> };
+  rcf: {
+    elements: Map<string, unknown>;
+    getElementText(element: HTMLElement): string;
+  };
   selectedElements: Set<string>;
   renderElementsTab(): void;
 }
@@ -160,6 +163,15 @@ function renderElementsTab(selectedIds: readonly string[]): HTMLElement {
     `return class SlicedPanel { ${block} };`,
   )(doc) as new () => SlicedPanel;
 
+  // Each card shows what its element shows now, through the widget's
+  // getElementText (s67 review, finding 4) — not the entry's authored
+  // `originalContent`. The elements therefore carry their text; they used to
+  // be empty and lean on an `originalContent` fallback that no longer exists.
+  const element = (tag: string, text: string) => {
+    const created = doc.createElement(tag);
+    created.textContent = text;
+    return created;
+  };
   const panel = new Panel();
   panel.rcf = {
     elements: new Map<string, unknown>([
@@ -168,7 +180,7 @@ function renderElementsTab(selectedIds: readonly string[]): HTMLElement {
         {
           type: "H1",
           originalContent: "Simple pricing",
-          element: doc.createElement("h1"),
+          element: element("h1", "Simple pricing"),
         },
       ],
       [
@@ -176,10 +188,11 @@ function renderElementsTab(selectedIds: readonly string[]): HTMLElement {
         {
           type: "P",
           originalContent: "Start free, upgrade when you grow.",
-          element: doc.createElement("p"),
+          element: element("p", "Start free, upgrade when you grow."),
         },
       ],
     ]),
+    getElementText: (target) => target.textContent ?? "",
   };
   panel.selectedElements = new Set(selectedIds);
   panel.renderElementsTab();

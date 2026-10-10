@@ -19,11 +19,19 @@ const eqCalls: Array<{ table: string; column: string; value: unknown }> = [];
 
 const makeBuilder = (table: string, result: QueryResult) => {
   const settled = { data: null, error: null, ...result };
+  let rangeStart = 0;
+  let rangeEnd = 499;
+  const rangedResult = () => ({
+    ...settled,
+    data: Array.isArray(settled.data)
+      ? settled.data.slice(rangeStart, rangeEnd + 1)
+      : settled.data,
+  });
   const builder: Record<string, unknown> = {
     then: (
       resolve: (value: QueryResult) => unknown,
       reject?: (reason: unknown) => unknown,
-    ) => Promise.resolve(settled).then(resolve, reject),
+    ) => Promise.resolve(rangedResult()).then(resolve, reject),
     single: jest.fn(() => Promise.resolve(settled)),
     insert: jest.fn((payload: unknown) => {
       insertCalls.push({ table, payload });
@@ -31,6 +39,11 @@ const makeBuilder = (table: string, result: QueryResult) => {
     }),
     eq: jest.fn((column: string, value: unknown) => {
       eqCalls.push({ table, column, value });
+      return builder;
+    }),
+    range: jest.fn((start: number, end: number) => {
+      rangeStart = start;
+      rangeEnd = Math.min(end, start + 499);
       return builder;
     }),
   };
@@ -139,6 +152,26 @@ describe("/api/bulk/export", () => {
         language: AWKWARD_ELEMENT.language,
         variant: AWKWARD_ELEMENT.variant,
       });
+    });
+
+    it("exports every row when PostgREST caps responses at 500", async () => {
+      seedSite("admin");
+      resultsByTable.content_elements = {
+        data: Array.from({ length: 1002 }, (_unused, index) => ({
+          ...PLAIN_ELEMENT,
+          id: `row-${String(index).padStart(4, "0")}`,
+          element_id: `element-${String(index).padStart(4, "0")}`,
+        })),
+      };
+
+      const response = await POST(
+        postRequest({ site_id: "site-123", format: "json" }),
+      );
+      const exported = JSON.parse(await readFileBody(response));
+
+      expect(response.status).toBe(200);
+      expect(exported).toHaveLength(1002);
+      expect(exported.at(-1).element_id).toBe("element-1001");
     });
 
     it("exports every documented field as CSV", async () => {

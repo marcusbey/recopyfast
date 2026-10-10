@@ -16,7 +16,7 @@ import type { StatusTone } from "@/components/ui/status-badge";
  * `warning`. Category never gets a colour.
  */
 const iconTileVariants = cva(
-  "inline-flex shrink-0 items-center justify-center rounded-lg border",
+  "inline-flex shrink-0 items-center justify-center rounded-container border",
   {
     variants: {
       tone: {
@@ -32,9 +32,9 @@ const iconTileVariants = cva(
           "border-tone-danger-border bg-tone-danger-surface text-tone-danger-text",
       },
       size: {
-        sm: "h-7 w-7 rounded-md [&_svg]:size-3.5",
+        sm: "h-7 w-7 [&_svg]:size-3.5",
         default: "h-9 w-9 [&_svg]:size-4",
-        lg: "h-11 w-11 rounded-xl [&_svg]:size-5",
+        lg: "h-11 w-11 [&_svg]:size-5",
       },
     },
     defaultVariants: { tone: "neutral", size: "default" },

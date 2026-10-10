@@ -5,6 +5,13 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { MAX_DISCOVERED_TEXT_LENGTH } from "@/lib/security/discovered-text";
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@supabase/ssr");
 jest.mock("@/lib/supabase/service");
 // Left real, the in-memory limiter counts every POST in this file into one
@@ -26,14 +33,21 @@ let existingElementIds: string[] = [];
 let writeErrorByElementId: Record<string, { code?: string; message: string }> =
   {};
 
+/**
+ * Content writes that went through the SERVICE client — the only writer of
+ * `content_elements` since s56 (ADR 042): no web principal holds DML on it any
+ * more. A content write through the cookie client lands in `rlsContentWrites`
+ * instead, which must stay empty.
+ */
 const contentWrites: Array<{
   kind: "insert" | "upsert";
   payload: Record<string, unknown>;
 }> = [];
+const rlsContentWrites: Record<string, unknown>[] = [];
 const operationInserts: Record<string, unknown>[] = [];
 const operationUpdates: Record<string, unknown>[] = [];
 
-const makeBuilder = (table: string) => {
+const makeBuilder = (table: string, client: "rls" | "service" = "rls") => {
   const filters: Record<string, unknown> = {};
   let settled: QueryResult = { data: null, error: null };
 
@@ -46,6 +60,10 @@ const makeBuilder = (table: string) => {
       return;
     }
     if (table !== "content_elements") return;
+    if (client === "rls") {
+      rlsContentWrites.push(payload);
+      return;
+    }
 
     contentWrites.push({ kind, payload });
     const failure = writeErrorByElementId[payload.element_id as string];
@@ -140,14 +158,22 @@ describe("/api/bulk/import per-row outcomes", () => {
     existingElementIds = [];
     writeErrorByElementId = {};
     contentWrites.length = 0;
+    rlsContentWrites.length = 0;
     operationInserts.length = 0;
     operationUpdates.length = 0;
     mockSupabase.auth.getUser.mockResolvedValue({
       data: { user: { id: "user-123", email: "owner@example.com" } },
     });
     rpc.mockResolvedValue({ data: "version-1", error: null });
-    (createServiceRoleClient as jest.Mock).mockReturnValue({ rpc });
+    (createServiceRoleClient as jest.Mock).mockReturnValue({
+      rpc,
+      from: jest.fn((table: string) => makeBuilder(table, "service")),
+    });
     (enforceRateLimit as jest.Mock).mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    expect(rlsContentWrites).toEqual([]);
   });
 
   it("reports created, updated and failed rows in source-file order", async () => {

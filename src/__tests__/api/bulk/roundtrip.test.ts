@@ -5,6 +5,13 @@ import { createServerClient } from "@supabase/ssr";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@supabase/ssr");
 jest.mock("@/lib/supabase/service");
 jest.mock("@/lib/api/rate-limit", () => ({ enforceRateLimit: jest.fn() }));
@@ -92,20 +99,35 @@ const SOURCE_ROWS = [
   },
 ];
 
+/**
+ * Content writes through the SERVICE client, the only writer of
+ * `content_elements` since s56 (ADR 042). A content write through the cookie
+ * client lands in `rlsContentWrites`, which must stay empty.
+ */
 const contentWrites: Record<string, unknown>[] = [];
+const rlsContentWrites: Record<string, unknown>[] = [];
 
-const makeBuilder = (table: string) => {
-  const filters: Record<string, unknown> = {};
-  const settled = {
-    data: table === "content_elements" ? SOURCE_ROWS : null,
-    error: null,
+const makeBuilder = (table: string, client: "rls" | "service" = "rls") => {
+  const recordContentWrite = (payload: Record<string, unknown>) => {
+    if (table !== "content_elements") return;
+    (client === "service" ? contentWrites : rlsContentWrites).push(payload);
   };
+  const filters: Record<string, unknown> = {};
+  let rangeStart = 0;
+  let rangeEnd = 499;
+  const settled = () => ({
+    data:
+      table === "content_elements"
+        ? SOURCE_ROWS.slice(rangeStart, rangeEnd + 1)
+        : null,
+    error: null,
+  });
 
   const builder: Record<string, unknown> = {
     then: (
       resolve: (value: unknown) => unknown,
       reject?: (reason: unknown) => unknown,
-    ) => Promise.resolve(settled).then(resolve, reject),
+    ) => Promise.resolve(settled()).then(resolve, reject),
     eq: jest.fn((column: string, value: unknown) => {
       filters[column] = value;
       return builder;
@@ -129,14 +151,19 @@ const makeBuilder = (table: string) => {
         : { data: null, error: { code: "PGRST116", message: "No rows" } };
     }),
     upsert: jest.fn((payload: Record<string, unknown>) => {
-      if (table === "content_elements") contentWrites.push(payload);
+      recordContentWrite(payload);
       return builder;
     }),
     insert: jest.fn((payload: Record<string, unknown>) => {
-      if (table === "content_elements") contentWrites.push(payload);
+      recordContentWrite(payload);
       return builder;
     }),
     update: jest.fn(() => builder),
+    range: jest.fn((start: number, end: number) => {
+      rangeStart = start;
+      rangeEnd = Math.min(end, start + 499);
+      return builder;
+    }),
   };
   for (const method of ["select", "in", "gte", "order", "limit"]) {
     builder[method] = jest.fn(() => builder);
@@ -175,11 +202,13 @@ describe("bulk export → import round trip", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     contentWrites.length = 0;
+    rlsContentWrites.length = 0;
     mockSupabase.auth.getUser.mockResolvedValue({
       data: { user: { id: "user-123", email: "owner@example.com" } },
     });
     (createServiceRoleClient as jest.Mock).mockReturnValue({
       rpc: jest.fn(async () => ({ data: "version-1", error: null })),
+      from: jest.fn((table: string) => makeBuilder(table, "service")),
     });
     (enforceRateLimit as jest.Mock).mockResolvedValue(null);
   });
@@ -210,6 +239,7 @@ describe("bulk export → import round trip", () => {
         failed: 0,
       });
 
+      expect(rlsContentWrites).toEqual([]);
       expect(contentWrites).toHaveLength(SOURCE_ROWS.length);
       SOURCE_ROWS.forEach((source, index) => {
         expect(contentWrites[index]).toMatchObject({

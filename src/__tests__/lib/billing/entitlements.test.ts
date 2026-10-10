@@ -236,11 +236,42 @@ describe("getEffectivePlanId", () => {
 
   it("lets a lifetime entitlement win over a live subscription", async () => {
     setRows({
-      plan_entitlements: { data: { plan_id: "pro" }, error: null },
+      plan_entitlements: { data: [{ plan_id: "pro" }], error: null },
       billing_subscriptions: { data: { plan: "starter" }, error: null },
     });
 
     await expect(getEffectivePlanId(USER)).resolves.toBe("pro");
+  });
+
+  it("keeps an Agency subscription above a lower Pro trial", async () => {
+    setTable("plan_entitlements", [trial(2)]);
+    setTable("billing_subscriptions", [
+      {
+        user_id: USER,
+        plan: "agency",
+        status: "active",
+        created_at: daysFromNow(-5),
+      },
+    ]);
+
+    await expect(getEffectivePlanId(USER)).resolves.toBe("agency");
+  });
+
+  it("keeps a permanent Agency grant above a newer lower Pro grant", async () => {
+    setTable("plan_entitlements", [
+      grant({
+        plan_id: "agency",
+        granted_at: daysFromNow(-30),
+      }),
+      grant({
+        plan_id: "pro",
+        source: "support_comp",
+        granted_at: daysFromNow(-1),
+      }),
+    ]);
+    setTable("billing_subscriptions", []);
+
+    await expect(getEffectivePlanId(USER)).resolves.toBe("agency");
   });
 
   it.each([
@@ -249,7 +280,12 @@ describe("getEffectivePlanId", () => {
   ])(
     "normalises a retired free plan on %s to no plan at all",
     async (_label, table, data) => {
-      setRows({ [table]: { data, error: null } });
+      setRows({
+        [table]: {
+          data: table === "plan_entitlements" ? [data] : data,
+          error: null,
+        },
+      });
 
       await expect(getEffectivePlanId(USER)).resolves.toBeNull();
     },
@@ -257,7 +293,7 @@ describe("getEffectivePlanId", () => {
 
   it("falls through a free grant to a real subscription underneath it", async () => {
     setRows({
-      plan_entitlements: { data: { plan_id: "free" }, error: null },
+      plan_entitlements: { data: [{ plan_id: "free" }], error: null },
       billing_subscriptions: { data: { plan: "pro" }, error: null },
     });
 

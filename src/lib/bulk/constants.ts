@@ -25,3 +25,20 @@ export const MAX_IMPORT_BYTES = 4 * 1024 * 1024;
 
 /** For the message the owner reads: "The import limit is 4 MB." */
 export const MAX_IMPORT_LABEL = `${MAX_IMPORT_BYTES / (1024 * 1024)} MB`;
+
+/**
+ * The most operations one `POST /api/bulk/update` request may carry (s77, s69
+ * R2). Over it is a 400, before the session is read.
+ *
+ * The route took any length. Each operation is a sequential element read plus
+ * up to one service-role write inside a single function invocation, and the
+ * whole array is stored in `bulk_operations.configuration` — so the limiter in
+ * front (10 requests a minute) bounded requests, not the work inside one.
+ *
+ * 100 because the only caller, the dashboard's batch form, builds operations
+ * by hand one row at a time; it never comes near. That bounds one request at
+ * about 200 round trips, and one address at about 1,000 element writes a
+ * minute. A bigger change is a bulk import (one RPC, ADR 008), not a bigger
+ * number here.
+ */
+export const MAX_BULK_UPDATE_OPERATIONS = 100;

@@ -7,6 +7,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { EditSessionManager } from "@/lib/auth/edit-sessions";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { authorizeFirstPartyEditorAccess } from "@/lib/auth/editor-access";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -81,6 +86,23 @@ export async function POST(request: NextRequest) {
       request.headers.get("x-real-ip") ||
       "unknown";
     const userAgent = request.headers.get("user-agent") || "unknown";
+
+    // A session on a lapsed owner's site would only be refused at its first
+    // save, so it is refused here, with the owner's message (s51, ADR 041).
+    // `createEditSession` checks the caller's permission AND inserts in one
+    // call, so the permission is read first: only a caller who holds a row on
+    // this site is told about its plan. Anyone else falls through to today's
+    // refusal and learns nothing about a stranger's billing.
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
+      siteId,
+      "view",
+    );
+    if (firstPartyAccess) {
+      const ownerCanEdit = await checkOwnerCanEdit(siteId);
+      if (!ownerCanEdit.ok) {
+        return ownerCanEditRefusal(ownerCanEdit);
+      }
+    }
 
     // Create edit session
     const editSession = await EditSessionManager.createEditSession({

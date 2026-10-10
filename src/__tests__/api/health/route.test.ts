@@ -5,14 +5,17 @@
 
 import { NextRequest } from "next/server";
 
+const mockFrom = jest.fn().mockReturnThis();
+const mockSelect = jest.fn().mockReturnThis();
+const mockLimit = jest.fn().mockResolvedValue({ data: [], error: null });
+
 // Mock the server Supabase client used by the health route's dependency checks
 // so GET exercises the real handler deterministically (healthy DB + storage).
 jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(async () => ({
-    from: jest.fn().mockReturnThis(),
-    select: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    single: jest.fn().mockResolvedValue({ data: { id: "1" }, error: null }),
+    from: mockFrom,
+    select: mockSelect,
+    limit: mockLimit,
     storage: {
       getBucket: jest.fn().mockResolvedValue({
         data: { name: "assets", public: false },
@@ -23,6 +26,13 @@ jest.mock("@/lib/supabase/server", () => ({
 }));
 
 describe("/api/health", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockFrom.mockReturnThis();
+    mockSelect.mockReturnThis();
+    mockLimit.mockResolvedValue({ data: [], error: null });
+  });
+
   // API-090: GET /api/health returns 200
   describe("API-090: Health endpoint", () => {
     it("should return health status information", async () => {
@@ -40,6 +50,19 @@ describe("/api/health", () => {
       expect(body).toHaveProperty("status");
       expect(["healthy", "degraded", "unhealthy"]).toContain(body.status);
       expect(body).toHaveProperty("timestamp");
+      expect(mockFrom).toHaveBeenCalledWith("plans");
+      expect(mockFrom).not.toHaveBeenCalledWith("sites");
+      expect(mockSelect).toHaveBeenCalledWith("id");
+    });
+
+    it("keeps the anonymous HEAD uptime probe off tenant tables", async () => {
+      const { HEAD } = await import("@/app/api/health/route");
+      const response = await HEAD();
+
+      expect(response.status).toBe(200);
+      expect(mockFrom).toHaveBeenCalledWith("plans");
+      expect(mockFrom).not.toHaveBeenCalledWith("sites");
+      expect(mockSelect).toHaveBeenCalledWith("id");
     });
 
     it("should include status field in response", () => {
@@ -70,6 +93,19 @@ describe("/api/health", () => {
 
   // API-091: GET /api/health/ready returns readiness
   describe("API-091: Readiness endpoint", () => {
+    it("uses the anonymous-readable plan catalogue for its database probe", async () => {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
+      const { GET } = await import("@/app/api/health/ready/route");
+      const response = await GET(
+        new NextRequest("http://localhost:3000/api/health/ready"),
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockFrom).toHaveBeenCalledWith("plans");
+      expect(mockFrom).not.toHaveBeenCalledWith("sites");
+      expect(mockSelect).toHaveBeenCalledWith("id");
+    });
+
     it("should check critical dependencies", () => {
       const readinessChecks = {
         database: true,

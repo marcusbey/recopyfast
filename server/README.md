@@ -291,7 +291,8 @@ sourcing note under the kill switch below.
 
 `NEXT_PUBLIC_WS_URL` is the whole of it, and it is what makes this story reversible (ADR 004
 rule 2). Unset it in Vercel Production and redeploy: `getPublicWebSocketUrl()` returns `""`,
-issued snippets omit `data-ws-url`, `window.RECOPYFAST_WS` is never set, the widget takes its
+issued snippets omit `data-ws-url`, `window.RECOPYFAST_WS` is `null` (since s67 the widget
+writes its resolved endpoint back to that global, and there is none), the widget takes its
 early return before downloading socket.io at all, the CSP stops advertising the origin, and
 `/api/health` stops reporting a `realtime` check rather than reporting it as failed. The product
 is byte-for-byte its pre-`s07b` self. Restore by setting the value and redeploying again.
@@ -379,7 +380,7 @@ than a skip. Before a service-role client is created, the shared guard also veri
 HTTP origins and ports and rejects the known production project reference. The core flow applies
 the same rule under `RUN_RECOPYFAST_CORE_E2E=1`.
 
-CI executes the complete inventory: **39 passed, 0 failed, 0 skipped, 0 flaky**. A custom reporter
+CI executes the complete inventory: **44 passed, 0 failed, 0 skipped, 0 flaky**. A custom reporter
 turns any missing, skipped or flaky case into a non-zero job and uploads only a credential-free
 summary. Traces, screenshots and videos are disabled in CI because the fixture URLs contain
 short-lived editor credentials.
@@ -458,7 +459,7 @@ it), production rebuilt from the same commit, verified, then restored and rebuil
 |---|---|---|
 | CSP `connect-src` | `'self'` + the two Supabase origins — **both realtime origins gone** | both realtime origins back |
 | `GET /api/health` | `healthy`, HTTP 200 | `healthy`, HTTP 200 |
-| Legacy snippet on the fixture | no `window.RECOPYFAST_WS`, no `/socket.io/` request, no fallback-loader request, content over HTTP, no error surface | unchanged |
+| Legacy snippet on the fixture | no `window.RECOPYFAST_WS` (it reads `null` since s67, which writes the resolved endpoint back), no `/socket.io/` request, no fallback-loader request (the loader itself was deleted in s67), content over HTTP, no error surface | unchanged |
 | **Editor saves** | **`staging_content` written and read back from the database**, zero socket traffic, zero page errors | unchanged |
 | Parity | n/a — nothing configured to connect to | **598 ms**, two distinct sockets |
 

@@ -5,7 +5,7 @@
 /**
  * T1 — `server/` must be installable and runnable from its own manifest.
  *
- * `server/Dockerfile:16` runs `npm ci --omit=dev` against `server/package.json`
+ * `server/Dockerfile:21` runs `npm ci --omit=dev` against `server/package.json`
  * alone, and `server/.dockerignore` strips the host's `node_modules`. So the
  * image contains exactly the declared dependencies and nothing else.
  *
@@ -93,7 +93,7 @@ describe("server manifest", () => {
   });
 
   it("has a patched lockfile that agrees with the manifest and is CI-gated", () => {
-    // `npm ci` (Dockerfile:16) refuses to run against a lockfile that does not
+    // `npm ci` (Dockerfile:21) refuses to run against a lockfile that does not
     // match package.json — it does not silently resolve, it exits non-zero. A
     // hand-edited manifest therefore breaks the build rather than the runtime.
     const rootEntry = lock.packages?.[""];

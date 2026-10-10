@@ -1,0 +1,73 @@
+---
+validated: yes
+validated_by: operator-prevalidated user scope (2026-09-25)
+---
+
+# s36 — Inline editor save lifecycle
+
+No new screen or design change; preserve the current UI and architecture.
+
+- [x] Add deterministic tests booting the real widget source. Hold a save response
+      pending while dispatching Save, Enter and Publish/outside mousedown; assert one
+      staging PUT. Complete save/cancel before the 100ms listener timer, advance it,
+      publish/clear simulated staging and click outside; assert no resurrected draft.
+      Cover a fresh edit after cleanup and recovery after a nonterminal save failure.
+      Run these against baseline and record the red result before changing source.
+- [x] Repair startTextEdit locally: synchronous in-flight and closed-session save
+      guards, retryable failure unlock, cancel/teardown lifecycle protection, cancel
+      deferred outside-listener installation, remove session-owned keyboard/paste
+      listeners on cleanup. Keep legitimate later edits and failure recovery working.
+      No global lock, new abstractions, dependencies or API changes.
+- [x] Rebuild embed and run targeted widget suites, preserving all guards.
+- [x] Repair the separately reproduced spec readiness race before heading.click:
+      the banner and data-rcf-id exist before hydration and edit listeners finish.
+      Poll the existing widget isInitialized flag with the default assertion budget,
+      retaining every assertion, retry setting and timeout. Baseline local failure at
+      share-edit-publish.spec.ts:250 is the red evidence (click before listener).
+- [x] Run the share spec with --repeat-each=20 --workers=1 --retries=0
+      against disposable loopback services; if unavailable, obtain three consecutive
+      green PR E2E jobs. Capture counts and limitations, without credentials.
+- [x] Run npm run precommit, npm run build, embed freshness/size, audit:prod,
+      production typecheck and formatting checks; record counts and inherited warnings.
+- [x] Add only a pending-independent-review placeholder, commit, push and create
+      a draft PR with Why / What changed / Decisions / Verification / Risk & rollback.
+
+Implementation ownership: executor subagent; integration, stack and release gates:
+leader. Independent review verdict remains a separate reviewer's responsibility.
+
+## Review-blocking fix run
+
+- [x] Extend the real-widget lifecycle regression first: while a save is pending,
+      freeze the editable element and scalar fields, show `Saving…` in either editor
+      banner, then restore editing after a bounded timeout or other recoverable failure.
+      Prove a later edit/save keeps the newer text and explicitly prove the successful
+      request clears the in-flight state.
+- [x] Replace the overlapping closed-session flags and duplicated handler cleanup
+      with one small session generation/token. Retain only lifecycle guards that have
+      an individual mutation-sensitive regression; do not weaken the existing race,
+      cleanup, paste, retry, or later-edit coverage.
+- [x] Rebuild with official Node 20.15.1 and reduce the widget by at least 90
+      gzipped bytes from the reviewed 33,952-byte measurement, without changing either
+      ceiling. Run only the targeted lifecycle and embed budget suites during this fix
+      pass; the leader owns the final full gates, commit, push, and PR CI repetitions.
+
+## Ship-allowed fix mode 2
+
+- [x] Replace the unconditional `AbortSignal.timeout` save dependency with a
+      feature-detected fallback signal. Add a regression that removes
+      `AbortSignal.timeout`, still observes one successful PUT, and separately
+      proves the 15-second abort fires where the helper exists.
+- [x] Give the staging banner a dedicated save-status element beside its mode
+      badge. Prove the dot and `Staging` label survive both successful and failed
+      saves.
+- [x] Make every lifecycle test boot a fresh widget instance, then rerun each
+      retained guard mutation through `RCF_WIDGET_SOURCE` and record the honest
+      red counts.
+- [x] Deferred as a byte-budget follow-up: explain that a timed-out save
+      may still have landed and re-read staging for the edited element when the
+      editor cancels after that timeout. The two major fixes leave five gzipped
+      widget bytes, which cannot carry this wording and refetch without weakening
+      a guard or expanding the review-approved scope.
+- [x] Rebuild the generated embed and pass the targeted lifecycle/embed tests
+      plus the official Node 20.15.1 freshness and byte check. The leader owns
+      the final full gates, commit, push, and draft-PR update.

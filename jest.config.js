@@ -1,30 +1,39 @@
-const nextJest = require('next/jest')
+const nextJest = require("next/jest");
 
 const createJestConfig = nextJest({
   // Provide the path to your Next.js app to load next.config.js and .env files
-  dir: './',
-})
+  dir: "./",
+});
 
 // Add any custom config to be passed to Jest
 const customJestConfig = {
-  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-  testEnvironment: 'jsdom',
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.js"],
+  testEnvironment: "jsdom",
+  // CI has long capped Jest at two workers with a 512 MB idle-worker recycle
+  // limit after parallel jsdom suites caused OOM/SIGABRT cascades. Local hooks
+  // still used Jest's CPU-derived default (nine workers on this machine), so a
+  // heavily loaded host could time out otherwise-green health and websocket
+  // suites before a push. Keep CLI, pre-commit and pre-push runs on the same
+  // resource contract as CI; this changes scheduling only, never assertions,
+  // retries, timeouts or coverage thresholds.
+  maxWorkers: 2,
+  workerIdleMemoryLimit: "512MB",
   testEnvironmentOptions: {
-    customExportConditions: [''],
+    customExportConditions: [""],
   },
   testPathIgnorePatterns: [
-    '<rootDir>/.next/',
-    '<rootDir>/node_modules/',
-    '<rootDir>/server/',
+    "<rootDir>/.next/",
+    "<rootDir>/node_modules/",
+    "<rootDir>/server/",
   ],
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/src/$1',
+    "^@/(.*)$": "<rootDir>/src/$1",
   },
   collectCoverageFrom: [
-    'src/**/*.{js,jsx,ts,tsx}',
-    '!src/**/*.d.ts',
-    '!src/app/layout.tsx',
-    '!src/app/globals.css',
+    "src/**/*.{js,jsx,ts,tsx}",
+    "!src/**/*.d.ts",
+    "!src/app/layout.tsx",
+    "!src/app/globals.css",
   ],
   // Ratchet, not a target. The global gate was set to 80% while real coverage
   // sat near 22%, so `npm run test:coverage` — and with it the pre-push hook —
@@ -39,19 +48,29 @@ const customJestConfig = {
   // branches 34.32, functions 39.51, lines 41.82, statements 41.57. Each is
   // rounded down to the integer below the measurement, so the gate has a
   // fraction of a point of slack and still ratchets. Never lower these.
+  //
+  // Raised 2026-10-09 (s75) from 34/39/41/41, when CI started enforcing them
+  // (`--coverage` on the CI Jest step; until then only the local prepush hook
+  // read them). Measured that day with the CI placeholder environment:
+  // branches 61.56, functions 65.72, lines 69.23, statements 68.62. Re-measured
+  // on s75's final tree (rebased on s73, with its review fixes), same command:
+  // branches 61.87, functions 65.88, lines 69.54, statements 68.92 — the same
+  // floors; lines keeps the least slack (0.54).
+  // src/__tests__/ci/release-gates.test.ts holds the same floor, so lowering
+  // one here fails that test too.
   coverageThreshold: {
     global: {
-      branches: 34,
-      functions: 39,
-      lines: 41,
-      statements: 41,
+      branches: 61,
+      functions: 65,
+      lines: 69,
+      statements: 68,
     },
   },
   // Only *.test.* / *.spec.* are suites. The previous
   // `src/**/__tests__/**/*.{js,jsx,ts,tsx}` pattern also swept up shared
   // helpers (e.g. integration/setup.ts) and failed them as empty suites.
-  testMatch: ['<rootDir>/src/**/*.(test|spec).{js,jsx,ts,tsx}'],
-}
+  testMatch: ["<rootDir>/src/**/*.(test|spec).{js,jsx,ts,tsx}"],
+};
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async
-module.exports = createJestConfig(customJestConfig)
+module.exports = createJestConfig(customJestConfig);

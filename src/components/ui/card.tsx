@@ -5,23 +5,27 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Container radius is softer than the radius of anything nested inside it
- * (`rounded-xl` here, `rounded-md`/`rounded-lg` for controls and rows), which
- * is what makes nesting read as nesting rather than as repetition.
+ * Square and flat (s66a, ADR 050). A card is a container, so it takes the 0
+ * radius; nesting reads through borders and surface steps, not through a
+ * container softer than its contents. That older rule ("rounded-xl here,
+ * rounded-md for controls") is superseded on app surfaces by ADR 050: it is
+ * how the owner's site-registered panel ended up as rounded boxes inside a
+ * rounded modal.
  *
- * Shadows come from the tinted `--shadow-*` scale in globals.css — the surface
- * hue at low alpha, not black at low opacity, so a raised card sits in the same
- * light as the page.
+ * Static panels cast no shadow and never move. Only `elevated`, for surfaces
+ * that float (dialogs, popovers), keeps `shadow-md`; shadows come from the
+ * tinted `--shadow-*` scale in globals.css. `interactive` signals itself with
+ * its border colour alone.
  */
 const cardVariants = cva(
   [
-    "rounded-xl border bg-card text-card-foreground",
+    "rounded-container border bg-card text-card-foreground",
     "transition-[box-shadow,border-color,transform,background-color] duration-200 ease-out",
   ].join(" "),
   {
     variants: {
       variant: {
-        default: "shadow-sm",
+        default: "",
         /** Sits above the page — dialogs, popovers, the one focal panel. */
         elevated: "shadow-md",
         /** Structure without weight. The dashboard's workhorse. */
@@ -29,15 +33,10 @@ const cardVariants = cva(
         /** No chrome at all; groups content without drawing a box. */
         ghost: "border-transparent bg-transparent shadow-none",
         /**
-         * The whole card is a link or button. Hover lifts, press settles.
-         * Pair with `surface-interactive` only when the card is not already
-         * inside a Link that supplies the affordance.
+         * The whole card is a link or button. Hover changes the border colour
+         * only: no lift, no shadow (s66a).
          */
-        interactive: [
-          "shadow-xs cursor-pointer",
-          "hover:border-primary/40 hover:shadow-md hover:-translate-y-px",
-          "active:translate-y-0 active:shadow-xs",
-        ].join(" "),
+        interactive: "cursor-pointer hover:border-primary/40",
       },
       padding: {
         default: "",
@@ -96,10 +95,7 @@ const CardTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <h3
     ref={ref}
-    className={cn(
-      "text-xl font-semibold leading-tight tracking-[-0.014em]",
-      className,
-    )}
+    className={cn("text-base font-semibold leading-6", className)}
     {...props}
   />
 ));

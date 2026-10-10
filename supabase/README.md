@@ -141,7 +141,7 @@ suite seeds fresh UUID-scoped sites, restores any captured content, and deletes
 only the current run's captured site id. `supabase stop --no-backup` removes the
 throwaway stack on both success and failure.
 
-The browser contract is exactly **39 passed, 0 failed, 0 skipped, 0 flaky**.
+The browser contract is exactly **44 passed, 0 failed, 0 skipped, 0 flaky**.
 Playwright's normal rich trace/video bundle is disabled in CI because editor
 credentials appear in fixture URLs; CI uploads only
 `test-results/playwright-summary.json`, which contains fixed test names, paths,

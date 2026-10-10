@@ -1,47 +1,70 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Newspaper } from "lucide-react";
 import { BlogPostList } from "@/components/blog/BlogPostList";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import {
+  listPublishedPosts,
+  type PublishedPostsResult,
+} from "@/lib/blog/published-posts";
 
-// This would typically come from a database
-const blogPosts = [
-  {
-    id: 1,
-    title: "5 Ways AI Website Builders Are Revolutionizing Web Development",
-    slug: "ai-website-builders-revolutionizing-web-development",
-    excerpt:
-      "Discover how AI-powered tools are making website creation faster and more accessible for freelancers, marketers, and developers.",
-    category: "AI Tools",
-    publishedAt: "2024-01-15",
-    readTime: "5 min read",
-    featured: true,
-  },
-  {
-    id: 2,
-    title: "Why Every Marketer Needs Dynamic Content Management",
-    slug: "dynamic-content-management-for-marketers",
-    excerpt:
-      "Learn how dynamic content updates can boost your conversion rates and improve user engagement without technical complexity.",
-    category: "Marketing",
-    publishedAt: "2024-01-14",
-    readTime: "4 min read",
-    featured: false,
-  },
-  {
-    id: 3,
-    title: "The Freelancer's Guide to Client Website Management",
-    slug: "freelancer-guide-client-website-management",
-    excerpt:
-      "Streamline your client workflow with tools that let you update content instantly without waiting for developer cycles.",
-    category: "Freelancing",
-    publishedAt: "2024-01-13",
-    readTime: "6 min read",
-    featured: false,
-  },
-];
+// Until s88 /blog inherited the root layout's canonical, which named the
+// homepage. Every indexable page names itself.
+export const metadata: Metadata = {
+  alternates: { canonical: "/blog" },
+};
 
-export default function Blog() {
+/**
+ * Regenerated at most hourly, like the sitemap, which lists the same posts.
+ *
+ * The posts are read as `anon` (ADR 058), so nothing here depends on who asked
+ * and the page can be static. Without `revalidate` it would be built once per
+ * deploy, and a post an admin publishes afterwards would never appear.
+ */
+export const revalidate = 3600;
+
+/**
+ * The three states of the index, each its own component (design system §
+ * States). Until s88's review this page rendered a hard-coded list of three
+ * posts from January 2024 whose slugs no `blog_posts` row was known to have.
+ */
+function BlogPosts({ result }: { result: PublishedPostsResult }) {
+  if (!result.ok) {
+    return (
+      <Alert variant="destructive" className="mx-auto max-w-2xl">
+        <AlertTitle>The blog could not be loaded</AlertTitle>
+        <AlertDescription>
+          Posts are temporarily unavailable. Please try again later.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (result.posts.length === 0) {
+    return (
+      <EmptyState
+        icon={Newspaper}
+        title="No posts yet"
+        description="Nothing has been published here yet. The installation guide shows how ReCopyFast fits your site."
+        action={
+          <Button asChild variant="outline">
+            <Link href="/docs/install">Read the installation guide</Link>
+          </Button>
+        }
+      />
+    );
+  }
+
+  return <BlogPostList posts={result.posts} />;
+}
+
+export default async function Blog() {
+  const result = await listPublishedPosts();
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -56,7 +79,7 @@ export default function Blog() {
           </p>
         </div>
 
-        <BlogPostList posts={blogPosts} />
+        <BlogPosts result={result} />
 
         {/* Newsletter CTA
             The email capture form that used to live here had no onChange, no

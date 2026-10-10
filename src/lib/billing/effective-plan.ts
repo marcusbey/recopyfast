@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { findPlanById } from "@/lib/stripe/plans";
-import type { SubscriptionPlan } from "@/lib/stripe/plan-types";
+import { findPlanById, findPurchasedPlanById } from "@/lib/stripe/plans";
+import { PAID_PLAN_IDS, type SubscriptionPlan } from "@/lib/stripe/plan-types";
 import {
-  readPurchasedCreditBalance,
+  readPaidCreditBalance,
   spendableFilter,
 } from "@/lib/credits/spendable";
+import type { FoundingOfferId } from "@/types/billing";
+import { FOUNDING_OFFER_TERMS, isFoundingOfferId } from "./founding-offer";
 
 /**
  * What an account is entitled to, resolved in one place.
@@ -44,6 +46,14 @@ function isRetired(planId: string): boolean {
   return RETIRED_PLAN_IDS.includes(planId);
 }
 
+const HIGHEST_PAID_PLAN_ID = PAID_PLAN_IDS[PAID_PLAN_IDS.length - 1];
+
+function isRecognisedPaidPlanId(planId: string): boolean {
+  return (
+    !isRetired(planId) && (PAID_PLAN_IDS as readonly string[]).includes(planId)
+  );
+}
+
 /**
  * `plan_entitlements.source` for the 14-day Pro trial (ADR 014).
  *
@@ -61,6 +71,12 @@ export interface TrialGrant {
   readonly expiresAt: string;
   /** False once the window has closed, or if the grant was revoked. */
   readonly isActive: boolean;
+  /**
+   * The founding offer this trial row was claimed under (s47a). Absent for a
+   * plain 14-day trial. Survives expiry and release: the lapsed billing screen
+   * reads it to say "Your founding offer has ended".
+   */
+  readonly offerId?: FoundingOfferId;
 }
 
 /**
@@ -87,7 +103,7 @@ export async function readTrialGrant(
 ): Promise<TrialGrant | null> {
   const { data, error } = await supabase
     .from("plan_entitlements")
-    .select("granted_at, expires_at, revoked_at")
+    .select("granted_at, expires_at, revoked_at, offer_id")
     .eq("user_id", userId)
     .eq("source", TRIAL_SOURCE)
     .limit(1)
@@ -95,6 +111,7 @@ export async function readTrialGrant(
       granted_at: string | null;
       expires_at: string | null;
       revoked_at: string | null;
+      offer_id: string | null;
     }>();
 
   if (error) {
@@ -118,6 +135,9 @@ export async function readTrialGrant(
     isActive:
       (data.revoked_at ?? null) === null &&
       new Date(data.expires_at).getTime() > Date.now(),
+    // An id with no terms is presented as the plain trial the resolver also
+    // treats it as, so the copy and the allowance never disagree.
+    ...(isFoundingOfferId(data.offer_id) ? { offerId: data.offer_id } : {}),
   };
 }
 
@@ -128,8 +148,11 @@ export async function readTrialGrant(
  *
  *   plan    — a live subscription or a permanent grant. Capabilities and
  *             quotas come from here and only from here.
- *   credits — no plan, but purchased credits left to spend. They paid for a
- *             delivered good, so it stays spendable; it confers no plan.
+ *   credits — no plan, but purchased credits left. They paid for a
+ *             delivered good, so the balance is kept; it confers no plan,
+ *             and since s51 no editing and no AI spend either until a plan
+ *             exists (ADR 041) — AI spend happens only inside editing, and
+ *             editing needs the site owner's plan (`checkOwnerCanEdit`).
  *   none    — nothing. The paywall.
  *
  * Modelled as a union rather than a boolean beside one, so a caller reaching
@@ -183,9 +206,11 @@ export function hasAnyEntitlement(entitlement: Entitlement): boolean {
  *     purchase and comp writes; a trial is the same row with a date on it
  *     (ADR 014), and lapses by simply not being selected any more.
  *
- * An entitlement wins over a subscription: someone who bought Lifetime Pro and
- * later starts a Starter subscription should keep Pro, and a lifetime grant can
- * never be downgraded by a lapsed card.
+ * A permanent grant ordinarily wins over a subscription: someone who bought
+ * Lifetime Pro and later starts a Starter subscription should keep Pro. Agency
+ * is the highest paid tier and wins regardless of which store holds it, so an
+ * Agency subscription cannot be masked by an earlier Pro trial/grant and a
+ * permanent Agency purchase cannot be masked by a newer lower grant.
  *
  * Retired ids are normalised to `null` here, at the one point both the router
  * and the gates read through, so a `free` row cannot mean one thing to
@@ -247,29 +272,144 @@ export async function readEffectivePlanId(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<string | null> {
-  const { data: entitlement, error: entitlementError } = await supabase
+  return (await readEffectivePlanBasis(supabase, userId))?.planId ?? null;
+}
+
+/** A plan an account holds, and whether a purchase is the only thing conferring it. */
+interface HeldPlan {
+  readonly planId: string;
+  /**
+   * True when every live grant of `planId` was bought — it carries a Stripe
+   * payment intent — and no live subscription bills the same plan.
+   *
+   * s45 (ADR 038): only then do the purchased product's limit overrides apply.
+   * A lifetime Founding Agency owner holds `agency` with 250 monthly AI credits
+   * instead of 1,000; an Agency subscriber, an unpaid support comp, and a buyer
+   * whose Agency subscription is still running out the period they paid for
+   * (the webhook cancels it at period end, and the offer card promises they
+   * keep that period) all hold the full plan.
+   *
+   * "Carries a payment intent" is the database's own definition of owning the
+   * founding lifetime (`reserve_founding_agency_spot`, 20260924065000). Trials
+   * (ADR 014) and comps carry none.
+   */
+  readonly isHeldByPurchaseOnly: boolean;
+}
+
+/** The plan in force, and what else the account holds beside it. */
+interface EffectivePlanBasis extends HeldPlan {
+  /**
+   * s47a (ADR 039): the founding offer the plan in force is held under, or
+   * null. Set only when every live grant of the plan in force is an offer row
+   * and no live subscription bills that plan. Offer rows are `pro` trial rows
+   * by CHECK (20260928120000), so this only ever marks `pro`.
+   */
+  readonly offerId: string | null;
+  /**
+   * Every OTHER plan the account holds through a live non-trial grant or its
+   * live subscription. Filled in only when the plan in force is held by
+   * purchase only, or by an offer only, because only then can an override
+   * (ADR 038, ADR 039) sit below something the account already has — see
+   * `resolveEntitlement`.
+   */
+  readonly otherHeldPlans: readonly HeldPlan[];
+}
+
+interface LiveGrant {
+  plan_id: string;
+  stripe_payment_intent_id: string | null;
+  source: string | null;
+  offer_id: string | null;
+}
+
+function isPurchaseOnly(grants: readonly LiveGrant[], planId: string): boolean {
+  const ofPlan = grants.filter((grant) => grant.plan_id === planId);
+  return (
+    ofPlan.length > 0 &&
+    ofPlan.every((grant) => (grant.stripe_payment_intent_id ?? null) !== null)
+  );
+}
+
+/**
+ * The founding offer conferring `planId`, when it is the only live grant that
+ * does (s47a, ADR 039). Null as soon as any other live grant of the same plan
+ * exists — a Lifetime Pro purchase, a comp, a plain trial — because that grant
+ * confers the full plan and the offer's allowance must not shrink it.
+ *
+ * "Every", not "some": the offer's 100 credits replace Pro's 500 only for an
+ * account that holds Pro through the offer alone. The subscription half of
+ * that rule is the caller's, beside the same test for purchases.
+ */
+function offerOnly(
+  grants: readonly LiveGrant[],
+  planId: string,
+): string | null {
+  const ofPlan = grants.filter((grant) => grant.plan_id === planId);
+  const offerId = ofPlan[0]?.offer_id ?? null;
+  return offerId !== null &&
+    ofPlan.every((grant) => (grant.offer_id ?? null) === offerId)
+    ? offerId
+    : null;
+}
+
+/**
+ * The plans other than `planId` that this account already gets an allowance
+ * from: every live non-trial grant (bought or comped) and the live
+ * subscription. Each is described the way the account holds it, so a second
+ * purchased grant is counted at what that purchase confers.
+ *
+ * Trials are left out on purpose. ADR 029 already keeps a Pro trial from
+ * outranking a purchased Agency grant; a trial is 14 card-less days, not an
+ * allowance the buyer paid for or was granted, so it does not lift one either.
+ */
+function otherHeldPlans(
+  grants: readonly LiveGrant[],
+  subscriptionPlanId: string | null,
+  planId: string,
+): HeldPlan[] {
+  const heldPlanIds = new Set([
+    ...grants
+      .filter((grant) => grant.source !== TRIAL_SOURCE)
+      .map((grant) => grant.plan_id),
+    ...(subscriptionPlanId ? [subscriptionPlanId] : []),
+  ]);
+
+  return [...heldPlanIds]
+    .filter((id) => id !== planId && isRecognisedPaidPlanId(id))
+    .map((id) => ({
+      planId: id,
+      isHeldByPurchaseOnly:
+        isPurchaseOnly(grants, id) && subscriptionPlanId !== id,
+    }));
+}
+
+async function readEffectivePlanBasis(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<EffectivePlanBasis | null> {
+  const { data: entitlements, error: entitlementError } = await supabase
     .from("plan_entitlements")
-    .select("plan_id")
+    // `offer_id` (s47a) exists only once 20260928120000 is applied. Deployed
+    // ahead of that migration, this select errors and every entitlement read
+    // throws — which is why the runbook applies the migration first.
+    .select("plan_id, stripe_payment_intent_id, source, offer_id")
     .eq("user_id", userId)
     .is("revoked_at", null)
     // Expiry is a predicate INSIDE the query, never a check on the row after
     // it comes back, and the difference is a paying customer's access.
     //
-    // The branch below is `if (entitlement && ...) return entitlement.plan_id`
-    // with nothing under it but the subscription fallback. Selecting an expired
-    // trial and then discarding it here would return null and skip that
-    // fallback entirely — so somebody who converted mid-trial, is being billed,
-    // and whose earlier trial has since lapsed would be shown the paywall. Not
-    // selecting the row instead lets `.limit(1)` find the next live grant, or
-    // fall through to their subscription, which is what makes conversion free.
+    // Selecting an expired trial and then discarding it after the query used to
+    // skip the subscription fallback entirely — so somebody who converted
+    // mid-trial, is being billed, and whose earlier trial has since lapsed was
+    // shown the paywall. Excluding it here leaves only live candidates before
+    // grant/subscription precedence is resolved below.
     //
     // Same shape and same function as the credit wallet's "not expired yet"
     // filter, reused rather than restated: NULL means never expires, which is
     // what every pre-trial grant row holds and why none of them need a backfill.
     .or(spendableFilter())
     .order("granted_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ plan_id: string }>();
+    .returns<LiveGrant[]>();
 
   // A read failure here must not silently downgrade a paying customer, so it is
   // surfaced rather than swallowed.
@@ -279,8 +419,30 @@ export async function readEffectivePlanId(
     );
   }
 
-  if (entitlement && !isRetired(entitlement.plan_id)) {
-    return entitlement.plan_id;
+  const liveGrants = entitlements ?? [];
+  const grantedPlanId =
+    liveGrants.find((entitlement) =>
+      isRecognisedPaidPlanId(entitlement.plan_id),
+    )?.plan_id ?? null;
+
+  // Agency is the highest tier in the closed identity contract. It wins even
+  // when an older permanent purchase sits under a newer Pro trial/support
+  // grant; using only the newest row made that lower grant a silent downgrade.
+  // Other grants retain their inherited newest-grant-wins semantics.
+  const holdsHighestGrant =
+    isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
+    liveGrants.some(
+      (entitlement) => entitlement.plan_id === HIGHEST_PAID_PLAN_ID,
+    );
+
+  // A grant that confers the full plan answers without the subscription read,
+  // exactly as before s45. Only a purchase-only Agency grant goes on to ask
+  // whether an Agency subscription is still billing — without that read, a
+  // subscriber who buys the lifetime would drop to its 250 credits in the
+  // middle of a period they had already paid 1,000 for. The same read tells
+  // `withAllowanceFloor` which lower plan (a Pro subscription) is still billing.
+  if (holdsHighestGrant && !isPurchaseOnly(liveGrants, HIGHEST_PAID_PLAN_ID)) {
+    return fullPlan(HIGHEST_PAID_PLAN_ID);
   }
 
   const { data: subscription, error: subscriptionError } = await supabase
@@ -298,11 +460,142 @@ export async function readEffectivePlanId(
     );
   }
 
-  if (!subscription || isRetired(subscription.plan)) {
-    return null;
+  if (
+    isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
+    subscription?.plan === HIGHEST_PAID_PLAN_ID
+  ) {
+    return fullPlan(HIGHEST_PAID_PLAN_ID);
   }
 
-  return subscription.plan;
+  const subscriptionPlanId = subscription?.plan ?? null;
+
+  if (holdsHighestGrant) {
+    return purchasedPlan(HIGHEST_PAID_PLAN_ID, liveGrants, subscriptionPlanId);
+  }
+
+  if (grantedPlanId) {
+    if (subscriptionPlanId === grantedPlanId) {
+      return fullPlan(grantedPlanId);
+    }
+    if (isPurchaseOnly(liveGrants, grantedPlanId)) {
+      return purchasedPlan(grantedPlanId, liveGrants, subscriptionPlanId);
+    }
+    const offerId = offerOnly(liveGrants, grantedPlanId);
+    return offerId === null
+      ? fullPlan(grantedPlanId)
+      : offerPlan(grantedPlanId, offerId, liveGrants, subscriptionPlanId);
+  }
+  if (!subscription || !isRecognisedPaidPlanId(subscription.plan)) return null;
+  return fullPlan(subscription.plan);
+}
+
+function fullPlan(planId: string): EffectivePlanBasis {
+  return {
+    planId,
+    isHeldByPurchaseOnly: false,
+    offerId: null,
+    otherHeldPlans: [],
+  };
+}
+
+function purchasedPlan(
+  planId: string,
+  grants: readonly LiveGrant[],
+  subscriptionPlanId: string | null,
+): EffectivePlanBasis {
+  return {
+    planId,
+    isHeldByPurchaseOnly: true,
+    offerId: null,
+    otherHeldPlans: otherHeldPlans(grants, subscriptionPlanId, planId),
+  };
+}
+
+function offerPlan(
+  planId: string,
+  offerId: string,
+  grants: readonly LiveGrant[],
+  subscriptionPlanId: string | null,
+): EffectivePlanBasis {
+  return {
+    planId,
+    isHeldByPurchaseOnly: false,
+    offerId,
+    otherHeldPlans: otherHeldPlans(grants, subscriptionPlanId, planId),
+  };
+}
+
+/** The catalogue plan as the account holds it: purchased view or full row. */
+async function findHeldPlan(held: HeldPlan): Promise<SubscriptionPlan | null> {
+  return held.isHeldByPurchaseOnly
+    ? findPurchasedPlanById(held.planId)
+    : findPlanById(held.planId);
+}
+
+/**
+ * A purchase's allowance override is a floor for the purchase, never a ceiling
+ * on the account: the monthly allowance is the highest of the purchased plan's
+ * and every other plan the account already holds.
+ *
+ * The s45 review (finding 1, critical) caught the version without this: a
+ * Lifetime Pro owner — 500 credits a month for life — who bought Founding
+ * Agency dropped to its 250 permanently, and a Pro subscriber who bought it
+ * dropped from 500 to 250 for the rest of a period they had already paid for
+ * (finding 2), despite the offer card's "You keep the period you have already
+ * paid for". Both are sold the offer (`LifetimeOfferCard`; checkout refuses
+ * only existing `agency` holders). Only the allowance is lifted, and only up;
+ * the plan in force and every other limit stay what ADR 029 and ADR 038 make
+ * them.
+ */
+async function withAllowanceFloor(
+  plan: SubscriptionPlan,
+  otherHeld: readonly HeldPlan[],
+): Promise<SubscriptionPlan> {
+  const others = await Promise.all(otherHeld.map(findHeldPlan));
+  const floor = Math.max(
+    0,
+    ...others.map((other) => other?.limits.monthlyCredits ?? 0),
+  );
+  return floor > plan.limits.monthlyCredits
+    ? { ...plan, limits: { ...plan.limits, monthlyCredits: floor } }
+    : plan;
+}
+
+/**
+ * The allowance the account actually holds the plan in force with.
+ *
+ * Purchase only (ADR 038): the product's override, floored by everything else
+ * held. Offer only (s47a, ADR 039): the offer's monthly credits in place of
+ * the plan's, floored the same way — a Starter subscriber keeps whatever
+ * Starter includes if it is ever more than the offer's 100. Every other limit
+ * stays the full plan's: the offer is Pro, metered.
+ *
+ * An offer id with no terms cannot happen while `offer_id` references
+ * `founding_offers` and the terms cover every seeded id. If the two ever drift
+ * the row is treated as the plain trial it also is, loudly, rather than
+ * inventing a number.
+ */
+async function withHeldAllowance(
+  plan: SubscriptionPlan,
+  basis: EffectivePlanBasis,
+): Promise<SubscriptionPlan> {
+  if (basis.isHeldByPurchaseOnly) {
+    return withAllowanceFloor(plan, basis.otherHeldPlans);
+  }
+  if (basis.offerId === null) {
+    return plan;
+  }
+  if (!isFoundingOfferId(basis.offerId)) {
+    console.error(
+      `[entitlement] offer ${basis.offerId} has no terms; resolving it as a plain trial`,
+    );
+    return plan;
+  }
+  const { monthlyCredits } = FOUNDING_OFFER_TERMS[basis.offerId];
+  return withAllowanceFloor(
+    { ...plan, limits: { ...plan.limits, monthlyCredits } },
+    basis.otherHeldPlans,
+  );
 }
 
 /**
@@ -314,21 +607,34 @@ export async function readEffectivePlanId(
  * switched off — is not a plan, and falls through to the wallet like any other
  * unsubscribed account: someone holding a dead plan id and 500 credits is a
  * credit holder, not a lost cause.
+ *
+ * A plan held by purchase only resolves through `findPurchasedPlanById`: the
+ * same catalogue row, with the buying product's limit overrides applied
+ * (ADR 038). That is how a lifetime Founding Agency owner gets Agency with 250
+ * monthly AI credits (s45) while keeping `planId: "agency"`, which every Agency
+ * check — nav, offers, checkout eligibility, the founding "owned" test — keys
+ * off. Every gate reads limits, so nothing but the allowance differs — and
+ * `withAllowanceFloor` keeps that allowance from ever landing below one the
+ * account already had.
  */
 export async function resolveEntitlement(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<Entitlement> {
-  const planId = await readEffectivePlanId(supabase, userId);
+  const basis = await readEffectivePlanBasis(supabase, userId);
 
-  if (planId !== null) {
-    const plan = await findPlanById(planId);
+  if (basis !== null) {
+    const plan = await findHeldPlan(basis);
     if (plan) {
-      return { kind: "plan", planId, plan };
+      return {
+        kind: "plan",
+        planId: basis.planId,
+        plan: await withHeldAllowance(plan, basis),
+      };
     }
   }
 
-  const purchasedCredits = await readPurchasedCreditBalance(supabase, userId);
+  const purchasedCredits = await readPaidCreditBalance(supabase, userId);
   if (purchasedCredits > 0) {
     return { kind: "credits", planId: null, plan: null };
   }

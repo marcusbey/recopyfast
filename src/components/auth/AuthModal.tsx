@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -33,28 +34,28 @@ export function AuthModal({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-semibold text-center text-foreground">
-            Welcome to ReCopyFast
-          </DialogTitle>
-          <DialogDescription className="text-center text-muted-foreground">
+          <DialogTitle>Welcome to ReCopyFast</DialogTitle>
+          <DialogDescription>
             Get instant access with a magic link sent to your email
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="login">Sign in</TabsTrigger>
-            <TabsTrigger value="signup">Sign up</TabsTrigger>
-          </TabsList>
+        <DialogBody>
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList>
+              <TabsTrigger value="login">Sign in</TabsTrigger>
+              <TabsTrigger value="signup">Sign up</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="login" className="mt-6">
-            <LoginForm onSwitchToSignup={() => setActiveTab("signup")} />
-          </TabsContent>
+            <TabsContent value="login" className="mt-6">
+              <LoginForm onSwitchToSignup={() => setActiveTab("signup")} />
+            </TabsContent>
 
-          <TabsContent value="signup" className="mt-6">
-            <SignupForm onSwitchToLogin={() => setActiveTab("login")} />
-          </TabsContent>
-        </Tabs>
+            <TabsContent value="signup" className="mt-6">
+              <SignupForm onSwitchToLogin={() => setActiveTab("login")} />
+            </TabsContent>
+          </Tabs>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

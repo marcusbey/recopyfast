@@ -35,6 +35,15 @@ interface Result {
 /** The one database every client in this test shares. */
 let mockDb: Record<string, Row[]> = {};
 
+/**
+ * The founding offer's capacity, as `claim_founding_offer_spot` sees it (s47a).
+ * Defaults to 0 in `beforeEach`, so every test that predates the offer runs
+ * the 14-day path exactly as it did — through a real `sold_out`, not through
+ * an unknown-RPC error that happens to fall back the same way.
+ */
+let mockOfferSpotsRemaining = 0;
+let mockOfferRpcFails = false;
+
 const mockGetUser = jest.fn();
 
 let generatedIds = 0;
@@ -100,10 +109,69 @@ function insertInto(
   return { row, error: null };
 }
 
+/**
+ * What 20260928120000's claim function does, minus the lock: an account that
+ * has never had a grant, a subscription or a credit purchase takes a spot, and
+ * its one trial row is written for 90 days, marked `founding_20`. The trial
+ * row goes through `insertInto`, so the one-trial index still decides.
+ */
+function claimFoundingOfferSpot(userId: string): Result {
+  if (mockOfferRpcFails) {
+    return { data: null, error: { message: "connection reset" } };
+  }
+  const hasHistory = [
+    "plan_entitlements",
+    "billing_subscriptions",
+    "credit_purchases",
+  ].some((table) =>
+    (mockDb[table] ?? []).some((row) => row.user_id === userId),
+  );
+  if (hasHistory) {
+    return {
+      data: [{ outcome: "ineligible", entitlement_id: null, expires_at: null }],
+      error: null,
+    };
+  }
+  if (mockOfferSpotsRemaining <= 0) {
+    return {
+      data: [{ outcome: "sold_out", entitlement_id: null, expires_at: null }],
+      error: null,
+    };
+  }
+
+  const grantedAt = new Date();
+  const { row, error } = insertInto("plan_entitlements", {
+    user_id: userId,
+    plan_id: "pro",
+    source: "trial",
+    stripe_payment_intent_id: null,
+    offer_id: "founding_20",
+    granted_at: grantedAt.toISOString(),
+    expires_at: new Date(grantedAt.getTime() + 90 * 86400000).toISOString(),
+  });
+  if (error) return { data: null, error };
+  mockOfferSpotsRemaining -= 1;
+  mockDb.founding_offer_claims = [
+    ...(mockDb.founding_offer_claims ?? []),
+    { user_id: userId, entitlement_id: row.id, status: "claimed" },
+  ];
+  return {
+    data: [
+      {
+        outcome: "claimed",
+        entitlement_id: row.id,
+        expires_at: row.expires_at,
+      },
+    ],
+    error: null,
+  };
+}
+
 function createFakeClient() {
   const from = (table: string) => {
     const predicates: Array<(row: Row) => boolean> = [];
     let sort: { column: string; ascending: boolean } | null = null;
+    let offset = 0;
     let cap: number | null = null;
     let mode: "select" | "insert" | "upsert" | "update" = "select";
     let payload: Row = {};
@@ -122,7 +190,9 @@ function createFakeClient() {
             (ascending ? 1 : -1),
         );
       }
-      return cap === null ? rows : rows.slice(0, cap);
+      return cap === null
+        ? rows.slice(offset)
+        : rows.slice(offset, offset + cap);
     };
 
     const run = (): Result => {
@@ -204,6 +274,11 @@ function createFakeClient() {
         cap = count;
         return builder;
       },
+      range: (from: number, to: number) => {
+        offset = from;
+        cap = to - from + 1;
+        return builder;
+      },
       insert: (values: Row) => {
         mode = "insert";
         payload = values;
@@ -241,7 +316,59 @@ function createFakeClient() {
     return builder;
   };
 
-  return { auth: { getUser: mockGetUser }, from };
+  const rpc = async (name: string, args: Record<string, unknown>) => {
+    if (name === "claim_subscription_checkout_intent") {
+      const existing = (mockDb.checkout_pending_intents ?? []).find(
+        (row) => row.user_id === args.p_user_id && row.status === "pending",
+      );
+      if (existing) {
+        return { data: [{ ...existing, is_new: false }], error: null };
+      }
+
+      const row = {
+        id: nextId("checkout_intent"),
+        user_id: args.p_user_id,
+        intent: "subscription",
+        status: "pending",
+        stripe_session_id: null,
+        checkout_url: null,
+        stripe_price_id: args.p_stripe_price_id,
+        plan_id: args.p_plan_id,
+        billing_period: args.p_billing_period,
+        expires_at: args.p_expires_at,
+      };
+      mockDb.checkout_pending_intents = [
+        ...(mockDb.checkout_pending_intents ?? []),
+        row,
+      ];
+      return { data: [{ ...row, is_new: true }], error: null };
+    }
+
+    if (name === "attach_subscription_checkout_session") {
+      mockDb.checkout_pending_intents = (
+        mockDb.checkout_pending_intents ?? []
+      ).map((row) =>
+        row.id === args.p_intent_id &&
+        row.user_id === args.p_user_id &&
+        row.status === "pending"
+          ? {
+              ...row,
+              stripe_session_id: args.p_stripe_session_id,
+              checkout_url: args.p_checkout_url,
+            }
+          : row,
+      );
+      return { data: null, error: null };
+    }
+
+    if (name === "claim_founding_offer_spot") {
+      return claimFoundingOfferSpot(args.p_user_id as string);
+    }
+
+    throw new Error(`Unexpected RPC in trial lifecycle test: ${name}`);
+  };
+
+  return { auth: { getUser: mockGetUser }, from, rpc };
 }
 
 jest.mock("@/lib/supabase/server", () => ({
@@ -262,6 +389,8 @@ jest.mock("@/lib/api/rate-limit", () => ({
 // are pinned by plan-seed.test.ts; what matters here is that a trial resolves
 // to the SAME Pro row a subscriber gets, with no trial-specific plan anywhere.
 jest.mock("@/lib/stripe/plans", () => ({
+  isAgencyCheckoutEnabled: () =>
+    process.env.AGENCY_CHECKOUT_ENABLED !== "false",
   findPlanById: jest.fn(async (planId: string) =>
     planId === "pro"
       ? {
@@ -284,24 +413,40 @@ jest.mock("@/lib/stripe/plans", () => ({
         }
       : null,
   ),
-  isPaidPlanId: (value: unknown) => value === "starter" || value === "pro",
+  isPaidPlanId: (value: unknown) =>
+    value === "starter" || value === "pro" || value === "agency",
+  isLifetimeProductId: (value: unknown) =>
+    value === "lifetime_pro" || value === "lifetime_agency",
   isBillingPeriod: (value: unknown) =>
     value === "monthly" || value === "yearly",
   getCreditPackConfig: jest.fn(async () => ({ maxPacksPerPurchase: 10 })),
   getLifetimeGrantPlanId: jest.fn(async () => "pro"),
+  getOneTimeProduct: jest.fn(async () => ({
+    id: "lifetime_pro",
+    grantsPlanId: "pro",
+  })),
   getPaidPlan: jest.fn(),
-  resolveStripePriceId: jest.fn(),
+  resolveStripePriceId: jest.fn(async () => "price_pro_monthly"),
 }));
 
 const mockCreateCheckoutSession = jest.fn();
+const mockFindCheckoutSessionForIntent = jest.fn();
+const mockExpireCheckoutSession = jest.fn();
 
 jest.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: (...args: unknown[]) =>
     mockCreateCheckoutSession(...args),
+  preflightLifetimeCheckout: jest.fn(),
+  findCheckoutSessionForIntent: (...args: unknown[]) =>
+    mockFindCheckoutSessionForIntent(...args),
   getCheckoutSessionStatus: jest.fn(),
+  expireCheckoutSession: (...args: unknown[]) =>
+    mockExpireCheckoutSession(...args),
 }));
 
 import { ensureTrialStarted } from "@/lib/billing/trial";
+import { resolveEntitlement } from "@/lib/billing/effective-plan";
+import { getUserCreditBalance } from "@/lib/credits/system";
 import { POST as registerSite } from "@/app/api/sites/register/route";
 import { GET as readContent } from "@/app/api/content/[siteId]/route";
 import { POST as checkout } from "@/app/api/billing/checkout/route";
@@ -348,12 +493,17 @@ function expireTheTrial() {
 beforeEach(() => {
   jest.clearAllMocks();
   generatedIds = 0;
+  mockOfferSpotsRemaining = 0;
+  mockOfferRpcFails = false;
   mockDb = {
+    credit_usage: [],
+    founding_offer_claims: [],
     plan_entitlements: [],
     billing_subscriptions: [],
     billing_customers: [],
     credit_purchases: [],
     checkout_reservations: [],
+    checkout_pending_intents: [],
     sites: [],
     site_permissions: [],
     content_elements: [],
@@ -366,6 +516,7 @@ beforeEach(() => {
     sessionId: "cs_test_1",
     url: "https://checkout.stripe.test/cs_test_1",
   });
+  mockFindCheckoutSessionForIntent.mockResolvedValue(null);
   jest.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -459,7 +610,7 @@ describe("a trial, from sign-in to expiry", () => {
       sessionId: "cs_test_1",
     });
     expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
-    expect(mockDb.checkout_reservations).toHaveLength(1);
+    expect(mockDb.checkout_pending_intents).toHaveLength(1);
   });
 
   it("keeps the customer entitled through conversion, with no gap", async () => {
@@ -508,5 +659,114 @@ describe("a trial, from sign-in to expiry", () => {
     expect(mockDb.plan_entitlements).toHaveLength(1);
     const { status } = await registerSiteFor("again.com", "Again");
     expect(status).toBe(403);
+  });
+});
+
+describe("the founding offer, from sign-in to lapse (s47a)", () => {
+  const DAY_MS = 86400000;
+
+  /** Move the offer row `days` into its life, as the clock would. */
+  function ageTheGrant(days: number) {
+    const shift = days * DAY_MS;
+    mockDb.plan_entitlements = mockDb.plan_entitlements.map((row) =>
+      row.source === "trial"
+        ? {
+            ...row,
+            granted_at: new Date(
+              Date.parse(row.granted_at as string) - shift,
+            ).toISOString(),
+            expires_at: new Date(
+              Date.parse(row.expires_at as string) - shift,
+            ).toISOString(),
+          }
+        : row,
+    );
+  }
+
+  function spend(credits: number, createdAt: string) {
+    mockDb.credit_usage = [
+      ...mockDb.credit_usage,
+      { user_id: USER_ID, credits_used: credits, created_at: createdAt },
+    ];
+  }
+
+  it("first sign-in while spots remain: pro for 90 days, 100 credits, no card; a new allowance on day 31; none on day 91; the next sign-in writes no second trial", async () => {
+    mockOfferSpotsRemaining = 20;
+
+    await ensureTrialStarted(cookieClient, USER_ID);
+
+    expect(mockDb.plan_entitlements).toHaveLength(1);
+    const [grant] = mockDb.plan_entitlements;
+    expect(grant).toMatchObject({
+      plan_id: "pro",
+      source: "trial",
+      stripe_payment_intent_id: null,
+      offer_id: "founding_20",
+    });
+    expect(
+      Date.parse(grant.expires_at as string) -
+        Date.parse(grant.granted_at as string),
+    ).toBe(90 * DAY_MS);
+    expect(mockDb.founding_offer_claims).toHaveLength(1);
+    expect(mockDb.billing_customers).toHaveLength(0);
+    expect(mockDb.billing_subscriptions).toHaveLength(0);
+
+    const entitlement = await resolveEntitlement(cookieClient, USER_ID);
+    expect(entitlement.planId).toBe("pro");
+    expect(entitlement.plan?.limits.monthlyCredits).toBe(100);
+    const { status } = await registerSiteFor("offer.com", "Offer");
+    expect(status).toBe(200);
+
+    // Day 31 and an hour: the first window's 100 are spent and gone, and the
+    // second window opened on the grant's first monthly anniversary.
+    ageTheGrant(31 + 1 / 24);
+    const grantedAt = Date.parse(
+      mockDb.plan_entitlements[0].granted_at as string,
+    );
+    spend(100, new Date(grantedAt + DAY_MS).toISOString());
+    const dayThirtyOne = await getUserCreditBalance(USER_ID, cookieClient);
+    expect(dayThirtyOne).toMatchObject({
+      included: 100,
+      usedThisMonth: 0,
+      total: 100,
+    });
+
+    // Day 91: lapsed like any trial.
+    ageTheGrant(60);
+    expect((await resolveEntitlement(cookieClient, USER_ID)).kind).toBe("none");
+
+    // Signing in again: the offer refuses (it has had a grant) and the 14-day
+    // fallback hits the one-trial index. Still one row, still no plan.
+    await ensureTrialStarted(cookieClient, USER_ID);
+    expect(mockDb.plan_entitlements).toHaveLength(1);
+    expect(mockDb.founding_offer_claims).toHaveLength(1);
+    expect((await resolveEntitlement(cookieClient, USER_ID)).kind).toBe("none");
+  });
+
+  it("spots gone: first sign-in gets the 14-day trial with 500, exactly as before", async () => {
+    mockOfferSpotsRemaining = 0;
+
+    await ensureTrialStarted(cookieClient, USER_ID);
+
+    expect(mockDb.plan_entitlements).toHaveLength(1);
+    const [grant] = mockDb.plan_entitlements;
+    expect(grant).toMatchObject({ plan_id: "pro", source: "trial" });
+    expect(grant).not.toHaveProperty("offer_id");
+    expect(mockDb.founding_offer_claims).toHaveLength(0);
+    const balance = await getUserCreditBalance(USER_ID, cookieClient);
+    expect(balance.included).toBe(500);
+  });
+
+  it("the offer RPC erroring still gives the 14-day trial", async () => {
+    mockOfferSpotsRemaining = 20;
+    mockOfferRpcFails = true;
+
+    await ensureTrialStarted(cookieClient, USER_ID);
+
+    expect(mockDb.plan_entitlements).toHaveLength(1);
+    expect(mockDb.plan_entitlements[0]).not.toHaveProperty("offer_id");
+    const balance = await getUserCreditBalance(USER_ID, cookieClient);
+    expect(balance.included).toBe(500);
+    expect(console.error).toHaveBeenCalled();
   });
 });

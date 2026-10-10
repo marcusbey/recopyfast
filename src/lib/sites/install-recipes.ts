@@ -2,10 +2,10 @@
  * Where the embed snippet goes, per stack — as typed data, in one place.
  *
  * The snippet itself is built by `buildEmbedScript()` and is identical for
- * every stack; the only thing that differs is which file the owner opens. That
- * difference used to exist nowhere at all: the dashboard printed a `<script>`
- * tag and left "so where do I put this" unanswered, which is the step an owner
- * stalls on.
+ * every stack. Full-document sites differ only in where the owner pastes it.
+ * React and Next.js are different: hydration, client navigation and
+ * URL-collecting analytics all affect whether the integration is safe and
+ * complete.
  *
  * THIS IS THE SINGLE SOURCE. `s18`'s public install pages extend this array
  * with the remaining stacks rather than keeping their own copy — the failure
@@ -13,21 +13,49 @@
  * day they are written and quietly disagree six months later, with nothing to
  * say which is current.
  *
- * Every recipe ends in the same place: immediately before `</body>`. The widget
- * reads the DOM it is handed, so a snippet in `<head>` runs before the copy it
- * is meant to discover exists.
+ * The Next.js recipe used to say that a root-layout tag completed installation.
+ * On aicompoz.com the document-level widget remained mounted across client
+ * navigation, while analytics could inspect credential-bearing editor URLs
+ * before the widget removed their query values. Keep those checks explicit.
+ *
+ * s67 (ADR 049, owner decision 3): the widget now follows History API route
+ * changes on its own, and hash routes are not supported. The card used to
+ * say the widget had no complete lifecycle for client-side route changes;
+ * after s67 that contradicted /docs/install. The SPA wording here must keep
+ * matching src/lib/docs/installation-content.ts.
  */
 
 export type InstallRecipeId = "wordpress" | "nextjs" | "html";
+
+/**
+ * The short heading of the "put the snippet in" step, for one stack. `code`,
+ * when present, follows `text` and is set as inline code.
+ */
+export interface InstallStepTitle {
+  text: string;
+  code?: string;
+}
+
+/** Full-document stacks share one step title. */
+const BEFORE_BODY_CLOSE: InstallStepTitle = {
+  text: "Paste it before",
+  code: "</body>",
+};
 
 export interface InstallRecipe {
   /** Stable key. Used as the tab value and, later, as s18's page slug. */
   id: InstallRecipeId;
   /** What the stack is called, in the owner's words. */
   label: string;
-  /** The file to open and the exact spot in it. */
+  /**
+   * The install step's heading while this stack is selected. Per recipe, not
+   * one shared line: "Paste it before </body>" above the Next.js recipe told
+   * the owner the opposite of the recipe under it (PR #67 review).
+   */
+  stepTitle: InstallStepTitle;
+  /** Where and how the generated snippet should load. */
   location: string;
-  /** The one caveat that stack has, when it has one. */
+  /** Integration caveats that must remain visible with the recipe. */
   notes?: string;
 }
 
@@ -35,6 +63,7 @@ export const installRecipes: readonly InstallRecipe[] = [
   {
     id: "wordpress",
     label: "WordPress",
+    stepTitle: BEFORE_BODY_CLOSE,
     location:
       "Paste it into your theme's footer.php, immediately before the closing </body> tag.",
     notes:
@@ -43,14 +72,16 @@ export const installRecipes: readonly InstallRecipe[] = [
   {
     id: "nextjs",
     label: "Next.js",
+    stepTitle: { text: "Load it after the page has hydrated" },
     location:
-      "Add it to app/layout.tsx, just before the closing </body> tag of the root layout.",
+      'For React or Next.js, load the generated tag after the page has hydrated. In Next.js, next/script with strategy="afterInteractive" is one option; preserve every generated attribute and value.',
     notes:
-      "On the Pages Router the same tag goes in pages/_document.tsx, inside <body> after <Main />.",
+      "The widget follows client-side route changes made with the History API (links, Back and Forward in a history-mode router): each in-app navigation loads that page's published copy and makes its newly rendered elements editable. Hash routes (/#/route) are not supported; switch the router to history mode, or give each route's elements a unique author-written data-rcf-id. Verify a full page load and an in-app navigation, then Back, reload, and returning to an edited page. Before the widget loads on editor-entry URLs, ensure analytics and session-replay scripts cannot read rcf_handoff, rcf_edit_token, rcf_staging, or rcf_token.",
   },
   {
     id: "html",
     label: "Plain HTML",
+    stepTitle: BEFORE_BODY_CLOSE,
     location:
       "Paste it before the closing </body> tag of every page you want to be editable.",
     notes:

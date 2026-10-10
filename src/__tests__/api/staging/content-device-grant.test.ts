@@ -31,6 +31,14 @@ import {
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
 const mockGetUser = jest.fn();
+
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(() =>
     Promise.resolve({
@@ -56,8 +64,8 @@ const mockCreateServiceRoleClient =
     typeof createServiceRoleClient
   >;
 
-const SITE_ID = "site-abc";
-const OTHER_SITE_ID = "site-xyz";
+const SITE_ID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
+const OTHER_SITE_ID = "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e";
 const EDITOR_ID = "site-editor-1";
 const GRANT_ROW_ID = "grant-row-1";
 const ELEMENT_ROW_ID = "content-element-1";
@@ -126,8 +134,23 @@ function makeClient(handle: (op: Op) => { data: unknown; error: unknown }) {
     return builder;
   }
 
+  async function rpc(name: string, payload: Record<string, unknown>) {
+    ops.push({ table: name, kind: "insert", payload, filters: [] });
+    return {
+      data: [
+        {
+          content_element_id: ELEMENT_ROW_ID,
+          updated_at: "2026-09-24T12:00:00.000Z",
+        },
+      ],
+      error: null,
+    };
+  }
+
   return {
-    client: { from } as unknown as ReturnType<typeof createServiceRoleClient>,
+    client: { from, rpc } as unknown as ReturnType<
+      typeof createServiceRoleClient
+    >,
     ops,
   };
 }
@@ -247,8 +270,7 @@ describe("PUT /api/staging/content/[siteId] — the device grant", () => {
       const response = await putWithGrant({ grant, origin: null });
 
       expect(response.status).toBe(401);
-      expect(writesTo(ops, "content_elements")).toHaveLength(0);
-      expect(writesTo(ops, "staging_history")).toHaveLength(0);
+      expect(writesTo(ops, "save_staging_content_atomic")).toHaveLength(0);
     });
 
     it("refuses a grant replayed from an origin it was not minted on", async () => {
@@ -261,8 +283,7 @@ describe("PUT /api/staging/content/[siteId] — the device grant", () => {
 
       expect(response.status).toBe(401);
       expect(body.error).toBe("origin_mismatch");
-      expect(writesTo(ops, "content_elements")).toHaveLength(0);
-      expect(writesTo(ops, "staging_history")).toHaveLength(0);
+      expect(writesTo(ops, "save_staging_content_atomic")).toHaveLength(0);
     });
   });
 
@@ -309,8 +330,8 @@ describe("PUT /api/staging/content/[siteId] — grading and attribution", () => 
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
 
-    const contentWrite = writesTo(ops, "content_elements")[0];
-    expect(contentWrite?.payload?.staging_content).toBe("New copy");
+    const atomicSave = writesTo(ops, "save_staging_content_atomic")[0];
+    expect(atomicSave?.payload?.p_staging_content).toBe("New copy");
   });
 
   it("names the grant holder in staging_history, not the credential type", async () => {
@@ -324,10 +345,10 @@ describe("PUT /api/staging/content/[siteId] — grading and attribution", () => 
 
     await putWithGrant({ grant });
 
-    const history = writesTo(ops, "staging_history")[0];
-    expect(history?.payload?.user_email).toBe(EDITOR_EMAIL);
+    const atomicSave = writesTo(ops, "save_staging_content_atomic")[0];
+    expect(atomicSave?.payload?.p_user_email).toBe(EDITOR_EMAIL);
     // Not attributable to any staging invite.
-    expect(history?.payload?.staging_access_id).toBeNull();
+    expect(atomicSave?.payload?.p_staging_access_id).toBeNull();
   });
 
   it("refuses a view-only grant and writes nothing", async () => {
@@ -342,8 +363,7 @@ describe("PUT /api/staging/content/[siteId] — grading and attribution", () => 
 
     expect(response.status).toBe(403);
     expect(body.error).toContain("edit");
-    expect(writesTo(ops, "content_elements")).toHaveLength(0);
-    expect(writesTo(ops, "staging_history")).toHaveLength(0);
+    expect(writesTo(ops, "save_staging_content_atomic")).toHaveLength(0);
   });
 
   it("refuses a grant minted for another site on this site's content route", async () => {
@@ -361,7 +381,7 @@ describe("PUT /api/staging/content/[siteId] — grading and attribution", () => 
 
     expect(response.status).toBe(401);
     expect(body.error).toBe("site_mismatch");
-    expect(writesTo(ops, "content_elements")).toHaveLength(0);
+    expect(writesTo(ops, "save_staging_content_atomic")).toHaveLength(0);
   });
 });
 
@@ -427,7 +447,7 @@ describe("POST /api/staging/publish — the device grant", () => {
     expect(response.status).toBe(200);
     expect(body.publishedBy).toBe(EDITOR_EMAIL);
     expect(rpc).toHaveBeenCalledWith(
-      "publish_staging_content_atomic",
+      "publish_staging_content_with_attributes_atomic",
       expect.objectContaining({ p_user_email: EDITOR_EMAIL }),
     );
   });

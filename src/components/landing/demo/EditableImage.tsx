@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ImagePlus, Shuffle, Sparkles, X } from "lucide-react";
+import { ImagePlus, Shuffle, X } from "lucide-react";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 export interface EditableImageProps {
@@ -45,24 +45,18 @@ export default function EditableImage({
   const titleId = useId();
   const closeModal = useCallback(() => setIsModalOpen(false), []);
   const dialogRef = useFocusTrap<HTMLDivElement>(isModalOpen, closeModal);
-  const [prompt, setPrompt] = useState("");
 
+  // Until s50 this modal also offered "Generate with AI" behind a sign-in, and
+  // said generating an image was a signed-in feature. It is not a feature at
+  // all: no image generation exists anywhere in the product, and the widget's
+  // own image modal takes a URL or an upload (public/embed/recopyfast.src.js
+  // :4714, :4748). Signing in unlocked nothing. So the demo only shuffles
+  // through its own photos.
   const shuffle = () => {
     const index = pool.indexOf(src);
     const next = pool[(index + 1) % pool.length] ?? pool[0];
     onReplace(next);
     setIsModalOpen(false);
-  };
-
-  const requestAiImage = () => {
-    // Generating a new image is a signed-in feature; the demo gates it rather
-    // than pretending. (The old code called `source.unsplash.com`, an endpoint
-    // Unsplash retired, so "generate" quietly produced nothing at all.)
-    window.open(
-      "/login?redirectedFrom=" + encodeURIComponent(window.location.href),
-      "_blank",
-      "width=500,height=600",
-    );
   };
 
   return (
@@ -138,35 +132,6 @@ export default function EditableImage({
               </div>
 
               <div className="space-y-4 p-5">
-                <div>
-                  <label
-                    htmlFor="demo-image-prompt"
-                    className="mb-2 block text-[13px] font-medium text-slate-700"
-                  >
-                    Describe the image you want
-                  </label>
-                  <textarea
-                    id="demo-image-prompt"
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    placeholder="Fresh pasta on a marble counter, morning light"
-                    rows={2}
-                    className="w-full resize-none rounded-md border border-slate-300 bg-white p-3 text-[13px] text-slate-900 transition-colors placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={requestAiImage}
-                  className="flex w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-3 text-[13px] font-medium text-white transition-colors hover:bg-slate-800"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Generate with AI
-                  <span className="ml-1 rounded bg-white/15 px-1.5 py-0.5 text-[11px]">
-                    Sign in
-                  </span>
-                </button>
-
                 <button
                   type="button"
                   onClick={shuffle}

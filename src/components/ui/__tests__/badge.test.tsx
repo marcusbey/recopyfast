@@ -43,7 +43,19 @@ describe("Badge Component", () => {
       expect(badge).toHaveTextContent("Default Badge");
       expect(badge.className).toContain("inline-flex");
       expect(badge.className).toContain("items-center");
-      expect(badge.className).toContain("rounded-full");
+      // s66a: badges are square at the control radius. Was `rounded-full`.
+      expect(badge.className).toContain("rounded-control");
+    });
+
+    it("should keep the leading dot round", () => {
+      render(
+        <Badge dot data-testid="badge">
+          Live
+        </Badge>,
+      );
+
+      const dot = screen.getByTestId("badge").querySelector("span > span");
+      expect(dot?.className).toContain("rounded-full");
     });
 
     it("should only show a focus ring for keyboard focus", () => {

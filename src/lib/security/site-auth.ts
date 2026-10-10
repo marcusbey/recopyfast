@@ -14,6 +14,33 @@ export interface SiteAuthContext {
   allowedOrigin: string | null;
 }
 
+export type SiteAuthErrorCode =
+  | "site_token_missing"
+  | "site_not_found"
+  | "site_token_invalid"
+  | "site_origin_not_allowed";
+
+/**
+ * An authorization refusal with the only origin that may safely read it.
+ *
+ * Site-token failures happen before a route has an auth context, but the
+ * widget still needs to read their stable code. Carrying the permitted origin
+ * on the error keeps that decision beside the domain comparison that earned
+ * it. Routes must never recover the raw request Origin in their catch blocks:
+ * doing so would reflect an attacker-controlled origin after auth failed.
+ */
+export class SiteAuthError extends Error {
+  constructor(
+    message: string,
+    readonly code: SiteAuthErrorCode,
+    readonly status: 401 | 403,
+    readonly allowedOrigin: string | null = null,
+  ) {
+    super(message);
+    this.name = "SiteAuthError";
+  }
+}
+
 export function normalizeDomain(domain: string) {
   const trimmed = domain.trim();
   if (!trimmed) {
@@ -81,9 +108,6 @@ export function buildSiteToken(siteId: string, apiKey: string) {
   return `${payload}.${signature}`;
 }
 
-/** Maximum lifetime of a site token: 90 days in seconds. */
-const SITE_TOKEN_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
-
 export function verifySiteTokenSignature(
   siteId: string,
   apiKey: string,
@@ -97,11 +121,13 @@ export function verifySiteTokenSignature(
 
   if (!/^[0-9]+$/.test(issuedAt)) return false;
 
-  // Reject tokens that are older than the maximum allowed age.
   const issuedAtSeconds = parseInt(issuedAt, 10);
   const nowSeconds = Math.floor(Date.now() / 1000);
-  if (nowSeconds - issuedAtSeconds > SITE_TOKEN_MAX_AGE_SECONDS) return false;
 
+  // Operator decision D3 deliberately removed the former 90-day age cap:
+  // installed snippets carry this static token, so otherwise every healthy
+  // installation died on a timer. Revocation is explicit api_key rotation;
+  // the future-date guard below remains part of the signed-token contract.
   // Guard against clock-skew / future-dated tokens (allow 60 s of leeway).
   if (issuedAtSeconds > nowSeconds + 60) return false;
 
@@ -143,10 +169,6 @@ export async function authorizeSiteRequest(options: {
 }): Promise<SiteAuthContext> {
   const { siteId, token, origin, referer } = options;
 
-  if (!token) {
-    throw new Error("Missing site token");
-  }
-
   const supabase = createServiceRoleClient();
   const { data: site, error } = await supabase
     .from("sites")
@@ -155,11 +177,37 @@ export async function authorizeSiteRequest(options: {
     .single();
 
   if (error || !site) {
-    throw new Error("Site not found");
+    throw new SiteAuthError("Site not found", "site_not_found", 401);
+  }
+
+  // Resolve the browser-supplied origin once, and retain only its canonical
+  // origin when it matches the registered host. That value is safe to echo on
+  // a refusal; the raw header is not. This work deliberately precedes the
+  // missing-token refusal so a correctly installed widget can read that 401,
+  // while a wrong or absent origin still receives no CORS grant.
+  const requestOriginHost = parseOrigin(origin) || parseOrigin(referer);
+  const requestOriginValue = parseOrigin(origin) ? origin : referer;
+  const allowedDomain = normalizeDomain(site.domain);
+  let permittedOrigin: string | null = null;
+
+  if (requestOriginHost === allowedDomain && requestOriginValue) {
+    try {
+      permittedOrigin = new URL(requestOriginValue).origin;
+    } catch {
+      permittedOrigin = null;
+    }
+  }
+
+  if (!token) {
+    throw new SiteAuthError(
+      "Missing site token",
+      "site_token_missing",
+      401,
+      permittedOrigin,
+    );
   }
 
   // Allow demo mode for localhost in development
-  const requestOriginHost = parseOrigin(origin) || parseOrigin(referer);
   const isLocalhost = isLocalhostHost(requestOriginHost);
   const isDemoToken = token === "demo-site-token";
   const isDevelopment = process.env.NODE_ENV !== "production";
@@ -167,11 +215,14 @@ export async function authorizeSiteRequest(options: {
 
   if (!isLocalDemo) {
     if (!verifySiteTokenSignature(site.id, site.api_key, token)) {
-      throw new Error("Invalid site token");
+      throw new SiteAuthError(
+        "Invalid site token",
+        "site_token_invalid",
+        401,
+        permittedOrigin,
+      );
     }
   }
-
-  const allowedDomain = normalizeDomain(site.domain);
 
   // The domain pin is mandatory, not conditional on a header being offered.
   //
@@ -189,10 +240,21 @@ export async function authorizeSiteRequest(options: {
   // non-production build, and `isLocalhost` is itself derived from a present
   // Origin or Referer.
   if (!isLocalDemo && requestOriginHost !== allowedDomain) {
-    throw new Error("Origin not allowed");
+    throw new SiteAuthError(
+      "Origin not allowed",
+      "site_origin_not_allowed",
+      403,
+    );
   }
 
-  const allowedOrigin = requestOriginHost ? `${origin ?? referer}` : null;
+  // Local demo is the only path where the origin intentionally cannot match
+  // the site's production domain. It still carries a real localhost origin,
+  // established by the exact-host allowlist above.
+  const allowedOrigin = isLocalDemo
+    ? requestOriginValue
+      ? new URL(requestOriginValue).origin
+      : null
+    : permittedOrigin;
 
   return {
     site,

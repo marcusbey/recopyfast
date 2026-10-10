@@ -5,6 +5,7 @@ import {
   hasAnyEntitlement,
   resolveEntitlement,
 } from "@/lib/billing/effective-plan";
+import { SENTRY_TUNNEL_ROUTE } from "@/lib/monitoring/sentry-tunnel";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -27,13 +28,17 @@ const CHECKOUT_PATH = "/dashboard/billing";
  * Deliberately `resolveEntitlement` + `hasAnyEntitlement` rather than a
  * condition of its own: the router must not hold a second opinion about who is
  * let in, or the paywall and the feature gates drift and one of them is wrong.
- * A credit holder passes here — they bought something that works, and bouncing
- * them to checkout would put the thing they paid for behind a wall.
+ * A credit holder passes here, deliberately: their balance is kept, and their
+ * dashboard still reads and exports. What they cannot do is write — since s51
+ * every content write and AI spend, and every credential issuance but handoff
+ * redemption, asks `checkOwnerCanEdit` (`@/lib/billing/owner-can-edit`, ADR
+ * 041) for the SITE OWNER's plan, and credits are not a plan. Routing does not
+ * repeat that rule.
  *
  * Fails open. A Supabase blip must not lock a paying customer out of their own
- * dashboard, and this gate is routing, not authorisation — every API route and
- * feature gate resolves entitlement independently, so the worst a false
- * negative here costs is a rendered shell with nothing behind it.
+ * dashboard, and this gate is routing, not authorisation — the write side
+ * resolves the owner's entitlement independently and fails CLOSED there, so the
+ * worst a false negative here costs is a rendered shell with nothing behind it.
  */
 async function isUnentitled(
   supabase: SupabaseClient,
@@ -48,7 +53,8 @@ async function isUnentitled(
 }
 
 /**
- * Paths whose caller cannot have a session, so asking about one is pure cost.
+ * Paths whose response does not depend on a session, so asking about one is
+ * pure cost.
  *
  * Everything under `embed/` is a static file in `public/` fetched by every
  * visitor to every customer site that has installed the widget — third parties
@@ -59,7 +65,36 @@ async function isUnentitled(
  * rather than a file list, so the next asset type added there does not have to
  * be rediscovered in production. robots.txt and sitemap.xml are the same trade
  * at lower volume: no session is possible, and indexability should not depend
- * on auth uptime.
+ * on auth uptime; `/llms.txt` (s88), the site map AI search reads, is the same
+ * kind of caller. `/try` is the public cold-start path used in outbound demos,
+ * and its exact cross-origin runtime path has the same no-session property as
+ * the production embed. Keeping both exact avoids turning sibling `/try/*`
+ * routes into an accidental auth bypass.
+ *
+ * `SENTRY_TUNNEL_ROUTE` (s46) is where the browser posts its Sentry events; a
+ * rewrite added by `withSentryConfig` forwards them to Sentry's ingest *after*
+ * this middleware runs. It is not a protected route, so it was never blocked —
+ * but every error event paid a GoTrue round trip, and a rotated session cookie
+ * could land on Sentry's response. Sentry's docs say to drop the tunnel from the
+ * matcher; this file keeps it matched, for the headers, like every path here.
+ * Exact match: with `trailingSlash` off, `/monitoring/` is redirected before it
+ * gets here, and anything under the path is not the tunnel.
+ *
+ * The installation guide and its Markdown handoff are public documentation.
+ * A visitor may happen to carry a session cookie, but it changes neither
+ * response. Sending those reads through GoTrue would make the help needed to
+ * complete an installation depend on authentication being available, which
+ * defeats the public route contract introduced by s59.
+ *
+ * `/api/published/` is s65a's published-copy snapshot (ADR 046): an
+ * unauthenticated read that only works because Vercel's CDN caches it. Vercel
+ * refuses to cache any response carrying `set-cookie`, and `getUser()` below
+ * can rotate a session cookie onto whatever response it touches — so without
+ * this entry, a visitor who is also signed in to ReCopyFast would turn the
+ * snapshot into an uncacheable origin hit and a GoTrue round trip on a host's
+ * render path. The response depends on no session; the route reads no cookie.
+ * A prefix, because the site id is a path segment; the sibling `/api/published`
+ * and every other `/api/*` path keep the session-aware path.
  *
  * These paths stay *in* `config.matcher`. Skipping the middleware entirely
  * would also skip the security headers below, and `/embed/recopyfast.js` is
@@ -69,8 +104,15 @@ async function isUnentitled(
 function isSessionlessPath(pathname: string): boolean {
   return (
     pathname.startsWith("/embed/") ||
+    pathname.startsWith("/api/published/") ||
+    pathname === "/docs/install" ||
+    pathname === "/docs/install/agent-instructions.md" ||
+    pathname === "/try" ||
+    pathname === "/try/rcf-try.js" ||
     pathname === "/robots.txt" ||
-    pathname === "/sitemap.xml"
+    pathname === "/sitemap.xml" ||
+    pathname === "/llms.txt" ||
+    pathname === SENTRY_TUNNEL_ROUTE
   );
 }
 
@@ -146,8 +188,14 @@ export async function middleware(request: NextRequest) {
   // session with no plan gets one destination, the checkout page, and typing a
   // dashboard URL does not get round it.
   //
-  // Only page routes are gated. API routes are under /api and enforce their own
-  // entitlement, so they never reach this branch and never pay for the query.
+  // Only page routes are gated. API routes are under /api and never reach this
+  // branch. Their entitlement is enforced where the write happens: every content
+  // write and AI spend, and every credential issuance but handoff redemption,
+  // calls `checkOwnerCanEdit` (s51, ADR 041) after authorising its caller.
+  // Public reads are deliberately ungated and must stay so — the embed, GET
+  // /api/content/[siteId], discovery, GET /api/v1/content, bulk export, the
+  // three validate routes and the WebSocket broadcast serve a lapsed owner's
+  // visitors exactly as before.
   if (
     user &&
     isProtectedRoute &&
@@ -202,8 +250,14 @@ function withSecurityHeaders(response: NextResponse): NextResponse {
 
   // connect-src must allowlist every origin the client opens XHR/fetch/WebSocket to,
   // or the browser silently blocks them. 'self' alone breaks Supabase (REST + wss
-  // realtime), the Socket.io server, and Sentry ingest. Derive the exact origins
-  // from env so we don't widen the policy to a blanket https:/wss:.
+  // realtime) and the Socket.io server. Derive the exact origins from env so we
+  // don't widen the policy to a blanket https:/wss:.
+  //
+  // Sentry does not need an entry of its own: since s46 the browser SDK posts to
+  // the same-origin `SENTRY_TUNNEL_ROUTE`, which 'self' covers. The DSN origin is
+  // still added below for the one case the SDK skips the tunnel — a DSN that is
+  // not a sentry.io SaaS host. It was already here before s46, which is how we
+  // know the CSP was never what kept events from arriving.
   const connectSrc = new Set<string>(["'self'"]);
   const addOrigin = (raw?: string) => {
     if (!raw) return;
@@ -270,7 +324,9 @@ export const config = {
      * API routes ARE included so they receive security headers
      * (X-Content-Type-Options, X-Frame-Options, etc.).
      *
-     * `embed/`, robots.txt and sitemap.xml are deliberately NOT excluded here.
+     * `embed/`, `/docs/install`, `/try`, its exact runtime asset, robots.txt,
+     * sitemap.xml, llms.txt and the Sentry tunnel are deliberately NOT excluded
+     * here.
      * They must not pay for a session — but the matcher is all-or-nothing, and
      * excluding them would drop the security headers too. The widget script is
      * executable JavaScript loaded cross-origin onto every customer site, so

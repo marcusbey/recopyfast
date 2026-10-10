@@ -105,7 +105,7 @@ export default function ValueProposition() {
             </span>
           </h2>
           <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto">
-            Every typo fix, every A/B test, every campaign update requires a
+            Every typo fix, every price change, every campaign update requires a
             developer ticket and days of waiting.
           </p>
         </motion.div>

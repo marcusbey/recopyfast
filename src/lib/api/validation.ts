@@ -50,6 +50,139 @@ export async function readJsonObject(
   return { ok: true, value: parsed as Record<string, unknown> };
 }
 
+/**
+ * The body as UTF-8 text, counted as it streams in: `null` as soon as the
+ * running byte total passes `maxBytes` — the stream is cancelled and nothing
+ * more is read, so at most `maxBytes` plus one chunk is ever held. Decoded
+ * like `request.text()` (replacement characters, leading BOM dropped); the
+ * decoder's `stream` mode keeps a character split across chunks whole.
+ */
+async function readCappedText(
+  request: Request,
+  maxBytes: number,
+): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+/**
+ * Read a JSON body of any shape, refusing it unparsed when it is larger than
+ * `maxBytes`.
+ *
+ * PR #65 review D4: this used to `await request.text()` and compare the length
+ * afterwards, so the bound was checked only once the whole body — whatever
+ * size the client chose — sat in memory. Now a declared `Content-Length` over
+ * the cap is refused before a byte is read, and otherwise the bytes are
+ * counted as they arrive and the read stops one chunk past the cap. The header
+ * only ever refuses early: a client can understate it, so the count, never the
+ * header, is what lets a body through (same reasoning as bulk/import).
+ */
+export async function readBoundedJson(
+  request: Request,
+  maxBytes: number,
+): Promise<ValidationResult<unknown>> {
+  const tooLarge = `Request body exceeds ${maxBytes} bytes`;
+  const declaredBytes = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+    return fail(tooLarge);
+  }
+
+  let text: string | null;
+  try {
+    text = await readCappedText(request, maxBytes);
+  } catch {
+    return fail("Request body could not be read");
+  }
+  if (text === null) return fail(tooLarge);
+
+  try {
+    return { ok: true, value: JSON.parse(text) as unknown };
+  } catch {
+    return fail("Request body must be valid JSON");
+  }
+}
+
+const TEXT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * An identifier-like string stored verbatim: non-empty, bounded, and free of
+ * control characters. Not trimmed — the value is a key other rows are matched
+ * on, so it is refused rather than silently rewritten, and a control character
+ * at either end is refused rather than trimmed away.
+ */
+export function requirePlainText(
+  body: Record<string, unknown>,
+  field: string,
+  options: { maxLength: number },
+): ValidationResult<string> {
+  const raw = body[field];
+  if (typeof raw !== "string" || raw.length === 0) {
+    return fail(`Field "${field}" is required and must be a non-empty string`);
+  }
+  if (raw.length > options.maxLength) {
+    return fail(
+      `Field "${field}" must be at most ${options.maxLength} characters`,
+    );
+  }
+  if (TEXT_CONTROL_PATTERN.test(raw)) {
+    return fail(`Field "${field}" contains control characters`);
+  }
+  return { ok: true, value: raw };
+}
+
+export function optionalPlainText(
+  body: Record<string, unknown>,
+  field: string,
+  options: { maxLength: number },
+): ValidationResult<string | undefined> {
+  if (body[field] === undefined || body[field] === null) {
+    return { ok: true, value: undefined };
+  }
+  return requirePlainText(body, field, options);
+}
+
+/**
+ * An optional string bounded in length. Empty is allowed (callers store it as
+ * absent); anything that is not a string, null or absent is refused. Control
+ * characters are refused too when the caller asks — for free text that ends
+ * up in mail or markup.
+ */
+export function optionalBoundedString(
+  body: Record<string, unknown>,
+  field: string,
+  options: { maxLength: number; rejectControlCharacters?: boolean },
+): ValidationResult<string | undefined> {
+  const raw = body[field];
+  if (raw === undefined || raw === null) {
+    return { ok: true, value: undefined };
+  }
+  if (typeof raw !== "string") {
+    return fail(`Field "${field}" must be a string`);
+  }
+  if (raw.length > options.maxLength) {
+    return fail(
+      `Field "${field}" must be at most ${options.maxLength} characters`,
+    );
+  }
+  if (options.rejectControlCharacters && TEXT_CONTROL_PATTERN.test(raw)) {
+    return fail(`Field "${field}" contains control characters`);
+  }
+  return { ok: true, value: raw };
+}
+
 export function requireString(
   body: Record<string, unknown>,
   field: string,
@@ -86,6 +219,81 @@ export function optionalString(
   return requireString(body, field, options);
 }
 
+export const MAX_CONTENT_HREF_LENGTH = 2048;
+export const MAX_CONTENT_ALT_LENGTH = 2000;
+
+export interface ContentAttributePatch {
+  href?: string;
+  alt?: string;
+}
+
+const URI_SCHEME_PATTERN = /^([a-z][a-z0-9+.-]*):/i;
+const ALLOWED_HREF_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
+const ATTRIBUTE_CONTROL_PATTERN = TEXT_CONTROL_PATTERN;
+
+/**
+ * Validate the two non-text values the embed editor can stage.
+ *
+ * Link destinations eventually become a DOM `href`, so accepting an arbitrary
+ * scheme here would turn a saved edit into stored script execution on every
+ * visitor. Relative URLs are intentional (including root-relative paths and
+ * fragments); protocol-relative URLs are refused because their effective
+ * scheme depends on the host page. Empty strings are valid and mean "clear the
+ * attribute". The image editor sends `alt: null` for background images, where
+ * there is no alt attribute to edit, so that one value is treated as omitted.
+ */
+export function validateContentAttributePatch(
+  body: Record<string, unknown>,
+): ValidationResult<ContentAttributePatch> {
+  const patch: ContentAttributePatch = {};
+
+  if (body.href !== undefined) {
+    if (typeof body.href !== "string") {
+      return fail('Field "href" must be a string');
+    }
+
+    const href = body.href.trim();
+    if (href.length > MAX_CONTENT_HREF_LENGTH) {
+      return fail(
+        `Field "href" must be at most ${MAX_CONTENT_HREF_LENGTH} characters`,
+      );
+    }
+    if (ATTRIBUTE_CONTROL_PATTERN.test(href) || href.includes("\\")) {
+      return fail('Field "href" contains unsafe characters');
+    }
+    if (href.startsWith("//")) {
+      return fail('Field "href" must use an explicit http or https scheme');
+    }
+
+    const scheme = URI_SCHEME_PATTERN.exec(href)?.[1]?.toLowerCase();
+    if (scheme && !ALLOWED_HREF_SCHEMES.has(scheme)) {
+      return fail(`Field "href" uses an unsupported scheme`);
+    }
+
+    patch.href = href;
+  }
+
+  if (body.alt !== undefined && body.alt !== null) {
+    if (typeof body.alt !== "string") {
+      return fail('Field "alt" must be a string');
+    }
+
+    const alt = body.alt.trim();
+    if (alt.length > MAX_CONTENT_ALT_LENGTH) {
+      return fail(
+        `Field "alt" must be at most ${MAX_CONTENT_ALT_LENGTH} characters`,
+      );
+    }
+    if (ATTRIBUTE_CONTROL_PATTERN.test(alt)) {
+      return fail('Field "alt" contains control characters');
+    }
+
+    patch.alt = alt;
+  }
+
+  return { ok: true, value: patch };
+}
+
 export function requireUuid(
   body: Record<string, unknown>,
   field: string,
@@ -94,7 +302,26 @@ export function requireUuid(
   if (typeof raw !== "string" || !UUID_PATTERN.test(raw.trim())) {
     return fail(`Field "${field}" must be a valid UUID`);
   }
-  return { ok: true, value: raw.trim() };
+  // PostgreSQL accepts several spellings for the same UUID. Canonicalising at
+  // the HTTP boundary prevents one database identity from opening distinct
+  // rate-limit buckets through upper-case input.
+  return { ok: true, value: raw.trim().toLowerCase() };
+}
+
+/**
+ * A site id taken from a caller — a query parameter, a path segment or a body
+ * field — canonical, or the refusal to send (s77, s69 R1).
+ *
+ * Every per-site limiter on the editor routes was keyed on the id exactly as
+ * sent, while the access checks reach the site through a `uuid` cast: `ABCD…`
+ * and `abcd…` are one site, and they were two budgets. Call this where the
+ * handler first reads the id, so the access check, the limiter and every query
+ * see one value. Upper case is accepted (the widget sends the snippet's id, and
+ * an installed snippet is permanent); only shapes the dashboard never issues are
+ * refused, before any lookup, with a message that echoes nothing.
+ */
+export function canonicalSiteId(raw: unknown): ValidationResult<string> {
+  return requireUuid({ siteId: raw }, "siteId");
 }
 
 export function requireEnum<T extends string>(
@@ -159,17 +386,88 @@ export function requireFiniteNumber(
   return { ok: true, value: raw };
 }
 
-function hasForbiddenKeys(value: unknown, depth: number): boolean {
-  if (depth > MAX_METADATA_DEPTH) return true;
+/**
+ * A number the caller may send loosely, replaced by `fallback` instead of
+ * refused. For a field whose refusal costs more than a wrong value: a 400
+ * throws away the whole request, and some callers — a `sendBeacon` — never see
+ * the answer. A finite number, or a non-blank string that parses to one, inside
+ * [min, max] is kept; anything else (absent included) becomes `fallback`.
+ */
+export function numberOrDefault(
+  body: Record<string, unknown>,
+  field: string,
+  options: { min: number; max: number; fallback: number },
+): number {
+  const raw = body[field];
+  let parsed = Number.NaN;
+  if (typeof raw === "number") parsed = raw;
+  if (typeof raw === "string" && raw.trim() !== "") parsed = Number(raw);
+
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < options.min ||
+    parsed > options.max
+  ) {
+    return options.fallback;
+  }
+  return parsed;
+}
+
+const TEXT_CONTROL_CHARACTERS = new RegExp(TEXT_CONTROL_PATTERN.source, "g");
+
+/**
+ * Free text the caller may send loosely, coerced to a bounded string instead
+ * of refused — the text twin of `numberOrDefault`. A string is kept; a number
+ * or a boolean goes through `String()`; anything else (null, an object, an
+ * array) becomes `fallback`, never "[object Object]". A lone UTF-16 surrogate
+ * becomes U+FFFD and control characters are stripped, then the text is cut on
+ * a whole character so that, written inside a JSON string, it takes at most
+ * `maxJsonBytes` UTF-8 bytes (escapes counted) — the measure a byte bound on
+ * the stored JSON applies.
+ *
+ * Lone surrogates (PR #65 review D3): a JS string may hold half a pair, which
+ * `JSON.stringify` writes as a `\ud800` escape — and Postgres `jsonb` refuses
+ * that escape, so one stray code unit failed the insert of every row beside
+ * it. `toWellFormed` replaces each unpaired surrogate and leaves valid pairs
+ * alone; it runs before the byte count, so the bound measures what is stored.
+ */
+export function coerceText(
+  raw: unknown,
+  options: { fallback: string; maxJsonBytes: number },
+): string {
+  const text =
+    typeof raw === "string"
+      ? raw
+      : typeof raw === "number" || typeof raw === "boolean"
+        ? String(raw)
+        : options.fallback;
+
+  let kept = "";
+  let bytes = 0;
+  const cleaned = text.toWellFormed().replace(TEXT_CONTROL_CHARACTERS, "");
+  for (const character of cleaned) {
+    bytes += Buffer.byteLength(JSON.stringify(character), "utf8") - 2;
+    if (bytes > options.maxJsonBytes) break;
+    kept += character;
+  }
+  return kept;
+}
+
+function hasForbiddenKeys(
+  value: unknown,
+  depth: number,
+  maxDepth: number,
+): boolean {
+  if (depth > maxDepth) return true;
   if (value === null || typeof value !== "object") return false;
 
   if (Array.isArray(value)) {
-    return value.some((entry) => hasForbiddenKeys(entry, depth + 1));
+    return value.some((entry) => hasForbiddenKeys(entry, depth + 1, maxDepth));
   }
 
   return Object.entries(value as Record<string, unknown>).some(
     ([key, entry]) =>
-      FORBIDDEN_KEYS.has(key) || hasForbiddenKeys(entry, depth + 1),
+      FORBIDDEN_KEYS.has(key) || hasForbiddenKeys(entry, depth + 1, maxDepth),
   );
 }
 
@@ -178,11 +476,18 @@ function hasForbiddenKeys(value: unknown, depth: number): boolean {
  * serialized size and nesting depth, with no prototype-polluting keys.
  * Callers persist this verbatim into a jsonb column, so it is attacker-controlled
  * storage — the bounds are what stop it becoming an unbounded write primitive.
+ *
+ * Depth counts values, not containers: the object itself is level 1 and its
+ * values level 2, so `maxDepth: 2` admits a flat object of primitives only.
+ * A route with a tighter contract than the defaults passes its own bounds.
  */
 export function optionalMetadata(
   body: Record<string, unknown>,
   field = "metadata",
+  options: { maxBytes?: number; maxDepth?: number } = {},
 ): ValidationResult<Record<string, unknown> | undefined> {
+  const maxBytes = options.maxBytes ?? MAX_METADATA_BYTES;
+  const maxDepth = options.maxDepth ?? MAX_METADATA_DEPTH;
   const raw = body[field];
   if (raw === undefined || raw === null) {
     return { ok: true, value: undefined };
@@ -199,11 +504,11 @@ export function optionalMetadata(
     return fail(`Field "${field}" must be JSON-serializable`);
   }
 
-  if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) {
-    return fail(`Field "${field}" exceeds ${MAX_METADATA_BYTES} bytes`);
+  if (Buffer.byteLength(serialized, "utf8") > maxBytes) {
+    return fail(`Field "${field}" exceeds ${maxBytes} bytes`);
   }
 
-  if (hasForbiddenKeys(raw, 1)) {
+  if (hasForbiddenKeys(raw, 1, maxDepth)) {
     return fail(
       `Field "${field}" contains disallowed keys or is nested too deeply`,
     );

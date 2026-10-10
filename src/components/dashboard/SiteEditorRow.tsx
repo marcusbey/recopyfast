@@ -2,7 +2,8 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Eye, Edit, Upload, Shield, Trash2, Mail } from "lucide-react";
+import { IconTile } from "@/components/ui/icon-tile";
+import { Eye, Edit, Upload, Shield, Trash2, Mail, Loader2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils/cn";
@@ -28,6 +29,9 @@ interface SiteEditorRowProps {
   editor: SiteEditorSummary;
   /** Opens the confirmation step. Nothing is destroyed by this callback. */
   onRevoke: (editor: SiteEditorSummary) => void;
+  onResend: (editor: SiteEditorSummary) => void;
+  isResending?: boolean;
+  resendError?: string | null;
 }
 
 const permissionIcons: Record<EditorPermission, LucideIcon> = {
@@ -46,7 +50,13 @@ function describeDevices(count: number): string {
   return count === 1 ? "1 device signed in" : `${count} devices signed in`;
 }
 
-export function SiteEditorRow({ editor, onRevoke }: SiteEditorRowProps) {
+export function SiteEditorRow({
+  editor,
+  onRevoke,
+  onResend,
+  isResending = false,
+  resendError = null,
+}: SiteEditorRowProps) {
   const { revokedAt } = editor;
   const isRevoked = revokedAt !== null;
 
@@ -60,15 +70,15 @@ export function SiteEditorRow({ editor, onRevoke }: SiteEditorRowProps) {
   return (
     <li
       className={cn(
-        "rounded-lg border border-border bg-surface-1 p-4",
+        "rounded-container border border-border bg-surface-1 p-4",
         isRevoked && "opacity-60",
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-tone-info-surface">
-            <Mail className="h-4 w-4 text-tone-info-text" aria-hidden="true" />
-          </div>
+          <IconTile tone="info" size="sm">
+            <Mail aria-hidden="true" />
+          </IconTile>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <p className="truncate font-medium text-foreground">
@@ -80,18 +90,36 @@ export function SiteEditorRow({ editor, onRevoke }: SiteEditorRowProps) {
           </div>
         </div>
 
-        {/* A removed editor has nothing left to remove. Re-inviting the same
-            address through the form above is what restores them. */}
+        {/* A removed editor has nothing left to remove. Adding the same
+            address again (People & access, Add editor) restores them. */}
         {!isRevoked && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onRevoke(editor)}
-            aria-label={`Remove ${editor.email}`}
-            className="h-8 px-2 text-tone-danger-text hover:bg-tone-danger-surface hover:text-tone-danger-text"
-          >
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onResend(editor)}
+              disabled={isResending}
+              aria-label={`${isResending ? "Sending invitation to" : "Resend invite to"} ${editor.email}`}
+            >
+              {isResending && (
+                <Loader2
+                  className="mr-1 h-4 w-4 animate-spin"
+                  aria-hidden="true"
+                />
+              )}
+              {isResending ? "Sending..." : "Resend invite"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onRevoke(editor)}
+              disabled={isResending}
+              aria-label={`Remove ${editor.email}`}
+              className="h-8 px-2 text-tone-danger-text hover:bg-tone-danger-surface hover:text-tone-danger-text"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
         )}
       </div>
 
@@ -106,6 +134,11 @@ export function SiteEditorRow({ editor, onRevoke }: SiteEditorRowProps) {
           );
         })}
       </div>
+      {resendError && !isRevoked && (
+        <p className="mt-3 text-sm text-tone-danger-text" role="alert">
+          {resendError}
+        </p>
+      )}
     </li>
   );
 }

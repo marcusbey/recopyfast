@@ -111,6 +111,9 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
    */
   const editToken = `parity_edit_${randomUUID()}`;
 
+  const ownerEmail = `e2e-parity-owner-${siteId}@recopyfast.local`;
+  let ownerId: string | null = null;
+
   let supabase: SupabaseClient | null = null;
   let fixtureServer: Server | null = null;
 
@@ -124,7 +127,11 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
   test.afterAll(async () => {
     try {
       if (supabase) {
-        await deleteCapturedSiteFixture(supabase, siteId);
+        try {
+          await deleteCapturedSiteFixture(supabase, siteId);
+        } finally {
+          await deletePayingOwner(supabase);
+        }
       }
     } finally {
       await new Promise<void>((resolve) => {
@@ -156,8 +163,10 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
 
     await page.goto(`${FIXTURE_URL}/legacy`, { waitUntil: "networkidle" });
 
-    // The attribute is absent, so `window.RECOPYFAST_WS` is never set and the
-    // widget takes its early return before any realtime bootstrap runs.
+    // The attribute is absent, so `window.RECOPYFAST_WS` is `null` (since s67
+    // the widget writes the endpoint it resolved back to that global, and
+    // there is none) and the widget takes its early return before any
+    // realtime bootstrap runs.
     expect(await page.evaluate(() => window.RECOPYFAST_WS)).toBeFalsy();
     expect(observed.socketAttempts).toEqual([]);
 
@@ -420,14 +429,55 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
       `[s07b AC 4] seeded site ${siteId} domain=${PARITY_DOMAIN} (delete on sight)`,
     );
 
+    await seedPayingOwner(client);
+
+    // s68a (ADR 047): a session grants at most its holder's live grant, so it
+    // names the owner seeded just above. A session with no `user_id` is
+    // refused by the validator now.
     const { error: editError } = await client.from("edit_sessions").insert({
       site_id: siteId,
+      user_id: ownerId,
       token: editToken,
       permissions: ["view", "edit", "publish"],
       expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       is_active: true,
     });
     if (editError) throw editError;
+  }
+
+  /**
+   * s51: saving needs the SITE OWNER's plan (ADR 041). This fixture used to be
+   * an ownerless site — no `admin` row — which the gate refuses as `no_owner`,
+   * and rightly: a real site always has one, written by sites/register. So the
+   * fixture says what a working site is: an owner account, its `admin` row,
+   * and a Pro grant with no expiry. Deleting the user cascades both rows.
+   */
+  async function seedPayingOwner(client: SupabaseClient) {
+    const { data, error } = await client.auth.admin.createUser({
+      email: ownerEmail,
+      email_confirm: true,
+    });
+    if (error) throw error;
+    if (!data.user) throw new Error("createUser returned no owner.");
+    ownerId = data.user.id;
+
+    const { error: permissionError } = await client
+      .from("site_permissions")
+      .insert({ site_id: siteId, user_id: ownerId, permission: "admin" });
+    if (permissionError) throw permissionError;
+
+    const { error: planError } = await client
+      .from("plan_entitlements")
+      .insert({ user_id: ownerId, plan_id: "pro", source: "e2e" });
+    if (planError) throw planError;
+  }
+
+  async function deletePayingOwner(client: SupabaseClient) {
+    if (!ownerId) return;
+
+    const { error } = await client.auth.admin.deleteUser(ownerId);
+    if (error) throw error;
+    ownerId = null;
   }
 
   async function seedContentElement(client: SupabaseClient, elementId: string) {

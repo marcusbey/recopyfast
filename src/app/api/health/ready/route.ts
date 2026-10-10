@@ -54,10 +54,14 @@ async function checkDatabaseConnection(): Promise<ReadinessCheck> {
   try {
     const supabase = await createClient();
 
-    // Verify we can connect and query
-    const { error } = await supabase.from("sites").select("count").limit(1);
+    // Readiness is polled without a user session. Probing `sites` coupled this
+    // check to tenant ACLs and turned the s38 credential lockdown into a false
+    // database outage. The active-plan catalogue is explicitly readable by
+    // anon, so this narrow query still exercises PostgREST and Postgres while
+    // keeping tenant tables closed.
+    const { error } = await supabase.from("plans").select("id").limit(1);
 
-    if (error && error.code !== "PGRST116") {
+    if (error) {
       throw error;
     }
 

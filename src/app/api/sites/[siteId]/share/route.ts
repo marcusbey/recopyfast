@@ -41,21 +41,73 @@ import {
   attachUserIdentities,
   resolveUserIdentity,
 } from "@/lib/auth/user-identity";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;
 }
 
+/**
+ * s77 (s69 R6) — ADR 037 step 1 on every verb.
+ *
+ * None of the three handlers had a limiter. Each starts with `getUser()` (a
+ * round trip to the auth server), then `checkSitePermission`, then service-role
+ * reads and writes of `site_permissions` — and GET resolves every
+ * collaborator's identity through the Admin API, one call per row. Per IP,
+ * before anything; 200/min per address, one bucket for the route — an office
+ * of managers shares a NAT address and the tight buckets below are per user.
+ * Fails CLOSED like every limiter behind it: this is a service-role route
+ * (ADR 002 §4), and nothing in the product calls it on a loop.
+ */
+function shedIpFlood(request: NextRequest) {
+  return enforceRateLimit(request, {
+    limit: "IP_GENERAL",
+    endpoint: "sites/share:ip",
+    identifierType: "ip",
+    onStoreFailure: "deny",
+  });
+}
+
+/**
+ * ADR 037 step 3 for POST and DELETE: once the caller is known, before the
+ * permission check or any service-role call. One bucket for granting and
+ * revoking — the same human action, the api-keys precedent; 10 a minute
+ * (`API_UPLOAD`). Fails CLOSED: both write `site_permissions` with RLS bypassed.
+ */
+function limitShareWrites(request: NextRequest, userId: string) {
+  return enforceRateLimit(request, {
+    limit: "API_UPLOAD",
+    endpoint: "sites/share:write",
+    identifier: userId,
+    identifierType: "user",
+    onStoreFailure: "deny",
+    message: "Too many access changes. Please try again shortly.",
+  });
+}
+
+/**
+ * ADR 037 step 3 for GET: the roster is read through the service role and
+ * decorated through the Admin API. 100 a minute per user (`USER_GENERAL`); no
+ * component in this repo fetches it (see GET).
+ */
+function limitShareReads(request: NextRequest, userId: string) {
+  return enforceRateLimit(request, {
+    limit: "USER_GENERAL",
+    endpoint: "sites/share:read",
+    identifier: userId,
+    identifierType: "user",
+    onStoreFailure: "deny",
+  });
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    const shed = await shedIpFlood(request);
+    if (shed) return shed;
+
     const { siteId } = await context.params;
     const supabase = await createServerClient();
     const permissions = new CollaborationPermissions();
-
-    // Every `site_permissions` query below goes through this client — see the
-    // module header. Authorisation for this request is checkSitePermission
-    // (["manager","owner"]) plus the canShareSite seat quota, both below.
-    const serviceClient = createServiceRoleClient();
 
     // Get current user
     const {
@@ -65,6 +117,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (userError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userLimited = await limitShareWrites(request, user.id);
+    if (userLimited) return userLimited;
 
     const body: ShareSitePayload = await request.json();
 
@@ -111,6 +166,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (siteError || !site) {
       return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
+
+    // Every `site_permissions` query below goes through this client — see the
+    // module header. Created only now, after checkSitePermission
+    // (["manager","owner"]): ADR 037 step 5 follows the authorization, as in
+    // GET and DELETE (s77 review m4). The canShareSite seat quota still runs
+    // below, before the insert.
+    const serviceClient = createServiceRoleClient();
 
     // Only the display name is used (in the notification body and the success
     // message). A parallel `targetIdentifier` was assigned in both branches and
@@ -289,6 +351,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    const shed = await shedIpFlood(request);
+    if (shed) return shed;
+
     const { siteId } = await context.params;
     const supabase = await createServerClient();
     const permissions = new CollaborationPermissions();
@@ -301,6 +366,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (userError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userLimited = await limitShareReads(request, user.id);
+    if (userLimited) return userLimited;
 
     // Managers and owners only — NOT every collaborator.
     //
@@ -383,6 +451,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
+    const shed = await shedIpFlood(request);
+    if (shed) return shed;
+
     const { siteId } = await context.params;
     const supabase = await createServerClient();
     const permissions = new CollaborationPermissions();
@@ -395,6 +466,9 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     if (userError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userLimited = await limitShareWrites(request, user.id);
+    if (userLimited) return userLimited;
 
     const { searchParams } = new URL(request.url);
     const permissionId = searchParams.get("permissionId");
@@ -523,6 +597,44 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         { error: "Failed to revoke site access" },
         { status: 500 },
       );
+    }
+
+    // Deactivate the removed member's edit sessions on this site (ADR 047,
+    // rule 3). This route used to delete the grant and leave `edit_sessions`
+    // alone, so a removed member's session lived on to its expiry (H1).
+    //
+    // NOT the security control, and deliberately not allowed to fail the
+    // request: since s68a `validateEditSessionAccess` reads the holder's LIVE
+    // grant on every use, so the row deleted above already left these sessions
+    // authorising nothing. This is what makes the dashboard's session list and
+    // the realtime sweep tell the truth now rather than at expiry — so a
+    // failure is logged and the completed removal still answers 200.
+    //
+    // Service client: it is the only writer of `edit_sessions` (migration
+    // 20261008100000). Scoped by `site_id` AND the removed row's `user_id`, so
+    // the member's sessions on their other sites survive. A team row has no
+    // `user_id` and no session can be issued on one, so it touches nothing.
+    // `is_active` keeps an earlier `revoked_at` from being rewritten.
+    if (targetPermission.user_id) {
+      try {
+        const { error: sessionError } = await serviceClient
+          .from("edit_sessions")
+          .update({ is_active: false, revoked_at: new Date().toISOString() })
+          .eq("site_id", siteId)
+          .eq("user_id", targetPermission.user_id)
+          .eq("is_active", true);
+        if (sessionError) {
+          console.error(
+            "Error deactivating a removed member's edit sessions:",
+            sessionError,
+          );
+        }
+      } catch (sessionError) {
+        console.error(
+          "Error deactivating a removed member's edit sessions:",
+          sessionError,
+        );
+      }
     }
 
     // Create notification for the affected user(s)

@@ -61,6 +61,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Deliberately NOT gated on the owner's plan (s51, ADR 041). The code is
+    // only checked inside `redeemHandoff`, which also spends it and mints the
+    // grant, and nothing before this line proves anything — the Origin check
+    // above is a header any non-browser caller can forge. A plan gate here
+    // would answer "plan ended" to anyone holding a public site id: an oracle
+    // on a customer's billing. It is also unnecessary: a code is only minted by
+    // `handoff/create`, which is authenticated and gated; it lives 60 seconds;
+    // and every write the resulting grant could make is gated.
     const result = await redeemHandoff({ code, siteId, device });
 
     if (!result.ok) {

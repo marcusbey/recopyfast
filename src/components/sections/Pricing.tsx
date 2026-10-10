@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
+import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
+import FoundingOfferCard from "./FoundingOfferCard";
+import { foundingOfferTrustLead } from "./founding-offer-copy";
 
 /**
  * Prices, feature bullets and the overage rate all come from `/api/pricing`,
@@ -24,6 +27,7 @@ interface PricingPlan {
   description: string;
   monthlyPrice: number;
   yearlyPrice: number;
+  yearlyTotal?: number;
   features: string[];
   highlight: boolean;
   badge: string | null;
@@ -37,35 +41,49 @@ interface PricingOneTimeProduct {
   price: number;
   features: string[];
   grantsPlanId: string | null;
+  creditsPerPack?: number;
 }
 
 interface PricingResponse {
   plans: PricingPlan[];
   oneTimeProducts: PricingOneTimeProduct[];
+  foundingAgencyAvailability?: FoundingAgencyAvailability | null;
+}
+
+interface FoundingAgencyAvailability {
+  remaining: number;
+  limit: 50;
+  soldOut: boolean;
 }
 
 const PLAN_ICONS: Record<string, LucideIcon> = {
   starter: Sparkles,
   pro: Rocket,
-  lifetime_pro: InfinityIcon,
+  agency: Rocket,
 };
 
 const FALLBACK_ICON = Sparkles;
 
-// The first two were removed once, because there was no trial and subscription
-// Checkout always collected a card — they were promises the product did not
-// honour. Both are true again: every new account is granted 14 days of Pro at
-// sign-in with no Stripe customer and no payment method (see
-// src/lib/billing/trial.ts). Do not restore either claim without that grant
+// The row leads with `foundingOfferTrustLead(offer)`: "14-day free trial" used
+// to be a fixed first item, but the first 20 accounts now get 90 days instead
+// (s47a), so the lead follows the founding-offer count (s47b). The two claims
+// below hold under the 14-day trial and under the founding offer alike: both
+// grants are made at sign-in with no Stripe customer and no payment method (see
+// src/lib/billing/trial.ts). "No credit card required" was removed once,
+// because there was no trial and subscription Checkout always collected a card
+// — a promise the product did not honour. Do not restore it without that grant
 // still being in place.
-const TRUST_POINTS = [
-  "14-day free trial",
-  "No credit card required",
-  "Cancel anytime",
-  "30-day money-back guarantee",
-];
+const TRUST_POINTS = ["No credit card required", "Cancel anytime"];
+// "30-day money-back guarantee" was removed in s50 on the owner's decision of
+// 2026-09-28: /terms has no refund clause, and refunds are handled case by
+// case, so it was a promise nothing stood behind. Do not restore it without a
+// refund clause in /terms.
 
-export default function Pricing() {
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+export default function Pricing({ offer }: { offer: FoundingOfferView }) {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, margin: "-100px" });
   const [isYearly, setIsYearly] = useState(false);
@@ -92,12 +110,21 @@ export default function Pricing() {
     void loadPricing();
   }, [loadPricing]);
 
-  // Lifetime Pro sits alongside the subscriptions: it is the same catalogue,
-  // and a one-time plan is a pricing choice a visitor makes on this page.
-  const lifetime = pricing?.oneTimeProducts.find(
-    (product) => product.grantsPlanId !== null,
+  const foundingAgency = pricing?.oneTimeProducts.find(
+    (product) => product.id === "lifetime_agency",
   );
-  const cardCount = (pricing?.plans.length ?? 0) + (lifetime ? 1 : 0);
+  const lifetimePro = pricing?.oneTimeProducts.find(
+    (product) => product.id === "lifetime_pro",
+  );
+  const creditsProduct = pricing?.oneTimeProducts.find(
+    (product) => product.id === "credits",
+  );
+  // Both numbers or neither: the offer card never names a pack it cannot price.
+  const creditPack =
+    isPositiveNumber(creditsProduct?.creditsPerPack) &&
+    isPositiveNumber(creditsProduct?.price)
+      ? { credits: creditsProduct.creditsPerPack, price: creditsProduct.price }
+      : null;
 
   return (
     <section
@@ -130,6 +157,18 @@ export default function Pricing() {
           <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto mb-8">
             Choose the plan that fits your needs. Upgrade anytime.
           </p>
+
+          {/* Only while spots remain. Loading and closed render nothing here:
+              the section is far below the fold, so the card arriving causes
+              no visible shift, and a placeholder would linger for every visit
+              after the spots are gone. */}
+          {offer.status === "open" && (
+            <FoundingOfferCard
+              remaining={offer.remaining}
+              limit={offer.limit}
+              creditPack={creditPack}
+            />
+          )}
 
           {/* Billing toggle */}
           <div className="inline-flex items-center gap-4 p-1 bg-white rounded-full border border-sky-200 shadow-sm">
@@ -190,21 +229,18 @@ export default function Pricing() {
 
         {/* Pricing cards */}
         {pricing && (
-          <div
-            className={`grid gap-6 lg:gap-8 ${
-              cardCount >= 3 ? "md:grid-cols-3" : "md:grid-cols-2"
-            }`}
-          >
+          <div className="grid gap-6 md:grid-cols-3 lg:gap-8">
             {pricing.plans.map((plan, i) => {
               const Icon = PLAN_ICONS[plan.id] ?? FALLBACK_ICON;
               const price = isYearly ? plan.yearlyPrice : plan.monthlyPrice;
-              // toFixed(2) is load-bearing, not cosmetic. The prices are
-              // binary-inexact decimals, so (9 - 7.47) * 12 evaluates to
-              // 18.359999999999996 and was rendering to customers verbatim.
-              const saving = (
-                (plan.monthlyPrice - plan.yearlyPrice) *
-                12
-              ).toFixed(2);
+              const yearlyTotal =
+                plan.yearlyTotal ??
+                Math.round(plan.yearlyPrice * 12 * 100) / 100;
+              // Use the exact annual charge rather than twelve times the
+              // rounded monthly equivalent. Agency is $490/year while its
+              // display equivalent is $40.83; multiplying that display value
+              // would invent a $489.96 charge and a slightly wrong saving.
+              const saving = (plan.monthlyPrice * 12 - yearlyTotal).toFixed(2);
 
               return (
                 <motion.div
@@ -244,9 +280,10 @@ export default function Pricing() {
                       <span className="text-slate-500">/month</span>
                     </div>
                     {isYearly && plan.monthlyPrice > 0 && (
-                      <p className="text-sm text-teal-700 mt-1">
-                        ${saving} saved yearly
-                      </p>
+                      <div className="mt-1 text-sm text-teal-700">
+                        <p>${yearlyTotal} charged annually</p>
+                        <p>${saving} saved yearly</p>
+                      </div>
                     )}
                   </div>
 
@@ -274,64 +311,115 @@ export default function Pricing() {
                 </motion.div>
               );
             })}
+          </div>
+        )}
 
-            {lifetime && (
+        {pricing && (lifetimePro || foundingAgency) && (
+          <div className="mt-8 grid gap-6 lg:grid-cols-2">
+            {lifetimePro && (
               <motion.div
                 initial={{ opacity: 0, y: 40 }}
                 animate={isInView ? { opacity: 1, y: 0 } : {}}
-                transition={{
-                  duration: 0.6,
-                  delay: 0.1 * pricing.plans.length,
-                }}
-                className="relative bg-white rounded-3xl p-8 border border-sky-100"
+                transition={{ duration: 0.6, delay: 0.25 }}
+                className="rounded-3xl border border-sky-200 bg-white p-8"
               >
-                <div className="mb-8">
-                  <div className="w-12 h-12 rounded-2xl bg-sky-50 flex items-center justify-center mb-4">
-                    <InfinityIcon className="w-6 h-6 text-sky-500" />
-                  </div>
-                  <h3 className="text-2xl font-semibold text-slate-900 mb-2">
-                    {lifetime.name}
-                  </h3>
-                  <p className="text-slate-500 text-sm">
-                    {lifetime.description}
-                  </p>
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50">
+                  <InfinityIcon className="h-6 w-6 text-sky-700" />
                 </div>
-
-                <div className="mb-8">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-5xl font-bold text-slate-900">
-                      ${lifetime.price}
-                    </span>
-                    <span className="text-slate-500">once</span>
-                  </div>
-                  <p className="text-sm text-teal-700 mt-1">No renewal, ever</p>
-                </div>
-
-                <ul className="space-y-3 mb-8">
-                  {lifetime.features.map((feature) => (
+                <h3 className="mb-2 text-2xl font-semibold text-slate-900">
+                  {lifetimePro.name}
+                </h3>
+                <p className="text-sm text-slate-600">
+                  {lifetimePro.description}
+                </p>
+                <ul className="mt-6 space-y-3">
+                  {lifetimePro.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-3">
-                      <Check className="w-5 h-5 text-teal-600 flex-shrink-0 mt-0.5" />
-                      <span className="text-slate-600 text-sm">{feature}</span>
+                      <Check className="mt-0.5 h-5 w-5 shrink-0 text-sky-700" />
+                      <span className="text-sm text-slate-700">{feature}</span>
                     </li>
                   ))}
                 </ul>
-
-                {/*
-                  Straight to the page that can actually take the $199, not to
-                  /signup. Middleware bounces an unauthenticated visitor from
-                  /dashboard/billing to /login?redirectedFrom=/dashboard/billing
-                  — where they can sign up as well as sign in, and land back on
-                  the offer — while an already-signed-in visitor arrives at it
-                  directly. /signup is a dead end for the latter: middleware
-                  redirects a logged-in session off the auth routes to
-                  /dashboard, which is nowhere near this purchase.
-                */}
+                <div className="mt-6 flex items-baseline gap-1">
+                  <span className="text-4xl font-bold text-slate-900">
+                    ${lifetimePro.price}
+                  </span>
+                  <span className="text-slate-600">once</span>
+                </div>
                 <Link
                   href="/dashboard/billing"
-                  className="block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all bg-sky-50 text-sky-700 hover:bg-sky-100"
+                  className="pressable mt-5 block rounded-xl bg-sky-600 px-6 py-3 text-center font-semibold text-white hover:bg-sky-700"
                 >
-                  Buy once
+                  Buy Lifetime Pro
                 </Link>
+              </motion.div>
+            )}
+
+            {foundingAgency && (
+              <motion.div
+                initial={{ opacity: 0, y: 40 }}
+                animate={isInView ? { opacity: 1, y: 0 } : {}}
+                transition={{ duration: 0.6, delay: 0.3 }}
+                className="rounded-3xl border-2 border-teal-500 bg-gradient-to-br from-teal-50 to-sky-50 p-8 shadow-xl shadow-teal-500/10"
+              >
+                <div className="grid items-center gap-8 md:grid-cols-[1fr_auto]">
+                  <div>
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white">
+                      <InfinityIcon className="h-6 w-6 text-teal-700" />
+                    </div>
+                    <h3 className="mb-2 text-2xl font-semibold text-slate-900">
+                      {foundingAgency.name}
+                    </h3>
+                    <p className="text-sm text-slate-600">
+                      {foundingAgency.description}
+                    </p>
+                    <ul className="mt-6 grid gap-3 sm:grid-cols-2">
+                      {foundingAgency.features.map((feature) => (
+                        <li key={feature} className="flex items-start gap-3">
+                          <Check className="mt-0.5 h-5 w-5 shrink-0 text-teal-700" />
+                          <span className="text-sm text-slate-700">
+                            {feature}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="min-w-56 text-center md:text-right">
+                    <div className="flex items-baseline justify-center gap-1 md:justify-end">
+                      <span className="text-5xl font-bold text-slate-900">
+                        ${foundingAgency.price}
+                      </span>
+                      <span className="text-slate-600">once</span>
+                    </div>
+                    <p className="mt-1 text-sm font-medium text-teal-800">
+                      {pricing.foundingAgencyAvailability == null
+                        ? "Availability temporarily unavailable"
+                        : pricing.foundingAgencyAvailability.soldOut
+                          ? "Sold out"
+                          : `${pricing.foundingAgencyAvailability.remaining} of ${pricing.foundingAgencyAvailability.limit} founding spots left`}
+                    </p>
+                    {pricing.foundingAgencyAvailability != null &&
+                    !pricing.foundingAgencyAvailability.soldOut ? (
+                      <Link
+                        href="/dashboard/billing"
+                        className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800"
+                      >
+                        Buy founding access
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="mt-5 w-full rounded-xl bg-slate-200 px-6 py-3 font-semibold text-slate-500"
+                      >
+                        {pricing.foundingAgencyAvailability?.soldOut
+                          ? "Sold out"
+                          : "Availability unavailable"}
+                      </button>
+                    )}
+                  </div>
+                </div>
               </motion.div>
             )}
           </div>
@@ -345,7 +433,7 @@ export default function Pricing() {
           className="mt-16 text-center"
         >
           <div className="flex flex-wrap justify-center items-center gap-6 text-sm text-slate-500">
-            {TRUST_POINTS.map((point) => (
+            {[foundingOfferTrustLead(offer), ...TRUST_POINTS].map((point) => (
               <span key={point} className="flex items-center gap-2">
                 <Check className="w-4 h-4 text-teal-600" />
                 {point}
