@@ -1,54 +1,95 @@
 # Review — s82-billing-lifetime-guards
 
-Reviewer: fresh-context `reviewer` subagents, 2026-10-09 (first review of c02df19; verification of 84d7b0c).
-Diff: `git diff origin/main...feature/s82-billing-lifetime-guards` (rebased onto fc5968b).
+Reviewer: independent fresh-context `reviewer`, 2026-10-10.
 
-## First review (c02df19) — Max severity: major, Ship allowed: yes
+Final target:
 
-All 8 tasks present; every symbol checked (enforceRateLimit, logger, refundCharge, consumeFeatureUsage, checkOwnerCanEdit,
-readGrantedPlanIds, findHeldPlan, LIVE_SUBSCRIPTION_STATUSES, PAID_PLAN_IDS). Reactivate guard uses the same grant reader
-as the billing page and the same rank rule as the Stripe webhook (`stopBillingForLifetimeOwner`); fails closed. Translate
-charges the site owner (service client scoped to that site's admin; refunds to the same wallet). "You were not charged"
-only when the full refund succeeded. No Stripe/DB text to clients in the touched routes. 22 mutations, 20 red.
+- SHA `52d43cccb64e17d5886463cfe3ecc4cb98c0a508`
+- tree `e5a35fddd7f00f3a736680e101c33642d216c833`
+- diff `git diff origin/main...HEAD`, with `origin/main` `0dea1c0`
+- both current main and prior PR head `d08b967` are ancestors; the worktree was clean before this report
 
-**major** — checkout's subscription intent and the plan-change PUT never read grants: a lifetime owner could start a new
-subscription for a plan they hold. minors: a DB read error became a silent 404; M14 (allowance matcher "credit") and M20
-(held-plan disable) unpinned; an overstated comment; the payment-methods 429 message hidden.
+## Findings
 
-## Fix pass `84d7b0c` — verified (Max severity: minor, Ship allowed: yes)
+None. The earlier stored review was stale. Its findings and the later PR #81 / verification findings are repaired and pinned in the final integrated tree.
 
-Checkout subscription intent and `updateSubscription` refuse a covered plan (409 before Stripe), same rank rule (an Agency
-subscription beside Lifetime Pro stays on sale), fail closed; UpgradeDialog shows covered plans "Included"; expired grants
-dropped by `readGrantedPlanIds` (PostgREST `or=(expires_at.is.null,expires_at.gt.<iso>)` verified against the real
-query builder) for every reader; read errors → logged 500, only no-row → 404; M14/M20 pinned; 429 shows the limiter sentence
-+ retry time. Billing matrix (no grant / Lifetime Pro / Lifetime Pro + Agency sub / Founding Agency / expired grant / trial /
-Agency subscriber × checkout / plan change / reactivate / lifetime purchase) matches the design and the webhook rule; no
-legitimate purchase refused. 18 mutations, 17 red (R17 — highest-grant label — survived).
+## Plan, rules and API verification
 
-Minors: m1 checkout's catch still returned `error.message` (DB text to the signed-in caller); m2 R17 unpinned; m3 "for life"
-shown for a dated grant (production QA grant `qa_recovery_20260919`).
+All validated plan tasks 1–43 are present. The diff remains inside the declared story: no migration, embed change, dependency or server change. Customer-facing billing refusals are typed; other route failures stay generic and are logged. The grant readers share the non-trial, non-revoked, unexpired rule, and the rank rule is shared across Checkout, plan changes, reactivation, the dialog and webhook reconciliation.
 
-## Fix pass `8b807a3` (rebased onto fc5968b) — orchestrator review
+Every new production import and provider call was traced to its target. The installed Stripe 18.4.0 / `2025-07-30.basil` types confirm:
 
-m1 checkout POST errors go through `billingErrorResponse` (generic 500 + log; customer refusals unchanged). m2 pinned
-(unsorted `["agency","pro"]` → "Included in your lifetime Agency"; `.at(-1)`→`.at(0)` red). m3 the page's existing grant
-query also reads `expires_at` (`readGrantedPlans`); a plan included only by dated grants reads "Included until <date>";
-"for life" only for undated grants. 12 mutations red. Jest 389 suites / 5,093; type-check (both) 0; lint 0 errors;
-format:check clean; build:embed 45828 / 33062; Playwright `--list` 80.
+- invoice subscription identity at `parent.subscription_details.subscription`, plus the supported legacy top-level shape;
+- expandable subscription, payment-intent and charge identities;
+- paginated `invoicePayments.list` and `refunds.list`;
+- refund statuses `pending`, `requires_action`, `succeeded`, `failed`, `canceled`;
+- subscription cancellation parameters `prorate`, `invoice_now` and `cancellation_details.comment`.
 
-## Follow-ups (not blocking)
+## Billing invariants verified
 
-- s96: a dated grant on the plan *in force* is still labelled "Lifetime"/"Lifetime access" on the card and its own dialog
-  tile (one production QA row today); the end date already reaches the dashboard.
-- Owner (Stripe access): confirm the billing-portal configuration (`STRIPE_BILLING_PORTAL_CONFIGURATION_ID` or the default)
-  has subscription updates disabled — otherwise a portal switch down into a covered plan bypasses these guards.
-- Translate / A/B-generate refund failures still only `console.error`; reactivate reads the newest row whatever its status.
+- A live grant refuses redundant subscription Checkout, plan changes and reactivation before Stripe; a higher Agency subscription beside Lifetime Pro remains allowed.
+- Open covered Checkouts are scanned page by page and expired. Broken cursor progress fails closed and alerts.
+- Both webhook event orders apply the same earliest-cover timing rule. A subscription bought after coverage is cancelled immediately and its collected payments are refunded; a predating subscription ends at period end.
+- Late invoice settlement checks Stripe's authoritative refusal marker even when the local row is stale or absent, verifies the invoice/subscription customer binding, and retries on a real local read failure.
+- Every invoice-payment page is processed. Payment-intent and charge references, including expanded objects, resolve correctly.
+- Refund metadata lookup reads every page before inferring absence. Unknown/null statuses fail closed; failed/canceled attempts receive a distinct deterministic retry key; concurrent idempotency-key conflicts do not create duplicate movement.
+- The once-only refusal report is claimed through `billing_events`; actionable failures alert in words. Pending/action-required refunds are described as created or found rather than completed.
+- A permitted plan switch clears scheduled cancellation and stale lifetime cancellation metadata, while a chargeback cancellation remains protected.
+- The three PR #81 findings are closed: late Checkout payment, scheduled cancellation surviving a plan change, and dated grants presented as permanent.
+- Dated grants read “Included until <date>”; undated grants may read “Lifetime.” Included plans remain unbuyable.
+- Translation charges the site owner through the authorised service client. AI suggestion failure says “not charged” only after a full credit refund.
+
+## Independent test evidence
+
+Runtime: Node `24.14.0`, `NEXT_PUBLIC_APP_URL=http://localhost:3000`, no production environment or provider calls.
+
+`npm run test:coverage -- --runInBand` passed:
+
+- 422 passed suites, 2 skipped, 424 total
+- 5,815 passed tests, 38 skipped, 5,853 total
+- 0 snapshots
+- coverage: 72.50% statements, 65.91% branches, 69.71% functions, 73.05% lines
+
+After all mutations were restored, the two repaired webhook suites passed again: 2 suites, 94 tests.
+
+## Independent mutation proof
+
+Each mutation was applied to the final tree, its focused tests ran red, and the source was restored in the same tool call.
+
+| Mutation | Neutralized invariant | Red |
+|---|---|---:|
+| RP01 | Refund lookup stops after page one | 5 |
+| RP02 | Unknown/null refund status is accepted | 4 |
+| X01 | Latest covering grant replaces earliest | 1 |
+| T40 | Late refund depends on a terminal local row | 2 |
+| T41 | Invoice-payment lookup stops after page one | 3 |
+| T42 | Pagination cursor validation is disabled | 2 |
+| T40-CUSTOMER | Invoice/subscription customer binding is disabled | 1 |
+| T39 | Subscription read errors are ignored | 1 |
+
+Total: 19 red tests; zero surviving mutations.
+
+Restored SHA-256:
+
+- `src/lib/stripe/lifetime-covered-billing.ts`: `52caa805e4474c8f63a2384b16d2a0b0dd7029b3ec4047ba1f6b3dbd96cfdc47`
+- `src/app/api/webhooks/stripe/route.ts`: `3bbf72639dc65ce4b7dad26861bcb77a89b5cc67ac3c4418a88242db7f76476e`
+- webhook lifetime test: `1987fabd067af16ee339c1f64e0af4bbb0d46e72e179c72359c7611622707613`
+
+`git diff --exit-code` passed after every restoration.
+
+## Supporting evidence kept separate
+
+- Parent read-only `npm run audit:prod`: exit 0, 0 vulnerabilities.
+- Implementer/parent reported the production typecheck and build green, with expected missing-local-provider warnings only.
+
+These are supporting reports, not substitutes for the independent Jest, static and mutation evidence above.
 
 ## Not verified
 
-Stripe test-mode runs (payment-methods 404s, reactivate 409, Lifetime Pro + Agency checkout/PUT 409); a real-DB run of
-`readGrantedPlanIds` with seeded expired/dated/trial/revoked grants; rendered UI at `md`; Sentry delivery of
-`logger.error`; the payment-methods limiter during a Redis outage.
+- The 2 database suites / 38 database tests were skipped without disposable PostgreSQL.
+- No Stripe test-mode or live call proved cancellation/refund delivery, the configured webhook endpoint API version, or whether the billing portal has subscription updates disabled. Verify the portal setting before production rollout.
+- No real Sentry delivery, rendered responsive billing UI, hosted CI run or production deployment was exercised.
+- Pre-existing follow-ups remain outside this story: chargeback protection on reactivation and the dropped database error in `stopBillingForLifetimeOwner`'s subscription lookup.
 
-Max severity: minor
+Max severity: none
 Ship allowed: yes
