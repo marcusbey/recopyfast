@@ -208,35 +208,142 @@ describe("workflows run with least privilege and pinned actions (s69 L19)", () =
       text: read(`.github/workflows/${file}`),
     }));
 
+  const reviewedWriteScopes = new Map([
+    ["uptime.yml#probe", ["contents: read", "issues: write"]],
+  ]);
+
+  function permissionProblems(
+    sources: Array<{ file: string; text: string }>,
+  ): string[] {
+    const problems: string[] = [];
+    const seenReviewedScopes = new Set<string>();
+
+    for (const { file, text } of sources) {
+      const lines = text.split("\n");
+      const blocks = lines.flatMap((line, index) => {
+        const match = /^(\s*)permissions:\s*(\S.*)?$/.exec(line);
+        if (!match) return [];
+
+        const indent = match[1].length;
+        const inline = match[2]?.trim();
+        const grants = inline ? [inline] : [];
+        for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+          const next = lines[cursor];
+          if (!next.trim()) continue;
+          const nextIndent = /^\s*/.exec(next)?.[0].length ?? 0;
+          if (nextIndent <= indent) break;
+          if (nextIndent === indent + 2) grants.push(next.trim());
+        }
+
+        if (indent === 0) return [{ scope: file, grants }];
+
+        const jobLine = lines
+          .slice(0, index)
+          .reverse()
+          .find((candidate) => /^  [\w-]+:\s*$/.test(candidate));
+        const job = /^  ([\w-]+):/.exec(jobLine ?? "")?.[1] ?? "<unknown>";
+        return [{ scope: `${file}#${job}`, grants }];
+      });
+
+      const topLevel = blocks.filter((block) => block.scope === file);
+      if (
+        topLevel.length !== 1 ||
+        topLevel[0].grants.join(",") !== "contents: read"
+      ) {
+        problems.push(
+          `${file}: top-level permissions are [${topLevel.flatMap((block) => block.grants).join(", ")}]`,
+        );
+      }
+
+      for (const block of blocks.filter(
+        (candidate) => candidate.scope !== file,
+      )) {
+        const expected = reviewedWriteScopes.get(block.scope);
+        if (expected) {
+          seenReviewedScopes.add(block.scope);
+          if (block.grants.slice().sort().join(",") !== expected.join(",")) {
+            problems.push(
+              `${block.scope}: permissions are [${block.grants.join(", ")}]`,
+            );
+          }
+          continue;
+        }
+
+        // This guard reads the repository's explicit mapping form, not all of
+        // YAML. An unfamiliar inline/expression form must fail closed: looking
+        // only for a trailing `write` missed `{ contents: write }` in review.
+        if (
+          block.grants.some((grant) => !/^[\w-]+:\s*(?:read|none)$/.test(grant))
+        ) {
+          problems.push(
+            `${block.scope}: grants an unreviewed write permission`,
+          );
+        }
+      }
+    }
+
+    for (const scope of reviewedWriteScopes.keys()) {
+      if (!seenReviewedScopes.has(scope)) {
+        problems.push(`${scope}: reviewed permission block is missing`);
+      }
+    }
+
+    return problems;
+  }
+
   it("finds the workflows it is checking", () => {
     expect(workflows.map((workflow) => workflow.file)).toEqual(
       expect.arrayContaining(["ci.yml", "server-security.yml"]),
     );
   });
 
-  it("gives every workflow a read-only token, and no job more", () => {
+  it("keeps every workflow read-only and scopes the one reviewed write grant to uptime.yml#probe", () => {
     // Without a `permissions:` key the token gets the repository default,
-    // which can be read-write. No job here pushes, comments or publishes:
-    // caches and artifacts use the runtime token, not GITHUB_TOKEN.
-    const offenders = workflows.flatMap(({ file, text }) => {
-      const topLevel = /^permissions:\n((?:[ \t]+\S.*\n)+)/m.exec(text);
-      const granted = (topLevel?.[1] ?? "")
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean);
-      const problems: string[] = [];
-      if (granted.join(",") !== "contents: read") {
-        problems.push(
-          `${file}: top-level permissions are [${granted.join(", ")}]`,
-        );
-      }
-      if (/^\s*(?:[a-z-]+:\s*write|permissions:\s*write-all)\s*$/m.test(text)) {
-        problems.push(`${file}: grants a write permission`);
-      }
-      return problems;
-    });
+    // which can be read-write. Uptime is the single reviewed exception: its
+    // named job opens and closes public incident issues, so only that job gets
+    // `issues: write`; the workflow default remains read-only.
+    expect(permissionProblems(workflows)).toEqual([]);
+  });
 
-    expect(offenders).toEqual([]);
+  it("rejects widening or moving the uptime job's reviewed write grant", () => {
+    const valid = `permissions:\n  contents: read\njobs:\n  probe:\n    permissions:\n      contents: read\n      issues: write\n`;
+
+    expect(permissionProblems([{ file: "uptime.yml", text: valid }])).toEqual(
+      [],
+    );
+    expect(
+      permissionProblems([
+        {
+          file: "uptime.yml",
+          text: valid.replace(
+            "      issues: write",
+            "      issues: write\n      pull-requests: write",
+          ),
+        },
+      ]),
+    ).not.toEqual([]);
+    expect(
+      permissionProblems([
+        {
+          file: "uptime.yml",
+          text: valid.replace("  probe:", "  deploy:"),
+        },
+      ]),
+    ).not.toEqual([]);
+
+    // Keep the approved job present so this proves the other job is refused,
+    // rather than passing only because the approved scope went missing.
+    for (const grants of ["{ contents: write }", "issues: write"]) {
+      expect(
+        permissionProblems([
+          { file: "uptime.yml", text: valid },
+          {
+            file: "another.yml",
+            text: `permissions:\n  contents: read\njobs:\n  build:\n    permissions: ${grants}\n`,
+          },
+        ]),
+      ).not.toEqual([]);
+    }
   });
 
   it("pins every action to a full commit SHA with its version beside it", () => {

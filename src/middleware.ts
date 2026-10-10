@@ -5,7 +5,10 @@ import {
   hasAnyEntitlement,
   resolveEntitlement,
 } from "@/lib/billing/effective-plan";
-import { SENTRY_TUNNEL_ROUTE } from "@/lib/monitoring/sentry-tunnel";
+import {
+  isForwardableTunnelRequest,
+  isSentryTunnelPath,
+} from "@/lib/monitoring/sentry-tunnel-guard";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -77,8 +80,9 @@ async function isUnentitled(
  * but every error event paid a GoTrue round trip, and a rotated session cookie
  * could land on Sentry's response. Sentry's docs say to drop the tunnel from the
  * matcher; this file keeps it matched, for the headers, like every path here.
- * Exact match: with `trailingSlash` off, `/monitoring/` is redirected before it
- * gets here, and anything under the path is not the tunnel.
+ * Every spelling the rewrite accepts (`isSentryTunnelPath`: any case, trailing
+ * slash, percent-encoded), not just the exact one — the rewrite forwards
+ * `/Monitoring` too. Anything under the path is not the tunnel.
  *
  * The installation guide and its Markdown handoff are public documentation.
  * A visitor may happen to carry a session cookie, but it changes neither
@@ -112,13 +116,36 @@ function isSessionlessPath(pathname: string): boolean {
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
     pathname === "/llms.txt" ||
-    pathname === SENTRY_TUNNEL_ROUTE
+    isSentryTunnelPath(pathname)
   );
 }
 
 export async function middleware(request: NextRequest) {
   // This middleware now focuses on auth and page-level security
   // API-level security is handled within individual API routes
+
+  // The Sentry tunnel forwards only our own browser's envelopes (s84). Until
+  // then the rewrite behind this path relayed to ANY Sentry project named in
+  // its query string — see `sentry-tunnel-guard.ts`. This runs before that
+  // rewrite, so a refusal here means nothing leaves for Sentry. Still served
+  // with the security headers, still no session work. Never `=== "/monitoring"`:
+  // the rewrite also accepts `/MONITORING`, and an exact match let the s84
+  // review relay a stranger's envelope through it (`isSentryTunnelPath`).
+  if (isSentryTunnelPath(request.nextUrl.pathname)) {
+    const isForwardable = await isForwardableTunnelRequest(
+      {
+        method: request.method,
+        searchParams: request.nextUrl.searchParams,
+        readBody: () => request.text(),
+      },
+      process.env.NEXT_PUBLIC_SENTRY_DSN,
+    );
+    if (!isForwardable) {
+      return withSecurityHeaders(
+        NextResponse.json({ error: "Invalid tunnel request" }, { status: 400 }),
+      );
+    }
+  }
 
   // Headers, but no session work. Deliberately before the Supabase client is
   // even constructed: the point is that nothing on this path can reach GoTrue.

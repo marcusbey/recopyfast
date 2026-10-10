@@ -171,9 +171,10 @@ ON team_members(user_id, team_id);
 
 ## Step 11: Backup Configuration
 
-1. Go to **Settings** → **Database**
-2. Verify daily backups are enabled
-3. Note: Supabase keeps 7 days of backups on free tier, 30 days on Pro
+The Supabase Free plan has **no** backups and no point-in-time recovery (checked 2026-10-09);
+this step used to say it kept seven days. Backups are a nightly encrypted dump run from GitHub
+Actions — what it covers, where the key lives and how to restore:
+[`backups.md`](./backups.md).
 
 ## Verification Checklist
 

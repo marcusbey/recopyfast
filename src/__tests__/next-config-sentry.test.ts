@@ -24,6 +24,9 @@ const original = {
   // `withSentryConfig` memoises the resolved tunnel path in this variable for
   // the rest of the process; left set, it would leak from one case to the next.
   __SENTRY_TUNNEL_ROUTE__: env.__SENTRY_TUNNEL_ROUTE__,
+  VERCEL_GIT_COMMIT_SHA: env.VERCEL_GIT_COMMIT_SHA,
+  GITHUB_SHA: env.GITHUB_SHA,
+  SENTRY_RELEASE: env.SENTRY_RELEASE,
 };
 
 function setEnv(name: string, value: string | undefined): void {
@@ -101,6 +104,33 @@ describe("next.config with a Sentry DSN", () => {
       destination: "/#pricing",
       permanent: true,
     });
+  });
+});
+
+describe("next.config and the Sentry release (s84)", () => {
+  it("gives every runtime and the source maps one release: the build's commit SHA", async () => {
+    // A stray CI variable must not win: the SDK's own detection reads
+    // SENTRY_RELEASE and GITHUB_SHA before VERCEL_GIT_COMMIT_SHA, so a build
+    // run inside GitHub Actions would otherwise name the release after a
+    // different commit than the one Vercel deployed.
+    setEnv("VERCEL_GIT_COMMIT_SHA", "8f2c1e0d9b7a");
+    setEnv("GITHUB_SHA", "stray-ci-sha");
+    setEnv("SENTRY_RELEASE", undefined);
+
+    const config = await loadConfig(DSN);
+
+    // What browser, server and edge inits read (inlined by Next)...
+    expect(config.env?.NEXT_PUBLIC_SENTRY_RELEASE).toBe("8f2c1e0d9b7a");
+    // ...and what the SDK itself resolved, used for the source-map upload.
+    expect(config.env?._sentryRelease).toBe("8f2c1e0d9b7a");
+  });
+
+  it("inlines no release when the build has no commit SHA, so the SDK keeps its own", async () => {
+    setEnv("VERCEL_GIT_COMMIT_SHA", undefined);
+
+    const config = await loadConfig(DSN);
+
+    expect(config.env).not.toHaveProperty("NEXT_PUBLIC_SENTRY_RELEASE");
   });
 });
 

@@ -106,10 +106,10 @@ describe("GET /api/health — the realtime check", () => {
     expect(response.status).toBe(200);
     expect(body.status).toBe("healthy");
     expect(body.checks.realtime).toMatchObject({ status: "ok" });
-    expect(body.checks.realtime.details).toMatchObject({
-      connections: 3,
-      supabase: "connected",
-    });
+    // s84 (s69 L3): the service's own body — its live connection count and
+    // Supabase state — used to be relayed here as `details`. Reachable and 2xx
+    // is the whole public answer now.
+    expect(body.checks.realtime).not.toHaveProperty("details");
   });
 
   it("probes the service over https when the configured origin is a wss one", async () => {
@@ -180,21 +180,27 @@ describe("GET /api/health — the realtime check", () => {
     const wire = JSON.stringify(body);
 
     expect(response.status).toBe(200);
-    expect(body.checks.realtime.error).toBe("Realtime service unreachable");
+    // s84: not even a fixed string any more — the status says it.
+    expect(body.checks.realtime).toEqual({
+      status: "error",
+      latency: expect.any(Number),
+    });
     expect(wire).not.toContain("ECONNREFUSED");
     expect(wire).not.toContain("10.0.0.7");
     expect(wire).not.toContain("fly.internal");
   });
 
-  it("keeps the timeout message generic too", async () => {
+  it("reports a timeout as a status, with no message", async () => {
     const aborted = new Error("The operation was aborted due to timeout");
     aborted.name = "TimeoutError";
     fetchMock.mockRejectedValue(aborted);
 
     const { body } = await callGet();
 
-    expect(body.checks.realtime.status).toBe("timeout");
-    expect(body.checks.realtime.error).toBe("Realtime service timed out");
+    expect(body.checks.realtime).toEqual({
+      status: "timeout",
+      latency: expect.any(Number),
+    });
   });
 
   it("records a timeout rather than waiting on an unreachable service", async () => {
@@ -269,39 +275,51 @@ describe("GET /api/health — the realtime check", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps HEAD reading the database alone, with realtime down", async () => {
+  it("keeps HEAD off the realtime service, with realtime down", async () => {
     // HEAD is what the uptime monitor and the load balancer poll. It answers
     // "can this instance serve traffic", and realtime has no bearing on that.
+    // (It reads the database and, since s84, the rate-limit store.)
     fetchMock.mockRejectedValue(new Error("connect ECONNREFUSED"));
 
+    const { NextRequest } = await import("next/server");
     const { HEAD } = await import("@/app/api/health/route");
-    const response = await HEAD();
+    const response = await HEAD(
+      new NextRequest("http://localhost:3000/api/health"),
+    );
 
     expect(response.status).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("skips the probe on the quick path", async () => {
-    // `?quick=true` exists to answer without touching a dependency at all.
+  it("treats ?quick=true as an ordinary truthful dependency probe", async () => {
+    // A public health URL must not have a query spelling that can manufacture
+    // 200 healthy while a critical dependency is down. `quick` has no accepted
+    // caller or weaker contract, so it is ignored like any unknown parameter.
+    doubleOptions = { databaseOk: false };
+
     const { response, body } = await callGet(
       "http://localhost:3000/api/health?quick=true",
     );
 
-    expect(response.status).toBe(200);
-    expect(body.status).toBe("healthy");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    expect(body.status).toBe("unhealthy");
+    expect(body.checks.database.status).toBe("error");
+    expect(body.checks.storage.status).toBe("ok");
+    expect(body.checks.cache.status).toBe("ok");
+    expect(body.checks.realtime.status).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   /**
-   * The memo. `/api/health` is public, unauthenticated and deliberately NOT
-   * rate limited — uptime monitors poll it, and denying them is worse than what
-   * this bounds. Since s07b every GET also issues an outbound request to the
-   * realtime service, which makes an endpoint anyone can call a small
-   * amplifier: one request in, two out, at whatever rate the caller likes.
+   * The memo. `/api/health` is public and unauthenticated. Since s07b every GET
+   * also issues an outbound request to the realtime service, which made an
+   * endpoint anyone can call a small amplifier: one request in, two out.
    *
-   * A limiter is the wrong answer here. Memoizing the probe is the right one:
-   * the reading is a few seconds old at worst, and the traffic the endpoint can
-   * generate downstream stops depending on the traffic it receives.
+   * s84 added a per-IP limiter (60/min, fail-open — `rate-limit.test.ts`), but
+   * the memo is still what bounds the downstream traffic: the limiter caps one
+   * address, the memo caps all of them together. The reading is a few seconds
+   * old at worst, and what the endpoint sends downstream stops depending on the
+   * traffic it receives.
    */
   describe("the probe memo", () => {
     it("issues one outbound probe for two GETs inside the window", async () => {

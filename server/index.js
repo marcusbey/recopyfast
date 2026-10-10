@@ -17,6 +17,7 @@ const {
   createRateLimiter,
   createRedisRateLimitStore,
 } = require('./rate-limit');
+const { initSentry, reportFatalAndExit } = require('./sentry');
 
 const window = new JSDOM('').window;
 const DOMPurify = createDOMPurify(window);
@@ -658,13 +659,18 @@ function installCrashHandlers() {
   // Crash safety: log and exit so the platform (Fly.io, Docker, PM2, etc.)
   // can restart the process.  Without these handlers an unhandled rejection
   // silently kills the event loop with no diagnostic output.
+  //
+  // s84: the exit goes through `reportFatalAndExit`, which sends the error to
+  // Sentry first when SENTRY_DSN is set (bounded flush, scrubbed — see
+  // ./sentry.js) and exits 1 at once when it is not. Same log line, same exit
+  // code; a crash loop is no longer visible only in `fly logs`.
   process.on('uncaughtException', (err) => {
     console.error('[FATAL] uncaughtException – restarting process:', err);
-    process.exit(1);
+    reportFatalAndExit(err);
   });
   process.on('unhandledRejection', (reason) => {
     console.error('[FATAL] unhandledRejection – restarting process:', reason);
-    process.exit(1);
+    reportFatalAndExit(reason);
   });
 }
 
@@ -776,6 +782,9 @@ function assertProductionEnvironment() {
 function startFromCli() {
   installCrashHandlers();
   loadEnvironment();
+  // After the environment is loaded, so a Fly secret and a local .env file
+  // reach it the same way. A no-op without SENTRY_DSN.
+  initSentry();
   assertProductionEnvironment();
 
   const supabase = createSupabaseFromEnv();

@@ -4,6 +4,7 @@
  */
 
 import * as Sentry from '@sentry/nextjs';
+import { releaseOption } from './src/lib/monitoring/sentry-release';
 
 const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -19,8 +20,10 @@ Sentry.init({
   // Performance Monitoring (reduced for edge)
   tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.05 : 1.0,
   
-  // Release tracking
-  release: process.env.VERCEL_GIT_COMMIT_SHA,
+  // Release tracking: the build's commit SHA, the same value the browser
+  // reports (s84, src/lib/monitoring/sentry-release.ts). Spread, never
+  // `release: undefined` — that would erase the SDK's own fallback.
+  ...releaseOption(process.env.NEXT_PUBLIC_SENTRY_RELEASE),
   
   // Edge-specific configuration
   transportOptions: {

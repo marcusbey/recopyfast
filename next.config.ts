@@ -1,8 +1,18 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import { SENTRY_TUNNEL_ROUTE } from "./src/lib/monitoring/sentry-tunnel";
+import { resolveBuildRelease } from "./src/lib/monitoring/sentry-release";
+
+// The one Sentry release (s84): the build's commit SHA, inlined below for the
+// browser, server and Edge inits and handed to `withSentryConfig` for the
+// source-map upload. See src/lib/monitoring/sentry-release.ts.
+const sentryRelease = resolveBuildRelease(process.env);
 
 const nextConfig: NextConfig = {
+  ...(sentryRelease
+    ? { env: { NEXT_PUBLIC_SENTRY_RELEASE: sentryRelease } }
+    : {}),
+
   // Enable experimental features for better monitoring
   experimental: {
     // instrumentationHook is enabled by default in Next.js 15
@@ -192,6 +202,11 @@ const sentryWebpackPluginOptions = {
   // A fixed path, not `true` (random per build): src/middleware.ts has to name
   // it to let it through without a session lookup.
   tunnelRoute: SENTRY_TUNNEL_ROUTE,
+
+  // Source maps are uploaded under the same release the inits report (s84).
+  // Without an explicit name the SDK guesses, and reads SENTRY_RELEASE and
+  // GITHUB_SHA before VERCEL_GIT_COMMIT_SHA.
+  ...(sentryRelease ? { release: { name: sentryRelease } } : {}),
 };
 
 // Make sure adding Sentry options is the last code to run before exporting
