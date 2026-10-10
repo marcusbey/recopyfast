@@ -97,11 +97,13 @@ describe("GET /api/health — the realtime check", () => {
 
   it("does not invent details from a status-only liveness response", async () => {
     const { response, body } = await callGet();
+    const realtime = body.checks.realtime;
 
     expect(response.status).toBe(200);
     expect(body.status).toBe("healthy");
-    expect(body.checks.realtime).toMatchObject({ status: "ok" });
-    expect(body.checks.realtime.details).toBeUndefined();
+    expect(Object.keys(realtime).sort()).toEqual(["latency", "status"]);
+    expect(realtime.status).toBe("ok");
+    expect(realtime.latency).toEqual(expect.any(Number));
   });
 
   it("probes the service over https when the configured origin is a wss one", async () => {

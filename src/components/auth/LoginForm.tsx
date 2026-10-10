@@ -25,9 +25,9 @@ export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
   const inFlightRef = useRef(false);
 
   // Read the query string after mount rather than with `useSearchParams`.
-  // `AuthModal` renders this form from `Header`, which sits on every page, so
-  // `useSearchParams` here would force a Suspense boundary around the whole
-  // app to keep static prerendering working.
+  // This originally kept Header's AuthModal from forcing a Suspense boundary
+  // onto static marketing pages. s79 now sends Header auth links to nonce
+  // documents; retaining the mount-time read preserves this form's behavior.
   //
   // `redirectedFrom` is set by `src/middleware.ts` when it bounces an
   // unauthenticated user off a protected route; carrying it through the magic
