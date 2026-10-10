@@ -185,12 +185,19 @@ export function DashboardFrame({ children }: { children: React.ReactNode }) {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
+                  {/* A full document navigation is deliberate here. CSP is
+                      document-scoped (ADR 059 recovery note), so these account
+                      destinations should receive their own fresh nonce rather
+                      than inherit one through a client transition. */}
+                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a href="/dashboard/settings" className="cursor-pointer">
                     <Settings className="mr-2 h-4 w-4" aria-hidden="true" />
                     <span>Settings</span>
                   </a>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
+                  {/* See the document-navigation rationale above. */}
+                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a href="/dashboard/billing" className="cursor-pointer">
                     <User className="mr-2 h-4 w-4" aria-hidden="true" />
                     <span>Billing</span>

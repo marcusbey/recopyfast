@@ -14,11 +14,26 @@
  *
  * The layout table is keyed by `NONCE_POLICY_PATH_PREFIXES` and compared with
  * it, so adding a prefix without a layout fails here rather than in production.
+ *
+ * s79 review F1: a URL under a segment that matches no page (`/login/x`, a
+ * signed-in owner's mistyped `/dashboard/...`) used to get Next's prebuilt
+ * `/_not-found` — static, so no nonce — served under the nonce policy: every
+ * script refused, a 404 that never hydrated. Each segment therefore owns a
+ * catch-all page that calls `notFound()`. It sits below the segment's layout,
+ * so the 404 renders per request like every other page there. The table of
+ * catch-alls is keyed and compared the same way as the layouts.
  */
 
 import React, { isValidElement, type ReactNode } from "react";
 
 jest.mock("next/server", () => ({ connection: jest.fn() }));
+
+jest.mock("next/navigation", () => ({
+  ...jest.requireActual("next/navigation"),
+  notFound: jest.fn(() => {
+    throw new Error("NEXT_NOT_FOUND");
+  }),
+}));
 
 jest.mock("@/contexts/AuthContext", () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => (
@@ -27,6 +42,7 @@ jest.mock("@/contexts/AuthContext", () => ({
 }));
 
 import { connection } from "next/server";
+import { notFound } from "next/navigation";
 import RootLayout from "@/app/layout";
 import { DashboardFrame } from "@/app/dashboard/DashboardFrame";
 import { NONCE_POLICY_PATH_PREFIXES } from "@/lib/security/content-security-policy";
@@ -39,6 +55,18 @@ const LAYOUTS: Record<string, () => Promise<{ default: Layout }>> = {
   "/login": () => import("@/app/login/layout"),
   "/signup": () => import("@/app/signup/layout"),
   "/edit": () => import("@/app/edit/layout"),
+};
+
+type CatchAllPage = () => unknown;
+
+const UNMATCHED_URL_PAGES: Record<
+  string,
+  () => Promise<{ default: CatchAllPage }>
+> = {
+  "/dashboard": () => import("@/app/dashboard/[...missing]/page"),
+  "/login": () => import("@/app/login/[...missing]/page"),
+  "/signup": () => import("@/app/signup/[...missing]/page"),
+  "/edit": () => import("@/app/edit/[...missing]/page"),
 };
 
 /** Depth-first: is `target` somewhere in this element tree? */
@@ -61,11 +89,27 @@ function findAll(node: ReactNode, type: string): React.ReactElement[] {
 
 beforeEach(() => {
   (connection as jest.Mock).mockReset();
+  (notFound as unknown as jest.Mock).mockClear();
 });
 
 it("covers exactly the nonce-policy segments", () => {
   expect(Object.keys(LAYOUTS)).toEqual([...NONCE_POLICY_PATH_PREFIXES]);
+  expect(Object.keys(UNMATCHED_URL_PAGES)).toEqual([
+    ...NONCE_POLICY_PATH_PREFIXES,
+  ]);
 });
+
+describe.each(NONCE_POLICY_PATH_PREFIXES)(
+  "a URL under %s that matches no page",
+  (prefix) => {
+    it("lands on the segment's own catch-all and invokes notFound()", async () => {
+      const { default: Page } = await UNMATCHED_URL_PAGES[prefix]();
+
+      expect(() => Page()).toThrow("NEXT_NOT_FOUND");
+      expect(notFound).toHaveBeenCalledTimes(1);
+    });
+  },
+);
 
 describe.each(NONCE_POLICY_PATH_PREFIXES)("the %s layout", (prefix) => {
   it("renders nothing until the request is there", async () => {

@@ -96,23 +96,29 @@ machine as covering both.
 Every connection reaches the machine from fly-proxy, so the peer is the same for every client and
 a bucket keyed on it is one bucket for the world. Fly's proxy sets `Fly-Client-IP`; `startFromCli`
 trusts it only when `FLY_APP_NAME` is set (every Fly Machine has it). Off Fly the header is
-ignored, because any client could send it.
+ignored, because any client could send it. `addressBucket` keeps IPv4 addresses whole, groups IPv6
+by subscriber `/64`, converts either spelling of IPv4-mapped IPv6 back to IPv4, and sends absent or
+malformed input to one fail-closed `unknown` bucket.
 
 **The HTTP surface is `/health` and nothing else.** It answers `200 {"status":"ok"}` with
 `Cache-Control: no-store` — liveness, which is all Fly's check, the uptime workflow and the app's
 realtime probe read. No `X-Powered-By`, no CORS at all (nothing browser-side reads it; the
-handshake's CORS is engine.io's and unchanged), and a fixed header set on every response,
-404s included (`security-headers.js`): `nosniff`, `X-Frame-Options: DENY`,
+handshake's CORS is engine.io's and unchanged), and a fixed header set on every **Express**
+response, 404s included (`security-headers.js`): `nosniff`, `X-Frame-Options: DENY`,
 `default-src 'none'; frame-ancestors 'none'`, `no-referrer`, HSTS with `includeSubDomains`,
 `Cross-Origin-Resource-Policy: same-origin`. Until s79 it answered `Access-Control-Allow-Origin: *`
-and the live connection count to anyone (s69 L13).
+and the live connection count to anyone (s69 L13). Engine.IO answers `/socket.io/` before the
+Express middleware, so its own error/handshake responses do not receive this fixed set; that
+surface and its CORS stayed outside s79.
 
 **Rotating a site's key closes the sockets opened with the old one** — ADR 027's follow-up. The
 sweep (`revalidateAll`, every 60 s) re-verifies every socket's site token against the current
 `sites.api_key`, reading `sites` once per site per pass and sharing the answer among that site's
 sockets (the widget opens a socket for every visitor of a page with `data-ws-url`); an editor's
-`content-update` and `join-dashboard` re-check it on the spot. A missing row or a token that no
-longer verifies → `auth-error` "Site token revoked", then disconnect; a lookup that fails →
+`content-update`, a viewer's `content-map`, and `join-dashboard` re-check it on the spot before
+fan-out. The extra `sites` read on those message paths is bounded by the per-socket message
+limiter. A missing row or a token that no longer verifies → `auth-error` "Site token revoked",
+then disconnect; a lookup that fails →
 "Site verification failed", then disconnect (fail closed, like the grant). The grant re-resolution
 for editors is unchanged and runs after the token check.
 

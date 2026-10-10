@@ -44,7 +44,8 @@ async function watchScriptViolations(
   });
   await page.addInitScript(() => {
     const store: string[] = [];
-    (window as unknown as { __cspViolations: string[] }).__cspViolations = store;
+    (window as unknown as { __cspViolations: string[] }).__cspViolations =
+      store;
     document.addEventListener("securitypolicyviolation", (event) => {
       store.push(`${event.violatedDirective} ${event.blockedURI}`);
     });
@@ -75,6 +76,27 @@ function nonceOf(policy: string | undefined): string | undefined {
   return NONCE_SOURCE.exec(policy ?? "")?.[1];
 }
 
+/**
+ * Every executable script Next wrote carries the header's nonce; the one that
+ * does not is ours, the theme script, allowed by its hash. Script preloads
+ * carry it too.
+ */
+function expectEveryNextScriptStamped(html: string, nonce: string): void {
+  const scripts = Array.from(
+    html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g),
+  ).filter(
+    ([, attributes]) => !/type="application\/ld\+json"/.test(attributes),
+  );
+  const unstamped = scripts
+    .filter(([, attributes]) => !attributes.includes(`nonce="${nonce}"`))
+    .map(([, , body]) => body);
+  expect(scripts.length).toBeGreaterThan(3);
+  expect(unstamped).toEqual([THEME_INIT_SCRIPT]);
+  for (const [preload] of html.matchAll(/<link\b[^>]*\bas="script"[^>]*>/g)) {
+    expect(preload).toContain(`nonce="${nonce}"`);
+  }
+}
+
 test.describe("s79 content security policy", () => {
   test("the marketing surface: / and /pricing hydrate under the static policy", async ({
     page,
@@ -101,7 +123,7 @@ test.describe("s79 content security policy", () => {
   });
 
   for (const path of ["/login", "/signup", "/edit"]) {
-    test(`the app surface: ${path} stamps a fresh nonce on every Next script`, async ({
+    test(`the app surface: ${path} stamps a fresh nonce on every Next script, its 404 included`, async ({
       page,
       request,
     }) => {
@@ -117,23 +139,35 @@ test.describe("s79 content security policy", () => {
         nonce,
       );
 
-      // Every executable script Next wrote carries the header's nonce; the
-      // one that does not is ours, the theme script, allowed by its hash.
-      const html = await first.text();
-      const scripts = Array.from(
-        html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g),
-      ).filter(([, attributes]) => !/type="application\/ld\+json"/.test(attributes));
-      const unstamped = scripts
-        .filter(([, attributes]) => !attributes.includes(`nonce="${nonce}"`))
-        .map(([, , body]) => body);
-      expect(scripts.length).toBeGreaterThan(3);
-      expect(unstamped).toEqual([THEME_INIT_SCRIPT]);
-      for (const [preload] of html.matchAll(/<link\b[^>]*\bas="script"[^>]*>/g)) {
-        expect(preload).toContain(`nonce="${nonce}"`);
-      }
+      expectEveryNextScriptStamped(await first.text(), nonce ?? "");
 
       const violations = await watchScriptViolations(page);
       await page.goto(path, { waitUntil: "load" });
+      await expect.poll(() => isHydrated(page)).toBe(true);
+      expect(await violations()).toEqual([]);
+
+      // s79 review F1: a URL under the segment that matches no page used to
+      // get the prebuilt, nonce-less /_not-found under this policy — every
+      // script refused, a 404 that never hydrated. It renders per request now.
+      // Streamed after the root `loading.tsx` shell, `notFound()` can no
+      // longer set the status, so Next answers 200 and writes a `noindex`
+      // robots meta instead (as it already did for an unknown /blog/[slug]).
+      // Either status is accepted; the noindex is not optional (ADR 059).
+      const missingPath = `${path}/no-such-page`;
+      const missing = await request.get(missingPath);
+      const missingHtml = await missing.text();
+      const missingNonce = nonceOf(
+        missing.headers()["content-security-policy"],
+      );
+      expect([200, 404]).toContain(missing.status());
+      expect(missingHtml).toContain('<meta name="robots" content="noindex"/>');
+      expect(missingNonce).toBeTruthy();
+      expectEveryNextScriptStamped(missingHtml, missingNonce ?? "");
+
+      await page.goto(missingPath, { waitUntil: "load" });
+      await expect(
+        page.getByText("Page not found", { exact: true }),
+      ).toBeVisible();
       await expect.poll(() => isHydrated(page)).toBe(true);
       expect(await violations()).toEqual([]);
     });
@@ -173,11 +207,23 @@ test.describe("s79 content security policy", () => {
       await expect.poll(() => isHydrated(page)).toBe(true);
       expect(await violations()).toEqual([]);
 
-      await page.goto(`/dashboard/sites/${owner.siteId}`, { waitUntil: "load" });
+      await page.goto(`/dashboard/sites/${owner.siteId}`, {
+        waitUntil: "load",
+      });
       await expect.poll(() => isHydrated(page)).toBe(true);
       expect(await violations()).toEqual([]);
 
-      expect(dashboardPolicies.length).toBeGreaterThanOrEqual(2);
+      // s79 review F1: a signed-in owner's mistyped dashboard URL renders its
+      // 404 per request, under the nonce, and hydrates (the policy is checked
+      // with the other dashboard documents below).
+      await page.goto("/dashboard/no-such-page", { waitUntil: "load" });
+      await expect(
+        page.getByText("Page not found", { exact: true }),
+      ).toBeVisible();
+      await expect.poll(() => isHydrated(page)).toBe(true);
+      expect(await violations()).toEqual([]);
+
+      expect(dashboardPolicies.length).toBeGreaterThanOrEqual(3);
       for (const policy of dashboardPolicies) {
         expect(nonceOf(policy)).toBeTruthy();
       }

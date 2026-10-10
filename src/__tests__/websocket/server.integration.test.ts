@@ -25,6 +25,7 @@ import type { Socket } from "socket.io-client";
 
 import { hashUserAgent } from "@/lib/auth/editor-crypto";
 import { createRealtimeServer } from "../../../server/index.js";
+import { addressBucket } from "../../../server/rate-limit.js";
 import {
   RecordingSupabase,
   TEST_USER_AGENT,
@@ -785,6 +786,71 @@ describe("rate limiting", () => {
       await server.close();
     });
 
+    /**
+     * s79 review F7. One subscriber line is handed a whole IPv6 /64, so keyed
+     * on the full address a single client rotating through its own block got
+     * a fresh bucket — and a fresh `sites` read — on every handshake. An IPv6
+     * client is now counted by its /64, as an IPv4 client is by its address.
+     */
+    it("counts an IPv6 client by its /64, however it writes the address", async () => {
+      const { server, port } = await bootWith({
+        rateLimitStore: memoryStore(),
+        rateLimit: { maxHandshakesPerAddress: 1 },
+        trustFlyClientIp: true,
+      });
+      const forged = {
+        siteId: SITE_ID,
+        token: buildSiteToken(SITE_ID, "not-the-key"),
+      };
+
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "2001:db8:abcd:12::1",
+        }).refused(),
+      ).toBe("Invalid site token");
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "2001:0DB8:ABCD:0012:ffff:ffff:ffff:fffe",
+        }).refused(),
+      ).toMatch(/rate limit/i);
+      expect(sitesReads()).toBe(1);
+
+      // The next /64 is another subscriber, with a bucket of its own.
+      connect(port, undefined, { "Fly-Client-IP": "2001:db8:abcd:13::1" });
+      await waitFor(
+        () => roomSize(server, `site:${SITE_ID}`) === 1,
+        "a client in another /64 to be admitted",
+      );
+
+      await server.close();
+    });
+
+    it("fail-closes malformed trusted addresses into one bounded bucket", async () => {
+      const { server, port } = await bootWith({
+        rateLimitStore: memoryStore(),
+        rateLimit: { maxHandshakesPerAddress: 1 },
+        trustFlyClientIp: true,
+      });
+      const forged = {
+        siteId: SITE_ID,
+        token: buildSiteToken(SITE_ID, "not-the-key"),
+      };
+
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "not-an-ip-address",
+        }).refused(),
+      ).toBe("Invalid site token");
+      expect(
+        await connect(port, forged, {
+          "Fly-Client-IP": "still-not-an-ip-address",
+        }).refused(),
+      ).toMatch(/rate limit/i);
+      expect(sitesReads()).toBe(1);
+
+      await server.close();
+    });
+
     it("ignores Fly-Client-IP off Fly, where any client could send it", async () => {
       const { server, port } = await bootWith({
         rateLimitStore: memoryStore(),
@@ -808,6 +874,47 @@ describe("rate limiting", () => {
 
       await server.close();
     });
+  });
+
+  describe("the address bucket (s79 review F7)", () => {
+    it.each([
+      ["2001:db8:abcd:12::1", "2001:db8:abcd:12::/64"],
+      ["2001:0DB8:ABCD:0012:FFFF:0:0:1", "2001:db8:abcd:12::/64"],
+      ["2001:db8::1", "2001:db8:0:0::/64"],
+      ["2001:db8:0:0:5::", "2001:db8:0:0::/64"],
+      ["::1", "0:0:0:0::/64"],
+      ["fe80::1%eth0", "fe80:0:0:0::/64"],
+    ])("groups the IPv6 address %s by its /64", (address, bucket) => {
+      expect(addressBucket(address)).toBe(bucket);
+    });
+
+    it.each([
+      ["203.0.113.7", "203.0.113.7"],
+      // How Node reports an IPv4 peer on a dual-stack listener. Read as IPv6,
+      // every IPv4 client in the world would share the bucket `0:0:0:0::/64`.
+      ["::ffff:203.0.113.7", "203.0.113.7"],
+      ["::FFFF:198.51.100.20", "198.51.100.20"],
+      // The same mapped addresses are valid in hexadecimal form. Treating
+      // these as ordinary IPv6 would collapse every one into the mapped
+      // `0:0:0:ffff::/64` and let one IPv4 caller exhaust everybody's bucket.
+      ["::ffff:cb00:7107", "203.0.113.7"],
+      ["0:0:0:0:0:ffff:c633:6414", "198.51.100.20"],
+    ])("keeps the IPv4 address %s whole", (address, bucket) => {
+      expect(addressBucket(address)).toBe(bucket);
+    });
+
+    it.each([
+      [""],
+      [undefined],
+      ["not an address"],
+      ["2001:db8::1::2"],
+      ["fe80::1%bad zone"],
+    ])(
+      "fail-closes an absent or malformed address into the shared unknown bucket (%p)",
+      (address) => {
+        expect(addressBucket(address)).toBe("unknown");
+      },
+    );
   });
 
   it("refuses every connection when the store is unreachable (fail closed)", async () => {
@@ -2094,6 +2201,37 @@ describe("key rotation reaches a live socket", () => {
     expect(await editor.refused()).toBe("Site token revoked");
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(received).toEqual([]);
+  });
+
+  /**
+   * s79 review F8. `content-map` compared the message's token with the one the
+   * socket connected with, never with the site's current key, so a socket
+   * holding a rotated-out token could keep telling the dashboard what pages and
+   * how many elements it saw until the next sweep. It re-checks the token
+   * against the current key now, as `content-update` does.
+   */
+  it("refuses a viewer's next content-map after rotation, and notifies no dashboard", async () => {
+    await boot(60 * 60 * 1000);
+    const dashboard = await connectEditor();
+    dashboard.socket.emit("join-dashboard", { siteId: SITE_ID });
+    await waitFor(
+      () => roomSize(server, `dashboard:${SITE_ID}`) === 1,
+      "the dashboard listener to join the dashboard room",
+    );
+    const notified: unknown[] = [];
+    dashboard.socket.on("content-map-updated", (data) => notified.push(data));
+    const viewer = await connectViewer();
+
+    site().api_key = ROTATED_KEY;
+    viewer.socket.emit("content-map", {
+      url: "https://example.com/pricing",
+      token: SITE_TOKEN,
+      contentMap: { headline: { selector: "h1", content: "Hi", type: "text" } },
+    });
+
+    expect(await viewer.refused()).toBe("Site token revoked");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(notified).toEqual([]);
   });
 
   it("drops the sockets of a deleted site", async () => {

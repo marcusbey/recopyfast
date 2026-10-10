@@ -13,7 +13,9 @@
  *   check, the uptime workflow and the app's server-side probe all read it
  *   without CORS), so the answer to a cross-origin read is no header at all.
  *   The WebSocket handshake is engine.io's, answered before Express runs, and
- *   is authorised by the per-site token and domain pin, not by CORS.
+ *   is authorised by the per-site token and domain pin, not by CORS. Its own
+ *   error and handshake responses therefore do not pass through this header
+ *   middleware; s79 covers the Express surface only.
  * - `X-Powered-By`, which is an Express app setting: `app.disable` in
  *   index.js, not a header to delete per response.
  *

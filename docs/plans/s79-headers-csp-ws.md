@@ -6,7 +6,8 @@ validated: yes
 > CTO decision under the owner's 2026-10-09 directive ("don't ask me questions; take CTO-level
 > decisions; implement everything left; test everything"): plan validated by the orchestrator.
 
-Branch: `feature/s79-headers-csp-ws` (from `origin/main` `fc5968b`).
+Branch: `feature/s79-headers-csp-ws` (planned from `origin/main` `fc5968b`; recovered and integrated
+on current `origin/main` `0dea1c0` on 2026-10-10).
 Research: `docs/research/s79-headers-csp-ws.md` — read it first; this plan does not repeat it.
 Decision: ADR 059. No new screen and no visible change, so no Design step. No migration. Embed
 allocation: 0 bytes (`public/embed/recopyfast.src.js` untouched).
@@ -86,8 +87,10 @@ renders `THEME_INIT_SCRIPT`. Red first in `src/__tests__/security/nonce-routes-r
 for every `NONCE_POLICY_PATH_PREFIXES` entry, the segment's layout module exists, awaits
 `connection()` (mocked) before resolving, and renders its children (the dashboard through
 `DashboardFrame`). Declared test change: `design/page-shell-guard.test.ts` `FOCUS_SHADOW_FILE` →
-`DashboardFrame.tsx` (the skip link moved with the frame). Build: the route table shows the four
-segments as `ƒ` and `/` still `○`.
+`DashboardFrame.tsx` (the skip link moved with the frame). Review recovery adds one
+`[...missing]/page.tsx` per nonce segment and declares the page-shell guard's narrow `notFound()`
+exemption, so unknown URLs also render below the dynamic layout. Build: the route table shows the
+four segments and their catch-alls as `ƒ` and `/` still `○`.
 
 - [x] Task 3
 
@@ -132,7 +135,8 @@ no-referrer`, HSTS as Task 4, `Cross-Origin-Resource-Policy: same-origin`); `ind
 (`npm uninstall --package-lock-only` in `server/`; `node_modules/cors` stays, engine.io's).
 Red first in `server.integration.test.ts` ("the HTTP surface"): with a socket open, `/health` is
 200 `{"status":"ok"}` exactly and `no-store`; no `x-powered-by`; no ACAO on GET or OPTIONS with
-a foreign `Origin`; each header present; an unknown path's 404 carries them too.
+a foreign `Origin`; each header present; an unknown Express path's 404 carries them too. Engine.IO
+answers `/socket.io/` before Express and its response headers remain outside this task.
 
 - [x] Task 7
 
@@ -148,7 +152,9 @@ exceeded"); with `maxHandshakesPerAddress: 2`, the third bad handshake from one 
 before any `sites` read, and another `Fly-Client-IP` is admitted when trusted; untrusted, two
 `Fly-Client-IP` values share one bucket. Declared test change: "spends no database round trip on
 a connection it has already refused" now caps `maxHandshakesPerAddress: 0` — the per-site cap
-moved behind verification by design.
+moved behind verification by design. Review recovery groups IPv6 identities by `/64`, preserves
+IPv4 and IPv4-mapped addresses per host, and sends malformed values to one `unknown` bucket;
+focused unit and handshake tests cover all three shapes.
 
 - [x] Task 8
 
@@ -162,7 +168,11 @@ socket is dropped with "Site token revoked" by the next sweep after the key chan
 signed with the new key is admitted (ADR 027's test); an editor's next `content-update` is
 refused and not broadcast; a deleted site drops its sockets; a failing `sites` read drops them
 (fail closed); ten sockets on one site cost one `sites` read per sweep; a valid viewer survives
-sweeps (existing test).
+sweeps (existing test). Review recovery applies the same current-key check to `content-map`
+before it can fan out URL/count metadata. Declared existing-test changes: the security projection
+allowlist admits the new service-role-only `sites.select("id, api_key")`; three revocation tests
+use the harness's `refused()` result instead of observing `socket.disconnected`, which may already
+be true before the client receives the preceding `auth-error`.
 
 - [x] Task 9
 
@@ -174,8 +184,9 @@ static policy, with the HSTS header and without `X-XSS-Protection`; (2–4) `/lo
 but the theme script carries the header's nonce, the page hydrates with no violation; (5) a
 signed-in owner (`owner-session.ts`, CI's disposable stack) loads `/dashboard` and
 `/dashboard/sites/<id>` under the nonce policy with no violation. Violations are collected from
-`securitypolicyviolation` (init script) and console. Contract 80 → 85 in `playwright.config.ts`,
-every place in `.github/workflows/ci.yml` and `src/__tests__/e2e/playwright-ci-contract.test.ts`.
+`securitypolicyviolation` (init script) and console. On the integrated base the contract is
+86 → 91 in `playwright.config.ts`, every place in `.github/workflows/ci.yml` and
+`src/__tests__/e2e/playwright-ci-contract.test.ts`.
 Run (1)–(4) locally against `next build` + `next start` (`CI=1`, `PLAYWRIGHT_BASE_URL`); (5) is
 CI's.
 
@@ -186,7 +197,9 @@ CI's.
 `docs/architecture.md` (Two deploy targets: `/health` shape; CSP section: the two policies,
 HSTS, pointers by symbol), `server/README.md` (Verify `/health`, HTTP surface, handshake order,
 rotation sweep, `FLY_APP_NAME`), `server/fly.toml` header pointers by symbol, ADR 059,
-s69 stub marks.
+s69 stub marks. Review recovery records the document-scoped client-navigation limitation in the
+architecture and the dated research addendum. ADR 059 stays untouched because accepted ADRs are
+immutable and this observation changes neither its policy nor its rationale.
 
 - [x] Task 11
 
@@ -196,8 +209,12 @@ Mutations (neutralise → red → restore with `git checkout -- <file>`): nonce 
 header; theme hash; one layout's `connection()`; HSTS `includeSubDomains`; the pre-auth bucket;
 per-site after verification; the sweep's token re-check; `/health` body; `x-powered-by`; the
 fidelity guard. Gates: full jest (CI env), `type-check`, `type-check:build`, `lint`,
-`format:check`, `build:embed -- --check`, `next build` (route table), Playwright `--list` = 85.
-Delete `.next`, `test-results/`, `playwright-report/`.
+`format:check`, `build:embed -- --check`, `next build` (route table), Playwright `--list` = 91.
+The integrated base's stricter Next lint also required two declared neutral repairs: document-load
+account links in `DashboardFrame` keep their `<a>` behavior with a narrow rule suppression and CSP
+rationale, while the generic badge component's navigation fixture uses an in-document hash instead
+of pretending to own the real `/dashboard` route. Delete `.next`, `test-results/`,
+`playwright-report/`.
 
 - [x] Task 12
 

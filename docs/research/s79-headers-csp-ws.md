@@ -168,3 +168,25 @@ https://evil.example` → `x-powered-by: Express`, `access-control-allow-origin:
 5. Express `x-powered-by` is per-app (`app.disable`), not a header to delete per response.
 6. The pre-auth bucket must key on the real client address, or behind fly-proxy it is one global
    bucket and a flood locks out everyone instead of one site.
+
+## 5. Recovery findings (2026-10-10)
+
+These findings post-date the 2026-10-09 research and are kept separate from that snapshot:
+
+- A browser keeps the CSP of its current document across an App Router client navigation. A
+  marketing-document `<Link>` to `/signup` or `/dashboard` renders the destination under the
+  marketing policy until a full document load. This is an accepted limitation of ADR 059's
+  split, not a reason to rewrite the accepted ADR: auth callbacks are full redirects, and changing
+  navigation behavior needs a separately validated plan. The canonical current-state note is in
+  `docs/architecture.md`.
+- Unknown URLs below a nonce segment were served by static `/_not-found`, whose scripts had no
+  nonce and did not hydrate. Segment-local `[...missing]/page.tsx` catch-alls make those 404s pass
+  through the segment's `connection()` layout and render per request.
+- A full IPv6 address is not a stable limiter identity because one subscriber commonly owns a
+  `/64`. The address bucket groups valid IPv6 by `/64`, keeps IPv4 (including hexadecimal and
+  dotted IPv4-mapped IPv6) per address, and fail-closes malformed input into one `unknown` bucket.
+- `content-map` compared only the message token with the socket's handshake token. Those two old
+  values still agreed after key rotation, so it could fan out URL/count metadata until the sweep.
+  It now reuses `revalidateSocket` before fan-out, at the cost of one bounded `sites` read.
+- `server/security-headers.js` is Express middleware. Engine.IO answers `/socket.io/` before
+  Express, so its own response headers and CORS were never covered by s79 and remain unchanged.

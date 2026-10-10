@@ -536,6 +536,18 @@ function createRealtimeServer(options = {}) {
           return;
         }
 
+        // TOMBSTONE — s79 review F8. Comparing the message token with the
+        // handshake token only proves the caller repeated the credential it
+        // connected with. After "Regenerate snippet" both values still match,
+        // although that token no longer verifies against `sites.api_key`, so
+        // the socket could fan out a URL and element count until the next
+        // 60-second sweep. Re-resolve before the emit, exactly as the other
+        // message paths do; a rotated token or failed site read disconnects
+        // and nothing reaches the dashboard room.
+        if (!(await revalidateSocket(socket))) {
+          return;
+        }
+
         // Notify dashboard clients about new content
         io.to(`dashboard:${siteId}`).emit('content-map-updated', {
           siteId,

@@ -4061,7 +4061,7 @@ Acceptance criteria:
 - [ ] A production build loads `/`, `/pricing` (→ `/#pricing`), `/login`, `/signup`, `/edit` and a
   signed-in `/dashboard` with no CSP violation and hydrated, and the nonce pages' served HTML
   carries the header's nonce on every script but the hashed theme script. Test: `e2e/csp.spec.ts`
-  (+5; Playwright contract 80 → 85). The four public cases pass locally against `next build` +
+  (+5; integrated Playwright contract 86 → 91). The four public cases pass locally against `next build` +
   `next start`; the signed-in case needs CI's disposable Supabase stack and has not run yet.
 - [x] Every response sends `Strict-Transport-Security: max-age=63072000; includeSubDomains`
   (no `preload`); no response sends `X-XSS-Protection`. Tests: `src/__tests__/next-config-hsts.test.ts`,
@@ -4078,7 +4078,7 @@ Acceptance criteria:
   cap leave a real editor's connection admitted; the per-address cap bounds the `sites` lookups;
   `Fly-Client-IP` keys the address only on Fly. Test: `server.integration.test.ts`.
 - [x] Rotating a site's key closes every open socket holding the old token within one sweep, at
-  the next `content-update`/`join-dashboard` for an editor, and a socket signed with the new key
+  the next `content-update`/`content-map`/`join-dashboard`, and a socket signed with the new key
   connects; one `sites` read per site per sweep. Test: `server.integration.test.ts`.
 - [x] No live-key account prefix in the repository. Test: `src/__tests__/security/no-live-key-prefixes.test.ts`.
 - [x] Docs: ADR 059, `docs/architecture.md` (security headers), `server/README.md`. Required gates

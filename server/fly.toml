@@ -53,7 +53,7 @@
 #      = 0. Its idle detection is request-based and a quiet WebSocket looks
 #      idle, so open editing sessions would be dropped. Both corrected below.
 #   3. HEALTH — the generated config had no health check at all, though
-#      /health exists (server/index.js:129, `app.get('/health', …)`) and
+#      /health exists (`app.get('/health', …)` in server/index.js) and
 #      s07b AC 3 depends on it.
 #   4. MEMORY — `memory = "1gb"` and `memory_mb = 512` were both set and
 #      disagreed. One value only, below.

@@ -14,7 +14,8 @@
  *
  * - R1 adoption: every routed `src/app/dashboard/**\/page.tsx` renders
  *   `<PageShell`, itself or through one listed delegate. A page that only
- *   redirects is exempt, and only while it still calls `redirect(`. The
+ *   redirects is exempt, and only while it still calls `redirect(`; so is a
+ *   page that only calls `notFound(` (s79 review F1). The
  *   segment's `loading.tsx` and `error.tsx` render it too: Next draws each in
  *   place of the page, inside the layout, so without one a pending route or a
  *   thrown page showed no title.
@@ -121,6 +122,17 @@ const DELEGATES: Readonly<Record<string, string>> = {
 
 /** Pages that render nothing but a redirect. */
 const REDIRECT_PAGES: readonly string[] = ["src/app/dashboard/teams/page.tsx"];
+
+/**
+ * Pages that render nothing but Next's not-found boundary (s79 review F1): the
+ * catch-all that makes an unmatched dashboard URL render per request under the nonce policy
+ * (ADR 059). `notFound()` draws the root `not-found.tsx` in place of the whole
+ * segment, outside this layout, so there is no frame to adopt. Exempt only
+ * while it still calls `notFound(`, like the redirect pages.
+ */
+const NOT_FOUND_PAGES: readonly string[] = [
+  "src/app/dashboard/[...missing]/page.tsx",
+];
 
 /** Outside the frame by ADR 053 §3: each renders its own one h1. */
 const STANDALONE_H1_FILES: readonly string[] = [
@@ -440,12 +452,16 @@ const rendersPageShell = (source: string) =>
 const callsRedirect = (source: string) =>
   /\bredirect\s*\(/.test(scanLiterals(stripComments(source)).blanked);
 
+const callsNotFound = (source: string) =>
+  /\bnotFound\s*\(/.test(scanLiterals(stripComments(source)).blanked);
+
 /** R1 for one routed page, given a way to read any file. */
 function adoptionOffence(
   page: string,
   read: (file: string) => string,
 ): Offence | null {
   if (REDIRECT_PAGES.includes(page)) return null;
+  if (NOT_FOUND_PAGES.includes(page)) return null;
   if (rendersPageShell(read(page))) return null;
   const delegate = DELEGATES[page];
   if (delegate && rendersPageShell(read(delegate))) return null;
@@ -519,6 +535,7 @@ describe("page-shell guard (ADR 053)", () => {
       ...Object.keys(DELEGATES),
       ...Object.values(DELEGATES),
       ...REDIRECT_PAGES,
+      ...NOT_FOUND_PAGES,
       ...STANDALONE_H1_FILES,
       ...Object.keys(PENDING),
       ...FLOATING_SHADOW_FILES,
@@ -540,6 +557,13 @@ describe("page-shell guard (ADR 053)", () => {
   it("exempts a redirect page only while it still redirects", () => {
     for (const page of REDIRECT_PAGES) {
       expect(callsRedirect(readSource(page))).toBe(true);
+      expect(rendersPageShell(readSource(page))).toBe(false);
+    }
+  });
+
+  it("exempts a 404 page only while it still calls notFound()", () => {
+    for (const page of NOT_FOUND_PAGES) {
+      expect(callsNotFound(readSource(page))).toBe(true);
       expect(rendersPageShell(readSource(page))).toBe(false);
     }
   });
