@@ -59,6 +59,13 @@ built by `scripts/run-db-invariants.mjs` (bootstrap + every migration), deleted 
    already states the rule for this repo. A pre-check alone is racy (two deliveries both see "no
    draft yet" during the ~30 s OpenAI call), so the day needs a database key.
 
+   **Independent-review correction (2026-10-10).** A unique key on the eventual `blog_posts` row is
+   too late to protect the provider call. The deterministic overlapping-delivery proof at
+   `.omx/ultragoal/evidence/s89/independent-review/concurrent-cron-proof.ts` produced two generation
+   calls, one row, and one `created: true` / one `created: false` response. The day therefore needs a
+   separate durable claim acquired before generation, and draft insertion plus claim completion
+   must be one transaction (ADR 060).
+
 7. **The platform-admin check exists four times, copied.** `generate/route.ts:35-50`,
    `api/audit/logs/route.ts:41-48`, `api/audit/compliance/route.ts:63-71` and `:158-166`. All trust
    `ADMIN_EMAILS` (case-insensitive) and `app_metadata.role`, never `user_metadata`. The audit routes
@@ -109,3 +116,6 @@ built by `scripts/run-db-invariants.mjs` (bootstrap + every migration), deleted 
    it only adds a nullable column and an index, so the current code is unaffected by it.
 6. **`user_metadata.role`** is caller-writable (`PATCH /api/auth/profile`, `auth.updateUser`); a
    test must prove it grants nothing.
+7. **Do not turn the claim into an expiring lease.** OpenAI does not accept a provider idempotency
+   key for this call. A takeover after a local timeout can overlap a slow request that still charges
+   and later completes. Pending and failed claims therefore require explicit operator recovery.

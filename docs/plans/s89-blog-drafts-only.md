@@ -8,6 +8,8 @@ validated: yes
 Branch: `feature/s89-blog-drafts-only` (from `origin/main` `c0c40bf`).
 Research: `docs/research/s89-blog-drafts-only.md` — read it first; this plan does not repeat it.
 Decision record: [ADR 057](../decisions/057-ai-blog-posts-are-drafts-platform-admin-publishes.md).
+Review-fix decision: [ADR 060](../decisions/060-daily-blog-generation-is-a-durable-claim.md),
+which supersedes ADR 057 §2's insufficient concurrency mechanism only.
 No Design step: no new screen (recorded in `docs/designs/README.md`). No embed change (0 bytes), no
 `server/` change, no new dependency, no e2e test (Playwright contract count unchanged).
 
@@ -50,6 +52,10 @@ No Design step: no new screen (recorded in `docs/designs/README.md`). No embed c
    says the count is most likely 0; any published AI post is reviewed by the owner and unpublished
    through the new route if it fails. Then: apply the migration (migration-first), set
    `ADMIN_EMAILS` to the owner's address in Vercel, deploy.
+10. **Review-fix decision: claim before spending.** The critical review proof showed that the
+    pre-read plus unique post key still lets two overlapping deliveries call OpenAI. A separate
+    service-role-only daily claim is acquired before generation. No pending or failed claim is
+    stolen automatically; recovery is an explicit operator action (ADR 060).
 
 ## Tasks
 
@@ -110,5 +116,45 @@ No Design step: no new screen (recorded in `docs/designs/README.md`). No embed c
      (it no longer guards `/api/blog/generate`) and an `ADMIN_EMAILS` line; `.env.example`'s
      `ADMIN_EMAILS` comment (blog publishing).
 - [x] 9. **Gates and mutations.** Full jest, type-check, type-check:build, lint, format:check,
-     `build:embed --check`, Playwright `--list`, the PG 14 DB runner. For each guard: neutralise,
+     `build:embed --check`, Playwright `--list`, the current PostgreSQL17 DB runner. For each guard: neutralise,
      see its test go red, restore with `git checkout --`. One story commit.
+- [x] 10. **Critical c1 — durable daily claim, test first.** Add a deterministic overlapping-call
+     regression to the drafts library and cron API suites; prove it red on the reviewed source with
+     two provider calls. Add ADR 060 and a new forward migration creating
+     `blog_generation_claims` plus service-role-only acquire, fail and atomic finalize RPCs. Preserve
+     the existing daily row, slug-collision and on-demand behavior.
+- [x] 11. **Follower and failure behavior.** Only the acquired token calls the bounded provider.
+     Followers poll for a bounded interval and return the finalized post with `created: false`;
+     pending timeout and failed claims return a generic error without generation. A definite provider or
+     database finalization failure marks the owned pending claim failed without a draft. An
+     ambiguous response after a committed finalization preserves succeeded state and the existing
+     draft; a retry reads it without another provider call. Extend the schema-strict
+     fake so both the new table and exact migration-defined RPC names are enforced.
+- [x] 12. **Real database proof.** Expand the named PostgreSQL suite with concurrent database
+     sessions proving one owner during an in-flight claim, finalization transaction rollback, legacy
+     daily-row reuse, service-role-only table/function grants, RLS, and no replay drift. Keep the
+     suite in `scripts/run-db-invariants.mjs`.
+- [ ] 13. **Contract and operations repair.** Make the story AC explicitly require a concurrent
+     duplicate to return the same draft without a second OpenAI call; record the review finding in
+     research; add the cron/platform-admin service-role principals to AGENTS.md; and document manual
+     pending/failed claim recovery in the blog runbook. Rerun focused checks, then hand the fix to an
+     independent `/ks-review`; do not write the ship gate here.
+
+## Claim-fix verification checkpoint (2026-10-10)
+
+The critical concurrency repair has47passing focused tests. The real PostgreSQL17 runner
+executed15named suites/102tests with one expected PostgREST-only skip. The new realDB suite
+drives the actual TypeScript generation function through two service-role sessions and realRPCs:
+one generatorcall and one shared draft. It also proves completion rollback, owner-token checks,
+no takeover of failed/old claims, private grants/RLS, replay preserving a completedclaim while
+removing an injected PUBLIC column grant, and legacy-post reuse. Source migrations are unchanged
+by those tests; the runner owns and removes its temporary cluster.
+
+A subsequent stalled-read regression failed because the follower counted only sleeps. A separate
+wall-clock deadline now covers reads too and stops late reads from restarting polling; the focused
+suite passed afterward. RealDB verification repeated after the deadline fix: all15suites/102tests passed, plus the
+expected PostgREST-only skip. An additional lost-completion-response regression also passed: the
+already committed draft/claim stay succeeded and a retry does not call the generator again.
+The operational runbook now names both migrations and the explicit manual-recovery boundary.
+Full gates and independent review are still open; the existing blocked review is not a verdict
+on this uncommitted repair.

@@ -22,6 +22,7 @@ const OPENAI_CHAT_COMPLETIONS_URL =
 const BLOG_MODEL = "gpt-4o-mini";
 const BLOG_TEMPERATURE = 0.7;
 const BLOG_MAX_TOKENS = 2000;
+const BLOG_PROVIDER_TIMEOUT_MS = 30_000;
 
 const SYSTEM_PROMPT =
   "You are a skilled content writer who creates engaging, naturally flowing blog posts that provide real value to readers. Write in a conversational tone that feels like a knowledgeable friend sharing insights.";
@@ -82,6 +83,11 @@ export const generatePostMarkdown: GeneratePost = async (request) => {
       temperature: BLOG_TEMPERATURE,
       max_tokens: BLOG_MAX_TOKENS,
     }),
+    // The daily claim has no automatic takeover because an abandoned provider
+    // request may still charge. Bound the request itself at the repo's 30 s API
+    // timeout; if it aborts, the owner marks the durable claim failed and the
+    // runbook decides whether a later manual retry is safe (ADR 060).
+    signal: AbortSignal.timeout(BLOG_PROVIDER_TIMEOUT_MS),
   });
 
   if (!response.ok) {

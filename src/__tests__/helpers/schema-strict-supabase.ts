@@ -30,7 +30,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { migrationColumns } from "./migration-columns";
+import { migrationColumns, migrationFunctionExists } from "./migration-columns";
 
 export type Row = Record<string, unknown>;
 
@@ -65,11 +65,21 @@ export interface RecordedQuery {
   error: DoubleError | null;
 }
 
-interface QueryResult {
+export interface QueryResult {
   data: unknown;
   error: DoubleError | null;
   count: number | null;
 }
+
+export interface RecordedRpc {
+  name: string;
+  args: Record<string, unknown>;
+  error: DoubleError | null;
+}
+
+export type RpcHandler = (
+  args: Record<string, unknown>,
+) => QueryResult | Promise<QueryResult>;
 
 function doubleError(code: string, message: string): DoubleError {
   return { code, message, details: null, hint: null };
@@ -482,7 +492,10 @@ class QueryBuilder implements PromiseLike<QueryResult> {
 
 export interface SchemaStrictDatabase {
   /** Pass this wherever the code expects a Supabase client. */
-  client: { from: (table: string) => QueryBuilder };
+  client: {
+    from: (table: string) => QueryBuilder;
+    rpc: (name: string, args?: Record<string, unknown>) => Promise<QueryResult>;
+  };
   /** Add rows. Throws on a column the table does not have: fixtures lie too. */
   seed: (table: string, rows: Row[]) => void;
   /** A copy of the table's current rows. */
@@ -490,6 +503,8 @@ export interface SchemaStrictDatabase {
   /** Every query executed, in order. */
   queries: RecordedQuery[];
   queriesOn: (table: string) => RecordedQuery[];
+  /** Every RPC call executed, including an unknown migration function. */
+  rpcCalls: RecordedRpc[];
 }
 
 export interface SchemaStrictOptions {
@@ -503,6 +518,12 @@ export interface SchemaStrictOptions {
    * double does not read indexes out of the migrations.
    */
   uniqueKeys?: Record<string, ReadonlyArray<readonly string[]>>;
+  /**
+   * Behavior for migration-defined RPCs used by the subject under test. A name
+   * absent from the migration ledger returns 42883; a real function without a
+   * handler throws instead of silently inventing database behavior.
+   */
+  rpcHandlers?: Record<string, RpcHandler>;
 }
 
 export function createSchemaStrictDatabase(
@@ -511,6 +532,7 @@ export function createSchemaStrictDatabase(
   const maxRows = options.maxRows ?? null;
   const tables = new Map<string, Table>();
   const queries: RecordedQuery[] = [];
+  const rpcCalls: RecordedRpc[] = [];
 
   function table(name: string): Table {
     let existing = tables.get(name);
@@ -530,6 +552,26 @@ export function createSchemaStrictDatabase(
     client: {
       from: (name: string) =>
         new QueryBuilder(table(name), (query) => queries.push(query), maxRows),
+      async rpc(name: string, args: Record<string, unknown> = {}) {
+        if (!migrationFunctionExists(name)) {
+          const error = doubleError(
+            "42883",
+            `function public.${name} does not exist`,
+          );
+          rpcCalls.push({ name, args: { ...args }, error });
+          return { data: null, error, count: null };
+        }
+
+        const handler = options.rpcHandlers?.[name];
+        if (!handler) {
+          throw new Error(
+            `schema-strict double: migration defines RPC "${name}", but this test supplied no handler`,
+          );
+        }
+        const result = await handler({ ...args });
+        rpcCalls.push({ name, args: { ...args }, error: result.error });
+        return result;
+      },
     },
     seed(name, rows) {
       const target = table(name);
@@ -549,5 +591,6 @@ export function createSchemaStrictDatabase(
     rows: (name) => table(name).rows.map((row) => ({ ...row })),
     queries,
     queriesOn: (name) => queries.filter((query) => query.table === name),
+    rpcCalls,
   };
 }

@@ -10,10 +10,10 @@ route refuses a request from any other origin, including the apex host and brand
 
 ## Once, before the first deploy of s89
 
-1. **Apply the migration first** — `supabase/migrations/20261009150000_blog_posts_daily_draft_key.sql`.
-   It only adds the nullable column `blog_posts.generated_on` and a unique index on it, so the code
-   already in production is unaffected. The new code reads that column: deployed without it, the
-   cron answers 500 (see Troubleshooting) and publishes nothing.
+1. **Apply both forward migrations first**, in timestamp order:
+   `20261009150000_blog_posts_daily_draft_key.sql`, then
+   `20261010120000_blog_generation_claims.sql`. They add the daily post key and the private
+   generation ledger/RPCs. The new code needs both; deploying without them fails closed.
 2. **Set `ADMIN_EMAILS`** in Vercel → Project → Settings → Environment Variables → Production to the
    owner's sign-in address (comma-separated for more than one; case and spaces do not matter), then
    redeploy — env changes apply to new deployments only. A user whose server-managed
@@ -29,8 +29,11 @@ route refuses a request from any other origin, including the apex host and brand
   `Authorization: Bearer $CRON_SECRET`. It picks a listed topic, asks OpenAI for a post and stores it
   with `status = 'draft'`, `published_at = NULL`, `generated_on = <UTC day>`.
 - **One per UTC day.** A second run the same day — a Vercel duplicate delivery, a retry, a manual
-  run — answers with the day's draft and `"created": false`, and does not call OpenAI. The database
-  enforces it (unique `generated_on`). Response:
+  run — returns the completed day's draft with `"created": false`, without calling OpenAI.
+  A database claim is acquired before generation, and the post and successful claim are committed
+  atomically (ADR060). A concurrent follower waits for up to35seconds. A failed claim or a claim
+  still pending after that wait returns a generic error; it never generates or steals ownership.
+  Successful response:
 
   ```json
   { "success": true, "created": true,
@@ -111,3 +114,30 @@ Every successful publish or unpublish logs one line in the Vercel function logs:
 | `403` although your address is in `ADMIN_EMAILS` | The variable is not in the **Production** environment, the deployment predates it (redeploy), or you signed in with another address. |
 | `403` on the `fetch` from the console | The tab is not on `<app>` (apex vs `www`, a branded subdomain, another site). |
 | `401` on the list URL | Not signed in on that origin. |
+
+## Pending or failed daily generation
+
+The provider request is bounded at30seconds. A timeout or lost response does not prove that
+the provider did no work or incurred no charge. Claims therefore have no automatic expiry or
+takeover; a later request may read a completed post, but cannot repeat generation for a failed
+or orphaned pending day. On-demand generation remains a separate, deliberately paid admin action.
+
+An operator can inspect `generated_on`, `status`, `post_id`, `created_at`, `updated_at` and
+`completed_at` in the service-only `blog_generation_claims` table. Do not expose owner tokens
+or provider credentials in public logs or issue reports. Check the matching `blog_posts`
+row and the original invocation/provider outcome before deciding anything:
+
+- A succeeded claim must resolve to its recorded post. A missing post is an integrity incident,
+  not permission to generate another one.
+- A pending claim may still have a running owner. Let it finish; do not delete or replace it.
+- A failed claim may follow a billable provider response or an uncertain database response.
+  Check both systems; do not infer “not charged” from the HTTP error.
+
+Manual recovery requires explicit operator authorization, a known UTC day and quiescence of
+all original invocations. First confirm that no post already exists for that day. If the provider
+provably did not accept the original request, or the operator explicitly accepts another possible
+charge, an operator with database maintenance rights may remove only that exact day's failed or
+orphaned claim in a transaction after locking and rechecking it. Then invoke the authenticated
+cron once and verify its post and succeeded claim. Never bulk-clear the ledger, bypass the
+normal cron authorization, or put this recovery in an automatic retry. If the original outcome
+cannot be established, keep the claim and investigate; the next UTC day has its own claim.

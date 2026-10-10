@@ -172,6 +172,13 @@ path. See [ADR 002](./docs/decisions/002-rls-tenant-boundary.md).
 fail-open per-IP limiter and a fixed public projection, by
 [ADR 046](./docs/decisions/046-unauthenticated-published-copy-snapshot.md) — not a pattern to copy.
 
+Two non-tenant blog principals may reach the service role for `blog_posts` and the private
+`blog_generation_claims` ledger only: the daily cron after the fail-closed `CRON_SECRET` bearer
+check, and a signed-in platform admin after the same-origin, IP limiter, `getUser()`, per-user
+limiter and `ADMIN_EMAILS` / server-managed `app_metadata.role` checks. Claims are acquired before
+OpenAI and are never stolen or retried automatically. See [ADR 057](./docs/decisions/057-ai-blog-posts-are-drafts-platform-admin-publishes.md)
+and [ADR 060](./docs/decisions/060-daily-blog-generation-is-a-durable-claim.md).
+
 The one other principal that may reach the service role is a **signed-in site admin writing a
 service-role-only table from the dashboard**: IP guard → `getUser()` → fail-closed per-user limiter
 → `admin` row read through the RLS client → only then the service client, scoped by the ids those

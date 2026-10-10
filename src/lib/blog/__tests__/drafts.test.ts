@@ -18,10 +18,8 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  createSchemaStrictDatabase,
-  type SchemaStrictDatabase,
-} from "@/__tests__/helpers/schema-strict-supabase";
+import { type SchemaStrictDatabase } from "@/__tests__/helpers/schema-strict-supabase";
+import { createBlogGenerationDatabase } from "@/__tests__/helpers/blog-generation-database";
 import {
   buildDraftRow,
   createDailyDraft,
@@ -70,9 +68,7 @@ function generator(markdown = PLAIN) {
 }
 
 beforeEach(() => {
-  db = createSchemaStrictDatabase({
-    uniqueKeys: { blog_posts: [["slug"], ["generated_on"]] },
-  });
+  db = createBlogGenerationDatabase();
 });
 
 describe("buildDraftRow", () => {
@@ -194,23 +190,135 @@ describe("createDailyDraft", () => {
     expect(db.rows("blog_posts")).toHaveLength(1);
   });
 
-  it("returns the winner when another delivery inserts first", async () => {
-    // The other delivery passed the same pre-check and finished its model call
-    // first: by the time this run inserts, the day's row exists.
+  it("lets one overlapping delivery call the model and returns its draft to the follower", async () => {
+    let releaseGeneration!: () => void;
+    let announceGeneration!: () => void;
+    const generationStarted = new Promise<void>((resolve) => {
+      announceGeneration = resolve;
+    });
+    const generationMayFinish = new Promise<void>((resolve) => {
+      releaseGeneration = resolve;
+    });
     const generate = jest.fn(async () => {
-      db.seed("blog_posts", [
-        {
-          id: "winner",
-          title: "Winner",
-          slug: "winner",
-          content: "Body",
-          category: "business",
-          status: "draft",
-          generated_on: "2026-10-09",
-        },
-      ]);
+      announceGeneration();
+      await generationMayFinish;
       return PLAIN;
     });
+
+    const owner = createDailyDraft({ db: client(), now: DELIVERY, generate });
+    await generationStarted;
+    const follower = createDailyDraft({
+      db: client(),
+      now: DELIVERY,
+      generate,
+      followerWaitMs: 1,
+      followerPollMs: 1,
+      wait: async () => {
+        releaseGeneration();
+        await owner;
+      },
+    });
+    const results = await Promise.all([owner, follower]);
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(results.map((result) => result.created).sort()).toEqual([
+      false,
+      true,
+    ]);
+    expect(results[0].draft.id).toBe(results[1].draft.id);
+    expect(db.rows("blog_posts")).toHaveLength(1);
+  });
+
+  it("bounds a pending follower and never steals the claim or calls the model", async () => {
+    db.seed("blog_generation_claims", [
+      {
+        generated_on: "2026-10-09",
+        status: "pending",
+        owner_token: "a017ff51-15da-4f43-91ff-0d51a9830739",
+        post_id: null,
+        created_at: "2026-10-09T14:00:00Z",
+        updated_at: "2026-10-09T14:00:00Z",
+        completed_at: null,
+      },
+    ]);
+    const generate = generator();
+    const wait = jest.fn(async () => undefined);
+
+    await expect(
+      createDailyDraft({
+        db: client(),
+        now: DELIVERY,
+        generate,
+        wait,
+        followerWaitMs: 2,
+        followerPollMs: 1,
+      }),
+    ).rejects.toThrow("operator recovery");
+
+    expect(wait).toHaveBeenCalledTimes(2);
+    expect(generate).not.toHaveBeenCalled();
+    expect(db.rows("blog_generation_claims")).toEqual([
+      expect.objectContaining({
+        status: "pending",
+        owner_token: "a017ff51-15da-4f43-91ff-0d51a9830739",
+      }),
+    ]);
+    expect(db.rows("blog_posts")).toEqual([]);
+  });
+
+  it("bounds a follower even when its database read never settles", async () => {
+    jest.useFakeTimers();
+    try {
+      const generate = generator();
+      const hanging = {
+        rpc: jest.fn().mockResolvedValue({
+          data: [
+            { outcome: "existing", claim_status: "pending", post_id: null },
+          ],
+          error: null,
+        }),
+        from: () => ({
+          select: () => ({
+            eq: () => ({ maybeSingle: () => new Promise(() => {}) }),
+          }),
+        }),
+      } as unknown as SupabaseClient;
+      let outcome = "pending";
+      void createDailyDraft({
+        db: hanging,
+        now: DELIVERY,
+        generate,
+        followerWaitMs: 10,
+        followerPollMs: 1,
+      }).then(
+        () => {
+          outcome = "resolved";
+        },
+        () => {
+          outcome = "rejected";
+        },
+      );
+      await jest.advanceTimersByTimeAsync(11);
+      expect(outcome).toBe("rejected");
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("reuses a daily row created before the claim ledger existed", async () => {
+    db.seed("blog_posts", [
+      {
+        id: "legacy-daily-draft",
+        title: "Legacy daily draft",
+        slug: "legacy-daily-draft",
+        content: "Body",
+        category: "business",
+        status: "draft",
+        generated_on: "2026-10-09",
+      },
+    ]);
+    const generate = generator();
 
     const result = await createDailyDraft({
       db: client(),
@@ -219,60 +327,16 @@ describe("createDailyDraft", () => {
     });
 
     expect(result.created).toBe(false);
-    expect(result.draft.id).toBe("winner");
+    expect(result.draft.id).toBe("legacy-daily-draft");
+    expect(generate).not.toHaveBeenCalled();
     expect(db.rows("blog_posts")).toHaveLength(1);
-  });
-
-  it("returns the winner when it loses the day key on the slug retry", async () => {
-    // This delivery first loses on an older row's slug. No daily winner is
-    // visible on the first re-read, but another delivery inserts today's row
-    // before this one retries with the dated slug. The retry's 23505 is the
-    // daily key, so this run must re-read and return that winner too.
-    const winner = {
-      id: "winner",
-      title: "Winner",
-      slug: "winner",
-      category: "business",
-      status: "draft" as const,
-      excerpt: "Winner excerpt",
-      generated_on: "2026-10-09",
-      published_at: null,
-      created_at: "2026-10-09T14:00:10Z",
-    };
-    let reads = 0;
-    const maybeSingle = jest.fn(async () => {
-      reads += 1;
-      return reads < 3
-        ? { data: null, error: null }
-        : { data: winner, error: null };
-    });
-    const single = jest.fn(async () => ({
-      data: null,
-      error: {
-        code: "23505",
-        message: "duplicate key value violates unique constraint",
-      },
-    }));
-    const racingClient = {
-      from: jest.fn(() => ({
-        select: jest.fn(() => ({
-          eq: jest.fn(() => ({ maybeSingle })),
-        })),
-        insert: jest.fn(() => ({
-          select: jest.fn(() => ({ single })),
-        })),
-      })),
-    } as unknown as SupabaseClient;
-
-    const result = await createDailyDraft({
-      db: racingClient,
-      now: DELIVERY,
-      generate: generator(),
-    });
-
-    expect(result).toEqual({ created: false, draft: winner });
-    expect(single).toHaveBeenCalledTimes(2);
-    expect(maybeSingle).toHaveBeenCalledTimes(3);
+    expect(db.rows("blog_generation_claims")).toEqual([
+      expect.objectContaining({
+        generated_on: "2026-10-09",
+        status: "succeeded",
+        post_id: "legacy-daily-draft",
+      }),
+    ]);
   });
 
   it("drafts again on the next UTC day", async () => {
@@ -345,6 +409,40 @@ describe("createDailyDraft", () => {
     expect(generate).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses a committed draft after the completion response is lost", async () => {
+    const healthy = client();
+    const rpc = healthy.rpc.bind(healthy);
+    const lossy = {
+      from: healthy.from.bind(healthy),
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        const result = await rpc(name, args);
+        return name === "complete_daily_blog_generation"
+          ? {
+              data: null,
+              error: { message: "synthetic lost completion response" },
+            }
+          : result;
+      },
+    } as unknown as SupabaseClient;
+    const generate = generator();
+    await expect(
+      createDailyDraft({ db: lossy, now: DELIVERY, generate }),
+    ).rejects.toThrow("lost completion response");
+    expect(db.rows("blog_posts")).toHaveLength(1);
+    expect(db.rows("blog_generation_claims")[0]).toMatchObject({
+      status: "succeeded",
+      post_id: db.rows("blog_posts")[0].id,
+    });
+    const retry = await createDailyDraft({
+      db: healthy,
+      now: SAME_DAY_RETRY,
+      generate,
+    });
+    expect(retry.created).toBe(false);
+    expect(retry.draft.id).toBe(db.rows("blog_posts")[0].id);
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
   it("writes nothing when the model call fails", async () => {
     const generate = jest.fn(async () => {
       throw new Error("OpenAI API call failed");
@@ -354,6 +452,24 @@ describe("createDailyDraft", () => {
       createDailyDraft({ db: client(), now: DELIVERY, generate }),
     ).rejects.toThrow("OpenAI API call failed");
     expect(db.rows("blog_posts")).toEqual([]);
+    expect(db.rows("blog_generation_claims")).toEqual([
+      expect.objectContaining({
+        generated_on: "2026-10-09",
+        status: "failed",
+        post_id: null,
+      }),
+    ]);
+
+    const retryGenerate = generator();
+    await expect(
+      createDailyDraft({
+        db: client(),
+        now: SAME_DAY_RETRY,
+        generate: retryGenerate,
+        followerWaitMs: 0,
+      }),
+    ).rejects.toThrow("operator recovery");
+    expect(retryGenerate).not.toHaveBeenCalled();
   });
 });
 

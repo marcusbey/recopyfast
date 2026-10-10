@@ -66,6 +66,7 @@ const REPLAY_SUITES = [
   // published posts only. Plain Postgres is enough; named so it never
   // records a "[gated]" pass.
   "src/__tests__/db/blog-daily-draft.test.ts",
+  "src/__tests__/db/blog-generation-claim.test.ts",
 ];
 
 function run(command, args, options = {}) {

@@ -324,4 +324,48 @@ describe("the schema-strict database double", () => {
     expect(result.error).toMatchObject({ code: "23505" });
     expect(db.rows("blog_posts").map((row) => row.slug)).toEqual(["a", "b"]);
   });
+
+  it("runs only migration-defined RPC names and records their exact arguments", async () => {
+    const handler = jest.fn(async () => ({
+      data: [{ outcome: "acquired" }],
+      error: null,
+      count: null,
+    }));
+    const db = createSchemaStrictDatabase({
+      rpcHandlers: { claim_daily_blog_generation: handler },
+    });
+
+    const result = await db.client.rpc("claim_daily_blog_generation", {
+      p_generated_on: "2026-10-09",
+      p_owner_token: "4f2595e9-4e40-4ac2-b762-1e7a23f80ccd",
+    });
+    const missing = await db.client.rpc("invented_blog_claim_rpc");
+
+    expect(result.error).toBeNull();
+    expect(handler).toHaveBeenCalledWith({
+      p_generated_on: "2026-10-09",
+      p_owner_token: "4f2595e9-4e40-4ac2-b762-1e7a23f80ccd",
+    });
+    expect(missing.error).toMatchObject({ code: "42883" });
+    expect(db.rpcCalls).toEqual([
+      expect.objectContaining({
+        name: "claim_daily_blog_generation",
+        error: null,
+      }),
+      expect.objectContaining({
+        name: "invented_blog_claim_rpc",
+        error: expect.objectContaining({ code: "42883" }),
+      }),
+    ]);
+  });
+
+  it("refuses to guess the behavior of a real RPC without a handler", async () => {
+    const db = createSchemaStrictDatabase();
+
+    await expect(
+      db.client.rpc("claim_daily_blog_generation", {
+        p_generated_on: "2026-10-09",
+      }),
+    ).rejects.toThrow("supplied no handler");
+  });
 });

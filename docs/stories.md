@@ -4023,7 +4023,8 @@ Embed allocation: 0 bytes.
 CTO decision under the owner's 2026-10-09 directive. Source: the PRD's SEO "Publishing discipline"
 (`docs/prd.md:320-322`: *"it drafts, a human publishes … Gate it."*) and the live finding recorded in
 s17's agentic notes (this file, "`cron/generate-blog-post` already auto-publishes, today, daily").
-Research: `docs/research/s89-blog-drafts-only.md`. Decision: [ADR 057](./decisions/057-ai-blog-posts-are-drafts-platform-admin-publishes.md).
+Research: `docs/research/s89-blog-drafts-only.md`. Decisions: [ADR 057](./decisions/057-ai-blog-posts-are-drafts-platform-admin-publishes.md)
+and its concurrency correction [ADR 060](./decisions/060-daily-blog-generation-is-a-durable-claim.md).
 No new screen, so no Design step (recorded in `docs/designs/README.md`).
 
 Cause (verified on `origin/main` `c0c40bf`): `vercel.json:3-5` runs `/api/cron/generate-blog-post`
@@ -4043,11 +4044,14 @@ Acceptance criteria:
   when the model's output carries `status: published` front matter and the request carries
   publish-shaped parameters. Tests: `src/lib/blog/__tests__/drafts.test.ts`,
   `src/__tests__/api/cron/generate-blog-post.test.ts`.
-- [ ] The cron is idempotent per UTC day: a second (retried, duplicated or concurrent) run the same
-  day returns the same draft with `created: false` and does not call OpenAI; the database refuses a
-  second cron row for the day (`blog_posts.generated_on`, unique). It answers which draft it created
-  or found (`{ created, draft: { id, title, slug, category, status, generated_on } }`). Tests: the two
-  above and `src/__tests__/db/blog-daily-draft.test.ts` (named in the CI database step).
+- [ ] The cron is idempotent per UTC day: a second retried, duplicated **or overlapping concurrent**
+  run returns the same draft with `created: false` and does not call OpenAI. A durable database claim
+  is won before generation, so exactly one concurrent caller reaches the provider; followers only
+  wait a bounded interval for its atomic draft/claim finalization. Pending timeout or failed claims
+  return a generic error and never generate until explicit operator recovery. The defensive unique
+  `blog_posts.generated_on` key still refuses a second cron row. The response identifies the draft
+  created or found (`{ created, draft: { id, title, slug, category, status, generated_on } }`). Tests:
+  the two above and `src/__tests__/db/blog-daily-draft.test.ts` (named in the CI database step).
 - [ ] `POST /api/blog/generate` (on-demand generation) is platform-admin only — the cron bearer no
   longer opens it — and it too writes drafts only. Test: `src/__tests__/api/blog/generate.test.ts`.
 - [ ] A platform admin (`ADMIN_EMAILS` allow-list or server-managed `app_metadata.role = "admin"`;

@@ -12,16 +12,19 @@
  * POST /api/admin/blog/posts/[id] sets `published`.
  *
  * The daily run is idempotent per UTC day. Vercel can deliver one scheduled run
- * twice, and the model call is billed every time, so the day's row is looked up
- * BEFORE the model is called, and `blog_posts.generated_on` is unique
- * (20261009150000) so two deliveries racing through the ~30 s call cannot both
- * insert: the loser gets 23505 and returns the winner.
+ * twice, and the model call is billed every time. ADR 057 originally relied on
+ * a pre-read plus `blog_posts.generated_on`; the independent review proved both
+ * overlapping calls still reached OpenAI before one lost the insert. ADR 060
+ * moves ownership before the provider call: `blog_generation_claims` has one
+ * durable owner token per day, and only that owner generates. Followers wait a
+ * bounded interval for the atomic draft/claim completion and never generate.
  *
  * The `db` passed in is the service-role client. The cron has no session (it
  * would run as `anon`), and an owner allow-listed by ADMIN_EMAILS is invisible
  * to RLS, so both write here only after their route's own checks (ADR 057).
  */
 
+import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   generatePostMarkdown,
@@ -77,6 +80,30 @@ const UNIQUE_VIOLATION = "23505";
 const EXCERPT_MAX_LENGTH = 200;
 const EXCERPT_MIN_PARAGRAPH_LENGTH = 50;
 const FALLBACK_SLUG = "post";
+const DAILY_CLAIM_COLUMNS = "status, post_id";
+const DAILY_CLAIM_RPC = "claim_daily_blog_generation";
+const DAILY_COMPLETE_RPC = "complete_daily_blog_generation";
+const DAILY_FAIL_RPC = "fail_daily_blog_generation";
+
+/** OpenAI is bounded at 30 s; give its winning request a small commit margin. */
+export const DAILY_DRAFT_FOLLOWER_WAIT_MS = 35_000;
+export const DAILY_DRAFT_FOLLOWER_POLL_MS = 250;
+
+type DailyClaimStatus = "pending" | "succeeded" | "failed";
+
+interface DailyClaimRow {
+  status: DailyClaimStatus;
+  post_id: string | null;
+}
+
+interface DailyClaimRpcRow extends DailyClaimRow {
+  outcome: "acquired" | "existing";
+  claim_status: DailyClaimStatus;
+}
+
+interface CompletedDraftRpcRow extends BlogPostSummary {
+  created: boolean;
+}
 
 /** `YYYY-MM-DD` of `now` in UTC — the cron's idempotency key. */
 export function utcDay(now: Date): string {
@@ -200,6 +227,199 @@ export interface DailyDraftOptions {
   now: Date;
   generate?: GeneratePost;
   random?: () => number;
+  /** Deterministic seams for concurrency/timeout tests; production omits them. */
+  ownerToken?: string;
+  wait?: (milliseconds: number) => Promise<void>;
+  followerWaitMs?: number;
+  followerPollMs?: number;
+}
+
+function oneRpcRow<T>(data: unknown): T | null {
+  return Array.isArray(data) && data.length === 1 ? (data[0] as T) : null;
+}
+
+function isClaimStatus(value: unknown): value is DailyClaimStatus {
+  return value === "pending" || value === "succeeded" || value === "failed";
+}
+
+async function acquireDailyClaim(
+  db: SupabaseClient,
+  day: string,
+  ownerToken: string,
+): Promise<DailyClaimRpcRow> {
+  const { data, error } = await db.rpc(DAILY_CLAIM_RPC, {
+    p_generated_on: day,
+    p_owner_token: ownerToken,
+  });
+  if (error) {
+    throw new Error(`Failed to claim daily blog generation: ${error.message}`);
+  }
+
+  const row = oneRpcRow<DailyClaimRpcRow>(data);
+  if (
+    !row ||
+    (row.outcome !== "acquired" && row.outcome !== "existing") ||
+    !isClaimStatus(row.claim_status) ||
+    (row.post_id !== null && typeof row.post_id !== "string")
+  ) {
+    throw new Error("Daily blog claim returned an invalid result");
+  }
+  return { ...row, status: row.claim_status };
+}
+
+async function readClaim(
+  db: SupabaseClient,
+  day: string,
+): Promise<DailyClaimRow> {
+  const { data, error } = await db
+    .from("blog_generation_claims")
+    .select(DAILY_CLAIM_COLUMNS)
+    .eq("generated_on", day)
+    .maybeSingle();
+  if (error)
+    throw new Error(`Failed to read daily blog claim: ${error.message}`);
+
+  const row = data as Partial<DailyClaimRow> | null;
+  if (
+    !row ||
+    !isClaimStatus(row.status) ||
+    (row.post_id !== null &&
+      row.post_id !== undefined &&
+      typeof row.post_id !== "string")
+  ) {
+    throw new Error(
+      "Daily blog claim is unavailable; operator recovery is required",
+    );
+  }
+  return { status: row.status, post_id: row.post_id ?? null };
+}
+
+async function findDraftById(
+  db: SupabaseClient,
+  postId: string,
+): Promise<BlogPostSummary> {
+  const { data, error } = await db
+    .from("blog_posts")
+    .select(BLOG_POST_SUMMARY_COLUMNS)
+    .eq("id", postId)
+    .maybeSingle();
+  if (error)
+    throw new Error(`Failed to read the daily blog draft: ${error.message}`);
+  if (!data) {
+    throw new Error(
+      "Daily blog claim has no draft; operator recovery is required",
+    );
+  }
+  return data as BlogPostSummary;
+}
+
+function defaultWait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForClaimedDraft(
+  db: SupabaseClient,
+  day: string,
+  initial: DailyClaimRow,
+  wait: (milliseconds: number) => Promise<void>,
+  waitMs: number,
+  pollMs: number,
+): Promise<BlogPostSummary> {
+  let remaining = Math.max(0, waitMs);
+  const interval = Math.max(1, pollMs);
+  let expired = false;
+  let timer: ReturnType<typeof setTimeout>;
+  const failure = () =>
+    new Error(
+      "Daily blog generation did not complete; operator recovery is required",
+    );
+
+  // Counting only poll sleeps left a follower hung forever inside a stalled
+  // database read. The wall-clock deadline covers reads as well as sleeps.
+  // A late read is harmless, but must not restart polling after we answered.
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      expired = true;
+      reject(failure());
+    }, remaining);
+  });
+  const poll = async (): Promise<BlogPostSummary> => {
+    let claim = initial;
+    while (true) {
+      if (expired) throw failure();
+      if (claim.status === "succeeded" && claim.post_id) {
+        return findDraftById(db, claim.post_id);
+      }
+      if (claim.status === "failed" || remaining === 0) throw failure();
+      const delay = Math.min(interval, remaining);
+      await wait(delay);
+      remaining -= delay;
+      if (expired) throw failure();
+      claim = await readClaim(db, day);
+    }
+  };
+  try {
+    return await Promise.race([poll(), deadline]);
+  } finally {
+    expired = true;
+    clearTimeout(timer!);
+  }
+}
+
+async function completeDailyClaim(
+  db: SupabaseClient,
+  day: string,
+  ownerToken: string,
+  row: DraftRow,
+): Promise<DailyDraftResult> {
+  const { data, error } = await db.rpc(DAILY_COMPLETE_RPC, {
+    p_generated_on: day,
+    p_owner_token: ownerToken,
+    p_title: row.title,
+    p_slug: row.slug,
+    p_content: row.content,
+    p_excerpt: row.excerpt,
+    p_category: row.category,
+  });
+  if (error) {
+    throw new Error(
+      `Failed to finalize daily blog generation: ${error.message}`,
+    );
+  }
+
+  const completed = oneRpcRow<CompletedDraftRpcRow>(data);
+  if (
+    !completed ||
+    typeof completed.created !== "boolean" ||
+    typeof completed.id !== "string" ||
+    completed.generated_on !== day ||
+    completed.status !== "draft"
+  ) {
+    throw new Error("Daily blog completion returned an invalid result");
+  }
+  const { created, ...draft } = completed;
+  return { created, draft };
+}
+
+async function failDailyClaim(
+  db: SupabaseClient,
+  day: string,
+  ownerToken: string,
+): Promise<void> {
+  const { data, error } = await db.rpc(DAILY_FAIL_RPC, {
+    p_generated_on: day,
+    p_owner_token: ownerToken,
+  });
+  if (error) {
+    throw new Error(
+      `Failed to mark daily blog generation failed: ${error.message}`,
+    );
+  }
+  // False is valid after an ambiguous completion response: the atomic function
+  // may already have committed `succeeded`, which must never be changed to failed.
+  if (data !== true && data !== false) {
+    throw new Error("Daily blog failure RPC returned an invalid result");
+  }
 }
 
 /** The daily cron's draft: one per UTC day, the model called at most once. */
@@ -208,25 +428,50 @@ export async function createDailyDraft({
   now,
   generate = generatePostMarkdown,
   random = Math.random,
+  ownerToken = randomUUID(),
+  wait = defaultWait,
+  followerWaitMs = DAILY_DRAFT_FOLLOWER_WAIT_MS,
+  followerPollMs = DAILY_DRAFT_FOLLOWER_POLL_MS,
 }: DailyDraftOptions): Promise<DailyDraftResult> {
   const day = utcDay(now);
+  const claim = await acquireDailyClaim(db, day, ownerToken);
 
-  // Before the model call, not after: a duplicate delivery must not pay
-  // OpenAI for a post it would then throw away.
-  const existing = await findDailyDraft(db, day);
-  if (existing) return { created: false, draft: existing };
+  if (claim.outcome !== "acquired") {
+    const draft = await waitForClaimedDraft(
+      db,
+      day,
+      claim,
+      wait,
+      followerWaitMs,
+      followerPollMs,
+    );
+    return { created: false, draft };
+  }
 
-  const subject = pickTopic(random);
-  const markdown = await generate({
-    ...subject,
-    keywords: keywordsForCategory(subject.category),
-  });
+  try {
+    const subject = pickTopic(random);
+    const markdown = await generate({
+      ...subject,
+      keywords: keywordsForCategory(subject.category),
+    });
 
-  return writeDraft(
-    db,
-    buildDraftRow(markdown, { ...subject, generatedOn: day }),
-    day,
-  );
+    return await completeDailyClaim(
+      db,
+      day,
+      ownerToken,
+      buildDraftRow(markdown, { ...subject, generatedOn: day }),
+    );
+  } catch (error) {
+    try {
+      await failDailyClaim(db, day, ownerToken);
+    } catch (claimError) {
+      // A request crash between provider failure and this write leaves pending
+      // deliberately. Never steal it automatically: the provider may still have
+      // charged. The runbook is the only recovery path (ADR 060).
+      console.error("Failed to close daily blog generation claim:", claimError);
+    }
+    throw error;
+  }
 }
 
 export interface OnDemandDraftOptions {

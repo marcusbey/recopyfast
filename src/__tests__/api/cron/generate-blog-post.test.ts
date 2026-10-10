@@ -18,10 +18,8 @@
  */
 
 import { NextRequest } from "next/server";
-import {
-  createSchemaStrictDatabase,
-  type SchemaStrictDatabase,
-} from "@/__tests__/helpers/schema-strict-supabase";
+import { type SchemaStrictDatabase } from "@/__tests__/helpers/schema-strict-supabase";
+import { createBlogGenerationDatabase } from "@/__tests__/helpers/blog-generation-database";
 import { onlyDateFaked } from "@/__tests__/helpers/blog-route-fixtures";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
@@ -52,7 +50,7 @@ const mockCreateServiceRoleClient =
 
 let db: SchemaStrictDatabase;
 let fetchMock: jest.SpyInstance;
-let modelAnswer: () => Response;
+let modelAnswer: () => Response | Promise<Response>;
 
 function openAiAnswer(content: string): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
@@ -84,9 +82,7 @@ beforeEach(() => {
   process.env.CRON_SECRET = CRON_SECRET;
   process.env.OPENAI_API_KEY = "sk-test";
 
-  db = createSchemaStrictDatabase({
-    uniqueKeys: { blog_posts: [["slug"], ["generated_on"]] },
-  });
+  db = createBlogGenerationDatabase();
   mockCreateServiceRoleClient.mockReturnValue(
     db.client as unknown as ReturnType<typeof createServiceRoleClient>,
   );
@@ -178,6 +174,45 @@ describe("GET /api/cron/generate-blog-post", () => {
       draft: { id: first.draft.id, status: "draft" },
     });
     expect(openAiCalls()).toBe(1);
+    expect(db.rows("blog_posts")).toHaveLength(1);
+  });
+
+  it("makes one OpenAI call for overlapping deliveries and returns the same draft", async () => {
+    let announceGeneration!: () => void;
+    let releaseGeneration!: () => void;
+    const generationStarted = new Promise<void>((resolve) => {
+      announceGeneration = resolve;
+    });
+    const generationMayFinish = new Promise<void>((resolve) => {
+      releaseGeneration = resolve;
+    });
+    modelAnswer = async () => {
+      announceGeneration();
+      await generationMayFinish;
+      return openAiAnswer(PUBLISH_SHAPED);
+    };
+
+    const owner = GET(cronRequest(`Bearer ${CRON_SECRET}`));
+    await generationStarted;
+    const follower = GET(cronRequest(`Bearer ${CRON_SECRET}`));
+    releaseGeneration();
+    const [ownerResponse, followerResponse] = await Promise.all([
+      owner,
+      follower,
+    ]);
+    const [ownerBody, followerBody] = await Promise.all([
+      ownerResponse.json(),
+      followerResponse.json(),
+    ]);
+
+    expect(ownerResponse.status).toBe(200);
+    expect(followerResponse.status).toBe(200);
+    expect(openAiCalls()).toBe(1);
+    expect([ownerBody.created, followerBody.created].sort()).toEqual([
+      false,
+      true,
+    ]);
+    expect(ownerBody.draft.id).toBe(followerBody.draft.id);
     expect(db.rows("blog_posts")).toHaveLength(1);
   });
 
