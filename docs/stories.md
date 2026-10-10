@@ -3507,8 +3507,8 @@ at that commit, to be re-verified at research time):
 - [x] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
   and the region (`src/app/api/health/route.ts:93,130`; `health/ready/route.ts:41,78,104,159`).
   → closed by s84-observability.
-- [ ] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
-  use `timingSafeEqual` over SHA-256 digests.
+- [x] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
+  use `timingSafeEqual` over SHA-256 digests. → closed by s77.
 - [ ] L5 — Raw Stripe errors returned to authenticated callers (payment-method existence oracle);
   payment-methods has no limiter (`billing/payment-methods/route.ts:121,206`;
   `subscription/route.ts:106,143`).
@@ -3516,7 +3516,8 @@ at that commit, to be re-verified at research time):
   scope.
 - [ ] L7 — Public routes with no limiter before authorization, against AGENTS.md:
   `ab-tests/{bucket,active,track}`, `staging/content` GET, `staging/publish`,
-  `staging/validate`, `edit-sessions/{validate,extend}`.
+  `staging/validate`, `edit-sessions/{validate,extend}`. → s77 closes the A/B and
+  `staging/{content,publish}` part; `staging/validate` and `edit-sessions/*` → s77b.
 - [ ] L8 — `public/embed/__fidelity__/index.html` test harness is served in production (live
   200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`.
 - [ ] L9 — `analytics/track` is a service-role write with `onStoreFailure:"allow"` (`:91-97`); a
@@ -3533,8 +3534,9 @@ at that commit, to be re-verified at research time):
   121 bare handshakes/min lock real editors out of realtime.
 - [x] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
   (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`. → closed by s72.
-- [ ] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
-  Node 24.14.0.
+- [x] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
+  Node 24.14.0. → closed by s75: `node:24-alpine`, the major CI tests on; the major tag is kept
+  on purpose so each deploy picks up Node security patches (s75 plan, decision 6).
 - [ ] L17 — Grant hygiene: `ALTER DEFAULT PRIVILEGES … REVOKE … FROM PUBLIC`
   (`20260809120000:213`) is a no-op; `generate_verification_code()` uses `random()` and is
   executable by `authenticated` (`20251230000000:172,275`); view-only members can read webhook
@@ -3545,6 +3547,8 @@ at that commit, to be re-verified at research time):
 - [ ] L19 — CI/header hygiene: `ci.yml` has no top-level `permissions:` and actions are pinned by
   tag, not SHA; HSTS lacks `includeSubDomains`; legacy `X-XSS-Protection` still set;
   `docs/operations/deployment-checklist.md:24` carries a truncated live-key account prefix.
+  → CI half closed by s75 (`contents: read`, every action SHA-pinned); the header and doc halves
+  remain.
 - [ ] L20 — Dev-only dependency advisories: critical `shell-quote` via `concurrently` 9.2.0
   (GHSA-pqg4-j6r4-53mv, fixed args only), high brace-expansion/braces/micromatch via
   `eslint-config-next`, `@typescript-eslint`, jest, and server `nodemon`. `npm audit fix` clears
@@ -3552,20 +3556,21 @@ at that commit, to be re-verified at research time):
 
 **Lows the s68 research verified itself** (R-series, overlapping L7/L17 where noted):
 
-- [ ] R1 — Per-site limiters keyed on the raw site id on authenticated editor routes
+- [x] R1 — Per-site limiters keyed on the raw site id on authenticated editor routes
   (`staging/publish/route.ts:153`, `staging/content/[siteId]/route.ts:280`,
   `ai/translate/route.ts:218`, five `edit-board/*` routes): spelling variants multiply buckets.
-- [ ] R2 — `bulk/update` accepts an unbounded `operations` array (`route.ts:31-38`); linear
-  database cost per request once s68b removes regex mode.
+  → closed by s77 (`ai/translate` was already canonical).
+- [x] R2 — `bulk/update` accepts an unbounded `operations` array (`route.ts:31-38`); linear
+  database cost per request once s68b removes regex mode. → closed by s77 (100 per request).
 - [ ] R3 — `staging_access` keeps admin-only INSERT/UPDATE policies for `authenticated`
   (`20251230000000_staging_workflow.sql:120-142`); an admin can write rows that bypass route
   validation (ADR 047 "Watch").
 - [ ] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
   (`src/lib/auth/editor-directory.ts:271-299`); s68c makes it non-load-bearing, the dashboard still
   lists them as live.
-- [ ] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
-  covers `PUT` only.
-- [ ] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter.
+- [x] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
+  covers `PUT` only. → closed by s77 (with `PUT`'s IP guard, s68b review minor 3).
+- [x] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter. → closed by s77.
 - [ ] R7 — The webhook URL guard narrows DNS rebinding but does not close it
   (`src/lib/security/webhook-url-safety.ts:19-26`, a recorded decision); pinning the resolved IP in
   a custom dispatcher would.
@@ -3627,6 +3632,11 @@ order:
   Pending + Published by default, site → page groups, readable locations, compare, history,
   revert (Save as draft · Revert and publish for publishers), 50 rows a page from a
   security-invoker view (ADR 054); two read-only routes; never calls `GET /api/sites`.
+  Follow-up **s81-version-restore-integrity** (compare-and-set in the staging PUT): Discard reads
+  its row again before its PUT, but a write landing between that read and the save RPC is not seen
+  — a write from a second tab or the live-page editor, or one of the Changes page's own writes
+  still in flight after the owner left the page and came back (its one-write-per-element lock
+  lives in the mounted page, not the tab).
 - **s70c-site-content-tab** (complexity 2) — the same view for one site under its site page.
 
 ## Story s71-billing-plan-badge — the billing page never calls a paid plan "Free"
@@ -3840,3 +3850,250 @@ Acceptance criteria:
 Complexity: 3. Dependencies: none. No migration; no embed change.
 
 Embed allocation: 0 bytes (ceilings only go down).
+
+## Story s74-deflake-landing-pricing — the landing page stays responsive in a browser that draws WebGL without a GPU
+
+Orchestrator triage, 2026-10-09: `main` CI at `72f4cff` (run 37902163949) went red on the E2E job.
+`e2e/landing.spec.ts` "E2E-012: Pricing shows both lifetime offers" waited 10 s for the Starter
+card (`landing.spec.ts:56-58`), found no element at all, then passed on retry in 35.5 s. The strict
+contract counts a flaky test as a failure (`.github/workflows/ci.yml:401-411`), and branch
+protection requires the job. Research: `docs/research/s74-deflake-landing-pricing.md`.
+
+Cause (verified on `origin/main` `72f4cff`): the landing page's sky (`src/app/page.tsx:22-29,47`)
+mounts a full-screen WebGL `<Canvas>` with `frameloop="always"`
+(`src/components/three/sky/SkyBackground.tsx:257-269`) whatever renders it. CI's Chromium has no
+GPU, and Playwright launches it with `--enable-unsafe-swiftshader`
+(`node_modules/playwright-core/lib/server/chromium/chromium.js:280`), so the raymarcher and the
+six-layer noise sky are shaded on the CPU by SwiftShader. Measured on this repo's production build
+with the same Playwright Chromium (renderer string "SwiftShader driver"): 2–34 frames in 3 s, p95
+frame 1.0–2.1 s, and 1.2–4.8 s of main-thread long tasks in every 3 s window. Every step
+`#pricing` waits on — hydration, the `/api/pricing` response handler
+(`src/components/sections/Pricing.tsx:93-111`), the cards' render (`:231`) — and every Playwright
+probe queues behind those frames, on a 4-vCPU runner shared with the Next server and the Supabase
+stack. With WebGL disabled the same page runs at 120 fps with 0–71 ms of long tasks. The CI logs
+show the cost is not pricing-specific: E2E-017 mocks `/api/offers/founding`, needs no plan card
+and still takes 30–56 s in green runs. Locally the baseline spec failed E2E-017 once in 27 runs
+(`page.reload` never reached `load` in 45 s). Not the cause: the cold `/api/pricing` build with the
+placeholder Stripe key takes 0.33 s, then 3–6 ms from cache.
+
+Production: `/` is a CDN-served static prerender (`x-vercel-cache: HIT`, 0.24–0.88 s); a visitor
+with a GPU is unaffected. A visitor whose browser draws WebGL in software (GPU blocklisted,
+hardware acceleration off, a VM or remote desktop) gets the same saturated page CI gets.
+
+Acceptance criteria:
+- [ ] When the browser can only draw WebGL with a major performance caveat (software rendering),
+  or not at all, the landing page mounts no WebGL canvas and shows the static sky gradient it
+  already uses as its loading and no-WebGL fallback.
+- [ ] A browser with a GPU keeps the shader sky exactly as today: volumetric above the fold,
+  layered below it, reduced motion drawing on demand.
+- [ ] The capability probe releases its context and never throws; a probe failure means no shader.
+- [ ] Unit tests cover the probe (software-only, hardware, no WebGL, throwing) and the sky's two
+  branches.
+- [ ] A new landing E2E test proves, in CI's own Chromium, that a software renderer gets no WebGL
+  canvas — red on main. The strict count goes 80 → 81 in `playwright.config.ts`, every place in
+  `.github/workflows/ci.yml`, and `src/__tests__/e2e/playwright-ci-contract.test.ts`.
+- [ ] No existing test's timeout or assertion is relaxed. The landing spec runs clean with
+  `--repeat-each` against a production build, with before/after timings in the research.
+
+Complexity: 2. Dependencies: none. Branch `feature/s74-deflake-landing-pricing`.
+
+Embed allocation: 0 bytes (nothing under `public/embed/` changes).
+
+## Story s75-ci-release-gates — CI proves what production runs
+
+Orchestrator triage, 2026-10-09, under the owner's directive ("get the product ready for
+production"). No UI, no migration, no embed change. Research: `docs/research/s75-ci-release-gates.md`.
+Closes the Node half of s69 L16 and the CI half of s69 L19.
+
+Cause (verified on `origin/main` `72f4cff`):
+- **The migration replay runs on the wrong PostgreSQL.** Production is PostgreSQL 17.4
+  (`docs/research/s56-rls-content-writes-need-plan.md:7`). CI replays every migration on
+  `postgres:14` (`.github/workflows/ci.yml:22`, step `:145`), the runner refuses anything else
+  (`scripts/run-db-invariants.mjs:142-146`), and the Supabase CLI stack the e2e job starts is
+  PostgreSQL 15 (`supabase/config.toml:28`).
+- **Seven database suites never run against a database in CI.** `content-attributes-lifecycle`,
+  `content-version-concurrency`, `content-version-i18n`, `editor-activation-concurrency`,
+  `restore-reports-rows`, `site-delete-cascade` and `sites-install-status` (all in
+  `src/__tests__/db/`) are named neither by the runner (`run-db-invariants.mjs:193-201`) nor by any
+  e2e step (`ci.yml:256-356`). Plain `npm test` records each as a passing `[gated]` line or a
+  `describe.skip`.
+- **The coverage ratchet is local-only.** The thresholds (`jest.config.js:51-58`, 34/39/41/41) are
+  read only by `npm run test:coverage`, which only the local `prepush` script runs
+  (`package.json:21,25`). CI runs `npm test` without `--coverage` (`ci.yml:139`). Measured today:
+  statements 68.62, branches 61.56, functions 65.72, lines 69.23 — the floors trail by ~27 points.
+- **`format:check` is in the Definition of Done (`AGENTS.md:239`) and in no CI step.**
+- **`ci.yml` has no `permissions:`** and every action is pinned by a moving tag
+  (`ci.yml:84,87,209,219,225,422,446,449`; `server-security.yml:21,24`) — s69 L19.
+- **Node 20 is past end of life** (2026-04-30) and Vercel discontinued `20.x` on 2026-10-01, yet CI
+  tests on `"20"` (`ci.yml:89,221,451`) and the realtime image is `node:20-alpine`
+  (`server/Dockerfile:9`, s69 L16). Local gates and the server audit already run Node 24.14.0
+  (`server-security.yml:26`); `package.json` declares no `engines`, so Vercel's runtime is whatever
+  the dashboard says.
+- **`e2e-billing-tests.spec.ts` sits at the repo root**, outside Playwright's `testDir: "./e2e"`
+  (`playwright.config.ts:4`), so it has never run.
+- `AGENTS.md:108` (embed "breached at 46,781"; measured 45,828) and `:228` ("22% lines") are stale.
+
+Acceptance criteria:
+- [ ] CI replays every migration on PostgreSQL 17 (`postgres:17`), the runner refuses any other
+  major and says how to point it at a 17 install, and the Supabase CLI stack is
+  `major_version = 17`. No applied migration is edited; every one replays cleanly on 17.
+- [ ] Every `src/__tests__/db/*.test.ts` suite is named by a CI database step, with a real
+  database required; the seven run in the replay step (none needs PostgREST or GoTrue). A suite
+  that registers only `[gated]` placeholders, only skipped tests, or nothing at all fails the
+  replay step by name. `test.failing` pins stay (they assert known defects A-15, A-16, A-23).
+- [ ] The CI Jest run collects coverage, so the `jest.config.js` thresholds fail CI when coverage
+  drops; the thresholds are ratcheted up to the measurement, rounded down, and never lowered.
+- [ ] CI runs `npm run format:check`.
+- [ ] Every workflow declares least-privilege `permissions:` (`contents: read`), and every action
+  is pinned by full commit SHA with its version in a comment.
+- [ ] One Node major everywhere: CI, the realtime image and Vercel (`engines`) run Node 24 LTS.
+- [ ] No Playwright spec lives outside `e2e/`; the root billing spec is removed with its
+  justification recorded, and the strict e2e count stays 80.
+- [ ] A contract test pins each of the above, and goes red when any one is undone.
+- [ ] `AGENTS.md`'s embed and coverage figures and its CI sentence state today's facts.
+
+Complexity: 3. Dependencies: none (PR #77, s70b, adds a view gated on `server_version_num >= 150000`
+— with a 17 replay it is created; nothing to do here beyond not breaking it). Branch
+`feature/s75-ci-release-gates`.
+
+## Story s88-seo-canonicals-sitemap — every public page names its own URL to search engines
+
+CTO decision under the owner's 2026-10-09 directive ("implement everything that is left … get the
+product ready for production"). Marketing/SEO perimeter (`docs/prd.md` § Technical SEO). No new
+screen, no embed change, no migration. Research: `docs/research/s88-seo-canonicals-sitemap.md`.
+Plan: `docs/plans/s88-seo-canonicals-sitemap.md`. Delivers s17's `llms.txt` criterion and the
+homepage half of its `SoftwareApplication` criterion (ADR 032 §5); s17 keeps the comparison-page
+schema, the dynamic route and the Lighthouse gate.
+
+Cause (verified on `c0c40bf`):
+- `src/app/layout.tsx:68-70` sets `alternates.canonical: "/"` and `:73` `openGraph.url: "/"` in the
+  root metadata. Next merges metadata per top-level key (`resolve-metadata.js:167` clones the
+  parent, `:177-185` replace `alternates`/`openGraph` only when the child sets them), so every page
+  that does not set its own — `/blog`, `/blog/<slug>`, `/privacy`, `/terms`, `/demo`, `/login`,
+  `/signup`, `/edit`, `/auth/error`, the dashboard — tells search engines it is a duplicate of the
+  homepage. Reproduced with Next's own resolver: `/privacy` resolves `canonical: https://recopyfa.st`.
+  `/edit` sends `noindex` and a canonical to the homepage at once.
+- `src/app/sitemap.ts:51` reads blog posts through the cookie client, which makes the route dynamic
+  (`ƒ /sitemap.xml` in `next build`): a database round trip on every crawler fetch, a read that runs
+  as whoever's cookies arrive, and `catch { return [] }` (`:64`) that drops every post without a log
+  line. `:75` stamps every static URL `lastModified: now`; `/docs/install` is missing; `/login` and
+  `/signup` (thin auth forms) are listed.
+- `src/app/robots.ts:14` disallows `/dashboard/`, which does not cover `/dashboard` itself.
+- No `SoftwareApplication` JSON-LD anywhere; no `/llms.txt` (PRD § Technical SEO; s17 AC).
+
+Acceptance criteria:
+- [x] The root layout declares no canonical and no `og:url`. Through Next's own metadata resolver,
+  `/`, `/demo`, `/try`, `/compare`, every `/compare/<slug>`, `/blog`, `/blog/<slug>`, `/privacy`,
+  `/terms` and `/docs/install` each resolve a canonical equal to their own URL, and no page other
+  than `/` resolves the homepage as canonical or `og:url`.
+- [x] `/login`, `/signup`, `/edit` and `/auth/error` resolve `noindex` with no canonical; every
+  `/dashboard` response carries `X-Robots-Tag: noindex, nofollow` (the segment is client-rendered
+  and cannot export metadata).
+- [x] The sitemap reads published posts with a cookie-less anon client (RLS on, the policy
+  `/blog/<slug>` already relies on) — never the cookie client, never the service role — and is
+  regenerated hourly instead of per request. It lists every indexable page including
+  `/docs/install`, no noindex page and nothing under `/dashboard`, `/api` or `/auth`. A post's
+  `lastModified` is `updated_at ?? published_at` and is omitted when both are null; static pages
+  carry none. A database failure is logged and degrades to the static entries.
+- [x] `robots.txt` disallows `/api/`, `/dashboard` (bare and nested) and `/auth/`, blocks no URL the
+  sitemap lists and no noindex page (so the noindex can be read), and names the sitemap.
+- [x] The homepage carries one `SoftwareApplication` JSON-LD whose offers are exactly the
+  catalogue's sellable monthly subscription plans (`plans`, the same rule as `/api/pricing`: not
+  `free`, Agency only while its checkout switch is on), in USD, with no rating or review; offers
+  are omitted when the catalogue cannot be read. No visible change to the homepage.
+- [x] `/llms.txt` is served as text, without a session lookup, and lists the product summary (only
+  claims the homepage-truth tests allow), the install guide and its Markdown brief, the comparison
+  hub and every comparison page (from the same data the routes use), the demo, the try page and
+  the legal pages, all as absolute URLs on the configured origin.
+- [x] Tests for each criterion; required gates pass; one story commit (after this docs commit).
+
+Review fixes (minors 1, 2, 4, 5; minor 3 — JSON-LD offers from `plans.price`, not the Stripe
+overlay — accepted as is, plan decision 7):
+- [x] The anon client is recorded: ADR 058, and its row in the "Data access" tables of `AGENTS.md`
+  and `docs/architecture.md`.
+- [x] `/blog` lists the posts `blog_posts` publishes (anon, published only, newest first,
+  regenerated hourly like the sitemap), with an empty state when there are none and an error —
+  never the empty state — when the read fails; the three hard-coded 2024 posts are gone.
+- [x] Every dashboard page's HTML says `noindex, nofollow`, the same as its `X-Robots-Tag` header.
+- [x] The sitemap no longer says the cron publishes: it only writes drafts (s89).
+
+Complexity: 3. Dependencies: none (s37 comparison pages and s59 install guide are on `main`).
+
+Embed allocation: 0 bytes (ceilings only go down).
+
+## Story s77-route-limiters-and-errors — API routes meter a caller before spending anything on them, and refuse what they cannot bound
+
+Owner directive 2026-10-09 ("take CTO-level decisions; get the product ready for production"),
+scoped by the orchestrator: the API-route items of `s69-security-lows` (L4, the A/B and staging
+part of L7, R1, R2, R5, R6) and three open review minors — s68b #3 (no IP guard before `getUser`
+on `PUT /api/domains/verify`), s42 m3 (no cap on API keys per site or on a key's name) and s44 m2
+(the public content API is metered per key, never recorded as a decision). Security story; no new
+screen. Research: `docs/research/s77-route-limiters-and-errors.md`. Plan:
+`docs/plans/s77-route-limiters-and-errors.md`. Decision: ADR 056.
+
+Cause (verified on `origin/main` `c0c40bf`):
+
+- **L4.** `CRON_SECRET` is compared with `!==`/`===` (`cron/ab-test-lifecycle/route.ts:14`,
+  `cron/generate-blog-post/route.ts:8`, `cron/webhook-dispatch/route.ts:28`,
+  `blog/generate/route.ts:21`) — the one secret not compared in constant time.
+- **L7.** `authorizeSiteRequest` (a `sites` lookup) runs for every caller before any limiter on
+  `ab-tests/bucket/[siteId]` (`:45` → `:82`), `ab-tests/active/[siteId]` (`:40` → `:86`) and
+  `ab-tests/track` (`:440` → `:478`). `staging/publish` POST authorizes (`:86-138`) before its
+  limiter (`:150`); its GET and `staging/content/[siteId]` GET (`:45-166`) have no limiter at all
+  in front of a service-role read.
+- **R1.** Per-site buckets keyed on the raw `siteId` (`staging/publish:153`, `staging/content:280`,
+  `edit-board/{history:51, languages:48,68, styles:46, styles/apply:51, themes:49}`): the authorizers
+  reach the site through a `uuid` cast, so each spelling of one id opens its own bucket.
+  `ai/translate:218` and `edit-board/history/[versionId]:85` are already canonical (verified).
+- **R2.** `bulk/update` takes any number of operations (`route.ts:31-39`), each a sequential read
+  and up to one service-role write.
+- **R5 / s68b #3.** `domains/verify` POST, GET and DELETE have no limiter; PUT's per-user limiter
+  (`:311`) has no IP guard before `getUser` (`:300`).
+- **R6.** `sites/[siteId]/share` POST, GET and DELETE have no limiter.
+- **s42 m3 / s44 m2.** `POST /api/api-keys` caps neither the keys on a site nor a key's name
+  (`route.ts:153-246`); `/api/v1/content` meters per key (`v1/content/route.ts:82-97`) where ADR 002
+  §4 says per site, so N keys gave a site N × the ceiling.
+
+Acceptance criteria:
+
+- [x] L4: the four routes decide `Authorization: Bearer <CRON_SECRET>` through one helper that
+  compares in constant time over equal-length digests, refuses an unset or empty secret, and never
+  throws on a length mismatch. Test: `src/__tests__/api/cron/cron-secret.test.ts`.
+- [x] L7: the three A/B routes and the staging publish/content routes refuse a flood per IP
+  (200/min, fail closed) before any authorization or database work; the per-site limiters stay
+  behind authorization; the two staging GETs gain a fail-closed per-site limiter (100/min). Tests:
+  `src/__tests__/api/ab-tests/ip-guard-before-auth.test.ts`,
+  `src/__tests__/api/staging/limiter-order.test.ts`.
+- [x] R1: every handler that takes a `siteId` from the caller on the staging and edit-board routes
+  canonicalises it before any work but the per-IP flood guard (L7, which runs first): an upper-case
+  id is served and metered as the lower-case id; a malformed id is 400 before any authorization,
+  per-site or per-user limiter, or query. Tests:
+  `src/__tests__/api/staging/limiter-order.test.ts`,
+  `src/__tests__/api/edit-board/canonical-site-id.test.ts`.
+- [x] R2: more than 100 operations in one `bulk/update` request is 400 before authentication, and
+  nothing is written. Test: `src/__tests__/api/bulk/update-operations-cap.test.ts`.
+- [x] R5 / s68b #3 / R6: every verb of `domains/verify` and `sites/[siteId]/share` runs IP guard →
+  `getUser` → fail-closed per-user limiter → permission read → service role (writes 10/min,
+  reads 100/min per user). Tests: `src/__tests__/api/domains/verify-limiters.test.ts`,
+  `src/__tests__/api/sites/share-limiters.test.ts`.
+- [x] s42 m3: an eleventh key on a site is 409 and a key name over 100 characters is 400, nothing
+  written; ADR 056 records per-key metering with the cap (s44 m2). Test:
+  `src/__tests__/api/api-keys/key-cap.test.ts`.
+- [x] Review m3, as corrected by PR #82's CI: every non-2xx answer of `GET /api/ab-tests/active`
+  is `private, no-cache` — never reused without going back to the server, never kept by a shared
+  cache, and never `no-store`, which left the widget's unread refusal open forever in Chromium (both
+  realtime specs timed out waiting for network idle). Tests:
+  `src/__tests__/api/ab-tests/active-refusals-not-cached.test.ts`; e2e `realtime-additive.spec.ts`
+  AC 6 and `realtime-parity.spec.ts` (legacy snippet).
+- [ ] No migration, nothing under `server/` or `public/embed/`, no new dependency; existing suites
+  whose fixtures or call-order assertions change are listed in the PR. Required gates pass; one
+  story commit. (Local: gates green, 27 mutations red; `content-write-privileges` needs PostgREST —
+  open until CI's DB step and the PR list.)
+
+Complexity: 3 (eight small, well-precedented route changes; the breadth — ~15 route handlers and
+the suites that drive them — is the risk). Dependencies: none. Branch
+`feature/s77-route-limiters-and-errors`. Follow-up: **s77b** — the same gaps in files other stories
+own right now (`staging/validate`, `edit-sessions/*` including s68a review m9, and an IP guard in
+front of `edit-board/*`), listed in the plan.
+
+Embed allocation: 0 bytes.

@@ -157,13 +157,14 @@ any rejected value into a response or a log line.
 
 ### Data access
 
-Three Supabase clients, and picking the wrong one is a security bug:
+Four Supabase clients, and picking the wrong one is a security bug:
 
 | Client | Use | RLS |
 |---|---|---|
 | `supabase/client.ts` `createClient()` | Browser, inside effects/handlers only | enforced |
 | `supabase/server.ts` `createClient()` | Route handlers acting **as the signed-in user** | enforced |
 | `supabase/service.ts` `createServiceRoleClient()` | Widget-facing paths where the caller is a site token, not a user | **bypassed** |
+| `supabase/anon.ts` `createAnonClient()` | Server code with **no user** reading rows RLS makes public to `anon` — the sitemap and `/blog`. No cookies, no session, read-only, never user data ([ADR 058](./decisions/058-cookie-less-anon-client-for-public-reads.md)) | enforced |
 
 28 of 77 routes use the service-role client. Every one of them owes an explicit authorization
 call before it touches data. See [ADR 002](./decisions/002-rls-tenant-boundary.md).
@@ -428,7 +429,7 @@ assert the following. None of it is true, and each was checked:
 | Cloudflare Workers serve the embed at the edge | No Workers. Vercel static + Next middleware |
 | Socket.io with Redis pub/sub, running | Running since `s07b` — but on **one** machine and with **no** Redis pub/sub. A single process keeps rooms coherent without an adapter; adding a second machine is what would make one mandatory |
 | Script size < 30KB gz | 46,781 gz today |
-| Test coverage ≥ 80% | Jest floor is 22% lines, ratcheted from measured reality |
+| Test coverage ≥ 80% | Jest floor is 69% lines (68 / 61 / 65 / 69 statements / branches / functions / lines, measured 2026-10-09), enforced in CI and ratcheted from measured reality |
 
 Fixing the first three in `CLAUDE.md` and keeping this table honest is cheaper than the
 alternative: an agent reads the stale claim, writes a Zustand store, and now the assertion is

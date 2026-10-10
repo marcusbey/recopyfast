@@ -291,15 +291,23 @@ describe("GET /api/health — the realtime check", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("skips the probe on the quick path", async () => {
-    // `?quick=true` exists to answer without touching a dependency at all.
+  it("treats ?quick=true as an ordinary truthful dependency probe", async () => {
+    // A public health URL must not have a query spelling that can manufacture
+    // 200 healthy while a critical dependency is down. `quick` has no accepted
+    // caller or weaker contract, so it is ignored like any unknown parameter.
+    doubleOptions = { databaseOk: false };
+
     const { response, body } = await callGet(
       "http://localhost:3000/api/health?quick=true",
     );
 
-    expect(response.status).toBe(200);
-    expect(body.status).toBe("healthy");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    expect(body.status).toBe("unhealthy");
+    expect(body.checks.database.status).toBe("error");
+    expect(body.checks.storage.status).toBe("ok");
+    expect(body.checks.cache.status).toBe("ok");
+    expect(body.checks.realtime.status).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   /**

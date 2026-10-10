@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 const rows = [
   ...Array.from({ length: 1002 }, (_unused, index) => ({
     id: `page-${String(index).padStart(4, "0")}`,
-    site_id: "site-1",
+    site_id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
     element_id: `page-${String(index).padStart(4, "0")}`,
     selector: "p",
     original_content: "Published",
@@ -19,7 +19,7 @@ const rows = [
   })),
   ...Array.from({ length: 3 }, (_unused, index) => ({
     id: `shared-${index}`,
-    site_id: "site-1",
+    site_id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
     element_id: `shared-${index}`,
     selector: "nav",
     original_content: "Published",
@@ -35,7 +35,7 @@ const rows = [
   })),
   {
     id: "other-page",
-    site_id: "site-1",
+    site_id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
     element_id: "other-page",
     selector: "p",
     original_content: "Published",
@@ -51,7 +51,7 @@ const rows = [
   },
   {
     id: "literal-percent",
-    site_id: "site-1",
+    site_id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
     element_id: "literal-percent",
     selector: "p",
     original_content: "Published",
@@ -67,7 +67,7 @@ const rows = [
   },
   {
     id: "encoded-space",
-    site_id: "site-1",
+    site_id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
     element_id: "encoded-space",
     selector: "p",
     original_content: "Published",
@@ -83,7 +83,7 @@ const rows = [
   },
   {
     id: "canonical-index",
-    site_id: "site-1",
+    site_id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
     element_id: "canonical-index",
     selector: "p",
     original_content: "Published",
@@ -204,9 +204,13 @@ describe("page-scoped content reads", () => {
   ])("rejects an invalid page_path on the %s read", async (_name, handler) => {
     const response = await handler(
       new NextRequest(
-        "https://www.recopyfa.st/api/content/site-1?page_path=relative",
+        "https://www.recopyfa.st/api/content/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d?page_path=relative",
       ),
-      { params: Promise.resolve({ siteId: "site-1" }) },
+      {
+        params: Promise.resolve({
+          siteId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        }),
+      },
     );
 
     expect(response.status).toBe(400);
@@ -218,7 +222,7 @@ describe("page-scoped content reads", () => {
   it("rejects an invalid page_path on the publish preview read", async () => {
     const response = await getPublishPreview(
       new NextRequest(
-        "https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=relative",
+        "https://www.recopyfa.st/api/staging/publish?siteId=9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d&page_path=relative",
       ),
     );
 
@@ -230,8 +234,14 @@ describe("page-scoped content reads", () => {
 
   it("paginates a legacy public read when page_path is omitted", async () => {
     const response = await getPublicContent(
-      new NextRequest("https://www.recopyfa.st/api/content/site-1"),
-      { params: Promise.resolve({ siteId: "site-1" }) },
+      new NextRequest(
+        "https://www.recopyfa.st/api/content/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      ),
+      {
+        params: Promise.resolve({
+          siteId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        }),
+      },
     );
     const content = await response.json();
 
@@ -250,9 +260,13 @@ describe("page-scoped content reads", () => {
     async (_name, handler) => {
       const response = await handler(
         new NextRequest(
-          "https://www.recopyfa.st/api/content/site-1?page_path=%2Fpricing",
+          "https://www.recopyfa.st/api/content/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d?page_path=%2Fpricing",
         ),
-        { params: Promise.resolve({ siteId: "site-1" }) },
+        {
+          params: Promise.resolve({
+            siteId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+          }),
+        },
       );
       const body = await response.json();
       const content = Array.isArray(body) ? body : body.content;
@@ -278,9 +292,13 @@ describe("page-scoped content reads", () => {
       for (const handler of [getPublicContent, getStagingContent]) {
         const response = await handler(
           new NextRequest(
-            `https://www.recopyfa.st/api/content/site-1?page_path=${encodeURIComponent(pagePath)}`,
+            `https://www.recopyfa.st/api/content/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d?page_path=${encodeURIComponent(pagePath)}`,
           ),
-          { params: Promise.resolve({ siteId: "site-1" }) },
+          {
+            params: Promise.resolve({
+              siteId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+            }),
+          },
         );
         const body = await response.json();
         const content = Array.isArray(body) ? body : body.content;
@@ -308,7 +326,7 @@ describe("page-scoped content reads", () => {
     async (pagePath, expectedElementId) => {
       const response = await getPublishPreview(
         new NextRequest(
-          `https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=${encodeURIComponent(pagePath)}`,
+          `https://www.recopyfa.st/api/staging/publish?siteId=9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d&page_path=${encodeURIComponent(pagePath)}`,
         ),
       );
       const body = await response.json();
@@ -326,7 +344,7 @@ describe("page-scoped content reads", () => {
   it("paginates the site-wide publish preview and reports the page breakdown", async () => {
     const response = await getPublishPreview(
       new NextRequest(
-        "https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=%2Fpricing",
+        "https://www.recopyfa.st/api/staging/publish?siteId=9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d&page_path=%2Fpricing",
       ),
     );
     const body = await response.json();

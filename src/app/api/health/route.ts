@@ -355,8 +355,7 @@ function probeRealtime(url: string): Promise<ServiceCheck> {
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
 
-  // Per IP, before any check — and before `?quick=true`, so the cheap path is
-  // not a way around it. Fails open: see `limitHealthProbe`.
+  // Per IP, before any check. Fails open: see `limitHealthProbe`.
   const limited = await limitHealthProbe(request);
   if (limited) return limited;
 
@@ -364,15 +363,6 @@ export async function GET(request: NextRequest) {
     // Get detail level from query params
     const { searchParams } = new URL(request.url);
     const detailed = searchParams.get("detailed") === "true";
-    const quick = searchParams.get("quick") === "true";
-
-    // Quick health check - just return OK without checks
-    if (quick) {
-      return NextResponse.json({
-        status: "healthy",
-        timestamp: new Date().toISOString(),
-      });
-    }
 
     // Run all health checks in parallel
     const realtimeUrl = getRealtimeHealthUrl();

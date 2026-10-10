@@ -10,6 +10,7 @@ import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { aiService } from "@/lib/ai/openai-service";
 import { withPublicCors } from "@/lib/http/public-cors";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { canonicalSiteId } from "@/lib/api/validation";
 import {
   checkOwnerCanEdit,
   ownerCanEditRefusal,
@@ -43,6 +44,9 @@ function withCors(response: NextResponse, origin?: string | null) {
  *
  * 10/min: applying a style to a page is a deliberate, slow action a human waits
  * for. Ten in a minute is already more than anyone does.
+ *
+ * Keyed on the canonical id: every handler passes `canonicalSiteId`'s value
+ * (s77, s69 R1), so each spelling of one site spends this one bucket.
  */
 function meterSite(request: NextRequest, siteId: string) {
   return enforceRateLimit(request, {
@@ -75,13 +79,13 @@ export async function POST(request: NextRequest) {
     }
 
     const {
-      siteId,
+      siteId: rawSiteId,
       styleId,
       elementIds,
       previewOnly = false,
     } = await request.json();
 
-    if (!siteId || !styleId) {
+    if (!rawSiteId || !styleId) {
       return withCors(
         NextResponse.json(
           { error: "Missing required fields: siteId, styleId" },
@@ -90,6 +94,16 @@ export async function POST(request: NextRequest) {
         origin,
       );
     }
+
+    // s77 (s69 R1): the canonical id, before the access check and the limiter.
+    const canonical = canonicalSiteId(rawSiteId);
+    if (!canonical.ok) {
+      return withCors(
+        NextResponse.json({ error: canonical.error }, { status: 400 }),
+        origin,
+      );
+    }
+    const siteId = canonical.value;
 
     // Validate staging access (edit permission required)
     const validation = await StagingAccessManager.validateStagingAccess(

@@ -51,8 +51,18 @@ const OTHER_IP = "198.51.100.23";
 const LIMIT_PER_MINUTE = 60;
 
 const env = process.env as Record<string, string | undefined>;
-const savedWsUrl = env.NEXT_PUBLIC_WS_URL;
+const savedEnv = {
+  NEXT_PUBLIC_SUPABASE_URL: env.NEXT_PUBLIC_SUPABASE_URL,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+  NEXT_PUBLIC_WS_URL: env.NEXT_PUBLIC_WS_URL,
+};
 const originalFetch = global.fetch;
+
+function setEnv(name: keyof typeof savedEnv, value: string | undefined): void {
+  if (value === undefined) delete env[name];
+  else env[name] = value;
+}
 
 function request(path: string, ip: string): NextRequest {
   return new NextRequest(`https://www.recopyfa.st${path}`, {
@@ -86,6 +96,14 @@ beforeEach(() => {
       listBuckets: jest.fn(async () => ({ data: [], error: null })),
     },
   }));
+  // `/api/health/ready` checks the deployment contract before touching its
+  // mocked database. This suite used to inherit the service-role key from a
+  // different test file, so it passed in one full-suite order and failed 3/5
+  // when run alone. Name every required variable here so the rate-limit proof
+  // is independent of Jest worker order.
+  env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
+  env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
+  env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
   env.NEXT_PUBLIC_WS_URL = "wss://recopyfast-ws.fly.dev";
   global.fetch = jest.fn(async () => ({
     ok: true,
@@ -100,8 +118,9 @@ beforeEach(() => {
 afterEach(() => {
   nowSpy.mockRestore();
   global.fetch = originalFetch;
-  if (savedWsUrl === undefined) delete env.NEXT_PUBLIC_WS_URL;
-  else env.NEXT_PUBLIC_WS_URL = savedWsUrl;
+  for (const [name, value] of Object.entries(savedEnv)) {
+    setEnv(name as keyof typeof savedEnv, value);
+  }
 });
 
 describe("the health endpoints' per-IP limit", () => {

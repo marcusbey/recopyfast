@@ -25,8 +25,9 @@ monitors above were created and left disabled. Uptime runs from GitHub Actions i
 - **On recovery:** comments and closes the issue.
 - **The run fails while anything is down**, so the Actions tab shows red and GitHub emails whoever
   last edited the schedule.
-- **Least privilege:** `contents: read`, `issues: write`; actions pinned by commit SHA;
-  `concurrency: uptime` so two runs never open two issues.
+- **Least privilege:** the workflow defaults to `contents: read`; only the named `probe` job gets
+  exactly `contents: read` plus `issues: write`. Actions are pinned by commit SHA;
+  `concurrency: uptime` keeps two runs from opening two issues.
 - **Decisions are code:** `scripts/uptime-check.mjs`, tested by
   `scripts/__tests__/uptime-check.test.mjs` (a blocking CI step).
 
@@ -42,7 +43,9 @@ Caveats you will meet:
 
 ## What the health endpoints answer
 
-`GET /api/health` (and `HEAD`, which checks the database and the rate-limit store only):
+`GET /api/health` (and `HEAD`, which checks the database and the rate-limit store only). Every GET
+spelling runs the real dependency checks: `?quick=true` is not a shortcut and cannot manufacture a
+healthy answer during an outage.
 
 | Component | Down means | Overall |
 |---|---|---|
@@ -54,6 +57,8 @@ Caveats you will meet:
 Each component is `{ "status": "ok" | "error" | "timeout", "latency": <ms> }` and nothing more.
 The reason is in the logs (Vercel function logs, and Sentry for errors), never in the body: the
 endpoint is anonymous. `GET /api/health/ready` answers `{ name, status, critical }` per check.
+Its exact checks are `environment_variables`, `database_connection` and `storage_access`; it does
+not claim that application routes passed unless it actually probes them.
 
 All three are rate limited **per IP: 60 requests per minute**, shared, and they **fail open** —
 with Redis down they still answer, and `/api/health` reports the outage as `cache: error`.
@@ -76,7 +81,9 @@ every 15 s (`server/fly.toml`).
   as `NEXT_PUBLIC_SENTRY_RELEASE`), the same name the source maps are uploaded under.
 - **Realtime service:** `server/sentry.js`, on when the Fly secret `SENTRY_DSN` is set. It reports
   uncaught exceptions and unhandled rejections, with tokens, credentials and client IPs scrubbed,
-  then exits 1 as before. See `server/README.md` § Secrets.
+  then exits 1 as before. Query names are URL-decoded for the sensitivity decision, so encoded forms
+  such as `to%6ben` and `rcf_%74oken` cannot bypass filtering; malformed names filter closed. See
+  `server/README.md` § Secrets.
 
 ## To do after the s84 deploy
 

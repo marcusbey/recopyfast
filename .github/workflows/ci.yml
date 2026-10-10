@@ -8,6 +8,14 @@ on:
     branches:
       - "**"
 
+# s75 (s69 L19): without this key the token gets the repository default, which
+# can be read-write. No job here pushes, comments or publishes — the npm cache
+# and the Playwright summary artifact use the runtime token, not GITHUB_TOKEN.
+# Every action below is pinned to a full commit SHA, its release in a comment;
+# a tag can be moved by whoever controls the action's repository.
+permissions:
+  contents: read
+
 jobs:
   # ─── Main CI job: lint → test → build ─────────────────────────────────────
   ci:
@@ -15,11 +23,14 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      # The s38 privilege suite replays every real migration against this
-      # disposable PostgreSQL 14 database. It is separate from the E2E Supabase
-      # stack and has no hosted credentials or network-reachable endpoint.
+      # scripts/run-db-invariants.mjs replays every real migration against this
+      # disposable database and runs the plain-SQL database suites on it. It is
+      # separate from the E2E Supabase stack and has no hosted credentials or
+      # network-reachable endpoint. s75: production is PostgreSQL 17.4; this was
+      # postgres:14 until then, so migrations were judged by another parser.
+      # The runner refuses any other major (scripts/db/replay-checks.mjs).
       postgres-s38:
-        image: postgres:14
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -81,19 +92,23 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      # s75: Node 24 LTS in every job, the realtime image (server/Dockerfile)
+      # and Vercel (package.json `engines`). Node 20 was past end of life and
+      # Vercel had discontinued 20.x, so CI was testing a runtime nothing ran.
+      - name: Set up Node.js 24
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
       # Every step in this job is a blocking gate:
-      # audit → lint → type-check → embed check → build → tests.
+      # audit → lint → format → type-check → embed check → build → tests
+      # (with the coverage ratchet) → database replay → script tests.
 
       # ── Step 0: Dependency vulnerabilities (BLOCKING) ─────────────────────
       # Production dependency tree only — dev-only advisories do not ship to
@@ -106,6 +121,12 @@ jobs:
       # ── Step 1: Lint (BLOCKING) ───────────────────────────────────────────
       - name: Lint (ESLint)
         run: npm run lint
+
+      # ── Step 1b: Formatting (BLOCKING) ────────────────────────────────────
+      # s75: in AGENTS.md's Definition of Done, but until s75 only the local
+      # pre-commit hook ran it. Same glob as `npm run format`.
+      - name: Check formatting (Prettier, blocking)
+        run: npm run format:check
 
       # ── Step 2: Production type-check (BLOCKING) ──────────────────────────
       # Type-checks shipped app code only (tsconfig.build.json excludes tests).
@@ -129,20 +150,32 @@ jobs:
       - name: Build (Next.js)
         run: npm run build
 
-      # ── Step 5: Unit / integration tests (Jest, BLOCKING) ─────────────────
-      # The broken mocks that forced `continue-on-error` have been fixed: the
-      # suite is green (61 passed / 1 skipped suite, 972 tests passed, 0 failed).
-      # It is now a real gate — if it goes red, the deploy stops.
-      # Worker count + idle memory limit stay capped to avoid the OOM/SIGABRT
-      # cascade this suite used to hit on CI runners.
-      - name: Test (Jest – CI mode, blocking)
-        run: npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB
+      # ── Step 5: Unit / integration tests + coverage ratchet (Jest, BLOCKING) ─
+      # A real gate — if it goes red, the deploy stops. Worker count + idle
+      # memory limit stay capped to avoid the OOM/SIGABRT cascade this suite
+      # used to hit on CI runners.
+      #
+      # s75: --coverage makes jest.config.js's coverageThreshold (the ratchet)
+      # fail this step when coverage drops. Until s75 only the local prepush
+      # script read the thresholds, so the ratchet held nowhere CI could see.
+      # One run, not a second full pass: a threshold miss prints
+      # `Jest: Coverage for lines (69.23%) does not meet "global" threshold (70%)`
+      # (measured by raising one threshold), naming the metric while every test
+      # still passes. text-summary keeps the coverage log to four lines.
+      - name: Test with coverage ratchet (Jest – CI mode, blocking)
+        run: npm test -- --ci --coverage --coverageReporters=text-summary --maxWorkers=2 --workerIdleMemoryLimit=512MB
+
+      # s75: the replay's own checks — the PostgreSQL major it accepts, and the
+      # report check that refuses a named suite that did not run — need no
+      # database, so they are tested before the replay relies on them.
+      - name: Test database replay checks (Node, blocking)
+        run: node --test scripts/__tests__/replay-checks.test.mjs
 
       # A normal Jest run deliberately gates real-Postgres suites when no
       # matching database is present. This dedicated step sets a required-db
       # contract through the runner, so connectivity or migration failures are
       # red rather than a passing "not verified" placeholder.
-      - name: Test database column privileges (PostgreSQL 14, blocking)
+      - name: Replay every migration on PostgreSQL 17 and run the database suites (blocking)
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:55438/recopyfast_s38_ci"
         run: node scripts/run-db-invariants.mjs
@@ -169,7 +202,7 @@ jobs:
   # constructing a service-role client, so changing only this workflow cannot
   # point them at production. The strict reporter makes skipped/flaky/missing
   # tests a failure and writes the only uploaded artifact: a credential-free
-  # summary with the exact expected 80-test count.
+  # summary with the exact expected 86-test count.
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
@@ -213,23 +246,23 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Prepare redacted report placeholder
         run: |
           set -euo pipefail
           mkdir -p test-results
-          printf '%s\n' '{"contract":"not-run","expected":80,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
+          printf '%s\n' '{"contract":"not-run","expected":86,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
           chmod 600 test-results/playwright-summary.json
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      - name: Set up Node.js 24
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v3
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
         with:
           version: "2.117.0"
 
@@ -296,6 +329,11 @@ jobs:
       # s70a: the embed-UI cleanup migration is executed on its exact seed in a
       # rolled-back transaction — seven rows deleted, every lookalike, edited
       # and review-tier row kept. Named here so it never records "[gated]".
+      #
+      # s70b (ADR 054): content_changes is a security-invoker view, which only
+      # this stack can prove — PostgreSQL 15 has the option the bare PG14
+      # replay lacks, and only real GoTrue JWTs through PostgREST show that an
+      # edit member reads no "who" and that no member reads another tenant.
       - name: Verify content tables take no direct writes through PostgREST, the snapshot reads fresh rows, and editor-code attempts are charged atomically
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -312,7 +350,8 @@ jobs:
               src/__tests__/db/edit-sessions-privileges.test.ts \
               src/__tests__/db/replay-privilege-convergence.test.ts \
               src/__tests__/db/editor-code-attempts.test.ts \
-              src/__tests__/db/embed-ui-rows-cleanup.test.ts
+              src/__tests__/db/embed-ui-rows-cleanup.test.ts \
+              src/__tests__/db/content-changes-view.test.ts
 
       - name: Test Founding Agency capacity against disposable Postgres
         env:
@@ -365,7 +404,7 @@ jobs:
       - name: Build production app
         run: npm run build
 
-      - name: Run all 80 Playwright tests (blocking)
+      - name: Run all 86 Playwright tests (blocking)
         run: |
           set -euo pipefail
           ws_log="$RUNNER_TEMP/recopyfast-ws.log"
@@ -407,14 +446,14 @@ jobs:
           );
           if (
             report.contract !== "passed" ||
-            report.expected !== 80 ||
-            report.total !== 80 ||
-            report.passed !== 80 ||
+            report.expected !== 86 ||
+            report.total !== 86 ||
+            report.passed !== 86 ||
             report.failed !== 0 ||
             report.skipped !== 0 ||
             report.flaky !== 0
           ) {
-            throw new Error("Playwright did not produce the required clean 80-test summary.");
+            throw new Error("Playwright did not produce the required clean 86-test summary.");
           }
           NODE
 
@@ -426,7 +465,7 @@ jobs:
 
       - name: Upload redacted Playwright summary
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: playwright-summary
           path: test-results/playwright-summary.json
@@ -450,12 +489,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      - name: Set up Node.js 24
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies

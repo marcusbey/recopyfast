@@ -1,77 +1,61 @@
-"use client";
-
-import { useLenis } from "@/lib/hooks/useLenis";
-import dynamic from "next/dynamic";
-import { Header } from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
-import Hero from "@/components/sections/Hero";
-import ValueProposition from "@/components/sections/ValueProposition";
-import HowItWorks from "@/components/sections/HowItWorks";
-import Benefits from "@/components/sections/Benefits";
-import Pricing from "@/components/sections/Pricing";
-import FinalCTA from "@/components/sections/FinalCTA";
-import HeroDemo from "@/components/landing/HeroDemo";
+import type { Metadata } from "next";
+import HomePage from "@/components/landing/HomePage";
+import { loadCatalogueOffers } from "@/lib/seo/catalogue-offers";
+import { buildSoftwareApplicationLd, serializeJsonLd } from "@/lib/seo/json-ld";
 import {
-  toFoundingOfferView,
-  useFoundingOffer,
-} from "@/hooks/useFoundingOffer";
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_OPEN_GRAPH,
+} from "@/lib/seo/site-identity";
+import { resolveSiteUrl } from "@/lib/seo/site-url";
 
-// Dynamic import to avoid SSR issues with Three.js. The loading gradient runs
-// the same horizon-to-zenith ramp as the shader, so the hand-off is a sharpening
-// rather than a colour change.
-const SkyBackground = dynamic(
-  () => import("@/components/three/sky/SkyBackground"),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="fixed inset-0 -z-10 bg-gradient-to-b from-[#5a9ce4] via-[#aed3f4] to-[#d6eafa]" />
-    ),
-  },
-);
+/**
+ * The homepage names itself. Until s88 the root layout did it for every page at
+ * once, which made every page that did not override it a duplicate of this one
+ * (see the note on `metadata` in `src/app/layout.tsx`).
+ *
+ * `openGraph` is restated in full rather than only `url`: a page's `openGraph`
+ * replaces its parent's whole object, so a lone `url` would drop the site name,
+ * title and description from the homepage's social card.
+ */
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+  openGraph: { ...SITE_OPEN_GRAPH, url: "/" },
+};
 
-export default function Home() {
-  /* Called for its effect, not its return value: it mounts Lenis and publishes
-     scroll progress to the module store the sky reads directly. Destructuring
-     `scrollProgress` here and passing it down would put the value back on the
-     React render path — one render of this entire tree per scroll step, which
-     is the cost useLenis exists to avoid. */
-  useLenis();
+/**
+ * The structured data states catalogue prices, so the page is regenerated on
+ * the pricing feed's interval (`/api/pricing` caches for 300 s) and the
+ * comparison pages' (ADR 032 §6). The body below is a client tree and is
+ * unaffected; only the server-written markup is refreshed.
+ */
+export const revalidate = 300;
 
-  /* One request for every section that names the founding offer, so the hero
-     and the pricing card cannot disagree about the count (s47b). */
-  const offer = toFoundingOfferView(useFoundingOffer());
+/**
+ * A server wrapper (s88) around the landing body, which is a client tree and
+ * so can neither export metadata nor read the catalogue. Here the page writes
+ * one SoftwareApplication JSON-LD for crawlers — PRD § Technical SEO, deferred
+ * from s37 by ADR 032 §5 — with offers from the plan catalogue and nothing it
+ * cannot back: no rating, no review, no fallback price.
+ */
+export default async function Home() {
+  const siteUrl = resolveSiteUrl();
+  const softwareApplication = buildSoftwareApplicationLd({
+    url: siteUrl,
+    name: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    offers: await loadCatalogueOffers(siteUrl),
+  });
 
   return (
-    <div className="min-h-screen">
-      {/* Volumetric sky above the fold, cheap layered sky below it. */}
-      <SkyBackground />
-
-      <Header />
-      <main className="relative z-10">
-        <Hero offer={offer} />
-
-        {/* The demo, pinned under the headline while page scroll drives the
-            demo site's own scroll. See HeroDemo for the mechanics. */}
-        <HeroDemo />
-
-        {/* The problem section is stacked UNDER the demo, not after it: the
-            negative margin parks it a full viewport beneath the pinned window
-            and the low z-index keeps it there, so the window lifting away at
-            the end of its track uncovers this section from its own first line
-            rather than from the middle. One viewport exactly — that is what
-            makes the two motions line up. Both halves of the effect live here
-            rather than inside either section, because neither one can see the
-            other: the overlap is a fact about their arrangement. */}
-        <div className="relative z-0 -mt-[100svh]">
-          <ValueProposition />
-        </div>
-
-        <HowItWorks />
-        <Benefits />
-        <Pricing offer={offer} />
-        <FinalCTA offer={offer} />
-      </main>
-      <Footer />
-    </div>
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: serializeJsonLd(softwareApplication),
+        }}
+      />
+      <HomePage />
+    </>
   );
 }

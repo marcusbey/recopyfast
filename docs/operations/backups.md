@@ -93,6 +93,17 @@ RLS was enabled on every table in all three — which is why the old step 5, an 
 have certified the first two. Not yet run against a hosted Supabase project: the first quarterly
 drill is that check.
 
+The exact schema-first/data-only commands below were rehearsed again on 2026-10-10 with a fresh,
+disposable PostgreSQL 17.11 source/target pair and all 73 current migrations. Synthetic
+`auth.users`, site, permission and content rows kept equal source/target counts; published copy was
+preserved; the step 6 privilege/function/RLS SQL returned zero rows; and effective web-role column
+grants matched. The ignored operator evidence is
+`.omx/ultragoal/evidence/s84/restore-proof/{local-drill.py,result.json}`. This was a local synthetic
+drill, not an encrypted production-artifact decrypt, auth identities/storage parity, hosted
+Supabase or provider restore, so it does not clear the quarterly hosted drill above. A separate
+read-only metadata check found scheduled run `38043247098` green with one unexpired 859,958-byte
+artifact; its contents and credentials were not downloaded.
+
 The backups repository's `README.md` must describe this same procedure. Until s84 its step 5 was
 `pg_restore --no-owner --no-privileges -d "<target url>" recopyfast.dump` — the first row above.
 If the two ever disagree, this page wins.

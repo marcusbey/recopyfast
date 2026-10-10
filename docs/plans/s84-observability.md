@@ -5,7 +5,8 @@ validated: yes
 
 > CTO decision under the owner's 2026-10-09 directive.
 
-Branch: `feature/s84-observability` (from `origin/main` `c0c40bf`).
+Branch: `feature/s84-observability` (created from `origin/main` `c0c40bf`; merged current
+`origin/main` `0dea1c0` during the 2026-10-10 recovery below).
 Research: `docs/research/s84-observability.md` — read it first; this plan does not repeat it.
 No Design step: no screen changes. No migration, no embed change (0 bytes).
 
@@ -163,6 +164,69 @@ Existing tests changed by the review fix (AGENTS.md § Tests): `sentry-tunnel-gu
 `tunnelRequest` takes a path (default unchanged); `websocket/sentry.test.ts`'s crash preload takes
 optional statements to run first, on lines of their own (default output byte-identical);
 `cache-check.test.ts` comment only. No test deleted.
+
+## Mainline recovery (2026-10-10)
+
+19. [x] **Merge the current production baseline.** Merged `origin/main` `0dea1c0` normally with
+    `--no-commit`. The only textual conflicts were `docs/stories.md` and `src/middleware.ts`:
+    stories keep both s84 and main's s74/s75/s88/s77 evidence; the middleware keeps main's
+    sessionless `/llms.txt` route and s84's normalized tunnel predicate. Main's s75 PostgreSQL 17,
+    Node 24 and CI-gate changes are now the authoritative validation harness.
+20. [x] **Make the health limiter proof independent.** RED: under the required Node 24 wrapper,
+    `npm test -- --runInBand src/__tests__/api/health/rate-limit.test.ts` failed 3 of 5 tests when
+    run alone because readiness correctly refused a missing `SUPABASE_SERVICE_ROLE_KEY`; the suite
+    only passed when another test happened to leave that variable behind. GREEN: the suite now
+    names and restores all three readiness-required variables itself; the isolated run passes 5/5.
+
+Existing test changed by this recovery (AGENTS.md § Tests): `rate-limit.test.ts` now owns the
+readiness environment its assertions require. No assertion or product behavior changed.
+
+## Independent review repair (2026-10-10)
+
+21. [x] **C1 (critical) — keep the workflow default read-only.** RED:
+    `release-gates.test.ts` and `uptime-check.test.mjs` both rejected the workflow-level
+    `issues: write`. GREEN: `.github/workflows/uptime.yml` keeps only `contents: read` at the top
+    level and gives the named `probe` job exactly `contents: read` plus `issues: write`. The s75
+    release-gate contract has one explicit allowlist entry, `uptime.yml#probe`, and mutations prove
+    that an extra grant or moving the grant to another job is rejected.
+22. [x] **M1 — every spelling of public health tells dependency truth.** RED: the former quick-path
+    test made the database fail and still received `200 healthy` without a realtime probe. GREEN:
+    `?quick=true` is an ordinary full `GET /api/health`; there is no unsupported bypass and no repo
+    caller to migrate.
+23. [x] **M2 — publish only checks that run.** RED: the route-level `no-leak.test.ts` received the
+    unconditional `critical_paths: pass`. GREEN: delete the placeholder and pin the exact readiness
+    set: `environment_variables`, `database_connection`, `storage_access`. No dynamic imports,
+    internal HTTP probes or route side effects were added.
+24. [x] **M3 — decode query names before the sensitivity decision.** RED: partially, fully and
+    mixed-case percent-encoded `token`, `editToken`, `rcf_token` and `handoff` names, plus malformed
+    escapes, retained their values in unit events and in a real CLI envelope sent to the local fake
+    ingest. GREEN: bounded one-pass URL decoding drives the decision while the raw key spelling is
+    preserved; malformed or oversized names filter closed. Ordinary URL/query data remains intact.
+
+Existing tests changed by this repair (AGENTS.md § Tests): `release-gates.test.ts` now declares the
+single reviewed write scope and tests widening/relocation; `uptime-check.test.mjs` pins the same
+top-level/job split; `realtime-check.test.ts` replaces the obsolete quick-bypass expectation with
+the truthful 503/component-body contract; `no-leak.test.ts` pins the readiness route's exact three
+check names; `websocket/sentry.test.ts` adds encoded-name unit rows, ordinary-query preservation and
+a real fake-ingest envelope control. No test was deleted.
+
+Restore evidence collected alongside this repair: a disposable two-database PostgreSQL 17.11
+drill replayed all 73 current migrations, loaded synthetic `auth.users` and public rows with the
+runbook's schema-first/data-only transaction, matched the five named source/target row counts,
+preserved published copy, returned zero findings from the runbook's privilege/function/RLS SQL and
+matched effective web-role column grants. Evidence is under the ignored operator path
+`.omx/ultragoal/evidence/s84/restore-proof/`. This proves the local commands against synthetic
+public-schema plus `auth.users` data only; it does not prove encrypted production-artifact decrypt,
+auth identities/storage parity, hosted Supabase or a provider restore. Read-only hosted metadata
+also showed scheduled run `38043247098` succeeded with an unexpired 859,958-byte artifact; its
+contents and credentials were not downloaded.
+
+The coordinator's continuation also pinned an inline-permission regression: with the approved
+uptime job still present, `another.yml` containing `{ contents: write }` previously escaped the
+new guard. The added case failed once, then passed with the guard accepting only explicit
+read/none mappings outside the one reviewed write scope. Final focused repair evidence:
+84 health/security tests,20 permission tests and22 uptime-tool tests passed. Full hooks and
+independent re-review still follow; these targeted results are not deployment proof.
 
 ## After merge (orchestrator; nothing here touches production)
 

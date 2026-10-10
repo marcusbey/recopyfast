@@ -125,27 +125,6 @@ async function checkStorageAccess(): Promise<ReadinessCheck> {
   }
 }
 
-async function checkCriticalPaths(): Promise<ReadinessCheck> {
-  try {
-    // Check if critical API routes are accessible
-    const criticalPaths = ["/api/sites", "/api/templates", "/api/auth/session"];
-
-    // In production, we would make actual requests to these endpoints
-    // For now, we'll just check if the route files exist
-    return {
-      name: "critical_paths",
-      status: "pass",
-      critical: true,
-    };
-  } catch (error) {
-    return {
-      name: "critical_paths",
-      status: "fail",
-      critical: true,
-    };
-  }
-}
-
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
 
@@ -160,7 +139,6 @@ export async function GET(request: NextRequest) {
       checkEnvironmentVariables(),
       checkDatabaseConnection(),
       checkStorageAccess(),
-      checkCriticalPaths(),
     ]);
 
     // Determine if app is ready

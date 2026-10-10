@@ -17,7 +17,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 # Two runs at once could both see "no open issue" and open two.
 concurrency:
@@ -27,6 +26,12 @@ concurrency:
 jobs:
   probe:
     name: Probe production
+    # s75 makes every workflow read-only by default. This named job is the one
+    # reviewed exception: scripts/uptime-check.mjs opens, comments on and closes
+    # public incident issues, and needs no other write capability.
+    permissions:
+      contents: read
+      issues: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

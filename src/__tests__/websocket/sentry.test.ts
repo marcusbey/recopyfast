@@ -252,6 +252,50 @@ describe("scrubEvent, below the top level and in logged objects", () => {
 
     expect(serverSentry.scrubBreadcrumb({ message: text }).message).toBe(text);
   });
+
+  it.each([
+    ["to%6ben", "ENCODED_PARTIAL_TOKEN"],
+    ["%74%6f%6b%65%6e", "ENCODED_FULL_TOKEN"],
+    ["EDIT%54OKEN", "ENCODED_MIXED_CASE_EDIT_TOKEN"],
+    ["rcf_%74oken", "ENCODED_RCF_TOKEN"],
+    ["%68andoff", "ENCODED_HANDOFF"],
+    ["to%6", "MALFORMED_ESCAPE_VALUE"],
+  ])("filters a query value whose raw name is %s", (name, secret) => {
+    const url = `/socket.io/?siteId=site-1&${name}=${secret}&transport=websocket`;
+    const scrubbed = serverSentry.scrubEvent({
+      message: `handshake failed for ${url}`,
+      request: {
+        url: `https://recopyfast-ws.fly.dev${url}`,
+        query_string: `${name}=${secret}&siteId=site-1`,
+      },
+    });
+    const wire = JSON.stringify(scrubbed);
+
+    expect(wire).not.toContain(secret);
+    expect(wire).toContain(`${name}=${serverSentry.FILTERED}`);
+    expect(wire).toContain("siteId=site-1");
+    expect(wire).toContain("transport=websocket");
+  });
+
+  it("normalizes encoded query-pair names without changing ordinary URLs or query data", () => {
+    const event = {
+      request: {
+        url: "https://recopyfast-ws.fly.dev/socket.io/?siteId=site-1&transport=websocket&feature%5Fflag=on",
+        query_string: [
+          ["edit%54oken", "ARRAY_ENCODED_EDIT_TOKEN"],
+          ["siteId", "site-1"],
+        ],
+      },
+    };
+
+    const scrubbed = serverSentry.scrubEvent(event);
+
+    expect(scrubbed.request.url).toBe(event.request.url);
+    expect(scrubbed.request.query_string).toEqual([
+      ["edit%54oken", serverSentry.FILTERED],
+      ["siteId", "site-1"],
+    ]);
+  });
 });
 
 describe("initSentry", () => {
@@ -524,6 +568,33 @@ describe("the realtime CLI, when it crashes", () => {
     expect(events[0]).toContain('"category":"console"');
     expect(events[0]).toContain("site-1");
     for (const secret of [SITE_TOKEN, EDIT_TOKEN, HANDOFF_CODE]) {
+      expect([secret, events[0].includes(secret)]).toEqual([secret, false]);
+    }
+  }, 30_000);
+
+  it("ships no credential from percent-encoded query names in a logged URL", async () => {
+    const encodedSiteToken = "REAL_INGEST_ENCODED_SITE_TOKEN";
+    const encodedHandoff = "REAL_INGEST_ENCODED_HANDOFF";
+    const encodedUrl =
+      `/socket.io/?siteId=site-1&to%6ben=${encodedSiteToken}` +
+      `&rcf_%74oken=${encodedHandoff}&transport=websocket`;
+    const run = await crashCli(
+      "throw",
+      {
+        SENTRY_DSN: ingest.dsn,
+        RCF_S84_ENCODED_URL: encodedUrl,
+      },
+      'console.log("encoded handshake", process.env.RCF_S84_ENCODED_URL);',
+    );
+
+    expect(run.code).toBe(1);
+    const events = ingest.envelopes.filter((body) =>
+      body.includes("boom-s84 throw"),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toContain("siteId=site-1");
+    expect(events[0]).toContain("transport=websocket");
+    for (const secret of [encodedSiteToken, encodedHandoff]) {
       expect([secret, events[0].includes(secret)]).toEqual([secret, false]);
     }
   }, 30_000);

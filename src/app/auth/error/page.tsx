@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   Card,
   CardContent,
@@ -8,6 +9,13 @@ import { Button } from "@/components/ui/button";
 import { IconTile } from "@/components/ui/icon-tile";
 import { AlertCircle } from "lucide-react";
 import Link from "next/link";
+
+// Reached only from a failed sign-in link; nothing here belongs in a search
+// index (s88). robots.txt also disallows /auth/, because /auth/confirm spends a
+// one-time token from its query string.
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export default function AuthErrorPage() {
   return (

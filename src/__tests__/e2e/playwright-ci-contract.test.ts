@@ -18,7 +18,8 @@ describe("Playwright CI contract", () => {
   });
 
   it("pins and starts the disposable service stack", () => {
-    expect(workflow).toContain("supabase/setup-cli@v3");
+    // s75: pinned by commit SHA (s69 L19), still a v3 release of the action.
+    expect(workflow).toMatch(/supabase\/setup-cli@[0-9a-f]{40} # v3\.\d+\.\d+/);
     expect(workflow).toContain('version: "2.117.0"');
     expect(workflow).toContain("image: redis:7-alpine");
     expect(workflow).toContain("supabase start");
@@ -37,7 +38,10 @@ describe("Playwright CI contract", () => {
   // s66c1: 69 -> 78, the nine site-pages tests (e2e/site-pages.spec.ts).
   // s66c2: 78 -> 80, the two `quick setup walks a new site to Live @<width>`
   // tests in that spec.
-  it("runs all 80 tests and always cleans up and uploads the redacted summary", () => {
+  // s74: 80 -> 81, E2E-019 in e2e/landing.spec.ts (a software WebGL renderer
+  // gets the static sky).
+  // s70b: 81 -> 86, the five Changes page tests (e2e/changes.spec.ts).
+  it("runs all 86 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -45,11 +49,11 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":80');
-    expect(workflow).toContain("report.expected !== 80");
-    expect(workflow).toContain("report.total !== 80");
-    expect(workflow).toContain("report.passed !== 80");
-    expect(config).toContain("expected: 80");
+    expect(workflow).toContain('"expected":86');
+    expect(workflow).toContain("report.expected !== 86");
+    expect(workflow).toContain("report.total !== 86");
+    expect(workflow).toContain("report.passed !== 86");
+    expect(config).toContain("expected: 86");
     expect(workflow).toContain("if-no-files-found: error");
   });
 

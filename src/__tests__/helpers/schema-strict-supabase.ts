@@ -47,6 +47,12 @@ export interface RecordedFilter {
   value: unknown;
 }
 
+interface Ordering {
+  column: string;
+  ascending: boolean;
+  nullsFirst: boolean;
+}
+
 export interface RecordedQuery {
   table: string;
   operation: Operation;
@@ -132,11 +138,13 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   private isHead = false;
   private isCounted = false;
   private isReturning = false;
-  private ordering: { column: string; ascending: boolean } | null = null;
+  private orderings: Ordering[] = [];
+  private rowOffset = 0;
 
   constructor(
     private readonly table: Table,
     private readonly record: (query: RecordedQuery) => void,
+    private readonly maxRows: number | null = null,
   ) {}
 
   select(
@@ -202,13 +210,34 @@ class QueryBuilder implements PromiseLike<QueryResult> {
     return this.filter("in", column, values);
   }
 
-  order(column: string, options: { ascending?: boolean } = {}): this {
-    this.ordering = { column, ascending: options.ascending !== false };
+  /**
+   * Chained calls sort by each key in turn, as PostgREST's `order=a,b` does.
+   * Nulls follow PostgreSQL: last when ascending, FIRST when descending,
+   * unless `nullsFirst` says otherwise (s88, Devin on PR #83: a descending
+   * read without `nullsFirst: false` puts undated rows on top).
+   */
+  order(
+    column: string,
+    options: { ascending?: boolean; nullsFirst?: boolean } = {},
+  ): this {
+    const ascending = options.ascending !== false;
+    this.orderings.push({
+      column,
+      ascending,
+      nullsFirst: options.nullsFirst ?? !ascending,
+    });
     return this;
   }
 
   limit(count: number): this {
     this.rowLimit = count;
+    return this;
+  }
+
+  /** Rows `from`..`to` inclusive, as supabase-js `range` sends `offset`/`limit`. */
+  range(from: number, to: number): this {
+    this.rowOffset = from;
+    this.rowLimit = to - from + 1;
     return this;
   }
 
@@ -272,7 +301,7 @@ class QueryBuilder implements PromiseLike<QueryResult> {
     const readColumn = table.unknownColumn([
       ...(this.projection ?? []),
       ...this.filters.map((filter) => filter.column),
-      ...(this.ordering ? [this.ordering.column] : []),
+      ...this.orderings.map((ordering) => ordering.column),
     ]);
     if (readColumn) {
       return doubleError(
@@ -372,18 +401,30 @@ class QueryBuilder implements PromiseLike<QueryResult> {
       return matched;
     }
 
-    const ordered = this.ordering ? this.sorted(matched) : matched;
-    return this.rowLimit === null ? ordered : ordered.slice(0, this.rowLimit);
+    const ordered = this.orderings.length > 0 ? this.sorted(matched) : matched;
+    const end =
+      this.rowLimit === null ? undefined : this.rowOffset + this.rowLimit;
+    const page = ordered.slice(this.rowOffset, end);
+    // PostgREST's `max_rows` caps every response, whatever the request asked.
+    return this.maxRows === null ? page : page.slice(0, this.maxRows);
   }
 
   private sorted(rows: Row[]): Row[] {
-    const { column, ascending } = this.ordering!;
     return [...rows].sort((a, b) => {
-      const left = a[column] as string | number;
-      const right = b[column] as string | number;
-      if (left === right) return 0;
-      const order = left < right ? -1 : 1;
-      return ascending ? order : -order;
+      for (const { column, ascending, nullsFirst } of this.orderings) {
+        const left = a[column];
+        const right = b[column];
+        const isLeftNull = left === null || left === undefined;
+        const isRightNull = right === null || right === undefined;
+        if (isLeftNull && isRightNull) continue;
+        if (isLeftNull) return nullsFirst ? -1 : 1;
+        if (isRightNull) return nullsFirst ? 1 : -1;
+        if (left === right) continue;
+        const order =
+          (left as string | number) < (right as string | number) ? -1 : 1;
+        return ascending ? order : -order;
+      }
+      return 0;
     });
   }
 }
@@ -400,7 +441,14 @@ export interface SchemaStrictDatabase {
   queriesOn: (table: string) => RecordedQuery[];
 }
 
-export function createSchemaStrictDatabase(): SchemaStrictDatabase {
+/**
+ * `maxRows` models PostgREST's `max_rows` (supabase/config.toml): no response
+ * carries more rows than that, whatever `limit` or `range` asked for.
+ */
+export function createSchemaStrictDatabase(
+  options: { maxRows?: number } = {},
+): SchemaStrictDatabase {
+  const maxRows = options.maxRows ?? null;
   const tables = new Map<string, Table>();
   const queries: RecordedQuery[] = [];
 
@@ -416,7 +464,7 @@ export function createSchemaStrictDatabase(): SchemaStrictDatabase {
   return {
     client: {
       from: (name: string) =>
-        new QueryBuilder(table(name), (query) => queries.push(query)),
+        new QueryBuilder(table(name), (query) => queries.push(query), maxRows),
     },
     seed(name, rows) {
       const target = table(name);

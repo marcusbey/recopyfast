@@ -132,7 +132,7 @@ const EMBED_ASSETS = [
 ];
 
 /** Crawler fetches. Same shape of caller: no session is possible. */
-const CRAWLER_ASSETS = ["/robots.txt", "/sitemap.xml"];
+const CRAWLER_ASSETS = ["/robots.txt", "/sitemap.xml", "/llms.txt"];
 
 /** The public landing page and its one exact cross-origin preview runtime. */
 const TRY_ASSETS = ["/try", "/try/rcf-try.js"];

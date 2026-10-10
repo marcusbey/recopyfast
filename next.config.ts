@@ -85,6 +85,18 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // s88. The dashboard's layout also exports `robots: noindex, nofollow`
+        // (s88 review), so its HTML and this header say the same thing
+        // (src/__tests__/app/seo-canonicals.test.ts); the header is read
+        // without parsing the page. The auth redirect and robots.txt already
+        // keep crawlers out; this is for the one that ignores robots.txt and
+        // reaches a page anyway.
+        // `:path*` also matches the bare `/dashboard`
+        // (src/__tests__/next-config-robots-headers.test.ts).
+        source: "/dashboard/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+      {
         // Apply to all routes
         source: '/(.*)',
         headers: [
@@ -119,6 +131,15 @@ const nextConfig: NextConfig = {
       // Config redirects run before middleware, so src/middleware.ts never
       // sees this path.
       { source: "/pricing", destination: "/#pricing", permanent: true },
+      // s70b: the Content page became Changes. The old URL is in bookmarks
+      // and in every tab the old sidebar opened, so it answers 308 rather
+      // than 404; the session gate in src/middleware.ts then applies to
+      // /dashboard/changes like any dashboard page.
+      {
+        source: "/dashboard/content",
+        destination: "/dashboard/changes",
+        permanent: true,
+      },
     ];
   },
 

@@ -4,6 +4,44 @@ Verified on `origin/main` `c0c40bf`, 2026-10-09, in the worktree `feature/s84-ob
 Installed versions: `next` 16.3.8, `@sentry/nextjs` / `@sentry/node` 10.58.0 (root). Nothing here was
 checked against production: no Vercel, Fly, Sentry or GitHub setting was read or changed.
 
+## Integration addendum — 2026-10-10
+
+The branch was reconciled with `origin/main` `0dea1c0` after this research. That baseline contains
+s75, so PostgreSQL 17 and Node 24 are now authoritative: `.github/workflows/ci.yml` uses
+`postgres:17` and Node 24, and `scripts/db/replay-checks.mjs` makes the database runner refuse any
+other server major. References below to the earlier PostgreSQL 14 / Node 20 harness describe the
+original research state, not the merged branch.
+
+The normal merge had two textual conflicts. `docs/stories.md` retains both histories.
+`src/middleware.ts` retains main's sessionless `/llms.txt` route and s84's
+`isSentryTunnelPath`, so case, encoded-letter and trailing-slash tunnel spellings still reach the
+allow-list without paying for a session.
+
+A fresh isolated Node 24 run found one test-harness dependency: `rate-limit.test.ts` expected the
+readiness route to answer 200 without setting `SUPABASE_SERVICE_ROLE_KEY`, although
+`checkEnvironmentVariables` requires it alongside the public Supabase URL and anon key. The test
+passed only when another suite leaked that variable. The recovery makes the suite set and restore
+all three required values; no route behavior changed.
+
+## Independent review addendum — 2026-10-10
+
+- Main's s75 workflow policy is list-wide: every workflow must default to exactly `contents: read`.
+  Uptime is the only job that mutates GitHub state, so the narrow compatible shape is a reviewed
+  `uptime.yml#probe` override with exactly `contents: read` and `issues: write`; all other write
+  scopes remain forbidden.
+- `rg` found no production caller of `/api/health?quick=true`. The branch still inherited a shortcut
+  that returned `200 healthy` before database, cache, storage and realtime checks, contradicting the
+  s84 public component contract. The parameter now has ordinary full-probe behavior.
+- Readiness inherited `critical_paths: pass`, but its function only constructed an unused route-name
+  array and never called, imported or inspected a route. The truthful response has exactly the three
+  checks it performs: environment, database and storage. Calling application routes from readiness
+  would add authority and side effects and has no accepted design.
+- The realtime scrubber tested raw query names. Standard URL parsing decodes `to%6ben`,
+  `edit%54oken`, `rcf_%74oken` and `%68andoff` into sensitive names, so their values survived in
+  request URLs, messages and Sentry envelopes. One bounded `decodeURIComponent` pass now decides
+  sensitivity while retaining the original spelling in output; malformed or oversized names are
+  filtered closed.
+
 ## 1. `/api/health` and Redis (A-30)
 
 - `HealthStatus.checks.cache?` is declared (`src/app/api/health/route.ts:20`) and never set. `GET`
@@ -151,3 +189,14 @@ then `--data-only` under `session_replication_role = replica`, matched productio
 exactly (0 differing grants). Triggers that would rewrite loaded rows: `BEFORE INSERT ON
 staging_access`, `AFTER INSERT ON public.content_elements`. Migration-seeded tables: `plans`,
 `copy_styles`, `founding_offers`, one `sites` row.
+
+**Local restore drill (2026-10-10):** a fresh disposable PostgreSQL 17.11 source/target pair replayed
+all 73 current migrations and ran the documented schema-first/data-only transaction with synthetic
+`auth.users`, site, permission and content rows. The five named row counts matched, published copy
+survived, the runbook privilege/function/RLS queries returned zero rows and effective web-role
+column grants matched. Evidence:
+`.omx/ultragoal/evidence/s84/restore-proof/{local-drill.py,result.json}`. Scope remains local and
+synthetic: no encrypted production artifact, auth identities/storage parity, hosted Supabase or
+provider restore was exercised. Read-only backup-repository metadata showed scheduled run
+`38043247098` completed successfully and retained one unexpired 859,958-byte artifact; no artifact
+contents or credentials were downloaded.

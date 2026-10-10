@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+
+import {
+  REQUIRED_PG_MAJOR,
+  assertServerMajor,
+  verifyReplayReport,
+} from "./db/replay-checks.mjs";
 
 const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -28,6 +34,35 @@ const EDIT_SESSIONS_MIGRATION =
   "20261008100000_edit_sessions_service_role_writes.sql";
 const CONVERGENCE_MIGRATION = "20261008110000_converge_replay_privileges.sql";
 const isPreFixProof = process.argv.includes("--pre-fix-proof");
+
+// Every suite the replay step runs. Each must produce at least one passing test
+// against this database: verifyReplayReport refuses a suite that matched no
+// file, registered a placeholder other than the PostgREST one, or skipped
+// everything.
+const REPLAY_SUITES = [
+  "src/__tests__/db/column-privileges.test.ts",
+  "src/__tests__/db/public-content-revision.test.ts",
+  // s68a: the definer-function and RLS invariants were only ever run by
+  // hand; a plain Jest run turns them into a passing "[gated]" line. Named
+  // here, under RCF_REQUIRE_TEST_DB=1, they gate every replay.
+  "src/__tests__/db/function-grants.test.ts",
+  "src/__tests__/db/rls-policies.test.ts",
+  "src/__tests__/db/edit-sessions-privileges.test.ts",
+  "src/__tests__/db/replay-privilege-convergence.test.ts",
+  // s75: these seven were named by no CI step, so every run recorded a
+  // "[gated]" placeholder or a describe.skip for them. None needs PostgREST
+  // or GoTrue. The first five use db-harness and run on this replay; the
+  // last two each create, own and drop a scratch database on this server
+  // (content-attributes-lifecycle refuses the Supabase port 54322, so it
+  // cannot ride the e2e job's database steps).
+  "src/__tests__/db/content-version-concurrency.test.ts",
+  "src/__tests__/db/content-version-i18n.test.ts",
+  "src/__tests__/db/restore-reports-rows.test.ts",
+  "src/__tests__/db/site-delete-cascade.test.ts",
+  "src/__tests__/db/sites-install-status.test.ts",
+  "src/__tests__/db/content-attributes-lifecycle.test.ts",
+  "src/__tests__/db/editor-activation-concurrency.test.ts",
+];
 
 function run(command, args, options = {}) {
   execFileSync(command, args, {
@@ -51,7 +86,7 @@ function findBinary(name) {
     if (result.status === 0) return candidate;
   }
   throw new Error(
-    `Could not find ${name}. Set RCF_POSTGRES_BIN to a PostgreSQL 14 bin directory.`,
+    `Could not find ${name}. Set RCF_POSTGRES_BIN to a PostgreSQL ${REQUIRED_PG_MAJOR} bin directory.`,
   );
 }
 
@@ -94,7 +129,9 @@ try {
     const initdb = findBinary("initdb");
     ownedPgCtl = findBinary("pg_ctl");
     const port = await availablePort();
-    ownedDataDir = mkdtempSync(path.join(tmpdir(), "recopyfast-s38-pg14-"));
+    ownedDataDir = mkdtempSync(
+      path.join(tmpdir(), `recopyfast-replay-pg${REQUIRED_PG_MAJOR}-`),
+    );
     run(initdb, [
       "-D",
       ownedDataDir,
@@ -139,11 +176,7 @@ try {
     ],
     { ...psqlOptions, encoding: "utf8" },
   ).trim();
-  if (!/^14\d{4}$/.test(serverVersion)) {
-    throw new Error(
-      `Database invariant runner requires PostgreSQL 14; server reported ${serverVersion}.`,
-    );
-  }
+  assertServerMajor(serverVersion);
 
   run(psql, [...psqlArgs, "--file", BOOTSTRAP], psqlOptions);
 
@@ -185,29 +218,44 @@ try {
   }
 
   const node = process.execPath;
-  run(
-    node,
-    [
-      require.resolve("jest/bin/jest"),
-      "--runInBand",
-      "src/__tests__/db/column-privileges.test.ts",
-      "src/__tests__/db/public-content-revision.test.ts",
-      // s68a: the definer-function and RLS invariants were only ever run by
-      // hand; a plain Jest run turns them into a passing "[gated]" line. Named
-      // here, under RCF_REQUIRE_TEST_DB=1, they gate every replay.
-      "src/__tests__/db/function-grants.test.ts",
-      "src/__tests__/db/rls-policies.test.ts",
-      "src/__tests__/db/edit-sessions-privileges.test.ts",
-      "src/__tests__/db/replay-privilege-convergence.test.ts",
-    ],
-    {
-      env: {
-        ...process.env,
-        RCF_TEST_DB_URL: databaseUrl,
-        RCF_REQUIRE_TEST_DB: "1",
-      },
-    },
+  const reportDir = mkdtempSync(
+    path.join(tmpdir(), "recopyfast-replay-report-"),
   );
+  try {
+    const reportFile = path.join(reportDir, "jest.json");
+    run(
+      node,
+      [
+        require.resolve("jest/bin/jest"),
+        "--runInBand",
+        "--json",
+        `--outputFile=${reportFile}`,
+        ...REPLAY_SUITES,
+      ],
+      {
+        env: {
+          ...process.env,
+          RCF_TEST_DB_URL: databaseUrl,
+          RCF_REQUIRE_TEST_DB: "1",
+          // editor-activation-concurrency reads its own variable and falls
+          // back to describe.skip without it; it only bootstraps a scratch
+          // database from this URL.
+          RCF_S29_DB_URL: databaseUrl,
+        },
+      },
+    );
+
+    // Jest exits 0 on a placeholder, a describe.skip and a path that matched
+    // nothing. A green replay must mean every named suite ran here, and that
+    // verdict is verifyReplayReport's alone (tested by `node --test`; s75
+    // review). It throws, naming each suite that did not run; nothing here
+    // catches it, so the run ends red.
+    console.log(
+      verifyReplayReport(reportFile, REPLAY_SUITES, realpathSync(REPO_ROOT)),
+    );
+  } finally {
+    rmSync(reportDir, { recursive: true, force: true });
+  }
 } finally {
   if (ownedDataDir && ownedPgCtl) {
     try {

@@ -29,7 +29,9 @@ jest.mock("@/components/sections/Benefits", () => ({
   default: () => null,
 }));
 
-import Home from "@/app/page";
+// s88 moved the landing body out of `src/app/page.tsx`, which became a server
+// wrapper (metadata, JSON-LD). The body is what names the offer.
+import Home from "@/components/landing/HomePage";
 
 /**
  * s47b — the landing page names the founding offer in three places: the hero

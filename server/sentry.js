@@ -59,6 +59,9 @@ const FLUSH_TIMEOUT_MS = 2000;
 /** How deep the scrubber walks. Sentry events are normalised well above this. */
 const MAX_SCRUB_DEPTH = 12;
 
+/** Longer query names are malformed for this service and are filtered closed. */
+const MAX_QUERY_NAME_LENGTH = 512;
+
 /**
  * Names whose value is a credential, in a query string, header, object key or
  * `key: value` text: any name CONTAINING one of the first list, or exactly one
@@ -131,6 +134,22 @@ function isSensitiveName(name) {
   return SENSITIVE_NAME.test(name);
 }
 
+/**
+ * Decide with the name a URL parser sees, while preserving its raw spelling in
+ * the scrubbed event. The s84 review found `to%6ben` and `rcf_%74oken` passed
+ * the raw-name regex even though every HTTP query parser decodes them to
+ * credentials. A malformed or oversized escape is filtered closed: retaining
+ * one questionable value is worse than losing it from a crash report.
+ */
+function isSensitiveQueryName(rawName) {
+  if (rawName.length > MAX_QUERY_NAME_LENGTH) return true;
+  try {
+    return isSensitiveName(decodeURIComponent(rawName.replace(/\+/g, ' ')));
+  } catch {
+    return true;
+  }
+}
+
 function isSensitiveKey(key) {
   return isSensitiveName(key) || IP_HEADERS.has(key.toLowerCase());
 }
@@ -152,7 +171,7 @@ function scrubString(value) {
     // An empty value hides nothing — and is what a quoted value the line above
     // already filtered (`handoff="[Filtered]"`) looks like from here.
     .replace(QUERY_PAIR, (match, separator, name, value) =>
-      value && isSensitiveName(name) ? `${separator}${name}=${FILTERED}` : match
+      value && isSensitiveQueryName(name) ? `${separator}${name}=${FILTERED}` : match
     )
     .replace(BEARER, `$1 ${FILTERED}`)
     .replace(JWT, FILTERED);
@@ -179,9 +198,19 @@ function scrubDeep(value, depth = 0) {
 function scrubQueryString(queryString) {
   if (Array.isArray(queryString)) {
     return queryString.map((pair) =>
-      Array.isArray(pair) && typeof pair[0] === 'string' && isSensitiveName(pair[0])
+      Array.isArray(pair) &&
+      typeof pair[0] === 'string' &&
+      isSensitiveQueryName(pair[0])
         ? [pair[0], FILTERED]
         : scrubDeep(pair)
+    );
+  }
+  if (queryString && typeof queryString === 'object') {
+    return Object.fromEntries(
+      Object.entries(queryString).map(([name, value]) => [
+        name,
+        isSensitiveQueryName(name) ? FILTERED : scrubDeep(value),
+      ])
     );
   }
   return scrubDeep(queryString);

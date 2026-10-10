@@ -8,6 +8,10 @@ import {
   type RateLimitFailureMode,
 } from "@/lib/api/rate-limit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import {
+  MAX_API_KEYS_PER_SITE,
+  MAX_API_KEY_NAME_LENGTH,
+} from "@/lib/api/api-key-limits";
 
 /*
  * Write boundary (s42).
@@ -184,6 +188,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // s77 (s42 review m3). Bounds both what the caller typed and what is
+    // stored: sanitizing HTML-encodes, so 100 `<` would be stored as 400
+    // characters (Devin on PR #82). Checked before any read.
+    if (
+      String(name).trim().length > MAX_API_KEY_NAME_LENGTH ||
+      sanitizedName.length > MAX_API_KEY_NAME_LENGTH
+    ) {
+      return NextResponse.json(
+        {
+          error: `Key name must be at most ${MAX_API_KEY_NAME_LENGTH} characters.`,
+        },
+        { status: 400 },
+      );
+    }
+
     // Verify the authenticated user has admin permission on this site
     const { data: sitePermission, error: permissionError } = await supabase
       .from("site_permissions")
@@ -205,14 +224,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Service-role from here — see "Write boundary" at the top of this file.
+    const serviceClient = createServiceRoleClient();
+
+    // s77 (s42 review m3, s44 review m2, ADR 056). `/api/v1/content` meters
+    // per key, so the number of keys multiplies a site's ceiling; this cap is
+    // what keeps that per-site. Counted per SITE — every admin's keys, active
+    // or paused (a paused key resumes without a create) — through the service
+    // client, because the SELECT policy shows a user only their own keys. Scoped
+    // by the site whose admin row was just read. A count the database cannot
+    // give refuses: an uncounted create is an uncapped one.
+    //
+    // Check-then-insert, not atomic: concurrent creates can overshoot by the
+    // number in flight, which the fail-closed write limiter above (10/min per
+    // user) bounds — and only an admin of this site can race it, against their
+    // own site's budget (ADR 056, "Considered options").
+    const { count: keysOnSite, error: countError } = await serviceClient
+      .from("api_keys")
+      .select("id", { count: "exact", head: true })
+      .eq("site_id", sanitizedSiteId);
+
+    if (countError || typeof keysOnSite !== "number") {
+      console.error("API key count error:", countError);
+      return NextResponse.json(
+        { error: "Failed to create API key" },
+        { status: 500 },
+      );
+    }
+
+    if (keysOnSite >= MAX_API_KEYS_PER_SITE) {
+      return NextResponse.json(
+        {
+          error: `This site already has ${MAX_API_KEYS_PER_SITE} API keys, the most a site can hold. Delete one before creating another.`,
+        },
+        { status: 409 },
+      );
+    }
+
     // Generate API key
     const { key, hash, prefix } = generateApiKey();
 
-    // Service-role insert — see "Write boundary" at the top of this file.
     // Bound to exactly one site: `user_id` is the session user and `site_id` is
     // the site whose admin row was just read under RLS. Key material, scopes and
     // rate limit are never taken from the request body.
-    const serviceClient = createServiceRoleClient();
     const { data: apiKey, error: insertError } = await serviceClient
       .from("api_keys")
       .insert([

@@ -11,6 +11,26 @@ function extractToken(request: NextRequest) {
   return request.nextUrl.searchParams.get("token");
 }
 
+/**
+ * s77 review m3: only a successful answer is reusable. A 429/503 from either
+ * limiter (or a 401, or a 500) used to carry the same one-minute public cache
+ * plus five minutes stale, so a browser or CDN could keep serving a refusal
+ * long after its `Retry-After` — the limiter would have let go, the cache not.
+ * A refusal is `private` (a 429 here is one address's, never a shared cache's
+ * to hand out) and `no-cache` (never served again without asking us).
+ *
+ * TOMBSTONE (PR #82 CI): NOT `no-store`, which is what the m3 fix first used.
+ * The widget reads this body only on an OK answer (`fetchActiveTests` returns
+ * on `!response.ok`), and Chromium never finishes a fetch whose body nobody
+ * reads unless its HTTP cache is writing the body down — `no-store` forbids
+ * that, so every page view that drew a refusal held a request open forever.
+ * The two realtime specs waited for network idle until they timed out, on every
+ * retry; a prerenderer or crawler waiting for network idle on a customer's page
+ * would hang the same way. Every widget ever installed has that early return,
+ * so the header is where it is fixed.
+ */
+const REFUSAL_CACHE_CONTROL = "private, no-cache";
+
 function withCors(response: NextResponse) {
   response.headers.set("Access-Control-Allow-Origin", "*");
   response.headers.set(
@@ -20,7 +40,9 @@ function withCors(response: NextResponse) {
   response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS");
   response.headers.set(
     "Cache-Control",
-    "public, max-age=60, stale-while-revalidate=300",
+    response.ok
+      ? "public, max-age=60, stale-while-revalidate=300"
+      : REFUSAL_CACHE_CONTROL,
   );
   return response;
 }
@@ -30,6 +52,22 @@ export async function GET(
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
+    // s77 (s69 L7). Per IP, BEFORE authorization. The per-site limiter below has
+    // to sit behind `authorizeSiteRequest` (an anonymous caller must not spend a
+    // customer's bucket), which left the authorizer's `sites` lookup unmetered
+    // for anyone naming a site id. 200/min per address: the content GET on the
+    // same page view is already behind the same ceiling, so no visitor meets a
+    // new one here. Fails CLOSED: every request this route would serve passes
+    // the fail-closed per-site limiter anyway, so an outage refuses visitors
+    // there regardless — failing open would only hand a flood the authorizer.
+    const shed = await enforceRateLimit(request, {
+      limit: "IP_GENERAL",
+      endpoint: "ab-tests/active:ip",
+      identifierType: "ip",
+      onStoreFailure: "deny",
+    });
+    if (shed) return withCors(shed);
+
     const { siteId } = await params;
     const token = extractToken(request);
 

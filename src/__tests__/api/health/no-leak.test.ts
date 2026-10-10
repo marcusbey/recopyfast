@@ -213,7 +213,13 @@ describe("GET /api/health/ready — what an anonymous caller learns", () => {
     const { response, body } = await getReady();
 
     expect(response.status).toBe(200);
-    expect(body.checks.length).toBeGreaterThan(0);
+    expect(
+      body.checks.map((check: { name: string }) => check.name).sort(),
+    ).toEqual([
+      "database_connection",
+      "environment_variables",
+      "storage_access",
+    ]);
     for (const check of body.checks) {
       expect(Object.keys(check).sort()).toEqual(["critical", "name", "status"]);
     }

@@ -380,12 +380,24 @@ test("runs every 10 minutes and on demand", () => {
   assert.match(workflow, /^\s+workflow_dispatch:\s*$/m);
 });
 
-test("holds exactly contents: read and issues: write, nowhere widened", () => {
-  const block = workflow.match(/^permissions:\n((?:\s{2}\S.*\n)+)/m);
-  assert.ok(block, "a top-level permissions block");
-  const grants = block[1].trim().split("\n").map((line) => line.trim()).sort();
-  assert.deepEqual(grants, ["contents: read", "issues: write"]);
-  assert.equal(workflow.match(/^\s*permissions:/gm).length, 1, "no job-level override");
+test("keeps the workflow read-only and gives only the probe job its exact issue grant", () => {
+  const topLevel = workflow.match(/^permissions:\n((?:\s{2}\S.*\n)+)/m);
+  assert.ok(topLevel, "a top-level permissions block");
+  assert.deepEqual(
+    topLevel[1].trim().split("\n").map((line) => line.trim()).sort(),
+    ["contents: read"],
+  );
+
+  const probeStart = workflow.indexOf("\n  probe:\n");
+  assert.notEqual(probeStart, -1, "the named probe job");
+  const probe = workflow.slice(probeStart + 1);
+  const jobPermissions = probe.match(/^    permissions:\n((?:\s{6}\S.*\n)+)/m);
+  assert.ok(jobPermissions, "the probe job's permissions block");
+  assert.deepEqual(
+    jobPermissions[1].trim().split("\n").map((line) => line.trim()).sort(),
+    ["contents: read", "issues: write"],
+  );
+  assert.equal(workflow.match(/^\s*permissions:/gm).length, 2, "no other override");
 });
 
 test("pins every action to a full commit SHA", () => {
