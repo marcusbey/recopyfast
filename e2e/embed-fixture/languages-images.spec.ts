@@ -3,6 +3,7 @@ import {
   FIXTURE_ELEMENT_IDS,
   FIXTURE_SITE_ID,
   FIXTURE_SITE_TOKEN,
+  FIXTURE_STAGING_TOKEN,
   startFixtureServers,
   type FixtureServers,
   waitForWidget,
@@ -30,13 +31,47 @@ test.describe("built embed fixture: languages and images", () => {
 
   test("adds a language through the widget and re-renders the panel", async ({
     page,
+    request,
   }) => {
+    const languagesUrl = `${fixture.servingOrigin}/api/edit-board/languages`;
+    for (const headers of [
+      undefined,
+      { authorization: "Bearer wrong-token" },
+    ]) {
+      const response = await request.get(
+        `${languagesUrl}?siteId=${FIXTURE_SITE_ID}`,
+        { failOnStatusCode: false, headers },
+      );
+      expect(response.status()).toBe(401);
+    }
+    for (const headers of [
+      undefined,
+      { authorization: "Bearer wrong-token" },
+    ]) {
+      const response = await request.post(languagesUrl, {
+        failOnStatusCode: false,
+        headers,
+        data: { siteId: FIXTURE_SITE_ID, languageCode: "es" },
+      });
+      expect(response.status()).toBe(401);
+    }
+
     await page.goto(fixture.stagingUrl(), { waitUntil: "networkidle" });
     await waitForWidget(page);
 
     await page.getByRole("button", { name: "Edit Board" }).click();
     await page.getByRole("button", { name: "Languages", exact: true }).click();
     await expect(page.getByText("English (en)")).toBeVisible();
+    await expect
+      .poll(
+        () =>
+          fixture.api.latestRequest("/api/edit-board/languages", "GET")?.headers
+            .authorization,
+      )
+      .toBe(`Bearer ${FIXTURE_STAGING_TOKEN}`);
+    expect(
+      fixture.api.latestRequest("/api/edit-board/languages", "GET")?.search,
+    ).toEqual({ siteId: FIXTURE_SITE_ID });
 
     await page.locator(".rcf-eb-select").selectOption("fr");
     await page.getByRole("button", { name: "Add Language" }).click();
@@ -50,6 +85,10 @@ test.describe("built embed fixture: languages and images", () => {
         siteId: FIXTURE_SITE_ID,
         languageCode: "fr",
       });
+    expect(
+      fixture.api.latestRequest("/api/edit-board/languages", "POST")?.headers
+        .authorization,
+    ).toBe(`Bearer ${FIXTURE_STAGING_TOKEN}`);
     await expect(page.getByText("French (fr)")).toBeVisible();
   });
 

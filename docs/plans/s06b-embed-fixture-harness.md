@@ -108,6 +108,12 @@ local evidence. Final review, PR/current-head CI and manual release remain separ
   passes; the Languages failure still ran and passed the image test. A delayed layout-shift mutant
   produced `delta=0.217101`, one targeted CLS failure and five passes. The clean artifact remained
   byte-identical to main before and after `npm run build:embed` (`8b43d15e…` as a Git blob).
+- Final review then removed the language POST Authorization header from a scratch built artifact.
+  The pre-fix harness incorrectly stayed six of six green. Test-first controls now require the real
+  staging Bearer credential on both language GET and POST, reject missing and wrong credentials with
+  401, and retain the GET site-id plus POST body/render assertions. The exact reviewer mutant
+  `d31b5137…` now produces one targeted language failure and five passes; the clean artifact remains
+  six of six with no skips or flakes.
 - Repository gates are green on Node 24: the current source-level embed suite passed 305/305;
   lint exited zero with 34 existing warnings; `format:check`, full and production type-checks,
   build, full Jest (5,571 passed, 38 skipped) and coverage all passed. Coverage reported 71.60%

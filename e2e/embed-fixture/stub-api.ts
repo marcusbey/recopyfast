@@ -155,9 +155,11 @@ async function parseMultipartBody(
  * Credential-free stand-in for the route surface the built widget calls.
  *
  * Every success payload below is paired with the production route that owns
- * its shape. The stub deliberately contains no auth policy and no business
- * decisions: it gives the browser deterministic state, records what crossed
- * the wire, and lets the specs judge the widget on both sides of each action.
+ * its shape. The stub contains no authorization business policy; narrow
+ * fixture-credential guards only keep it from manufacturing route success
+ * when the built widget omitted a required wire credential. It otherwise gives
+ * the browser deterministic state, records what crossed the wire, and lets the
+ * specs judge the widget on both sides of each action.
  */
 export class StubApi {
   readonly replacementImageUrl: string;
@@ -440,6 +442,25 @@ export class StubApi {
     }
 
     if (url.pathname === "/api/edit-board/languages") {
+      // The final s06b review removed the POST Authorization header from a
+      // scratch built artifact and all six tests still passed because this stub
+      // returned 200 for every language request. The real GET and POST handlers
+      // both validate the staging credential before their service-role access;
+      // require the fixture's exact Bearer value here so the harness cannot
+      // invent language success after that credential disappears or drifts.
+      if (
+        (method === "GET" || method === "POST") &&
+        headers.authorization !== `Bearer ${FIXTURE_STAGING_TOKEN}`
+      ) {
+        this.writeJson(response, 401, {
+          error: headers.authorization
+            ? "Access denied"
+            : method === "GET"
+              ? "Missing staging token or siteId"
+              : "Missing staging token",
+        });
+        return true;
+      }
       if (method === "GET") {
         // src/app/api/edit-board/languages/route.ts GET
         this.writeJson(response, 200, {
