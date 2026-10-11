@@ -13,6 +13,7 @@ import {
   SITE_TITLE,
 } from "@/lib/seo/site-identity";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
+import { THEME_INIT_SCRIPT } from "@/lib/theme/theme-init-script";
 
 /**
  * Instrument Sans carries the UI. It is a grotesque with more character than
@@ -42,6 +43,11 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-jetbrains-mono",
+  // s17's first 40-report Lighthouse run found this 40,941-byte face in the
+  // high-priority preload graph on all eight comparison routes, even though
+  // those pages contain no `font-mono` content. Keep the variable and face for
+  // routes that use machine strings; let the browser request it only there.
+  preload: false,
 });
 
 /**
@@ -124,12 +130,10 @@ export default function RootLayout({
           renders with the OS theme and then snaps to the user's choice on
           hydration — a visible flash on every navigation. Kept inline and
           synchronous for that reason; it must run before the body paints.
+          The string is a constant because the app surface's CSP allows it by
+          its hash (s79, ADR 059): edit it there, never inline here.
         */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("recopyfast-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t}}catch(e){}})();`,
-          }}
-        />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="font-sans">
         <AuthProvider>{children}</AuthProvider>

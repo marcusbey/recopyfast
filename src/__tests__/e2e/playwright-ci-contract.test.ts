@@ -46,7 +46,11 @@ describe("Playwright CI contract", () => {
   // s74: 80 -> 81, E2E-019 in e2e/landing.spec.ts (a software WebGL renderer
   // gets the static sky).
   // s70b: 81 -> 86, the five Changes page tests (e2e/changes.spec.ts).
-  it("runs all 86 tests and always cleans up and uploads the redacted summary", () => {
+  // s17: +2, the two request-only comparison route contract tests.
+  // s79: 86 -> 91, the five e2e/csp.spec.ts tests (marketing surface, /login,
+  // /signup, /edit, signed-in dashboard).
+  // Combined: 86 + 2 + 5 = 93 distinct tests.
+  it("runs all 93 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -54,19 +58,19 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":86');
-    expect(workflow).toContain("report.expected !== 86");
-    expect(workflow).toContain("report.total !== 86");
-    expect(workflow).toContain("report.passed !== 86");
-    expect(config).toContain("expected: 86");
+    expect(workflow).toContain('"expected":93');
+    expect(workflow).toContain("report.expected !== 93");
+    expect(workflow).toContain("report.total !== 93");
+    expect(workflow).toContain("report.passed !== 93");
+    expect(config).toContain("expected: 93");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
-  it("keeps the credential-free built-embed harness outside the strict 86-test suite", () => {
-    // s06b was recovered after the 86-test reporter became a hard CI contract.
+  it("keeps the credential-free built-embed harness outside the strict 93-test suite", () => {
+    // s06b was recovered after the strict-count reporter became a hard CI contract.
     // Its specs live below e2e/ for shared Playwright conventions, so without an
     // explicit exclusion Playwright recursively collects six extra tests into
-    // the main job and makes that otherwise-correct job fail at 92/86. The
+    // the main job and makes that otherwise-correct job miss its exact count. The
     // second config and unguarded job are the ownership boundary: the harness
     // still has to run, just without Next, Supabase, or provider credentials.
     expect(config).toContain('testIgnore: ["**/embed-fixture/**"]');

@@ -104,7 +104,7 @@ local evidence. Final review, PR/current-head CI and manual release remain separ
 - The current main Playwright config recursively discovered the fixture directory and produced
   92 tests against its strict expected count of 86. Recovery therefore adds an explicit
   `**/embed-fixture/**` exclusion to the main config and a CI-contract regression test. Fresh
-  enumeration proves the main config still owns exactly 86 tests and the isolated config owns six.
+  enumeration proves the main config still owns exactly 93 tests and the isolated config owns six.
 - Task 8 was run per spec group through `RECOPYFAST_FIXTURE_ARTIFACT`. Disabling History rendering,
   the publish POST, or Languages rendering each produced exactly one targeted failure and five
   passes; the Languages failure still ran and passed the image test. A delayed layout-shift mutant
@@ -191,7 +191,7 @@ which is why the criterion is written as a delta.
 - `e2e/embed-fixture/servers.ts`, `stub-api.ts`, `fixture-page.ts` — new.
 - `e2e/embed-fixture/{edit-publish,staging-history,languages-images,cls}.spec.ts` — new.
 - `playwright.embed.config.ts` — new.
-- `playwright.config.ts` — exclude the isolated fixture from main's strict 86-test inventory.
+- `playwright.config.ts` — exclude the isolated fixture from main's strict 93-test inventory.
 - `package.json` — one script.
 - `.github/workflows/ci.yml` — one new, unguarded job.
 - `src/__tests__/e2e/playwright-ci-contract.test.ts` — pin the separate ownership and CI contract.
@@ -216,7 +216,7 @@ than what covers it.
   flaky harness will be disabled by the first agent it inconveniences, and then `s06c` ships
   unguarded.
 - **Existing suites unchanged.** The current source-level embed suites stay green, main's strict
-  Playwright inventory stays at 86, and `e2e/share-edit-publish.spec.ts` is untouched.
+  Playwright inventory stays at 93, and `e2e/share-edit-publish.spec.ts` is untouched.
 - **Runs from a clean checkout**: `npm ci && npm run build:embed && npm run test:embed:fixture`
   with an empty environment. That command, passing on the CI runner, is the story's evidence.
 

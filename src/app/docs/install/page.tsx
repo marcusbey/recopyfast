@@ -96,7 +96,9 @@ export default function InstallGuidePage() {
             <span className="text-xl">ReCopyFast</span>
           </Link>
           <Button asChild size="sm" variant="outline">
-            <Link href="/dashboard/sites">Sites</Link>
+            {/* Static docs -> nonce dashboard document. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a href="/dashboard/sites">Sites</a>
           </Button>
         </div>
       </header>

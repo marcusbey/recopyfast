@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { AuthModal } from "@/components/auth/AuthModal";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { Zap, Menu, X } from "lucide-react";
 import Link from "next/link";
@@ -13,7 +12,6 @@ const SCROLLED_THRESHOLD_PX = 50;
 
 export function Header() {
   const { user, loading } = useAuth();
-  const [showAuthModal, setShowAuthModal] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -148,18 +146,24 @@ export function Header() {
                 <UserMenu />
               ) : (
                 <>
-                  <button
-                    onClick={() => setShowAuthModal(true)}
+                  {/* ADR 059 is a document boundary. A client transition would
+                      keep the marketing page's unsafe-inline policy on login. */}
+                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                  <a
+                    href="/login"
                     className="hidden sm:inline-flex text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
                   >
                     Sign in
-                  </button>
+                  </a>
                   <Button
-                    onClick={() => setShowAuthModal(true)}
+                    asChild
                     size="sm"
                     className="pressable bg-sky-600 text-white hover:bg-sky-700"
                   >
-                    Get started
+                    {/* The native anchor also keeps modifier keys and ordinary
+                        link accessibility at this security boundary. */}
+                    {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                    <a href="/signup">Get started</a>
                   </Button>
                 </>
               )}
@@ -233,11 +237,6 @@ export function Header() {
           )}
         </div>
       </header>
-
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={() => setShowAuthModal(false)}
-      />
     </>
   );
 }

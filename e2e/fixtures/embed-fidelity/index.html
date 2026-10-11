@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>ReCopyFast — edit-mode fidelity fixture</title>
+<!--
+  A local measurement tool, never a page of the product. Run
+    node scripts/serve-embed-fidelity.mjs
+  and open the address it prints (loopback only). Until s79 this file sat
+  under public/embed/, so production served it — and the ?widget= parameter
+  below turned any URL into a script on www.recopyfa.st (s69 L8). Do not move
+  it back under public/.
+-->
 
 <!-- A genuinely remote webfont: exercises "styles captured before fonts load". -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -361,7 +369,7 @@
   setTimeout(function () { document.body.classList.add('fonts-swapped'); }, 1200);
 </script>
 
-<script src="../__fidelity__/harness.js"></script>
+<script src="./harness.js"></script>
 <script>
   // The widget is injected rather than hard-coded so the fixture can (a) always
   // cache-bust and (b) load a specific artifact for comparison.
@@ -373,14 +381,14 @@
   //   ?widget=<url>   load a specific artifact instead of the current build.
   //
   // To A/B the working build against the committed one:
-  //   git show HEAD:public/embed/recopyfast.js > public/embed/__fidelity__/head.js
-  //   ...then open with ?widget=./head.js  (delete head.js afterwards — a
+  //   git show HEAD:public/embed/recopyfast.js > e2e/fixtures/embed-fidelity/head.js
+  //   ...then open with ?widget=head  (delete head.js afterwards — a
   //   checked-in copy of the bundle rots immediately)
   (function () {
     var params = new URLSearchParams(location.search);
     var choice = params.get('widget');
-    var src = choice === 'head' ? './head-artifact.js'
-            : (choice || '../recopyfast.js');
+    var src = choice === 'head' ? './head.js'
+            : (choice || '/embed/recopyfast.js');
 
     // Credentials come from the query string, never from source. With the
     // placeholder values below the widget authenticates as nobody, so

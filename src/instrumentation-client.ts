@@ -20,6 +20,7 @@
  */
 
 import * as Sentry from "@sentry/nextjs";
+import { releaseOption } from "@/lib/monitoring/sentry-release";
 
 const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -42,8 +43,10 @@ Sentry.init({
   // 16,734 B. That is under the bar.
   tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
 
-  // Release tracking
-  release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA,
+  // Release tracking: the build's commit SHA, the same value server and Edge
+  // report (s84, src/lib/monitoring/sentry-release.ts). Spread, never
+  // `release: undefined` — that would erase the SDK's own fallback.
+  ...releaseOption(process.env.NEXT_PUBLIC_SENTRY_RELEASE),
 
   // No Session Replay, deliberately. The operator ruled on 2026-09-26 that launch
   // landing pages cannot carry it and that error reporting is the goal. Replay
@@ -57,8 +60,11 @@ Sentry.init({
   // `Sentry.addIntegration`. Keep `maskAllText`, `maskAllInputs` and
   // `blockAllMedia`: replays render customer websites and their visitors'
   // personal data. `lazyLoadIntegration` injects a <script> from
-  // https://browser.sentry-cdn.com, which the CSP's `script-src 'self'` blocks,
-  // so that decision includes the CSP.
+  // https://browser.sentry-cdn.com. The static marketing policy's
+  // `script-src 'self'` blocks it; the app policy's `'strict-dynamic'` can trust
+  // a script inserted by nonce-trusted code. Re-enabling Replay therefore has
+  // to decide the CSP behavior on both document surfaces rather than assuming
+  // one global policy.
   integrations: [Sentry.browserTracingIntegration()],
 
   // Filtering

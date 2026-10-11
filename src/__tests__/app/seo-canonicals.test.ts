@@ -32,6 +32,7 @@ import type { ResolvedMetadata } from "next/dist/lib/metadata/types/metadata-int
 import { accumulateMetadata } from "next/dist/lib/metadata/resolve-metadata";
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import nextConfig from "../../../next.config";
+import * as comparisonDetailRoute from "@/app/compare/[competitor]/page";
 import { metadata as rootMetadata } from "@/app/layout";
 import { comparisonList } from "@/lib/compare/comparisons";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
@@ -102,7 +103,7 @@ type Route = { path: string; layers: () => Promise<Layer[]> };
 const comparisonRoutes: Route[] = comparisonList.map((comparison) => ({
   path: `/compare/${comparison.slug}`,
   layers: async () => [
-    layerOf(await import(`@/app/compare/${comparison.slug}/page`)),
+    layerOf(comparisonDetailRoute, { competitor: comparison.slug }),
   ],
 }));
 

@@ -1,4 +1,6 @@
 import {
+  buildBreadcrumbListLd,
+  buildFAQPageLd,
   buildSoftwareApplicationLd,
   serializeJsonLd,
   type MonthlyOffer,
@@ -98,6 +100,64 @@ describe("serializeJsonLd", () => {
     expect(text).not.toContain("<");
     expect(JSON.parse(text)).toEqual({
       name: "</script><script>alert(1)</script>",
+    });
+  });
+});
+
+describe("shared page schemas", () => {
+  it("numbers breadcrumb items in rendered order", () => {
+    expect(
+      buildBreadcrumbListLd([
+        { name: "Comparisons", url: "https://recopyfa.st/compare" },
+        {
+          name: "Contentful",
+          url: "https://recopyfa.st/compare/contentful",
+        },
+      ]),
+    ).toEqual({
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        {
+          "@type": "ListItem",
+          position: 1,
+          name: "Comparisons",
+          item: "https://recopyfa.st/compare",
+        },
+        {
+          "@type": "ListItem",
+          position: 2,
+          name: "Contentful",
+          item: "https://recopyfa.st/compare/contentful",
+        },
+      ],
+    });
+  });
+
+  it("uses the same FAQ questions and answers as the visible content", () => {
+    const faqs = [
+      { question: "Where does content live?", answer: "In the source system." },
+      {
+        question: "Can clients edit?",
+        answer: "Yes, with product-specific access.",
+      },
+    ];
+
+    expect(buildFAQPageLd(faqs)).toEqual({
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: [
+        {
+          "@type": "Question",
+          name: faqs[0].question,
+          acceptedAnswer: { "@type": "Answer", text: faqs[0].answer },
+        },
+        {
+          "@type": "Question",
+          name: faqs[1].question,
+          acceptedAnswer: { "@type": "Answer", text: faqs[1].answer },
+        },
+      ],
     });
   });
 });

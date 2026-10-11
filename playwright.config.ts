@@ -5,8 +5,8 @@ export default defineConfig({
   // s06b owns a credential-free built-artifact harness under e2e/ so its
   // fixtures stay beside the rest of the browser tests. Playwright discovers
   // subdirectories recursively: when this exclusion was omitted during the
-  // recovery onto s75, the strict main job silently grew from its reviewed 86
-  // tests to 92. The separate playwright.embed.config.ts and CI job execute
+  // recovery onto s75, the strict main job silently grew from its reviewed
+  // inventory to six extra tests. The separate playwright.embed.config.ts and CI job execute
   // these six tests; the main job must keep its exact inventory and disposable
   // Supabase/Next contract.
   testIgnore: ["**/embed-fixture/**"],
@@ -19,7 +19,7 @@ export default defineConfig({
         [
           "./e2e/support/strict-reporter.ts",
           {
-            expected: 86,
+            expected: 93,
             outputFile: "test-results/playwright-summary.json",
           },
         ],

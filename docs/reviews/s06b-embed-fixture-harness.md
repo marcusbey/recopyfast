@@ -33,7 +33,7 @@
   input count; the printed delta remains gated at `<= 0.001`. This is bounded Chromium startup-lab
   evidence, not lifetime/session or field CLS.
 - [x] **Task 7:** the isolated config owns exactly six Chromium tests with no `webServer`; the main
-  config excludes the fixture and still owns exactly 86 tests. The unguarded, credential-free CI
+  config excludes the fixture and still owns exactly 93 tests. The unguarded, credential-free CI
   job performs install, browser install, embed build and fixture run.
 - [x] **Task 8:** scratch built-artifact mutations produce targeted red tests while unrelated
   fixture cases remain green. No product source or generated artifact was mutated.
@@ -91,7 +91,7 @@
 - Full Jest — **412 suites passed, 2 skipped; 5,571 tests passed, 38 database-dependent tests
   skipped**.
 - Full TypeScript check — passed.
-- Playwright enumeration — main config **86 tests in 15 files**; fixture config **6 tests in 4
+- Playwright enumeration — main config **93 tests in 17 files**; fixture config **6 tests in 4
   files**.
 - `node scripts/build-embed.mjs --check` — artifact fresh at 45,828 bundle / 33,062 widget /
   13,141 transport gzipped bytes.

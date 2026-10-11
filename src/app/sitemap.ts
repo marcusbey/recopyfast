@@ -34,24 +34,30 @@ type StaticRoute = {
  * ignore this file's dates, the real ones on blog posts included. No page
  * records when its content last changed, so none is claimed.
  */
-const STATIC_ROUTES: readonly StaticRoute[] = [
-  { path: "/", changeFrequency: "weekly", priority: 1 },
-  { path: "/demo", changeFrequency: "monthly", priority: 0.8 },
-  { path: "/try", changeFrequency: "monthly", priority: 0.9 },
-  { path: "/docs/install", changeFrequency: "monthly", priority: 0.8 },
-  { path: "/compare", changeFrequency: "monthly", priority: 0.8 },
-  ...comparisonList.map(
-    (comparison) =>
-      ({
-        path: `/compare/${comparison.slug}`,
-        changeFrequency: "monthly",
-        priority: 0.7,
-      }) as const,
-  ),
-  { path: "/blog", changeFrequency: "daily", priority: 0.7 },
-  { path: "/privacy", changeFrequency: "yearly", priority: 0.2 },
-  { path: "/terms", changeFrequency: "yearly", priority: 0.2 },
-];
+export function buildStaticSitemapRoutes(
+  comparisons: readonly { readonly slug: string }[] = comparisonList,
+): readonly StaticRoute[] {
+  return [
+    { path: "/", changeFrequency: "weekly", priority: 1 },
+    { path: "/demo", changeFrequency: "monthly", priority: 0.8 },
+    { path: "/try", changeFrequency: "monthly", priority: 0.9 },
+    { path: "/docs/install", changeFrequency: "monthly", priority: 0.8 },
+    { path: "/compare", changeFrequency: "monthly", priority: 0.8 },
+    ...comparisons.map(
+      (comparison) =>
+        ({
+          path: `/compare/${comparison.slug}`,
+          changeFrequency: "monthly",
+          priority: 0.7,
+        }) as const,
+    ),
+    { path: "/blog", changeFrequency: "daily", priority: 0.7 },
+    { path: "/privacy", changeFrequency: "yearly", priority: 0.2 },
+    { path: "/terms", changeFrequency: "yearly", priority: 0.2 },
+  ];
+}
+
+const STATIC_ROUTES = buildStaticSitemapRoutes();
 
 type BlogPostEntry = {
   slug: string;
