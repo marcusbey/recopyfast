@@ -212,6 +212,7 @@ this branch's `20261009150000_blog_posts_daily_draft_key.sql` and
 `20261010120000_blog_generation_claims.sql` sort after it, so no migration on main must follow them.
 Neither migration is applied to any remote database by this PR.
 
-Gate: the earlier `Ship allowed: yes` lines above apply only to their frozen sources. Devin's three
-findings are fixed and tested, but a fresh independent `/ks-review` of the merged tree is still
-pending, and the strict hosted CI run remains a PR-readiness gate.
+Architect approval (2026-10-11): Devin re-ran on 6fdef92 and reported 0 bugs, 0 vulnerabilities, and all three findings resolved. An independent verifier confirmed each fix against code and tests (cursor pagination, the random-suffix slug retry, and the table-level REVOKE proved by the replay test). Since then the branch has only merged main: docs/stories.md conflicts, and no s89 code change.
+
+Max severity: none
+Ship allowed: yes

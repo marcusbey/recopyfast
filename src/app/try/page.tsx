@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
@@ -66,7 +65,9 @@ export default function TryPage() {
               Add ReCopyFast to your site, invite your team and start publishing
               edits.
             </p>
-            <Link
+            {/* Preserve campaign attribution across a new nonce document. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
               href="/signup?utm_source=try&utm_medium=page&utm_campaign=try_on_any_site"
               className="pressable group mt-8 inline-flex items-center gap-2 rounded-full bg-slate-900 px-8 py-4 text-base font-semibold text-white transition-[background-color,transform] hover:bg-slate-800"
             >
@@ -75,7 +76,7 @@ export default function TryPage() {
                 className="h-5 w-5 transition-transform group-hover:translate-x-1"
                 aria-hidden="true"
               />
-            </Link>
+            </a>
           </div>
         </section>
       </main>

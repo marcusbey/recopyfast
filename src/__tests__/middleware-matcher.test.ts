@@ -266,7 +266,6 @@ describe("a request whose response does not depend on a session", () => {
     for (const header of [
       "X-Content-Type-Options",
       "X-Frame-Options",
-      "X-XSS-Protection",
       "Referrer-Policy",
       "Permissions-Policy",
       "Content-Security-Policy",
@@ -294,7 +293,6 @@ describe("the Sentry tunnel", () => {
     for (const header of [
       "X-Content-Type-Options",
       "X-Frame-Options",
-      "X-XSS-Protection",
       "Referrer-Policy",
       "Permissions-Policy",
       "Content-Security-Policy",

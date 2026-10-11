@@ -1,5 +1,4 @@
 import { Check, Rocket } from "lucide-react";
-import Link from "next/link";
 import { foundingOfferHeadline } from "./founding-offer-copy";
 
 /**
@@ -76,12 +75,15 @@ export default function FoundingOfferCard({
           <p className="tabular mt-1 text-sm font-medium text-teal-800">
             {count}
           </p>
-          <Link
+          {/* A client transition would carry marketing's unsafe-inline CSP
+              into /signup. This boundary must replace the document. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
             href="/signup"
             className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 text-center font-semibold text-white hover:bg-teal-800"
           >
             Claim your spot
-          </Link>
+          </a>
         </div>
       </div>
 

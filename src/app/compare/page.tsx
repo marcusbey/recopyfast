@@ -279,13 +279,16 @@ export default function CompareIndexPage() {
               Add client editing without rebuilding the site
             </h2>
             <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link
+              {/* Keep attribution intact while establishing /signup's nonce
+                  policy through a full document request. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a
                 href="/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_index"
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast
                 <ArrowRight aria-hidden="true" className="h-5 w-5" />
-              </Link>
+              </a>
               <Link
                 href="/try"
                 className="pressable inline-flex items-center rounded-full border border-slate-300 bg-white px-7 py-3.5 font-semibold text-slate-900 hover:border-slate-400"

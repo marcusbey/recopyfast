@@ -267,10 +267,15 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
       return { status: "error", latency };
     }
 
-    // The service's own body (its live connection count, its Supabase state)
-    // is deliberately not relayed: s84 / s69 L3. Reachable and 2xx is the
-    // answer this check gives.
-    return { status: "ok", latency };
+    return {
+      status: "ok",
+      latency,
+      // TOMBSTONE — s79 reduced the realtime `/health` contract to liveness:
+      // a 2xx with `{ status: "ok" }`. Its live connection count and Supabase
+      // mode were removed. Defaulting those absent fields to `0` and
+      // `"unknown"` made this endpoint publish invented measurements, so a
+      // successful probe reports only what this app measured: status + latency.
+    };
   } catch (error) {
     const isTimeout =
       error instanceof Error &&

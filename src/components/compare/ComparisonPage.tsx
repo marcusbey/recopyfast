@@ -327,13 +327,15 @@ export function ComparisonPage({ comparison, pricing }: ComparisonPageProps) {
               Keep the site. Give clients a simpler editing path.
             </h2>
             <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link
+              {/* Preserve the campaign query while replacing the static
+                  comparison document with /signup's nonce document. */}
+              <a
                 href={`/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_${comparison.slug}`}
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast
                 <ArrowRight aria-hidden="true" className="h-5 w-5" />
-              </Link>
+              </a>
               <Link
                 href="/try"
                 className="pressable inline-flex items-center rounded-full border border-slate-300 bg-white px-7 py-3.5 font-semibold text-slate-900 hover:border-slate-400"
