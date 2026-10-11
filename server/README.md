@@ -76,6 +76,54 @@ machine as covering both.
 
 ---
 
+## Admission, the HTTP surface and key rotation (s79)
+
+**A handshake is admitted in this order** (`io.on('connection', …)` in `index.js`):
+
+1. `siteId` present, else dropped.
+2. **The pre-authorization bucket**, per client address across all sites
+   (`checkHandshake`, `maxHandshakesPerAddress`, 60/min, fail closed). AGENTS.md's "rate limit
+   before authorization": the next step is a database read.
+3. Token present; `sites` row read; HMAC verified (`verifySiteToken`); registered-domain pin
+   (`isOriginAllowed`).
+4. **Only now the per-site buckets** (`checkConnection`: 120/min per site, 40/min per site and
+   address). Until s79 these were spent at step 2, so 121 handshakes carrying nothing locked every
+   real editor of a site out of realtime for a minute (s69 L14). A holder of the public token who
+   forges `Origin` from several addresses can still spend a site's 120 — that is what the cap is for.
+5. The editor grant, for a staging socket (`resolveGrant`).
+
+**The client address is `Fly-Client-IP` on Fly, the TCP peer elsewhere** (`resolveClientAddress`).
+Every connection reaches the machine from fly-proxy, so the peer is the same for every client and
+a bucket keyed on it is one bucket for the world. Fly's proxy sets `Fly-Client-IP`; `startFromCli`
+trusts it only when `FLY_APP_NAME` is set (every Fly Machine has it). Off Fly the header is
+ignored, because any client could send it. `addressBucket` keeps IPv4 addresses whole, groups IPv6
+by subscriber `/64`, converts either spelling of IPv4-mapped IPv6 back to IPv4, and sends absent or
+malformed input to one fail-closed `unknown` bucket.
+
+**The HTTP surface is `/health` and nothing else.** It answers `200 {"status":"ok"}` with
+`Cache-Control: no-store` — liveness, which is all Fly's check, the uptime workflow and the app's
+realtime probe read. No `X-Powered-By`, no CORS at all (nothing browser-side reads it; the
+handshake's CORS is engine.io's and unchanged), and a fixed header set on every **Express**
+response, 404s included (`security-headers.js`): `nosniff`, `X-Frame-Options: DENY`,
+`default-src 'none'; frame-ancestors 'none'`, `no-referrer`, HSTS with `includeSubDomains`,
+`Cross-Origin-Resource-Policy: same-origin`. Until s79 it answered `Access-Control-Allow-Origin: *`
+and the live connection count to anyone (s69 L13). Engine.IO answers `/socket.io/` before the
+Express middleware, so its own error/handshake responses do not receive this fixed set; that
+surface and its CORS stayed outside s79.
+
+**Rotating a site's key closes the sockets opened with the old one** — ADR 027's follow-up. The
+sweep (`revalidateAll`, every 60 s) re-verifies every socket's site token against the current
+`sites.api_key`, reading `sites` once per site per pass and sharing the answer among that site's
+sockets (the widget opens a socket for every visitor of a page with `data-ws-url`); an editor's
+`content-update`, a viewer's `content-map`, and `join-dashboard` re-check it on the spot before
+fan-out. The extra `sites` read on those message paths is bounded by the per-socket message
+limiter. A missing row or a token that no longer verifies → `auth-error` "Site token revoked",
+then disconnect; a lookup that fails →
+"Site verification failed", then disconnect (fail closed, like the grant). The grant re-resolution
+for editors is unchanged and runs after the token check.
+
+---
+
 ## Deploy
 
 ### Prerequisites
@@ -152,10 +200,9 @@ all day while `/health` keeps answering 200.
 > **`ALLOWED_ORIGINS` is not in that list and must not be added.** It is not consulted anywhere in
 > this service — `grep -rn ALLOWED_ORIGINS server/*.js` returns nothing since `s07a` rewrote the
 > connection handler, so there is no code left to point at and nothing to reinstate.
-> Authorisation is the per-site HMAC token check at `index.js:256` (`verifySiteToken`,
-> `auth.js:50`) followed by the registered-domain pin at `:263` (`isOriginAllowed`, `auth.js:101`),
-> both inside the connection handler — strictly stronger than an origin allowlist, and no redeploy
-> per customer. Setting it creates false confidence about where the security boundary is. The
+> Authorisation is the per-site HMAC token check (`verifySiteToken`, `auth.js`) followed by the
+> registered-domain pin (`isOriginAllowed`, `auth.js`), both inside the connection handler in
+> `index.js` — strictly stronger than an origin allowlist, and no redeploy per customer. Setting it creates false confidence about where the security boundary is. The
 > variable still exists in the *Next app's* environment for unrelated reasons; it means nothing
 > here.
 
@@ -187,16 +234,18 @@ when it happens to be run in the right order is not a documented procedure.
 ### Verify
 
 ```sh
-curl https://recopyfast-ws.fly.dev/health
-# {"status":"ok","connections":0,"supabase":"connected","message":"All systems operational"}
+curl -s -D - https://recopyfast-ws.fly.dev/health
+# HTTP 200, {"status":"ok"}, cache-control: no-store, x-content-type-options: nosniff,
+# and NO x-powered-by and NO access-control-allow-origin (s79)
 
 fly status -a recopyfast-ws     # one machine, started, checks passing
 fly machines list -a recopyfast-ws
 ```
 
-`supabase: "disabled"` instead of `"connected"` means the secrets are missing or malformed. The
-process still starts — and in that state it verifies no tokens and grants no staging rooms, by
-design — but nothing works. Treat it as a failed deploy.
+`/health` reports liveness only since s79 — no connection count, no Supabase mode. With
+`NODE_ENV=production` (fly.toml) a process whose Supabase or Redis secrets are missing refuses to
+boot (`assertProductionEnvironment`), so a missing secret shows as a failing check and a
+`Refusing to start in production` line in `fly logs`, not as a field here.
 
 **`/health` is not proof that the deploy landed.** It answered `status: ok` throughout the entire
 drift described at the bottom of this file, on an image five hours and one merge out of date. It
@@ -211,7 +260,9 @@ fly ssh console -a recopyfast-ws -C "sh -c '
 ```
 
 The line count must equal `wc -l server/index.js` in the tree you deployed, and every marker must
-be non-zero. The five are the same five as the incident table at the bottom of this file, so its
+be non-zero. Since s79, add `resolveClientAddress`, `revalidateAll` and `securityHeaders` to the
+loop: all three must be non-zero on an image that carries the admission order and rotation sweep
+above. The five are the same five as the incident table at the bottom of this file, so its
 `before`/`after` columns are directly comparable to this output. On today's tree:
 
 ```
@@ -280,8 +331,9 @@ curl -sI https://<preview-deployment>.vercel.app/login \
 # must NOT name recopyfast-ws.fly.dev
 ```
 
-The second is a proxy, and an exact one: `src/middleware.ts:233` feeds `connect-src` from
-`NEXT_PUBLIC_WS_URL` and from nothing else, so the origin's absence there is the variable's
+The second is a proxy, and an exact one: `src/middleware.ts` passes `NEXT_PUBLIC_WS_URL` to
+`connectSources` (`src/lib/security/content-security-policy.ts`), and nothing else puts the realtime
+origin into `connect-src`, so the origin's absence there is the variable's
 absence in that environment. `<team>` and the preview URL come from `vercel ls` — see the
 sourcing note under the kill switch below.
 

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   ArrowRight,
   MousePointerClick,
@@ -114,13 +113,15 @@ export default function Demo() {
               edited. Your developers keep the codebase; everyone else stops
               queueing for copy changes.
             </p>
-            <Link
+            {/* Static demo -> nonce signup document (ADR 059). */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
               href="/signup"
               className="pressable group inline-flex items-center gap-2 rounded-full bg-slate-900 px-8 py-4 text-base font-semibold text-white transition-colors hover:bg-slate-800"
             >
               <span>Add it to your site</span>
               <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-            </Link>
+            </a>
           </div>
         </section>
       </main>

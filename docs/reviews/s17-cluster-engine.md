@@ -1,6 +1,6 @@
 # Review — s17-cluster-engine
 
-Reviewer: fresh-context `reviewer`, 2026-10-11. Candidate: complete story diff on `feature/s17-cluster-engine` against `origin/main` `0dea1c05babed48834ecc72700cfebef01ae6733`. Source and the initial review were committed through normal hooks as `c8c25ab`; the final reviewed amend adds the route unit test that the first staging pass missed and this resolved review verdict.
+Reviewer: fresh-context `reviewer`, 2026-10-11. Candidate: complete story diff on `feature/s17-cluster-engine` against `origin/main` `0dea1c05babed48834ecc72700cfebef01ae6733`; hosted acceptance was reopened on exact head `e0019c792f675d824b84b46cb970e7f1b8b0ab61`.
 
 ## Verdict summary
 
@@ -42,13 +42,39 @@ The reviewed imports and APIs exist in the installed source: Next 16 async param
 
 The implementation follows ADRs 012, 013, 032, and 061. It keeps the Marketing surface, catalogue source of truth, honest browser-applied-copy caveat, first-party source boundary, and s79 integration note. When branches integrate, s79's native full-document Marketing-to-auth navigation must win over this branch's inherited `Link` CTA; that is an integration requirement, not a defect in this isolated s17 diff.
 
-## PR-readiness and evidence boundaries
+## Prior local approval and evidence boundaries
 
 The code and local story acceptance reviewed here pass. The intentional 1 ms LCP control failed while retaining a structurally complete corpus; the restored 2500 ms configuration then passed the clean final-source 40-report run.
 
-Before the draft PR can be marked ready, the dedicated Lighthouse workflow must pass twice on the same pushed commit and current-head GitHub CI must be green. Those hosted checks calibrate runner stability and the 45-minute job budget; they remain mandatory PR-readiness evidence, but they do not change this source-review verdict. The existing responsive before/after and production 200/404 evidence must remain attached to the PR.
+This source and local evidence produced the earlier `Max severity: none` / `Ship allowed: yes` verdict. It remains valid dated evidence, but the subsequent hosted result below supersedes its ship decision.
 
 Manual merge, deployment, and production verification are downstream human/release gates and are not prerequisites for `Ship allowed: yes`.
 
-Max severity: none
-Ship allowed: yes
+## Hosted acceptance reopened — major
+
+The first mandatory hosted Lighthouse attempt on exact head `e0019c7` produced a valid 40-report corpus with the exact approved profile, but every route failed the committed TBT <= 200 ms threshold. Independently recomputed medians are 236.849-277.251 ms. Performance, LCP, and CLS pass; current-head CI also passes, including strict Playwright 88/88 with zero failed, skipped, or flaky tests. Neither result cancels the dedicated TBT gate.
+
+The failure is systematic across all eight routes and five runs per route, so it is not an incomplete artifact, profile mismatch, duplicate-path defect, or isolated outlier. The reports support host-sensitive parse/evaluation/layout work as a diagnosis direction, but host sensitivity is not permission to relax ADR 013's threshold.
+
+Required closure is a bounded source repair followed by a clean first hosted Lighthouse run and a second pass on the same repaired SHA, with current-head CI green. Constraints remain unchanged: no threshold/profile/run-count relaxation, no deferral of synchronous pre-hydration Sentry, and no competing AuthModal lazy import because s79 already removes it from the integrated marketing path. The failed head must not be rerun merely to sample for green.
+
+Independent assessment: `.omx/ultragoal/evidence/s17/hosted-verification-20261011/hosted-attempt1-independent-assessment.md`.
+
+## Stacked s79 candidate source verification — 2026-10-11
+
+The frozen non-production merge has s17 `e0019c7` as `HEAD`/first parent, approved s79 `a768ca5` as `MERGE_HEAD`/second parent, and common base `0dea1c0`; no unmerged index path remains. Independent comparison of all 1,586 tracked files against the measured s17+s79 probe found exactly two differences: this review and the s17 plan's integration execution note. Every product, test, workflow, package/lock, Header, Sentry-client, Lighthouse-config, and runner byte matches the measured probe.
+
+The candidate's 42-path visible diff against s79 has the exact same name/status set as the original s17 diff against the common base. The only merge conflicts were the three strict Playwright inventory files, resolved consistently to 93 = 86 inherited + 2 s17 + 5 s79. The saved fresh boundary proof remains 93 listed tests and 6 Jest suites / 83 tests passed.
+
+Header and Sentry hashes match approved s79 exactly. The applied-mobile profile, five-run medians, and all four numeric limits are unchanged. This verifies the stacked source and PR-diff boundary; it does not close the hosted TBT failure. Full evidence: `.omx/ultragoal/evidence/s17/stacked-candidate/independent-review.md`.
+
+## WebSocket hook-timeout diagnostics — 2026-10-11
+
+The first stacked normal hook reproduced an intermittent 15-second connection/lifecycle timeout in an approved s79 WebSocket integration row. The exact row then passed 11 isolated runs; a later full-file failure moved to an unrelated key-rotation handshake, whose exact row passed 10 isolated runs. This is not a reproduced authorization or stacked-product regression, and the underlying timeout class remains unresolved.
+
+The only follow-up source is test diagnostics. `waitForHandshake` preserves each existing predicate and 15-second deadline, then appends allowlisted socket/manager/engine/transport booleans or state plus the count of tracked errors. It does not expose auth values, messages, tokens, URLs, socket/site/editor ids, queries, headers, or payloads. Its new fail-path test asserts the exact state/count output and proves a seeded sensitive auth-error message is absent. No server, retry, timeout, assertion, dependency, or product behavior changed.
+
+The writer's five post-diagnostic full-file runs passed 455/455 with type-check, focused lint, formatting, and diff checks green. Those passes show the diagnostic is non-regressive; they do not prove the intermittent timeout fixed because it did not recur. Independent delta review found no diagnostic defect. Evidence: `.omx/ultragoal/evidence/s17/stacked-candidate/websocket-timeout-diagnosis/independent-review.md`.
+
+Max severity: major
+Ship allowed: no

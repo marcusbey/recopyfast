@@ -203,6 +203,19 @@ implementation was authorized before this checkpoint. Execution may now follow t
   is archived under `.omx/ultragoal/evidence/s17/applied-final-clean-20261011/`; this does not
   replace the two required same-SHA hosted runs or the remaining delivery/production gates.
 
+- The first hosted run on exact isolated s17 head `e0019c7` retained 40 valid reports but failed
+  TBT on all eight routes, so it was not rerun unchanged. A reversible local no-commit probe then
+  merged the already-approved s79 head `a768ca5`: the Duda five-run median moved from 122.100 to
+  112.090 ms TBT, main-thread work fell 178.606 ms, the Header-reachable graph fell 24,311 raw
+  bytes, and hydration/CSP checks stayed green. This measured integration improves the diagnosed
+  cause without changing s17's approved product scope, Sentry contract, Lighthouse profile, limits,
+  or dependencies. The non-production stacked candidate therefore adopts exact s79 source rather
+  than adding a competing Header optimization. PR 89 will temporarily target
+  `feature/s79-headers-csp-ws` so its visible diff remains s17; parent PR 85 stays unchanged.
+  Task 6 and the current `major` / `Ship allowed: no` review remain open until the stacked exact head
+  passes current CI and two same-SHA hosted Lighthouse runs. Any main merge, deployment, parent/base
+  promotion, or later authenticated-shell redesign remains a separate human release/plan decision.
+
 ## Scope limits
 
 No blog generation/publication changes (s89), s18/s19 implementation, new marketing design,

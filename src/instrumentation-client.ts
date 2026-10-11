@@ -57,8 +57,11 @@ Sentry.init({
   // `Sentry.addIntegration`. Keep `maskAllText`, `maskAllInputs` and
   // `blockAllMedia`: replays render customer websites and their visitors'
   // personal data. `lazyLoadIntegration` injects a <script> from
-  // https://browser.sentry-cdn.com, which the CSP's `script-src 'self'` blocks,
-  // so that decision includes the CSP.
+  // https://browser.sentry-cdn.com. The static marketing policy's
+  // `script-src 'self'` blocks it; the app policy's `'strict-dynamic'` can trust
+  // a script inserted by nonce-trusted code. Re-enabling Replay therefore has
+  // to decide the CSP behavior on both document surfaces rather than assuming
+  // one global policy.
   integrations: [Sentry.browserTracingIntegration()],
 
   // Filtering

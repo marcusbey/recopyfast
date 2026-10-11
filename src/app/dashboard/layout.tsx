@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { DashboardFrame } from "./DashboardFrame";
 
 /**
@@ -14,8 +15,22 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function DashboardLayout({
+/**
+ * Every dashboard page renders per request, on purpose (s79, ADR 059).
+ *
+ * The dashboard is served under the nonce Content Security Policy, and Next
+ * can stamp that nonce on its scripts only while rendering a request. Most
+ * dashboard pages are client components with no request data, so Next used to
+ * prerender them at build time — and a prerendered page under the nonce policy
+ * has every script refused and never hydrates. Awaiting `connection()` here,
+ * in the segment's layout, makes every page below it dynamic, including pages
+ * added later. Do not remove it to "make the dashboard static again": the
+ * nonce policy in `src/middleware.ts` would then break the whole segment, in
+ * production builds only.
+ */
+export default async function DashboardLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  await connection();
   return <DashboardFrame>{children}</DashboardFrame>;
 }

@@ -6,6 +6,11 @@ import {
   resolveEntitlement,
 } from "@/lib/billing/effective-plan";
 import { SENTRY_TUNNEL_ROUTE } from "@/lib/monitoring/sentry-tunnel";
+import {
+  buildContentSecurityPolicy,
+  createCspNonce,
+  usesNoncePolicy,
+} from "@/lib/security/content-security-policy";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -120,15 +125,47 @@ export async function middleware(request: NextRequest) {
   // This middleware now focuses on auth and page-level security
   // API-level security is handled within individual API routes
 
+  // One policy per request, decided before anything else (s79, ADR 059). On
+  // the app surface it carries a fresh nonce, and the SAME string must reach
+  // Next on the request: Next reads the nonce it stamps on its scripts from
+  // the request's Content-Security-Policy header, never from the response's.
+  // A nonce on the response alone blocks every Next script on the page.
+  const nonce = usesNoncePolicy(request.nextUrl.pathname)
+    ? createCspNonce()
+    : undefined;
+  const contentSecurityPolicy = buildContentSecurityPolicy({
+    nonce,
+    isDev: process.env.NODE_ENV !== "production",
+    // Named one by one, as before s79: these are the origins connect-src is
+    // derived from, and nothing else in the environment reaches the policy.
+    env: {
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
+      NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+    },
+  });
+
+  /**
+   * `NextResponse.next` with the request Next should render. Built at call
+   * time, not once: Supabase's `setAll` below writes refreshed cookies onto
+   * `request` and rebuilds the response, and the rebuilt one must forward
+   * those cookies AND the policy. On a nonce route the caller's own
+   * Content-Security-Policy request header, if any, is overwritten — the
+   * nonce Next uses is ours.
+   */
+  const forward = () => {
+    const headers = new Headers(request.headers);
+    if (nonce) headers.set("content-security-policy", contentSecurityPolicy);
+    return NextResponse.next({ request: { headers } });
+  };
+
   // Headers, but no session work. Deliberately before the Supabase client is
   // even constructed: the point is that nothing on this path can reach GoTrue.
   if (isSessionlessPath(request.nextUrl.pathname)) {
-    return withSecurityHeaders(NextResponse.next({ request }));
+    return withSecurityHeaders(forward(), contentSecurityPolicy);
   }
 
-  let supabaseResponse = NextResponse.next({
-    request,
-  });
+  let supabaseResponse = forward();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -142,9 +179,7 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
-          supabaseResponse = NextResponse.next({
-            request,
-          });
+          supabaseResponse = forward();
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
           );
@@ -218,7 +253,7 @@ export async function middleware(request: NextRequest) {
     return redirect;
   }
 
-  return withSecurityHeaders(supabaseResponse);
+  return withSecurityHeaders(supabaseResponse, contentSecurityPolicy);
 }
 
 /**
@@ -228,86 +263,31 @@ export async function middleware(request: NextRequest) {
  * can still be given headers — see `isSessionlessPath`. Redirects are the one
  * exception: they carry no body to protect, and the destination they point at
  * comes back through here.
+ *
+ * The policy itself is built in `@/lib/security/content-security-policy`
+ * (ADR 059): a per-request nonce on the app surface, today's static policy on
+ * the marketing surface. connect-src is derived from env there, exactly as it
+ * was here.
+ *
+ * TOMBSTONE — `X-XSS-Protection: 1; mode=block` was set here until s79 (s69
+ * L19). Browsers removed the auditor it configured, and where it still exists
+ * `mode=block` has been used for cross-site leaks; the CSP is the protection.
+ * Do not re-add it. HSTS is not here: it is set once, in `next.config.ts`, so
+ * static assets the matcher skips send the same policy (a browser keeps the
+ * last one it saw).
  */
-function withSecurityHeaders(response: NextResponse): NextResponse {
-  // Security headers
+function withSecurityHeaders(
+  response: NextResponse,
+  contentSecurityPolicy: string,
+): NextResponse {
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("X-XSS-Protection", "1; mode=block");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set(
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=()",
   );
-
-  // Content Security Policy
-  // In development keep 'unsafe-eval' so Next.js HMR / React DevTools work.
-  // In production drop it to prevent arbitrary code execution.
-  const isDev = process.env.NODE_ENV !== "production";
-  const scriptSrc = isDev
-    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-    : "script-src 'self' 'unsafe-inline'";
-
-  // connect-src must allowlist every origin the client opens XHR/fetch/WebSocket to,
-  // or the browser silently blocks them. 'self' alone breaks Supabase (REST + wss
-  // realtime) and the Socket.io server. Derive the exact origins from env so we
-  // don't widen the policy to a blanket https:/wss:.
-  //
-  // Sentry does not need an entry of its own: since s46 the browser SDK posts to
-  // the same-origin `SENTRY_TUNNEL_ROUTE`, which 'self' covers. The DSN origin is
-  // still added below for the one case the SDK skips the tunnel — a DSN that is
-  // not a sentry.io SaaS host. It was already here before s46, which is how we
-  // know the CSP was never what kept events from arriving.
-  const connectSrc = new Set<string>(["'self'"]);
-  const addOrigin = (raw?: string) => {
-    if (!raw) return;
-    try {
-      const { protocol, host } = new URL(raw);
-      // Supabase exposes REST over https and realtime over wss on the same host.
-      if (protocol === "https:" || protocol === "http:") {
-        connectSrc.add(`https://${host}`);
-        connectSrc.add(`wss://${host}`);
-      } else if (protocol === "wss:" || protocol === "ws:") {
-        connectSrc.add(`wss://${host}`);
-        connectSrc.add(`https://${host}`);
-      }
-      // Keep the scheme as configured too. Socket.io opens its handshake over
-      // plain HTTP polling before upgrading, so a local `http://host:4001` WS
-      // URL needs http:/ws: allowed or the connection dies at the first XHR.
-      // Only in dev — production env values are https/wss and stay that way.
-      if (isDev && (protocol === "http:" || protocol === "ws:")) {
-        connectSrc.add(`http://${host}`);
-        connectSrc.add(`ws://${host}`);
-      }
-    } catch {
-      // ignore malformed env values
-    }
-  };
-  addOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
-  addOrigin(process.env.NEXT_PUBLIC_WS_URL);
-  addOrigin(process.env.NEXT_PUBLIC_SENTRY_DSN);
-  if (isDev) connectSrc.add("ws://localhost:*");
-
-  const csp = [
-    "default-src 'self'",
-    scriptSrc,
-    // Browsers fall back to script-src when script-src-elem is absent, so this
-    // is not a tightening — it just stops the fallback from being implicit, and
-    // makes the "which directive blocked me" console message unambiguous.
-    scriptSrc.replace("script-src", "script-src-elem"),
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https:",
-    "font-src 'self' https:",
-    `connect-src ${Array.from(connectSrc).join(" ")}`,
-    "frame-src 'none'",
-    "object-src 'none'",
-    "base-uri 'self'",
-    // CSP equivalent of the X-Frame-Options: DENY header set above. Kept in
-    // sync with it; frame-ancestors is what modern browsers actually honour.
-    "frame-ancestors 'none'",
-  ].join("; ");
-
-  response.headers.set("Content-Security-Policy", csp);
+  response.headers.set("Content-Security-Policy", contentSecurityPolicy);
 
   return response;
 }
