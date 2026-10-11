@@ -124,6 +124,13 @@ local evidence. Final review, PR/current-head CI and manual release remain separ
   both methods return 401 before state mutation. Exact scratch artifact `acb0ce5f…`, which removes
   only the publish POST `editorTokenBody()` call, produces one targeted edit/publish failure and
   five passes. The clean artifact remains six of six with no skips or flakes.
+- CI run `38124306716` then exposed a staging/history ordering race: the first attempt asserted
+  fixture state while the widget's optimistic DOM already showed the edit but its asynchronous PUT
+  had not reached the stub; retry passed, correctly failing the strict zero-flake contract. A
+  controlled 400 ms delay before API dispatch reproduced the old `null` state deterministically.
+  The spec now waits on the recorded PUT body before reading fixture state, retaining the DOM,
+  staged-versus-published and restore assertions. With that pre-dispatch delay, the case passed ten
+  consecutive zero-retry runs; the full CI-mode fixture passed six of six with zero flakes.
 - Repository gates are green on Node 24: the current source-level embed suite passed 305/305;
   lint exited zero with 34 existing warnings; `format:check`, full and production type-checks,
   build, full Jest (5,571 passed, 38 skipped) and coverage all passed. Coverage reported 71.60%

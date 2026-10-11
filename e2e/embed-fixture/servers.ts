@@ -55,6 +55,10 @@ interface StartFixtureServersOptions {
   artifactPath?: string;
   servingPort?: number;
   hostPort?: number;
+  beforeApiRequest?: (request: {
+    method: string;
+    pathname: string;
+  }) => Promise<void>;
 }
 
 function portFromEnvironment(name: string, fallback: number): number {
@@ -160,9 +164,24 @@ export async function startFixtureServers(
   const servingServer = createServer(
     (request: IncomingMessage, response: ServerResponse) => {
       void (async () => {
+        const requestUrl = new URL(request.url || "/", servingOrigin);
+        if (
+          requestUrl.pathname.startsWith("/api/") &&
+          options.beforeApiRequest
+        ) {
+          // CI first exposed the staging spec reading fixture state after an
+          // optimistic DOM update but before its PUT reached StubApi. This hook
+          // delays dispatch into the stub itself, rather than merely delaying a
+          // response after mutation, so the regression reproduces that exact
+          // component boundary without changing product timing.
+          await options.beforeApiRequest({
+            method: (request.method || "GET").toUpperCase(),
+            pathname: requestUrl.pathname,
+          });
+        }
         if (await api.handle(request, response)) return;
 
-        const url = new URL(request.url || "/", servingOrigin);
+        const url = requestUrl;
         if (url.pathname === "/embed/recopyfast.js") {
           respondText(
             response,

@@ -9,11 +9,24 @@ import {
   waitForWidget,
 } from "./servers";
 
+const STAGING_WRITE_DELAY_MS = 400;
+
 test.describe("built embed fixture: staging and history", () => {
   let fixture: FixtureServers;
 
   test.beforeAll(async () => {
-    fixture = await startFixtureServers();
+    fixture = await startFixtureServers({
+      beforeApiRequest: async ({ method, pathname }) => {
+        if (
+          method === "PUT" &&
+          pathname === `/api/staging/content/${FIXTURE_SITE_ID}`
+        ) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, STAGING_WRITE_DELAY_MS),
+          );
+        }
+      },
+    });
   });
 
   test.beforeEach(() => {
@@ -46,6 +59,18 @@ test.describe("built embed fixture: staging and history", () => {
     await page.locator(".rcf-btn-save").click();
 
     await expect(copy).toHaveText(stagedText);
+    await expect
+      .poll(
+        () =>
+          fixture.api.latestRequest(
+            `/api/staging/content/${FIXTURE_SITE_ID}`,
+            "PUT",
+          )?.json,
+      )
+      .toMatchObject({
+        elementId: FIXTURE_ELEMENT_IDS.copy,
+        content: stagedText,
+      });
     expect(fixture.api.stagedContent(FIXTURE_ELEMENT_IDS.copy)).toBe(
       stagedText,
     );

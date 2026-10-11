@@ -1,8 +1,8 @@
 # Review — Story s06b-embed-fixture-harness
 
 > Fresh-context review by the `reviewer` subagent. Reviewed the complete story diff from
-> `origin/main` (`0dea1c05`) through PR head `2b8273e3`, plus the frozen post-Devin repair in
-> `stub-api.ts`, `edit-publish.spec.ts`, `cls.spec.ts`, the plan and this review.
+> `origin/main` (`0dea1c05`) through PR head `d0b13de9`, plus the frozen CI timing repair in
+> `servers.ts`, `staging-history.spec.ts`, the plan and this review.
 > Draft PR: <https://github.com/marcusbey/recopyfast/pull/88>.
 > No product UI changes, so design-system and customer screenshot review do not apply.
 
@@ -21,7 +21,9 @@
   `siteId` / `stagingToken`, then publishes the staged value and clears the draft. Missing or wrong
   fixture credentials are refused before state mutation.
 - [x] **Task 4:** staging validation/banner, draft-only state, history list, Bearer credential,
-  restore request, restored fixture state and restored host DOM are all asserted.
+  restore request, restored fixture state and restored host DOM are all asserted. The spec waits
+  for the exact recorded staging PUT before reading fixture state, so an optimistic DOM update
+  cannot race the asynchronous write dispatch.
 - [x] **Task 5:** the user-approved 2026-10-11 scope is implemented exactly: existing language
   list/add, including site id, POST body and staging Bearer contract, plus image upload with exact
   file bytes/name/type/site id, site Bearer, staging write and changed host `src`. No language
@@ -67,6 +69,21 @@
 - `NEXT_PUBLIC_APP_URL=http://localhost:3000 CI=1 npm test -- src/__tests__/e2e/playwright-ci-contract.test.ts --runInBand`
   — **12/12 passed**.
 - `git diff --check` and product-file diff checks — passed after the clean and mutant runs.
+
+### Post-CI staging/history timing repair
+
+- CI run `38124306716` correctly failed the strict flake gate: first attempt observed optimistic DOM
+  text before the PUT reached fixture state; retry passed; overall result remained red at one flaky.
+- The repaired fixture delays the exact staging PUT by 400 ms **before** dispatch into `StubApi`,
+  then polls for its exact recorded body before direct state reads. Recording and row mutation are
+  synchronous with no intervening `await`, so observing the record establishes that mutation has
+  completed on the same Node event loop.
+- Fresh reviewer command
+  `npx playwright test --config=playwright.embed.config.ts staging-history.spec.ts --retries=0`
+  — **1/1 passed with no retry available**.
+- Retained implementation evidence records the deterministic old `null` failure, **10/10**
+  consecutive zero-retry passes after repair and strict CI mode at **6 passed / 0 flaky**.
+- Retry policy, strict reporter, assertions and the six-test inventory are unchanged.
 
 ### Earlier reviewer gates on locked PR source `2b8273e3`
 
@@ -123,6 +140,12 @@ missing language Bearer validation and missing staging-publish credential valida
 were fixed test-first and independently neutralized again; the exact broken artifacts now fail only
 their intended cases. They are recorded as resolved review history, not open findings.
 
+CI also exposed one test-ordering defect after PR head `d0b13de9`: optimistic DOM text did not prove
+the asynchronous staging PUT had reached fixture state. The strict zero-flake reporter kept the job
+red. The frozen repair synchronizes on the recorded PUT, preserves every state/DOM/history
+assertion, and passes under a deterministic pre-dispatch delay with retries disabled. It is resolved
+review history, not an open finding.
+
 ## Evidence boundaries
 
 - This fixture is intentionally a deterministic browser/widget instrument with stubbed API
@@ -149,6 +172,8 @@ Authenticated Devin review exposed a real major publish-credential false positiv
 questioned the CLS observation boundary. The publish gap is now repaired and independently proven
 with the exact broken artifact. The CLS code, plan and report now state the intended bounded startup
 window explicitly; the 750 ms duration, `0.001` threshold and in-window mutation were not relaxed.
+The later CI-only staging/history race is also repaired at the request-dispatch boundary without a
+sleep after mutation, retry increase or assertion removal; the independent zero-retry case passes.
 
 No unresolved finding remains. PR readiness still depends on root-owned commit/push hooks,
 current-head hosted CI and the separate PR-review UI disposition; those delivery gates are not
