@@ -1,4 +1,4 @@
-import { comparisonList } from "@/lib/compare/comparisons";
+import { comparisonList, type Comparison } from "@/lib/compare/comparisons";
 import { SITE_DESCRIPTION, SITE_NAME } from "./site-identity";
 
 /**
@@ -16,11 +16,14 @@ import { SITE_DESCRIPTION, SITE_NAME } from "./site-identity";
  * routes and the sitemap are built from (ADR 012 §4), so a new comparison is
  * listed here without touching this file.
  */
-export function buildLlmsTxt(siteUrl: string): string {
+export function buildLlmsTxt(
+  siteUrl: string,
+  comparisonEntries: readonly Comparison[] = comparisonList,
+): string {
   const link = (label: string, path: string, note: string) =>
     `- [${label}](${siteUrl}${path}): ${note}`;
 
-  const comparisons = comparisonList.map((comparison) =>
+  const comparisonLinks = comparisonEntries.map((comparison) =>
     link(
       comparison.title,
       `/compare/${comparison.slug}`,
@@ -75,7 +78,7 @@ export function buildLlmsTxt(siteUrl: string): string {
       "/compare",
       "how ReCopyFast compares with other ways to let clients edit a website, including where the others are the better choice.",
     ),
-    ...comparisons,
+    ...comparisonLinks,
     "",
     "## Legal",
     "",

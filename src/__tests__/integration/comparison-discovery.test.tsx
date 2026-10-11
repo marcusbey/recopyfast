@@ -43,6 +43,8 @@ describe("comparison page discovery", () => {
     expect(comparisonUrls).toEqual(
       comparisonList.map((comparison) => `/compare/${comparison.slug}`),
     );
+    expect(comparisonUrls).toHaveLength(7);
+    expect(urls.some((url) => url.startsWith("/alternatives"))).toBe(false);
 
     expect(urls).toEqual(
       expect.arrayContaining([
@@ -57,8 +59,16 @@ describe("comparison page discovery", () => {
         "/compare/duda",
         "/compare/tinacms",
         "/compare/cloudcannon",
+        "/compare/contentful",
+        "/compare/storyblok",
+        "/compare/decap-cms",
       ]),
     );
+    expect(
+      entries
+        .filter((entry) => new URL(entry.url).pathname.startsWith("/compare"))
+        .every((entry) => entry.lastModified === undefined),
+    ).toBe(true);
   });
 
   it("preserves published blog URLs beside the static comparison entries", async () => {

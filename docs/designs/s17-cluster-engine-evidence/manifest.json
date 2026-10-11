@@ -1,0 +1,29 @@
+{
+  "capturedOn": "2026-10-10",
+  "kind": "local production build, unavailable catalogue fixture",
+  "beforeHead": "40b7f1383657eada5c72d18f23a8f3feea59ebe3",
+  "beforeComparisonSourceMatchesMain": "0dea1c05babed48834ecc72700cfebef01ae6733",
+  "after": "uncommitted s17 recovery with real404 fix; before later nonvisual shared-schema/registry/runner review repairs",
+  "screenshots": [
+    {
+      "file": "before-hub-1440.png",
+      "sha256": "baef1575a7123d02728f78c35bf6ee9864304252d498608a83dd519645639527"
+    },
+    {
+      "file": "hub-desktop.png",
+      "sha256": "75a4e6dee3a767ede3b996d7b278ff45cd876242281537b8f4d714ad5c1e340b"
+    },
+    {
+      "file": "before-webflow-editor-1440.png",
+      "sha256": "cfa10515b0662c28cfa3a18803b14d81550b42b8b637ea089e2309bdb7a10d49"
+    },
+    {
+      "file": "webflow-editor-1440.png",
+      "sha256": "a3000a9e04fcdcf15216972e60448ce0871ace5fc3c8dc77780009a9ac1b1947"
+    },
+    {
+      "file": "contentful-390.png",
+      "sha256": "98e7c71b78c29c13a745594452a5cb0e841845bbb519b5985180266cfed3b2d5"
+    }
+  ]
+}

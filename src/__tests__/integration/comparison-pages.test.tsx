@@ -1,35 +1,37 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render, screen, within } from "@testing-library/react";
+import type { Metadata } from "next";
 import CompareIndexPage, {
   metadata as indexMetadata,
 } from "@/app/compare/page";
-import WebflowEditorPage, {
-  metadata as webflowMetadata,
-  revalidate as webflowRevalidate,
-} from "@/app/compare/webflow-editor/page";
-import DudaPage, {
-  metadata as dudaMetadata,
-  revalidate as dudaRevalidate,
-} from "@/app/compare/duda/page";
-import TinaCmsPage, {
-  metadata as tinaMetadata,
-  revalidate as tinaRevalidate,
-} from "@/app/compare/tinacms/page";
-import CloudCannonPage, {
-  metadata as cloudCannonMetadata,
-  revalidate as cloudCannonRevalidate,
-} from "@/app/compare/cloudcannon/page";
+import ComparisonRoute, {
+  revalidate as comparisonRevalidate,
+} from "@/app/compare/[competitor]/page";
 import { ComparisonPage } from "@/components/compare/ComparisonPage";
-import { comparisons } from "@/lib/compare/comparisons";
+import {
+  comparisons,
+  createComparisonMetadata,
+  type ComparisonSlug,
+} from "@/lib/compare/comparisons";
 import {
   loadComparisonPricing,
   type ComparisonPricing,
 } from "@/lib/compare/comparison-pricing";
+import { loadCatalogueOffers } from "@/lib/seo/catalogue-offers";
+import type { MonthlyOffer } from "@/lib/seo/json-ld";
+import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/seo/site-identity";
 
 jest.mock("@/lib/compare/comparison-pricing", () => ({
   loadComparisonPricing: jest.fn(),
 }));
 
+jest.mock("@/lib/seo/catalogue-offers", () => ({
+  loadCatalogueOffers: jest.fn(),
+}));
+
 const mockLoadComparisonPricing = jest.mocked(loadComparisonPricing);
+const mockLoadCatalogueOffers = jest.mocked(loadCatalogueOffers);
 
 jest.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
@@ -45,9 +47,7 @@ const routes = [
   {
     slug: "webflow-editor",
     name: "Webflow",
-    Page: WebflowEditorPage,
-    metadata: webflowMetadata,
-    revalidate: webflowRevalidate,
+    factsCheckedAsOf: "2026-09",
     shortAnswer: /choose Webflow when you need to design or rebuild/i,
     competitorFit: /visual site building, CMS, and hosting/i,
     deliveryDisclosure:
@@ -56,9 +56,7 @@ const routes = [
   {
     slug: "duda",
     name: "Duda",
-    Page: DudaPage,
-    metadata: dudaMetadata,
-    revalidate: dudaRevalidate,
+    factsCheckedAsOf: "2026-09",
     shortAnswer: /choose Duda when your agency wants one visual builder/i,
     competitorFit: /build and manage client sites in one visual platform/i,
     deliveryDisclosure:
@@ -67,9 +65,7 @@ const routes = [
   {
     slug: "tinacms",
     name: "TinaCMS",
-    Page: TinaCmsPage,
-    metadata: tinaMetadata,
-    revalidate: tinaRevalidate,
+    factsCheckedAsOf: "2026-09",
     shortAnswer: /choose TinaCMS when Git-backed structured content/i,
     competitorFit: /content in Git with developer-defined schemas/i,
     deliveryDisclosure:
@@ -78,13 +74,38 @@ const routes = [
   {
     slug: "cloudcannon",
     name: "CloudCannon",
-    Page: CloudCannonPage,
-    metadata: cloudCannonMetadata,
-    revalidate: cloudCannonRevalidate,
+    factsCheckedAsOf: "2026-09",
     shortAnswer: /choose CloudCannon when a Git-based visual CMS/i,
     competitorFit: /Git and static-site workflow/i,
     deliveryDisclosure:
       "Choose CloudCannon when published edits must be served in the page's HTML. ReCopyFast applies published edits in the visitor's browser after the page loads, so visitors without JavaScript and crawlers that do not render JavaScript see the original HTML; put SEO-critical copy in the site's source as well.",
+  },
+  {
+    slug: "contentful",
+    name: "Contentful",
+    factsCheckedAsOf: "2026-10",
+    shortAnswer: /choose Contentful when reusable structured content/i,
+    competitorFit: /modeled content that can be reused/i,
+    deliveryDisclosure:
+      "Choose Contentful when published content should enter the frontend through a structured API. Whether it reaches visitors in served HTML depends on that frontend's rendering and deployment; ReCopyFast applies published edits in the browser after load.",
+  },
+  {
+    slug: "storyblok",
+    name: "Storyblok",
+    factsCheckedAsOf: "2026-10",
+    shortAnswer: /choose Storyblok when a headless content platform/i,
+    competitorFit: /structured stories and reusable content blocks/i,
+    deliveryDisclosure:
+      "Choose Storyblok when its API content feeds a frontend that can render published updates into served HTML. ReCopyFast applies published edits in the visitor's browser after the page loads.",
+  },
+  {
+    slug: "decap-cms",
+    name: "Decap CMS",
+    factsCheckedAsOf: "2026-10",
+    shortAnswer: /choose Decap CMS when repository files/i,
+    competitorFit: /content should stay as files in a Git repository/i,
+    deliveryDisclosure:
+      "Choose Decap CMS when commits feed a build that serves updated HTML. Decap CMS does not deliver the frontend itself; ReCopyFast applies published edits in the visitor's browser after page load.",
   },
 ] as const;
 
@@ -139,10 +160,52 @@ const expectedCompetitorRows = {
     "Pricing model":
       "Plans bundle user allowances; extra users or site shares may vary by plan, and Standard lists unlimited sites.",
   },
+  contentful: {
+    "Best at":
+      "Modeling reusable structured content for websites, apps, and other channels.",
+    Installation:
+      "Model content, integrate the delivery APIs or SDKs, and configure preview for the consuming frontend.",
+    "Editor access":
+      "Editors are invited organization users with role-based access. Custom permissions and advanced environment controls depend on the plan.",
+    Publishing:
+      "Publishing makes entries available through the Content Delivery API. Roles control who edits or publishes; workflow features depend on the plan.",
+    "How published edits reach visitors":
+      "Contentful delivers published content as JSON and media through its APIs. The site's rendering or build workflow determines whether visitors receive that content in served HTML.",
+    "Pricing model":
+      "Platform plans vary by spaces, users, roles, locales, API calls, bandwidth, and governance features.",
+  },
+  storyblok: {
+    "Best at":
+      "Component-based headless content with a visual preview and broader editorial platform.",
+    Installation:
+      "Integrate the Content Delivery API and SDK, map frontend components, and connect the Storyblok Bridge for visual editing.",
+    "Editor access":
+      "Users join a space with roles controlling content, blocks, assets, languages, and publishing. Custom roles and workflows are available on supporting plans.",
+    Publishing:
+      "Stories move between draft, published, and changed states; workflows and scheduled publishing vary by plan and configuration.",
+    "How published edits reach visitors":
+      "Storyblok delivers JSON through its content API. The frontend's rendering or build workflow determines when that content becomes visitor-facing HTML.",
+    "Pricing model":
+      "Plans vary by spaces, seats, traffic, API requests, locales, workflow features, and governance needs.",
+  },
+  "decap-cms": {
+    "Best at":
+      "Open-source editorial UI over Git-backed content and review workflows.",
+    Installation:
+      "Add the admin app, configure collections and media, choose a Git backend, and provide authentication plus a build and deploy path.",
+    "Editor access":
+      "Editors authenticate through the configured backend; standard Git backends, Git Gateway, Open Authoring, and hosted Turbo have different account requirements.",
+    Publishing:
+      "By default a save commits to the publication branch; editorial workflow uses branches and pull or merge requests for drafts, review, and approval.",
+    "How published edits reach visitors":
+      "Decap CMS updates repository content but does not deliver the website. The configured build and deployment determine when those files become visitor-facing HTML.",
+    "Pricing model":
+      "The core CMS is free and open source; Git hosting, authentication, site hosting, builds, and optional hosted services are separate.",
+  },
 } as const;
 
 const indexPlatformDisclosure =
-  "Choose a full platform when you need its wider system: visual layout and hosting from Webflow or Duda, structured Git content from TinaCMS, or a Git-based visual CMS and repository sync from CloudCannon. For Git-backed tools, whether an edit appears in served HTML depends on the site's build and deployment. ReCopyFast applies published edits in the visitor's browser after the page loads, so no-JavaScript visitors and crawlers that do not render JavaScript see the original HTML; put SEO-critical copy in the site's source as well.";
+  "Choose a full platform when you need its wider system: visual layout and hosting from Webflow or Duda, structured API content from Contentful or Storyblok, or Git-backed workflows from TinaCMS, CloudCannon, or Decap CMS. Whether a headless or Git-backed edit appears in served HTML depends on the site's rendering, build, and deployment. ReCopyFast applies published edits in the visitor's browser after the page loads, so no-JavaScript visitors and crawlers that do not render JavaScript see the original HTML; put SEO-critical copy in the site's source as well.";
 
 const indexRecopyFastDisclosure =
   "Choose ReCopyFast when the site already exists, should stay on its current stack, and clients need an account-free email-code path to draft and publish copy. Its published edits are applied in the visitor's browser after load; visitors without JavaScript and crawlers that do not render it see the original HTML, so keep SEO-critical copy in the site's source too.";
@@ -150,10 +213,7 @@ const indexRecopyFastDisclosure =
 const integrationBoundaryDisclosure =
   "ReCopyFast can be added across different site stacks because its integration is a script, but installation requires permission to add a script and a compatible Content Security Policy (CSP). It edits existing authored copy; it does not build pages or migrate a site. Published edits are applied in the visitor's browser after the page loads. Visitors without JavaScript, and crawlers that do not render JavaScript, see the original HTML copy, so put SEO-critical copy in the site's source as well.";
 
-function expectMetadata(
-  metadata: (typeof routes)[number]["metadata"],
-  slug: string,
-) {
+function expectMetadata(metadata: Metadata, slug: string) {
   const canonical = `/compare/${slug}`;
 
   expect(metadata.alternates).toMatchObject({ canonical });
@@ -168,6 +228,12 @@ function expectMetadata(
   });
 }
 
+async function renderComparisonRoute(slug: ComparisonSlug) {
+  return render(
+    await ComparisonRoute({ params: Promise.resolve({ competitor: slug }) }),
+  );
+}
+
 const availablePricing: ComparisonPricing = {
   status: "available",
   agency: { monthlyPrice: 73, websites: 14 },
@@ -177,6 +243,21 @@ const availablePricing: ComparisonPricing = {
     availability: { remaining: 9, limit: 50, soldOut: false },
   },
 };
+
+const catalogueOffers: MonthlyOffer[] = [
+  {
+    name: "Starter",
+    price: 9,
+    currency: "USD",
+    url: "http://localhost:3000/#pricing",
+  },
+  {
+    name: "Pro",
+    price: 19,
+    currency: "USD",
+    url: "http://localhost:3000/#pricing",
+  },
+];
 
 function expectFaqJsonLdMatchesVisibleFaq() {
   const scripts = Array.from(
@@ -224,6 +305,7 @@ function expectFaqJsonLdMatchesVisibleFaq() {
 describe("comparison marketing pages", () => {
   beforeEach(() => {
     mockLoadComparisonPricing.mockResolvedValue(availablePricing);
+    mockLoadCatalogueOffers.mockResolvedValue(catalogueOffers);
   });
 
   it("renders a comparison index with every supported alternative", async () => {
@@ -296,19 +378,28 @@ describe("comparison marketing pages", () => {
     expectFaqJsonLdMatchesVisibleFaq();
   });
 
+  it("routes the comparison index FAQ schema through the shared JSON-LD boundary", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/app/compare/page.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("buildFAQPageLd(indexFaqs)");
+    expect(source).toContain("serializeJsonLd(indexFaqSchema)");
+    expect(source).not.toContain("JSON.stringify(indexFaqSchema)");
+  });
+
   it.each(routes)(
     "renders the dated, fair $name comparison with valid matching FAQ schema",
     async ({
       slug,
       name,
-      Page,
-      metadata,
-      revalidate,
+      factsCheckedAsOf,
       shortAnswer,
       competitorFit,
       deliveryDisclosure,
     }) => {
-      render(await Page());
+      await renderComparisonRoute(slug);
 
       expect(
         screen.getByRole("heading", {
@@ -318,7 +409,12 @@ describe("comparison marketing pages", () => {
       ).toBeInTheDocument();
       expect(screen.getByText(shortAnswer)).toBeInTheDocument();
       expect(
-        screen.getByText(/product information checked as of 2026-09/i),
+        screen.getByText(
+          new RegExp(
+            `product information checked as of ${factsCheckedAsOf}`,
+            "i",
+          ),
+        ),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("heading", {
@@ -457,6 +553,23 @@ describe("comparison marketing pages", () => {
       const schemas = Array.from(
         document.querySelectorAll('script[type="application/ld+json"]'),
       ).map((script) => JSON.parse(script.textContent ?? "null"));
+      const softwareApplication = schemas.find(
+        (schema) => schema?.["@type"] === "SoftwareApplication",
+      );
+      expect(softwareApplication).toMatchObject({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        name: SITE_NAME,
+        description: SITE_DESCRIPTION,
+        url: `http://localhost:3000/compare/${slug}`,
+        offers: [
+          expect.objectContaining({ name: "Starter", price: 9 }),
+          expect.objectContaining({ name: "Pro", price: 19 }),
+        ],
+      });
+      expect(JSON.stringify(softwareApplication)).not.toMatch(
+        /aggregateRating|ratingValue|"review"/,
+      );
       expect(schemas).toEqual(
         expect.arrayContaining([
           {
@@ -483,8 +596,8 @@ describe("comparison marketing pages", () => {
         "aria-current",
         "page",
       );
-      expectMetadata(metadata, slug);
-      expect(revalidate).toBe(300);
+      expectMetadata(createComparisonMetadata(comparisons[slug]), slug);
+      expect(comparisonRevalidate).toBe(300);
     },
   );
 
@@ -500,7 +613,7 @@ describe("comparison marketing pages", () => {
   );
 
   it("documents the current Webflow content-editor account flow and legacy Editor retirement", async () => {
-    render(await WebflowEditorPage());
+    await renderComparisonRoute("webflow-editor");
 
     expect(
       screen.getByText(/legacy Webflow Editor retired on August 4, 2026/i),
@@ -513,7 +626,7 @@ describe("comparison marketing pages", () => {
   });
 
   it("credits CloudCannon client sharing as a no-account option", async () => {
-    render(await CloudCannonPage());
+    await renderComparisonRoute("cloudcannon");
 
     expect(
       screen.getByText(
@@ -523,7 +636,7 @@ describe("comparison marketing pages", () => {
   });
 
   it("states Duda's unlimited client-account and per-site billing model accurately", async () => {
-    render(await DudaPage());
+    await renderComparisonRoute("duda");
 
     expect(
       screen.getByText(expectedCompetitorRows.duda["Client access"]),
@@ -574,7 +687,11 @@ describe("comparison marketing pages", () => {
     "renders $0 without a hardcoded offer",
     (_label, pricing, expected) => {
       render(
-        <ComparisonPage comparison={comparisons.duda} pricing={pricing} />,
+        <ComparisonPage
+          comparison={comparisons.duda}
+          pricing={pricing}
+          offers={catalogueOffers}
+        />,
       );
 
       expect(screen.getAllByText(expected).length).toBeGreaterThanOrEqual(1);
@@ -593,6 +710,7 @@ describe("comparison marketing pages", () => {
       <ComparisonPage
         comparison={comparisons.duda}
         pricing={availablePricing}
+        offers={catalogueOffers}
       />,
     );
 
@@ -620,6 +738,7 @@ describe("comparison marketing pages", () => {
             availability: { remaining: 9, limit: 50, soldOut: false },
           },
         }}
+        offers={catalogueOffers}
       />,
     );
 
@@ -631,22 +750,45 @@ describe("comparison marketing pages", () => {
     expect(screen.queryByText(/250 AI credits/)).toBeNull();
   });
 
+  it("omits schema offers after a catalogue failure without hiding visible pricing state", async () => {
+    mockLoadCatalogueOffers.mockResolvedValueOnce([]);
+
+    await renderComparisonRoute("contentful");
+
+    const schemas = Array.from(
+      document.querySelectorAll('script[type="application/ld+json"]'),
+    ).map((script) => JSON.parse(script.textContent ?? "null"));
+    const softwareApplication = schemas.find(
+      (schema) => schema?.["@type"] === "SoftwareApplication",
+    );
+    expect(softwareApplication).toBeDefined();
+    expect(softwareApplication).not.toHaveProperty("offers");
+    expect(
+      screen.getAllByText(
+        /Agency is \$73\/month for 14 sites.*Founding Agency is \$411 lifetime/i,
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
   it("publishes unique canonical and social titles for every comparison route", () => {
-    const metadata = routes.map((route) => route.metadata);
+    const metadata = routes.map((route) =>
+      createComparisonMetadata(comparisons[route.slug]),
+    );
     const titles = metadata.map((item) => item.openGraph?.title);
     const canonicals = metadata.map((item) => item.alternates?.canonical);
 
     expect(new Set(titles).size).toBe(routes.length);
     expect(new Set(canonicals).size).toBe(routes.length);
-    for (const route of routes) {
-      expect(route.metadata.title).toEqual({
+    for (const [index] of routes.entries()) {
+      const routeMetadata = metadata[index];
+      expect(routeMetadata.title).toEqual({
         absolute: expect.stringMatching(/^ReCopyFast vs /),
       });
-      expect(route.metadata.openGraph?.title).toBe(
-        (route.metadata.title as { absolute: string }).absolute,
+      expect(routeMetadata.openGraph?.title).toBe(
+        (routeMetadata.title as { absolute: string }).absolute,
       );
-      expect(route.metadata.twitter?.title).toBe(
-        (route.metadata.title as { absolute: string }).absolute,
+      expect(routeMetadata.twitter?.title).toBe(
+        (routeMetadata.title as { absolute: string }).absolute,
       );
     }
   });

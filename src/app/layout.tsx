@@ -42,6 +42,11 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-jetbrains-mono",
+  // s17's first 40-report Lighthouse run found this 40,941-byte face in the
+  // high-priority preload graph on all eight comparison routes, even though
+  // those pages contain no `font-mono` content. Keep the variable and face for
+  // routes that use machine strings; let the browser request it only there.
+  preload: false,
 });
 
 /**
