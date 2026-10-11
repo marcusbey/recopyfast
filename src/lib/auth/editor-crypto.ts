@@ -20,6 +20,8 @@ export const CRYPTO_DOMAIN = {
   code: "recopyfast/editor-code/v1",
   handoff: "recopyfast/editor-handoff/v1",
   hubSession: "recopyfast/editor-hub-session/v1",
+  // The owner's "Edit website" link (s76, ADR 055): src/lib/auth/edit-link.ts.
+  editLink: "recopyfast/edit-link/v1",
 } as const;
 
 export type CryptoDomain = (typeof CRYPTO_DOMAIN)[keyof typeof CRYPTO_DOMAIN];

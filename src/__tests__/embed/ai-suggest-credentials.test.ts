@@ -148,13 +148,18 @@ async function bootGrantHolder(aiReply: Reply = SUGGESTED) {
   return recorded;
 }
 
-/** Boots the owner's edit-session link, as the dashboard's "Edit" opens it. */
+/**
+ * Boots a tab holding the owner's edit session (ADR 036) — what the
+ * dashboard's "Edit" link leaves behind once the widget has spent its code
+ * (s76; edit-link-persistence.test.ts). Before s76 this landed on
+ * `?rcf_edit_token=`, which the widget no longer reads.
+ */
 async function bootEditSessionOwner() {
-  window.history.replaceState(
-    null,
-    "",
-    `/pricing?rcf_edit_token=${EDIT_TOKEN}`,
+  window.sessionStorage.setItem(
+    `rcf_edit_link:${SITE_ID}`,
+    JSON.stringify([null, EDIT_TOKEN]),
   );
+  window.history.replaceState(null, "", "/pricing");
 
   const recorded = installFetch({
     "staging/validate": {

@@ -190,3 +190,34 @@ describe("s51 — POST /api/editor/refresh-grant", () => {
     });
   });
 });
+
+describe("s76 — A-28: the body does not choose the replacement's lifetime", () => {
+  it("does not forward the body's rememberDevice to the rotation", async () => {
+    // The lineage decides (refreshDeviceGrant reads the row it rotates). This
+    // route used to read `rememberDevice` off the JSON body and hand it on,
+    // which is how a session-only grant became a seven-day one.
+    mockCheckOwnerCanEdit.mockResolvedValue({ ok: true, ownerId: "owner-1" });
+
+    const response = await POST(
+      new NextRequest("https://www.recopyfa.st/api/editor/refresh-grant", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://helloworld.com",
+          "User-Agent": "jest",
+        },
+        body: JSON.stringify({
+          grant: "rcfg1.held",
+          siteId: SITE_ID,
+          rememberDevice: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockRefreshDeviceGrant).toHaveBeenCalledTimes(1);
+    expect(mockRefreshDeviceGrant.mock.calls[0][0]).not.toHaveProperty(
+      "rememberDevice",
+    );
+  });
+});

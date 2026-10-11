@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { EditSessionManager } from "@/lib/auth/edit-sessions";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { authorizeFirstPartyEditorAccess } from "@/lib/auth/editor-access";
+import { buildEditUrl, mintEditLinkCode } from "@/lib/auth/edit-link";
 import {
   checkOwnerCanEdit,
   ownerCanEditRefusal,
@@ -130,6 +131,24 @@ export async function POST(request: NextRequest) {
       .eq("id", siteId)
       .single();
 
+    // The link carries a 60-second, single-use code in its FRAGMENT — never
+    // the token, never a query string (s76, ADR 055). TOMBSTONE: this was
+    // `https://${site?.domain}?rcf_edit_token=${editSession.token}` — the
+    // session itself in the customer's access logs, CDN, `Referer` and history
+    // (A-29) — and `https://https://…` for a domain stored with its scheme.
+    // The widget spends the code at its boot check (POST /api/staging/validate)
+    // and receives the token in that response body. The token below stays in
+    // this authenticated response body, which is logged nowhere and read by
+    // nothing on the customer's page. null when the site has no usable domain:
+    // the dashboard says it could not open edit mode.
+    const editUrl = buildEditUrl(
+      site?.domain,
+      mintEditLinkCode({
+        sessionId: editSession.id,
+        siteId: editSession.site_id,
+      }),
+    );
+
     return NextResponse.json({
       success: true,
       session: {
@@ -140,7 +159,7 @@ export async function POST(request: NextRequest) {
         expiresAt: editSession.expires_at,
         site: site || null,
       },
-      editUrl: `https://${site?.domain}?rcf_edit_token=${editSession.token}`,
+      editUrl,
       message: "Edit session created successfully",
     });
   } catch (error) {

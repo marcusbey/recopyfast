@@ -7,7 +7,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { StagingAccessManager } from "@/lib/auth/staging-access";
+import {
+  StagingAccessManager,
+  stagingRefusalStatus,
+} from "@/lib/auth/staging-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import {
   authorizeFirstPartyEditorAccess,
@@ -149,7 +152,7 @@ export async function GET(
         return withCors(
           NextResponse.json(
             { error: validation.error || "Access denied" },
-            { status: 401 },
+            { status: stagingRefusalStatus(validation) },
           ),
           origin,
         );
@@ -253,7 +256,7 @@ export async function POST(
         return withCors(
           NextResponse.json(
             { error: validation.error || "Access denied" },
-            { status: 401 },
+            { status: stagingRefusalStatus(validation) },
           ),
           origin,
         );

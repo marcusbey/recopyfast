@@ -88,6 +88,20 @@ describe("installation documentation content", () => {
     );
   });
 
+  // s76 (ADR 055): the owner's "Edit website" link lands as `#rcf_edit=<code>`
+  // (a one-time code in the fragment); `?rcf_edit_token=` is retired. Session
+  // replay and analytics read the full URL, fragment included, so customers
+  // are told to exclude the fragment from capture, in both formats.
+  it("names the edit link's fragment, not the retired query token, in both formats", () => {
+    const guideText = JSON.stringify(INSTALLATION_GUIDE);
+
+    for (const text of [guideText, AGENT_INSTALLATION_INSTRUCTIONS]) {
+      expect(text).toContain("#rcf_edit=");
+      expect(text).toMatch(/exclude[^.]*#rcf_edit=[^.]*session-replay/i);
+      expect(text).not.toContain("rcf_edit_token");
+    }
+  });
+
   it("states that snippet installation does not guarantee a zero-flash first paint", () => {
     expect(INSTALLATION_GUIDE.install.renderingTitle).toBe(
       "Rendering at first paint",

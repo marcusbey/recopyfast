@@ -85,9 +85,10 @@ function registeredHostname(domain: string): string | null {
 }
 
 /**
- * The edit link carries a short-lived edit token, so it is opened only if it
- * is an http(s) URL on the site's own registered host: a response that named
- * any other origin would hand that token to it.
+ * The edit link carries a one-time code in its fragment (s76, ADR 055) — not
+ * the edit token any more — but it is still opened only if it is an http(s)
+ * URL on the site's own registered host: a response that named any other
+ * origin would hand that code, and the session behind it, to that origin.
  */
 function validEditUrl(value: unknown, domain: string): string | null {
   if (typeof value !== "string") return null;

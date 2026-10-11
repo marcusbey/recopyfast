@@ -85,11 +85,15 @@ async function settle() {
 
 async function boot(failure: Failure, owner = false) {
   if (owner) {
-    window.history.replaceState(
-      null,
-      "",
-      "/pricing?rcf_staging=1&rcf_edit_token=owner-edit-token",
+    // A tab that already holds the owner's edit session (ADR 036). Before s76
+    // this landed on `?rcf_staging=1&rcf_edit_token=…`; the widget no longer
+    // reads a token from the query, and how a link becomes this stored session
+    // is edit-link-persistence.test.ts's subject, not this suite's.
+    window.sessionStorage.setItem(
+      `rcf_edit_link:${SITE_ID}`,
+      JSON.stringify([null, "owner-edit-token"]),
     );
+    window.history.replaceState(null, "", "/pricing");
   } else {
     window.localStorage.setItem(
       STORAGE_KEY,
