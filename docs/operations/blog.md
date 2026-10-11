@@ -110,8 +110,11 @@ await (await fetch("/api/admin/blog/posts/<id>", {
   the call came from another origin / without an `Origin` header · `404` no such post · `409` the post
   is not in the state the action expects (already published, still a draft, archived) · `429`/`503`
   rate limited / limiter store down (fails closed).
-- **Known gap:** the `/blog` index page is a static list (`src/app/blog/page.tsx`), not the published
-  posts. A published post is reachable at its URL and through the sitemap only (follow-up story).
+- **Public discovery:** `/blog` lists up to the 100 newest published posts through the anonymous,
+  published-only reader in `src/lib/blog/published-posts.ts`. The index is eligible for revalidation
+  after one hour (`revalidate = 3600`), so publication changes may not appear there until a request
+  triggers successful revalidation. Published posts also have their individual URLs and sitemap
+  entries; the index is no longer the historical hard-coded list.
 
 ## Audit trail
 

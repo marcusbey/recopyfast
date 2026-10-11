@@ -148,5 +148,19 @@ deployment, deployed `ADMIN_EMAILS` setting or production blog inventory was ver
 operational release checks above remain open. This approval covers the repaired source; normal
 commit/push hooks and exact-head hosted CI must still pass before the PR returns to ready.
 
+## Documentation delta — 2026-10-11
+
+The authenticated Devin UI exposed a stale runbook statement that `/blog` was a hard-coded
+list. Independent documentation review confirmed the correction against `src/app/blog/page.tsx`
+and `src/lib/blog/published-posts.ts`: the index reads published rows as anon, shows up to the
+100 newest posts, and becomes eligible for request-triggered revalidation after 3,600 seconds.
+Individual post URLs and sitemap discovery remain supported. No runtime source changed from
+`40b7f138`; this paragraph does not claim a new runtime or provider test.
+
+The separate flag about an unchecked final plan task is stale: all 16 implementation tasks in
+the current plan are checked, with their existing acceptance evidence. Manual release and hosted
+production acceptance above remain open. The documentation delta has no findings; normal hooks
+and exact-head CI will verify its final commit before delivery readiness is refreshed.
+
 Max severity: none
 Ship allowed: yes
