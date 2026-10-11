@@ -137,6 +137,7 @@ Subordinate to [`architecture.md`](./architecture.md) above.
 | [`stripe-setup.md`](./operations/stripe-setup.md)                 | Stripe products, prices and webhook configuration                                                                 |
 | [`founding-offer.md`](./operations/founding-offer.md)             | Founding offer (first 20 accounts): migration-first deploy, live proof, releasing a QA spot, inspection, rollback |
 | [`edit-needs-a-plan.md`](./operations/edit-needs-a-plan.md)       | Before deploying s51: list paid credits-only accounts to comp or refund                                           |
+| [`blog.md`](./operations/blog.md)                                 | Blog: the cron drafts, an admin reviews and publishes (s89) — `ADMIN_EMAILS`, migration-first, publish/unpublish  |
 
 ### [`gtm/`](./gtm/README.md) — how we sell it
 | File | Contents |

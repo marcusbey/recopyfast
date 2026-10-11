@@ -62,6 +62,11 @@ const REPLAY_SUITES = [
   "src/__tests__/db/sites-install-status.test.ts",
   "src/__tests__/db/content-attributes-lifecycle.test.ts",
   "src/__tests__/db/editor-activation-concurrency.test.ts",
+  // s89: one cron blog draft per UTC day is a unique key, and anon reads
+  // published posts only. Plain Postgres is enough; named so it never
+  // records a "[gated]" pass.
+  "src/__tests__/db/blog-daily-draft.test.ts",
+  "src/__tests__/db/blog-generation-claim.test.ts",
 ];
 
 function run(command, args, options = {}) {

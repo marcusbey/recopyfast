@@ -64,9 +64,13 @@ const SEEDED_ROW: SeededRow = {
   page_path: null,
 };
 
-interface TextChange {
+interface AnchoredTextChange {
   type: string;
   text: string | null;
+  added: number;
+  removed: number;
+  target: string;
+  boundary: "pre-dom-content-loaded" | "post-dom-content-loaded";
 }
 
 function escapeHtml(value: string): string {
@@ -205,6 +209,50 @@ test.describe("published snapshot rendered by the host", () => {
 
     await installTextObserver(page);
 
+    // Observer contract: parser construction is ignored, while a destructive
+    // write before DOMContentLoaded and a pure addition after it are both kept.
+    const observerPageErrors: string[] = [];
+    const recordObserverPageError = (error: Error) => {
+      observerPageErrors.push(error.message);
+    };
+    page.on("pageerror", recordObserverPageError);
+    await page.goto(`${TARGET_URL}/observer-contract`, { waitUntil: "load" });
+    const observerState = await page.evaluate(() => {
+      const value = (
+        window as unknown as { __rcfTextChanges?: AnchoredTextChange[] }
+      ).__rcfTextChanges;
+      return {
+        exists: Array.isArray(value),
+        changes: Array.isArray(value) ? value : [],
+      };
+    });
+    page.off("pageerror", recordObserverPageError);
+    expect(observerPageErrors).toEqual([]);
+    expect(observerState.exists).toBe(true);
+    const observerContractChanges = observerState.changes;
+    expect(
+      observerContractChanges.some(
+        (change) =>
+          change.boundary === "pre-dom-content-loaded" && change.removed > 0,
+      ),
+    ).toBe(true);
+    expect(
+      observerContractChanges.some(
+        (change) =>
+          change.boundary === "post-dom-content-loaded" &&
+          change.added > 0 &&
+          change.removed === 0,
+      ),
+    ).toBe(true);
+    expect(
+      observerContractChanges.some(
+        (change) =>
+          change.boundary === "pre-dom-content-loaded" &&
+          change.added > 0 &&
+          change.removed === 0,
+      ),
+    ).toBe(false);
+
     // Control: authored copy in the HTML. The embed must swap it, and the
     // observer must see the swap.
     const authoredChanges = await loadAndSettle(page, `${TARGET_URL}/authored`);
@@ -221,49 +269,111 @@ test.describe("published snapshot rendered by the host", () => {
     ]);
   });
 
-  /**
-   * Records every text change on the anchored element from the first byte of
-   * the document. Parser insertions only ever add nodes; a swap removes the old
-   * text node (`textContent =`) or rewrites it (characterData). Additions after
-   * the document is parsed count too.
-   */
+  /** Records real text changes while excluding only queued parser additions. */
   async function installTextObserver(target: Page) {
-    await target.addInitScript((anchorSelector: string) => {
-      const changes: Array<{ type: string; text: string | null }> = [];
-      (window as unknown as { __rcfTextChanges: unknown }).__rcfTextChanges =
-        changes;
-      let isParsed = false;
-      document.addEventListener("DOMContentLoaded", () => {
-        isParsed = true;
-      });
-      new MutationObserver((records) => {
-        const anchor = document.querySelector(anchorSelector);
-        if (!anchor) return;
-        for (const record of records) {
-          if (record.target !== anchor && !anchor.contains(record.target)) {
-            continue;
+    await target.addInitScript(
+      (options: {
+        anchorSelector: string;
+        deferPreBoundaryRecords: boolean;
+      }) => {
+        const changes: AnchoredTextChange[] = [];
+        (
+          window as unknown as { __rcfTextChanges: AnchoredTextChange[] }
+        ).__rcfTextChanges = changes;
+        let acceptsPureAdditions = false;
+        const deferredRecords: MutationRecord[] = [];
+
+        const observer = new MutationObserver((records) => {
+          if (!acceptsPureAdditions && options.deferPreBoundaryRecords) {
+            deferredRecords.push(...records);
+            return;
           }
-          const isTextChange =
-            record.type === "characterData" ||
-            (record.type === "childList" &&
-              (record.removedNodes.length > 0 ||
-                (isParsed && record.addedNodes.length > 0)));
-          if (isTextChange) {
-            changes.push({ type: record.type, text: anchor.textContent });
+          const anchor = document.querySelector(options.anchorSelector);
+          if (!anchor) return;
+          for (const record of records) {
+            if (record.target !== anchor && !anchor.contains(record.target)) {
+              continue;
+            }
+            const added = record.addedNodes.length;
+            const removed = record.removedNodes.length;
+            const isTextChange =
+              record.type === "characterData" ||
+              (record.type === "childList" &&
+                (removed > 0 || (acceptsPureAdditions && added > 0)));
+            if (!isTextChange) continue;
+            changes.push({
+              type: record.type,
+              text: anchor.textContent,
+              added,
+              removed,
+              target: record.target.nodeName,
+              boundary: acceptsPureAdditions
+                ? "post-dom-content-loaded"
+                : "pre-dom-content-loaded",
+            });
           }
-        }
-      }).observe(document, {
-        childList: true,
-        characterData: true,
-        subtree: true,
-      });
-    }, ANCHOR);
+        });
+
+        document.addEventListener("DOMContentLoaded", () => {
+          const records = deferredRecords
+            .splice(0)
+            .concat(observer.takeRecords());
+          const anchor = document.querySelector(options.anchorSelector);
+          if (anchor) {
+            // Deliberately duplicated rather than extracted. Playwright 1.58
+            // serializes this initializer with fn.toString(); a transformed
+            // nested named helper referenced module-scoped `__name` in the
+            // browser and prevented the observer from installing at all.
+            for (const record of records) {
+              if (record.target !== anchor && !anchor.contains(record.target)) {
+                continue;
+              }
+              const added = record.addedNodes.length;
+              const removed = record.removedNodes.length;
+              const isTextChange =
+                record.type === "characterData" ||
+                (record.type === "childList" && removed > 0);
+              if (!isTextChange) continue;
+              changes.push({
+                type: record.type,
+                text: anchor.textContent,
+                added,
+                removed,
+                target: record.target.nodeName,
+                boundary: "pre-dom-content-loaded",
+              });
+            }
+          }
+          acceptsPureAdditions = true;
+        });
+
+        observer.observe(document, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+      },
+      {
+        anchorSelector: ANCHOR,
+        // Deterministically exercises the delivery order that CI produced once:
+        // parser records queued until the DOMContentLoaded boundary.
+        deferPreBoundaryRecords: true,
+      },
+    );
+  }
+
+  async function readTextChanges(target: Page): Promise<AnchoredTextChange[]> {
+    return target.evaluate(
+      () =>
+        (window as unknown as { __rcfTextChanges: AnchoredTextChange[] })
+          .__rcfTextChanges,
+    );
   }
 
   async function loadAndSettle(
     target: Page,
     url: string,
-  ): Promise<TextChange[]> {
+  ): Promise<AnchoredTextChange[]> {
     const hydrated = target.waitForResponse(
       (response) =>
         response.url().startsWith(`${APP_URL}/api/content/${siteId}?`) &&
@@ -277,11 +387,7 @@ test.describe("published snapshot rendered by the host", () => {
         (window as unknown as { ReCopyFast?: { isInitialized?: boolean } })
           .ReCopyFast?.isInitialized === true,
     );
-    return target.evaluate(
-      () =>
-        (window as unknown as { __rcfTextChanges: TextChange[] })
-          .__rcfTextChanges,
-    );
+    return readTextChanges(target);
   }
 
   async function storedRows() {
@@ -355,6 +461,24 @@ test.describe("published snapshot rendered by the host", () => {
 
       if (incoming.url === "/authored") {
         respond(AUTHORED_TEXT);
+        return;
+      }
+
+      if (incoming.url === "/observer-contract") {
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+        });
+        response.end(`<!doctype html>
+<html><body>
+  <h1 data-rcf-id="${ELEMENT_ID}">Parser baseline</h1>
+  <script>
+    const anchor = document.querySelector(${JSON.stringify(ANCHOR)});
+    anchor.textContent = "Destructive pre-boundary write";
+    document.addEventListener("DOMContentLoaded", () => {
+      anchor.append("; post-boundary addition");
+    });
+  </script>
+</body></html>`);
         return;
       }
 

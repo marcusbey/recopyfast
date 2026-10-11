@@ -39,11 +39,14 @@ REDIS_URL=rediss://default:<password>@<host>:<port>
 ALLOWED_ORIGINS=https://recopyfa.st,https://www.recopyfa.st
 CRON_SECRET=<generate: openssl rand -base64 32>
 # ^ NEVER commit a real value here. The previous one was committed in full to
-# this public repository and had to be rotated. It guards /api/blog/generate
-# and both cron routes, so anyone reading it could trigger AI generation
-# against our OpenAI billing. Vercel injects this as
-# `Authorization: Bearer $CRON_SECRET` on scheduled invocations, so rotating
-# the env var rotates both sides at once.
+# this public repository and had to be rotated. It guards the cron routes
+# (since s89 no longer /api/blog/generate, which is admin-only), so anyone
+# reading it could trigger AI generation against our OpenAI billing. Vercel
+# injects this as `Authorization: Bearer $CRON_SECRET` on scheduled
+# invocations, so rotating the env var rotates both sides at once.
+ADMIN_EMAILS=<the owner's sign-in address>
+# ^ Platform admins: who may list, publish and unpublish blog drafts
+# (docs/operations/blog.md, ADR 057). Comma-separated, case-insensitive.
 
 # Monitoring (Optional but recommended)
 NEXT_PUBLIC_SENTRY_DSN=

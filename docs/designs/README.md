@@ -13,7 +13,7 @@ under "Design system gaps" in the story's `.md` — recorded, never filled frees
 
 ## Stories with no design, and why
 
-`AGENTS.md`: *"Design only when the story has UI."* These eight have no user-facing surface, so
+`AGENTS.md`: *"Design only when the story has UI."* These nine have no user-facing surface, so
 they are skipped deliberately. Recorded here so a missing file reads as a decision rather than
 an omission.
 
@@ -27,6 +27,7 @@ an omission.
 | `s08-embed-transport` | A wire protocol swap: native `WebSocket` for the embed, per [ADR 004](../decisions/004-embed-transport-split.md). Correct behaviour is invisible; the only user-facing artefact is one explicit console warning when a host page's `connect-src` blocks the socket. |
 | `s11a-ab-data-plane` | Explicitly "no UI" in its split proposal — migration, deterministic bucketing, and a suite proving the split is honest. |
 | `s11c-ab-variant-delivery` | Widget runtime. Its whole goal is that a visitor sees nothing: the variant swap window shrinks and a no-test site issues zero extra requests. |
+| `s89-blog-drafts-only` | The blog cron writes drafts and a platform admin publishes through two admin-only API routes and a runbook (`docs/operations/blog.md`) — a CTO decision recorded in its plan. No page is added; the public blog pages are unchanged. |
 
 Three of these — `s06c`, `s08`, `s11c` — are worth stating plainly: **their success criterion is
 that nothing looks different.** A design doc would invite change where change is the defect.
