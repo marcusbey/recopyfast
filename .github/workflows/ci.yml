@@ -196,6 +196,37 @@ jobs:
       - name: Test uptime monitor decisions (Node, blocking)
         run: node --test scripts/__tests__/uptime-check.test.mjs
 
+  # This job is intentionally separate from `e2e`. That job owns the strict
+  # 93-test Next/Supabase/Redis/WebSocket stack; collecting this directory there
+  # would break its reviewed inventory and make a build-artifact safety net wait
+  # on providers it does not use. This harness owns both loopback origins and
+  # every API response, so credentials must never become a condition for it.
+  embed-fixture:
+    name: Built Embed Fixture (Playwright)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build embed artifact
+        run: npm run build:embed
+
+      - name: Run built-artifact fixture harness
+        run: npm run test:embed:fixture
+
   # ─── Playwright end-to-end tests ───────────────────────────────────────────
   # This job owns a disposable stack. No hosted Supabase/Redis/Fly credential is
   # accepted: the mutating specs also enforce the exact loopback ports before

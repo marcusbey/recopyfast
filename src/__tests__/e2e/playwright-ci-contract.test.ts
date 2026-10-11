@@ -6,6 +6,11 @@ const ROOT = process.cwd();
 describe("Playwright CI contract", () => {
   const workflow = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
   const config = readFileSync(join(ROOT, "playwright.config.ts"), "utf8");
+  const embedConfig = readFileSync(
+    join(ROOT, "playwright.embed.config.ts"),
+    "utf8",
+  );
+  const packageManifest = readFileSync(join(ROOT, "package.json"), "utf8");
   const coreFlow = readFileSync(
     join(ROOT, "e2e/share-edit-publish.spec.ts"),
     "utf8",
@@ -59,6 +64,39 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain("report.passed !== 93");
     expect(config).toContain("expected: 93");
     expect(workflow).toContain("if-no-files-found: error");
+  });
+
+  it("keeps the credential-free built-embed harness outside the strict 93-test suite", () => {
+    // s06b was recovered after the strict-count reporter became a hard CI contract.
+    // Its specs live below e2e/ for shared Playwright conventions, so without an
+    // explicit exclusion Playwright recursively collects six extra tests into
+    // the main job and makes that otherwise-correct job miss its exact count. The
+    // second config and unguarded job are the ownership boundary: the harness
+    // still has to run, just without Next, Supabase, or provider credentials.
+    expect(config).toContain('testIgnore: ["**/embed-fixture/**"]');
+    expect(embedConfig).toContain('testDir: "./e2e/embed-fixture"');
+    expect(embedConfig).not.toContain("webServer:");
+    expect(embedConfig).toContain('"./e2e/support/strict-reporter.ts"');
+    expect(embedConfig).toContain("expected: 6");
+    expect(embedConfig).toContain(
+      'outputFile: "test-results/embed-fixture-summary.json"',
+    );
+    expect(packageManifest).toContain(
+      '"test:embed:fixture": "playwright test --config=playwright.embed.config.ts"',
+    );
+
+    const fixtureJob = workflow.slice(
+      workflow.indexOf("\n  embed-fixture:\n"),
+      workflow.indexOf("\n  e2e:\n"),
+    );
+    expect(fixtureJob).toContain('node-version: "24"');
+    expect(fixtureJob).toContain("run: npm ci");
+    expect(fixtureJob).toContain("run: npm run build:embed");
+    expect(fixtureJob).toContain("run: npm run test:embed:fixture");
+    expect(fixtureJob).not.toContain("\n    if:");
+    expect(fixtureJob).not.toContain("SUPABASE");
+    expect(fixtureJob).not.toContain("STRIPE");
+    expect(fixtureJob).not.toContain("NEXT_PUBLIC_");
   });
 
   it("runs the founding offer capacity suite against the disposable database", () => {
