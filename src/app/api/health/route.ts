@@ -1,11 +1,24 @@
 /**
  * Health Check API Endpoint
  * Provides comprehensive system health status for monitoring
+ *
+ * Anonymous by design — uptime monitors call it without a credential — so the
+ * body says HOW each component is and never WHY (s84, s69 L3). It used to
+ * return the raw Postgres/Storage error text, the bucket name and its public
+ * flag, the realtime service's live connection count and, on
+ * `?detailed=true`, heap metrics. Each component is now `{ status, latency }`;
+ * the reason is logged where an operator reads it. Do not add a `details` or
+ * `error` field back to `ServiceCheck` "for debugging" — that is the leak.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { limitHealthProbe } from "@/lib/api/health-rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/monitoring/logger";
+import {
+  createRateLimitConfig,
+  rateLimiter,
+} from "@/lib/security/rate-limiter";
 import * as Sentry from "@sentry/nextjs";
 
 interface HealthStatus {
@@ -26,28 +39,12 @@ interface HealthStatus {
      */
     realtime?: ServiceCheck;
   };
-  metrics?: {
-    memory: MemoryMetrics;
-    cpu?: CPUMetrics;
-  };
 }
 
+/** What the public learns about one component: its state and how long it took. */
 interface ServiceCheck {
   status: "ok" | "error" | "timeout";
   latency?: number;
-  error?: string;
-  details?: Record<string, unknown>;
-}
-
-interface MemoryMetrics {
-  used: number;
-  total: number;
-  percentage: number;
-}
-
-interface CPUMetrics {
-  usage: number;
-  loadAverage: number[];
 }
 
 // Track server start time
@@ -73,25 +70,14 @@ async function checkDatabase(): Promise<ServiceCheck> {
       throw error;
     }
 
-    return {
-      status: "ok",
-      latency,
-      details: {
-        connected: true,
-        responseTime: `${latency}ms`,
-      },
-    };
+    return { status: "ok", latency };
   } catch (error) {
     logger.error("Database health check failed", error as Error, undefined, {
       component: "health-check",
       service: "database",
     });
 
-    return {
-      status: "error",
-      latency: Date.now() - start,
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
+    return { status: "error", latency: Date.now() - start };
   }
 }
 
@@ -101,7 +87,7 @@ async function checkStorage(): Promise<ServiceCheck> {
     const supabase = await createClient();
 
     // Check if storage bucket exists
-    const { data, error } = await supabase.storage.getBucket("assets");
+    const { error } = await supabase.storage.getBucket("assets");
 
     const latency = Date.now() - start;
 
@@ -109,28 +95,70 @@ async function checkStorage(): Promise<ServiceCheck> {
       throw error;
     }
 
-    return {
-      status: "ok",
-      latency,
-      details: {
-        connected: true,
-        bucket: data?.name || "assets",
-        public: data?.public || false,
-      },
-    };
+    return { status: "ok", latency };
   } catch (error) {
     logger.error("Storage health check failed", error as Error, undefined, {
       component: "health-check",
       service: "storage",
     });
 
-    return {
-      status: "error",
-      latency: Date.now() - start,
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
+    return { status: "error", latency: Date.now() - start };
   }
 }
+
+/**
+ * The rate-limit store (Redis), probed with the one operation the product
+ * depends on it for.
+ *
+ * A-30 / s84. This check did not exist: `checks.cache` was declared and never
+ * filled. Redis is a hard dependency of signing in to edit — the store throws
+ * when it is unreachable (`rate-limiter.ts` `checkLimit`) and the editor-login
+ * limiters fail CLOSED on it — so the outage that refuses every editor showed
+ * here as a green probe. Nothing paged and nothing was routed around.
+ *
+ * A real `checkLimit` rather than a PING: it exercises the exact INCR+EXPIRE
+ * pipeline login runs, through the same client, connect timeout and command
+ * timeout. The key is fixed and its verdict ignored — this never limits
+ * anyone, it only asks whether the store answers. Two Upstash commands.
+ */
+const CACHE_PROBE_CONFIG = createRateLimitConfig(
+  "health-probe",
+  "ip",
+  "API_GENERAL",
+  "health/cache-probe",
+);
+
+async function checkCache(): Promise<ServiceCheck> {
+  const start = Date.now();
+  try {
+    await rateLimiter.checkLimit(CACHE_PROBE_CONFIG);
+    return { status: "ok", latency: Date.now() - start };
+  } catch (error) {
+    logger.error(
+      "Rate-limit store health check failed",
+      error as Error,
+      undefined,
+      {
+        component: "health-check",
+        service: "cache",
+      },
+    );
+
+    return { status: "error", latency: Date.now() - start };
+  }
+}
+
+/**
+ * Checks whose failure ALONE means the product cannot serve (s84).
+ *
+ * The database holds every site, grant and published copy; the rate-limit
+ * store gates editor login and fails closed. Either one down is an outage, and
+ * the counting rule below ("two errors make `unhealthy`") reported each of them
+ * as `degraded` with a 200 — so the uptime workflow, which GETs this endpoint,
+ * would have read a database outage as "up". Storage is deliberately absent: it
+ * serves image uploads, not the copy visitors read or the saves editors make.
+ */
+const CRITICAL_CHECKS = ["database", "cache"] as const;
 
 async function checkExternalServices(): Promise<ServiceCheck> {
   const start = Date.now();
@@ -153,17 +181,25 @@ async function checkExternalServices(): Promise<ServiceCheck> {
     const latency = Date.now() - start;
     const allHealthy = Object.values(services).every((status) => status);
 
-    return {
-      status: allHealthy ? "ok" : "error",
-      latency,
-      details: services,
-    };
+    if (!allHealthy) {
+      // Which integration is off is for the log, not for an anonymous caller.
+      logger.warn("External services health check failed", undefined, {
+        component: "health-check",
+        service: "external",
+        services,
+      });
+    }
+
+    return { status: allHealthy ? "ok" : "error", latency };
   } catch (error) {
-    return {
-      status: "error",
-      latency: Date.now() - start,
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
+    logger.error(
+      "External services health check failed",
+      error as Error,
+      undefined,
+      { component: "health-check", service: "external" },
+    );
+
+    return { status: "error", latency: Date.now() - start };
   }
 }
 
@@ -223,28 +259,18 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
     const latency = Date.now() - start;
 
     if (!response.ok) {
-      return {
-        status: "error",
-        latency,
-        error: `Realtime service responded ${response.status}`,
-      };
+      logger.warn("Realtime health check failed", undefined, {
+        component: "health-check",
+        service: "realtime",
+        reason: `Realtime service responded ${response.status}`,
+      });
+      return { status: "error", latency };
     }
 
-    const payload = (await response.json().catch(() => ({}))) as {
-      status?: string;
-      connections?: number;
-      supabase?: string;
-    };
-
-    return {
-      status: "ok",
-      latency,
-      details: {
-        connections: payload.connections ?? 0,
-        supabase: payload.supabase ?? "unknown",
-        reported: payload.status ?? "unknown",
-      },
-    };
+    // The service's own body (its live connection count, its Supabase state)
+    // is deliberately not relayed: s84 / s69 L3. Reachable and 2xx is the
+    // answer this check gives.
+    return { status: "ok", latency };
   } catch (error) {
     const isTimeout =
       error instanceof Error &&
@@ -259,7 +285,7 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
       reason: error instanceof Error ? error.message : "Unknown error",
     });
 
-    // Generic on the wire, specific in the log. `/api/health` is public and
+    // Status on the wire, reason in the log. `/api/health` is public and
     // unauthenticated, and the raw message carries infrastructure detail a
     // caller has no business seeing — TLS handshake and certificate errors,
     // `ECONNREFUSED 127.0.0.1:4001` with the internal port, Node-specific error
@@ -269,9 +295,6 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
     return {
       status: isTimeout ? "timeout" : "error",
       latency: Date.now() - start,
-      error: isTimeout
-        ? "Realtime service timed out"
-        : "Realtime service unreachable",
     };
   }
 }
@@ -279,17 +302,17 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
 /**
  * How long one realtime probe answers for.
  *
- * `/api/health` is public, unauthenticated and deliberately **not** rate
- * limited: uptime monitors poll it, and denying them is a worse outcome than
- * what this bounds. Since the realtime check landed, every GET also issues an
- * outbound request to `recopyfast-ws.fly.dev` — which turns an endpoint anyone
- * can call into a small amplifier, one request in and two out, at whatever rate
- * the caller likes. The destination is fixed and the timeout is 2 s, so it is
- * mild; it is still a network side effect the endpoint did not have before, and
- * AGENTS.md's "rate limit before authorization" rule has no coverage here.
+ * `/api/health` is public and unauthenticated. Since the realtime check landed,
+ * every GET also issues an outbound request to `recopyfast-ws.fly.dev` — which
+ * turned an endpoint anyone can call into a small amplifier, one request in and
+ * two out. s07b answered that with this memo rather than a limiter, because a
+ * memo costs the monitors nothing. s84 then added a per-IP limiter as well
+ * (`limitHealthProbe`, 60/min, fail-open): the limiter bounds what ONE address
+ * can make this endpoint do, the memo bounds what ALL of them together can make
+ * it send downstream. Neither replaces the other — many addresses at 59/min
+ * each would still fan out without the memo.
  *
- * Memoizing is the answer rather than a limiter, because it costs the monitors
- * nothing: what they lose is freshness, not an answer. Ten seconds is short
+ * What the monitors lose to the memo is freshness, not an answer. Ten seconds is short
  * enough that an outage — or a recovery, which is the direction that reads
  * wrong for longer — surfaces within a poll or two, and Fly's own check on the
  * service runs every 15 s (`server/fly.toml`), so this memo is not the slowest
@@ -329,60 +352,36 @@ function probeRealtime(url: string): Promise<ServiceCheck> {
   return result;
 }
 
-function getMemoryMetrics(): MemoryMetrics {
-  const memoryUsage = process.memoryUsage();
-  const totalMemory = memoryUsage.heapTotal;
-  const usedMemory = memoryUsage.heapUsed;
-
-  return {
-    used: Math.round(usedMemory / 1024 / 1024), // MB
-    total: Math.round(totalMemory / 1024 / 1024), // MB
-    percentage: Math.round((usedMemory / totalMemory) * 100),
-  };
-}
-
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
+
+  // Per IP, before any check. Fails open: see `limitHealthProbe`.
+  const limited = await limitHealthProbe(request);
+  if (limited) return limited;
 
   try {
     // Get detail level from query params
     const { searchParams } = new URL(request.url);
     const detailed = searchParams.get("detailed") === "true";
-    const quick = searchParams.get("quick") === "true";
-
-    // Quick health check - just return OK without checks
-    if (quick) {
-      return NextResponse.json({
-        status: "healthy",
-        timestamp: new Date().toISOString(),
-      });
-    }
 
     // Run all health checks in parallel
     const realtimeUrl = getRealtimeHealthUrl();
-    const [database, storage, external, realtime] = await Promise.allSettled([
-      checkDatabase(),
-      checkStorage(),
-      detailed ? checkExternalServices() : Promise.resolve(undefined),
-      realtimeUrl ? probeRealtime(realtimeUrl) : Promise.resolve(undefined),
-    ]);
+    const [database, storage, cache, external, realtime] =
+      await Promise.allSettled([
+        checkDatabase(),
+        checkStorage(),
+        checkCache(),
+        detailed ? checkExternalServices() : Promise.resolve(undefined),
+        realtimeUrl ? probeRealtime(realtimeUrl) : Promise.resolve(undefined),
+      ]);
 
     // Process results
     const checks: HealthStatus["checks"] = {
       database:
-        database.status === "fulfilled"
-          ? database.value
-          : {
-              status: "error",
-              error: "Check failed",
-            },
+        database.status === "fulfilled" ? database.value : { status: "error" },
       storage:
-        storage.status === "fulfilled"
-          ? storage.value
-          : {
-              status: "error",
-              error: "Check failed",
-            },
+        storage.status === "fulfilled" ? storage.value : { status: "error" },
+      cache: cache.status === "fulfilled" ? cache.value : { status: "error" },
     };
 
     if (detailed && external.status === "fulfilled") {
@@ -402,12 +401,16 @@ export async function GET(request: NextRequest) {
       .filter(Boolean)
       .map((check: ServiceCheck) => check.status);
 
+    const errorCount = statuses.filter((s) => s === "error").length;
+    const isCriticalDown = CRITICAL_CHECKS.some(
+      (name) => checks[name]?.status === "error",
+    );
+
     let overallStatus: "healthy" | "degraded" | "unhealthy" = "healthy";
-    if (statuses.includes("error")) {
-      overallStatus =
-        statuses.filter((s) => s === "error").length > 1
-          ? "unhealthy"
-          : "degraded";
+    if (isCriticalDown || errorCount > 1) {
+      overallStatus = "unhealthy";
+    } else if (errorCount === 1) {
+      overallStatus = "degraded";
     }
 
     // Realtime, capped at `degraded` and never worse (ADR 004, "Watch"). It can
@@ -433,13 +436,6 @@ export async function GET(request: NextRequest) {
       uptime: Math.round((Date.now() - serverStartTime) / 1000), // seconds
       checks,
     };
-
-    // Add metrics if requested
-    if (detailed) {
-      response.metrics = {
-        memory: getMemoryMetrics(),
-      };
-    }
 
     // Log health check
     logger.info("Health check completed", undefined, {
@@ -487,17 +483,22 @@ export async function GET(request: NextRequest) {
 // Support HEAD requests for uptime monitoring.
 // A HEAD probe must reflect real readiness: if the database is unreachable the
 // instance cannot serve traffic, so return 503 and let the load balancer / uptime
-// monitor route around it. A bare 200 would mask a hard outage.
+// monitor route around it. A bare 200 would mask a hard outage. The rate-limit
+// store is the same kind of dependency (A-30 / s84): with Redis down, editor
+// login refuses every request, so HEAD answers 503 for it too.
 //
 // The realtime check is deliberately absent here and must stay absent. This is
 // the probe a load balancer polls, and an instance with realtime down can serve
 // every request the product makes — HTTP is authoritative (ADR 004 rule 1).
 // Adding the probe would also put a cross-network fetch on the hottest path in
 // the app, for a dependency it does not need.
-export async function HEAD() {
-  const db = await checkDatabase();
+export async function HEAD(request: NextRequest) {
+  const limited = await limitHealthProbe(request);
+  if (limited) return limited;
+
+  const [db, cache] = await Promise.all([checkDatabase(), checkCache()]);
   return new NextResponse(null, {
-    status: db.status === "ok" ? 200 : 503,
+    status: db.status === "ok" && cache.status === "ok" ? 200 : 503,
     headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
   });
 }

@@ -66,7 +66,11 @@ describe("install recipes", () => {
 
     expect(guidance).toMatch(/analytics/i);
     expect(guidance).toMatch(/rcf_handoff/);
-    expect(guidance).toMatch(/rcf_edit_token/);
+    // s76 (ADR 055): the owner's link carries a one-time code in the
+    // fragment, not a token in the query. Tools that capture the full URL
+    // see the fragment too, so that is what customers are told to exclude.
+    expect(guidance).toMatch(/#rcf_edit=/);
+    expect(guidance).not.toMatch(/rcf_edit_token/);
     expect(guidance).toMatch(/rcf_staging/);
     expect(guidance).toMatch(/rcf_token/);
   });

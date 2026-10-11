@@ -177,6 +177,8 @@ function grantRow(
     grant_hash: hashOpaqueSecret(grant),
     user_agent_hash: hashUserAgent(USER_AGENT),
     origin_hash: hashOrigin(MINTING_ORIGIN),
+    // NOT NULL DEFAULT now() on the real table; s76 dates a lineage by it.
+    created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
     expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     revoked_at: null,
     revoked_reason: null,

@@ -194,3 +194,24 @@ finding.
 
 Max severity: none
 Ship allowed: yes
+
+## Devin Review on PR #87 — 2026-10-11
+
+Three findings from the automated Devin review of PR #87, each fixed on this branch and covered by a
+test. The branch was then merged with `origin/main` (s76 and s84); the only textual conflict was
+`docs/stories.md`, resolved by keeping both sides' story entries.
+
+| Finding | Fix | Test |
+| --- | --- | --- |
+| Older drafts vanish: the admin list returned a fixed first page, so the 51st and older drafts were unreachable. | `GET /api/admin/blog/posts` returns a `nextCursor` (opaque base64url keyset cursor over the sort key plus id) and accepts it back, so every draft is reachable page by page (`src/app/api/admin/blog/posts/route.ts`, `encodeCursor` / `cursorFilter`). | `returns a cursor that reaches the 51st draft` in `src/__tests__/api/admin/blog-posts.test.ts`. |
+| Repeated titles: a second draft with an already-used title collided on the unique `slug` and the paid output was lost. | On a slug collision the generator retries with the dated slug and then a random UUID suffix, keeping the paid output (`src/lib/blog/drafts.ts`). | `keeps paid output after the plain, dated, and one UUID slug all collide` and `gives concurrent same-title drafts distinct slugs without regenerating` in `src/lib/blog/__tests__/drafts.test.ts`. |
+| A replayed migration left `owner_token` readable: a column-level `SELECT` grant surviving from an earlier run kept the claim token visible even after the table-level revoke. | `20261010120000_blog_generation_claims.sql` runs a table-level `REVOKE ALL ... FROM PUBLIC, anon, authenticated, service_role` before the one reviewed `GRANT SELECT`, which also removes column privileges (`has_column_privilege` is false). | `replay retains completed claims, removes stale column grants and reuses a legacy post` in `src/__tests__/db/blog-generation-claim.test.ts` (grants `SELECT(owner_token)` to PUBLIC, replays the migration, asserts `has_column_privilege` is false). |
+
+Migration order after the merge: main's newest migration is `20261009120000_content_changes_view.sql`;
+this branch's `20261009150000_blog_posts_daily_draft_key.sql` and
+`20261010120000_blog_generation_claims.sql` sort after it, so no migration on main must follow them.
+Neither migration is applied to any remote database by this PR.
+
+Gate: the earlier `Ship allowed: yes` lines above apply only to their frozen sources. Devin's three
+findings are fixed and tested, but a fresh independent `/ks-review` of the merged tree is still
+pending, and the strict hosted CI run remains a PR-readiness gate.

@@ -3504,8 +3504,9 @@ at that commit, to be re-verified at research time):
   no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`.
 - [ ] L2 — Bulk CSV export has no formula-injection guard (`src/lib/bulk/csv.ts:21-25`); the
   analytics export has one.
-- [ ] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
+- [x] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
   and the region (`src/app/api/health/route.ts:93,130`; `health/ready/route.ts:41,78,104,159`).
+  → closed by s84-observability.
 - [x] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
   use `timingSafeEqual` over SHA-256 digests. → closed by s77.
 - [ ] L5 — Raw Stripe errors returned to authenticated callers (payment-method existence oracle);
@@ -3525,8 +3526,8 @@ at that commit, to be re-verified at research time):
   and quota exhaustion.
 - [ ] L11 — `v1/content` POST stores `metadata` without `optionalMetadata` (`:236,298,322`), and
   `/api/published` then serves it.
-- [ ] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
-  content routes pin the exact host.
+- [x] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
+  content routes pin the exact host. → closed by s76.
 - [ ] L13 — WS server: no helmet, `x-powered-by: Express`, `ACAO:*` and the live connection count
   on `/health` (`server/index.js:78,125-136`; live).
 - [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
@@ -3564,9 +3565,9 @@ at that commit, to be re-verified at research time):
 - [ ] R3 — `staging_access` keeps admin-only INSERT/UPDATE policies for `authenticated`
   (`20251230000000_staging_workflow.sql:120-142`); an admin can write rows that bypass route
   validation (ADR 047 "Watch").
-- [ ] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
+- [x] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
   (`src/lib/auth/editor-directory.ts:271-299`); s68c makes it non-load-bearing, the dashboard still
-  lists them as live.
+  lists them as live. → closed by s76.
 - [x] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
   covers `PUT` only. → closed by s77 (with `PUT`'s IP guard, s68b review minor 3).
 - [x] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter. → closed by s77.
@@ -3770,6 +3771,85 @@ Acceptance criteria:
   story commit.
 
 Complexity: 2. Branch `feature/s73-button-as-child`. Embed allocation: 0 bytes.
+
+## Story s84-observability — an outage is noticed within minutes, and no monitoring surface leaks or relays
+
+> CTO decision under the owner's 2026-10-09 directive. Infrastructure story; no new UI, so no
+> Design step. Closes s69 L3 and the s07b review's "public, unlimited endpoint" minor.
+
+As the owner of a product with paying customers on the way, I learn that production is down from an
+issue in my own repository within ten minutes — not from a customer — and nothing I added to watch
+production can be read or abused by someone else.
+
+Cause (verified on `origin/main` `c0c40bf`; research: `docs/research/s84-observability.md`):
+
+- **`/api/health` is blind to Redis.** `checks.cache` is declared (`src/app/api/health/route.ts:20`)
+  and never populated; `GET` runs database, storage, optional external and realtime (`:363-368`),
+  `HEAD` the database alone (`:497-502`). Editor login fails closed on the same store, so the probe
+  stays green through the outage that matters. Three `test.failing` pins say so
+  (`src/__tests__/api/health/cache-check.test.ts:132,156,172`). The severity maths also answers a
+  database-only outage `degraded`/200 on `GET` (`:401-411`) while `HEAD` answers 503 — a `GET`
+  monitor would miss it.
+- **Health bodies leak (s69 L3).** Raw `error.message` (`route.ts:93,130,165`), the bucket name and
+  its public flag (`:115-119`), the realtime service's live connection count (`:242-246`), heap
+  metrics and the Sentry-enabled flag behind `?detailed=true` (`:141-148,438-441`); the readiness
+  route names missing environment variables (`ready/route.ts:41`), returns raw errors (`:77-78`,
+  `:104`) and the region (`:159`).
+- **No limiter.** `/api/health` is unlimited by design (`route.ts:279-298`), flagged by the s07b
+  review (`docs/reviews/s07b-realtime-deploy.md:179-183`); `/api/health/ready` likewise.
+- **The Sentry tunnel is an open relay.** `tunnelRoute` (`next.config.ts:173`) makes
+  `@sentry/nextjs` rewrite `/monitoring?o=<org>&p=<project>[&r=<region>]` to
+  `https://o<org>.ingest[.<region>].sentry.io/api/<project>/envelope/` for any digits
+  (`node_modules/@sentry/nextjs/build/cjs/config/withSentryConfig/tunnel.js:19-71`); the middleware
+  lets the path through untouched (`src/middleware.ts:113`). Anyone can post envelopes to any
+  Sentry project through our origin.
+- **The browser release can be `undefined`.** `release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA`
+  (`src/instrumentation-client.ts:46`) is unset unless Vercel exposes system variables to the
+  bundle, and the SDK spreads user options after its own default
+  (`@sentry/nextjs/build/cjs/client/index.js:54-58`), so the explicit `undefined` erases the
+  release the SDK injected. Server and edge read a different variable
+  (`sentry.server.config.ts:23`, `sentry.edge.config.ts:23`).
+- **The realtime server reports nothing.** `server/package.json` has no Sentry; a crash is a log
+  line and `process.exit(1)` (`server/index.js:657-669`), visible only in `fly logs`.
+- **No uptime monitor runs.** Sentry's plan has one uptime seat, used by another project; the two
+  Sentry uptime monitors were created disabled.
+- **No backup runbook.** Supabase Free has no backups or PITR; the nightly encrypted backup built
+  on 2026-10-09 is undocumented here.
+
+Acceptance criteria:
+- [ ] Redis unreachable ⇒ `GET` and `HEAD /api/health` answer 503 with `checks.cache.status` `error`;
+  Redis reachable ⇒ `checks.cache.status` `ok`. The three A-30 pins are plain tests.
+- [ ] Database down on its own ⇒ `GET /api/health` answers 503 `unhealthy`, as `HEAD` already does.
+  Storage alone stays `degraded`/200; realtime stays capped at `degraded`.
+- [ ] Every public health body reports each component as `{ status, latency }` only — no error
+  text, environment variable name, region, bucket, connection count or memory metric; the detail is
+  logged server-side.
+- [ ] `GET`/`HEAD /api/health` and `GET /api/health/ready` are rate limited per IP before any check:
+  60 per minute, fail-open; one check every 5–10 minutes from one IP is never limited, and a Redis
+  outage is reported, not refused.
+- [ ] `/monitoring` — under every spelling its rewrite accepts (Next matches it case-insensitively,
+  with an optional trailing slash; percent-encoded letters too) — forwards only to our DSN's org,
+  region and project, and only an envelope whose header DSN names our host and project; anything
+  else is a 400 carrying the security headers and costing no GoTrue round trip.
+- [ ] Browser, server and edge Sentry report one release — the build's Vercel commit SHA, also the
+  source-map upload release — and none of them passes an explicit `undefined`.
+- [ ] With `SENTRY_DSN` set, the realtime server reports uncaught exceptions and unhandled
+  rejections to Sentry with tokens scrubbed from URLs, query strings, headers and messages; unset,
+  it is a no-op. Either way it logs and exits 1 exactly as before.
+- [ ] `.github/workflows/uptime.yml` probes `https://www.recopyfa.st/api/health` and
+  `https://recopyfast-ws.fly.dev/health` every 10 minutes and on demand, with timeouts and two
+  retries; on failure it opens (or comments on) the open `uptime` issue "Production down: <target>",
+  on recovery it comments and closes it. Least privilege (`contents: read`, `issues: write`),
+  actions pinned by full SHA, decision logic tested with `node --test` in CI.
+- [ ] `docs/operations/backups.md` and `docs/operations/monitoring.md` describe the backup system,
+  the restore drill and every monitor, with no secret in them. A restore keeps the column and
+  function privileges production has (ADR 033): schema from `supabase/migrations`, rows from the
+  backup, and a privilege check that fails on a restore that exposes them.
+- [ ] Required gates pass; the realtime server's production audit stays clean.
+
+Complexity: 3. Dependencies: none. No migration; no embed change.
+
+Embed allocation: 0 bytes (ceilings only go down).
 
 ## Story s74-deflake-landing-pricing — the landing page stays responsive in a browser that draws WebGL without a GPU
 
@@ -4075,3 +4155,93 @@ Branch `feature/s89-blog-drafts-only`. Follow-up: the `/blog` index is a hardcod
 and in the sitemap but not listed there (separate story).
 
 Embed allocation: 0 bytes (ceilings only go down).
+
+## Story s76-grant-and-edit-token-hardening — the Edit website link carries no reusable credential, and editor access ends when it should
+
+Owner directive 2026-10-09 ("take CTO-level decisions; get the product ready for production"),
+scoped by the orchestrator: the production defects pinned by `test.failing` tests on main, plus
+s69 L12 and R4 and the s41 review's outage follow-up. Security story; no new screen (the only
+visible change is the address the "Edit website" tab opens). Research:
+`docs/research/s76-grant-and-edit-token-hardening.md`. Plan:
+`docs/plans/s76-grant-and-edit-token-hardening.md`. Decision: ADR 055.
+
+Cause (verified on `origin/main` `72f4cff`):
+
+- **The edit session travels in the URL (A-29).** `POST /api/edit-sessions/create` answers
+  `editUrl: https://${site.domain}?rcf_edit_token=${token}`
+  (`src/app/api/edit-sessions/create/route.ts:143`). The token is a bearer credential good for 2 h
+  (24 h absolute) with no origin or device binding; it reaches the customer's access logs and CDN,
+  every `Referer` the page sends before the widget strips it (`public/embed/recopyfast.src.js:77-89`),
+  and history. A `sites.domain` stored with a scheme yields `https://https://…`. Pinned by
+  `src/__tests__/api/edit-sessions/create-token-leak.test.ts:151,170,192` (`test.failing`).
+- **A request body chooses a grant's lifetime, and a grant lineage never ends (A-28).**
+  `POST /api/editor/refresh-grant` reads `rememberDevice` off the body (`route.ts:39`) and
+  `refreshDeviceGrant` hands it to `issueDeviceGrant`, which picks 12 h or 7 d from it
+  (`src/lib/auth/editor-grants.ts:162-165`, `:450-456`); every rotation re-anchors expiry on today,
+  so a grant refreshed on schedule never retires. Pinned by
+  `src/lib/auth/__tests__/editor-grants-ttl.test.ts:250,298,352,412` (`test.failing`).
+- **L12.** `originBelongsToSite` accepts any subdomain of the registered domain
+  (`src/lib/auth/editor-request.ts:73`) while the content routes pin the exact host
+  (`src/lib/security/site-auth.ts:242`): a grant can be minted for, and bound to, `evil.example.com`.
+- **R4.** `revokeSiteEditor` sweeps the editor's device grants but not their `staging_access`
+  invites (`src/lib/auth/editor-directory.ts:292-322`); the dashboard keeps listing them as live.
+- **Outage signs editors out (s41 review).** A database error during validation answers 401:
+  `validateEditSessionAccess` (`src/lib/auth/editor-access.ts:471-482`, `.single()` error),
+  `validateStagingAccess` (`src/lib/auth/staging-access.ts:214-232`, `:343-353`),
+  `validateDeviceGrantAccess` (`editor-access.ts:330-335`, reason `error`) and
+  `POST /api/editor/validate-grant` (`route.ts:56-66`, 401 with reason `error`, which the widget
+  reads as a verdict and clears the grant, `recopyfast.src.js:338-347`).
+
+Acceptance criteria:
+
+- [x] `editUrl` is `https://<host>/#rcf_edit=<code>`: no query string at all, no edit-session token
+  anywhere in it, a well-formed host when `sites.domain` carries a scheme. The code is signed,
+  names one session and one site, lives 60 s and is spent once. The three A-29 pins are plain
+  tests. Tests: `create-token-leak.test.ts`, `src/lib/auth/__tests__/edit-link.test.ts`.
+- [x] Only the widget's boot check (`POST /api/staging/validate`) spends a code, after its
+  signature, site and expiry are checked offline, the request's `Origin` is the site's
+  registered host and the session is validated (without recording a use); it answers the
+  session's token in the body. A second presentation, a code past 60 s, a code for another site,
+  a forged code, a code from another origin and a code whose holder lost their grant are refused;
+  an outage at any step is 503 and leaves the code unspent. Test:
+  `src/__tests__/api/staging/validate-edit-link.test.ts`.
+- [x] The widget reads the code from the fragment, strips it from the address bar, swaps it for the
+  returned token in memory and in the tab's storage (ADR 036), and never reads `rcf_edit_token`
+  from the query: an old or crafted `?rcf_edit_token=` link boots a visitor, stores nothing, and
+  leaves the address bar without it. Customer install docs name `#rcf_edit=` instead.
+  Multi-page editing (s41) keeps working. Test: `src/__tests__/embed/edit-link-persistence.test.ts`.
+- [x] A refreshed grant's lifetime comes from its own lineage, never from the request body, and no
+  lineage outlives 30 days from its first issue: past it, validation and refresh refuse
+  (`expired`); within it, a replacement never expires after the ceiling. The four A-28 pins are
+  plain tests. Tests: `editor-grants-ttl.test.ts`, `src/__tests__/api/editor/refresh-grant/route.test.ts`.
+- [x] L12: an origin belongs to a site only on the exact registered host (scheme, port and case
+  aside); a subdomain, a parent domain and a look-alike suffix are refused; localhost only outside
+  production. Test: `src/lib/auth/__tests__/editor-request-origin.test.ts`.
+- [x] R4: revoking an editor also deactivates that address's active `staging_access` invites on
+  that site (case-insensitive), and nobody else's. Test:
+  `src/lib/auth/__tests__/editor-directory-revoke.test.ts`.
+- [x] An infrastructure error while validating an edit session, a staging invite or a device grant
+  (the Edit Board's routes included), or while reading a site's domain for an origin check,
+  answers 503, never 401/403; the widget keeps the edit link and the grant on 503. Tests:
+  `src/lib/auth/__tests__/editor-access-outage.test.ts`, `edit-link-persistence.test.ts`,
+  `src/__tests__/embed/editor-auth.test.ts`, `src/__tests__/api/edit-board/staging-outage.test.ts`,
+  `editor-request-origin.test.ts`.
+- [ ] Embed bytes do not grow: the ceilings (45828 / 33062) ratchet down to the branch's
+  measurement. No migration, nothing under `server/`, no new dependency. Required gates pass; e2e
+  specs that landed with `?rcf_edit_token=` use the new link; Playwright count unchanged.
+  (Local: measured 45818 / 33059 after review fix pass 2 — `window.` restored on every name a
+  host page can shadow, `src/__tests__/embed/host-page-globals.test.ts`, with the census by scope
+  analysis in `host-page-globals-census.test.ts` (verification fix pass) — below main's
+  45828 / 33062; gates green, `--list` 81 after the rebase on s74/s75 (unchanged by s76). Open until
+  CI runs the two e2e specs.)
+
+Complexity: 4. Dependencies: none (s72 merged). Branch `feature/s76-grant-and-edit-token-hardening`.
+Follow-ups (not s76): the widget's own API reads still carry `?rcf_edit_token=` to RecopyFast's API
+(`recopyfast.src.js:1333`) and the realtime handshake carries `editToken` in its query
+(`server/index.js:211`, s79's file) — RecopyFast's own logs, not a third party's; the editor hub's
+`?rcf_handoff=` (60 s, one-time) could move to the fragment too; Share Preview Links
+(`?rcf_staging=1&rcf_token=`) belong to s72b; globals the widget used bare before s76 (`fetch`,
+`setTimeout`, `alert`, `confirm`, `crypto`, …) can be shadowed by a host page's top-level `let`
+exactly as the six names s76 now reaches through `window.` (plan, review fix pass 2).
+
+Embed allocation: ≤ 0 bytes (ceilings only go down; research measured −3 / −4 for the whole edit).
