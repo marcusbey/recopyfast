@@ -199,3 +199,21 @@ for both web roles; no migration change is needed for that automated warning.
 Evidence: primary checkout `.omx/ultragoal/evidence/s89/post-ci-fixes/` and
 `post-ci-review/`. Final independent review, normal-hook commit/push, and exact-head hosted CI
 remain the delivery gates; production and live provider acceptance stay separate.
+
+## Post-review strict-E2E flake repair checkpoint (2026-10-11)
+
+Hosted strict E2E recorded one first-attempt failure in the published-snapshot SSR guard and a
+passing retry. Real-browser diagnosis reproduced the actual boundary race: a pure parser addition
+can be delivered after `DOMContentLoaded`, so callback-time readiness misclassifies host-rendered
+text as an embed mutation. The test observer now drains queued parser records under pre-boundary
+rules before opening the boundary. Its explicit controls retain destructive mutations before the
+boundary and pure additions after it; the authored-copy swap and exact stored-row assertions are
+unchanged. This is a test-contract correction to one existing Playwright case and does not change
+the strict test inventory.
+
+Disposable real integration passed the full focused spec once and the repaired named case 20
+times, all with Chromium, one worker and retries `0`; a separate owner-only reviewer run passed the
+named case once. The task-owned Supabase, Redis, WebSocket and Next resources were removed and all
+fixed ports were clear afterward. The full strict 86-test inventory remains assigned to hosted CI.
+Sanitized evidence is in the primary checkout at
+`.omx/ultragoal/evidence/s89/ssr-real-integration-20261011.md`.

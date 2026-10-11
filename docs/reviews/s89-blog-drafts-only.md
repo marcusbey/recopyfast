@@ -162,5 +162,35 @@ the current plan are checked, with their existing acceptance evidence. Manual re
 production acceptance above remain open. The documentation delta has no findings; normal hooks
 and exact-head CI will verify its final commit before delivery readiness is refreshed.
 
+## Post-CI SSR observer-race repair — 2026-10-11
+
+Hosted CI exposed a real false positive in `e2e/published-snapshot-ssr.spec.ts`: on one of 150
+diagnostic built-embed navigations, Chromium delivered the parser-created `H1` text-node record
+after `DOMContentLoaded` had flipped the observer's live boolean. The queued record was a pure
+`childList` addition (`added=1`, `removed=0`), not a product write, but the old harness counted it
+and failed the otherwise unchanged SSR assertion.
+
+The repair is test-only. The early observer now buffers pre-boundary callback records, drains that
+buffer plus `observer.takeRecords()` under pre-boundary rules, then opens pure additions. It always
+retains character-data changes and destructive child-list changes, including before the boundary,
+and retains pure additions after it. A self-contained inline initializer avoids Playwright 1.58's
+`fn.toString()` closure boundary; fail-fast page-error/state checks prevent another inert observer
+from passing or waiting silently. The added fixture route proves a destructive pre-boundary write
+and a true post-boundary addition are both observed while a pure parser addition is excluded.
+
+The original acceptance remains unchanged: the real embed's authored-copy swap must produce a
+mutation; server-rendered published copy must produce exactly `[]`; and the database row, including
+`original_content`, must equal the seeded values. No product/embed source, retry, skip, timeout,
+dependency, or strict 86-test inventory changed.
+
+Verification on the owned disposable stack: focused spec 1/1 passed and the repaired case passed
+20/20 with retries disabled. An independent reviewer then ran the owner-prepared single-case command
+against the same healthy stack: 1/1 passed in 2.2 seconds, wrapper exit 0, and the release marker was
+written. Evidence is in `.omx/ultragoal/evidence/s89/ssr-repair-source-review-20261011.md`,
+`ssr-real-integration-20261011.md`, and `ssr-repair-independent-verification-20261011.md`.
+
+The strict 86-test hosted run remains a PR-readiness gate. This repaired source has no new review
+finding.
+
 Max severity: none
 Ship allowed: yes
