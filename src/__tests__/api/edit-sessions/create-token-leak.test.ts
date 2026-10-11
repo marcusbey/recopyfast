@@ -19,7 +19,17 @@
  *
  * These assert on the artifact the route hands to the browser, not on the
  * status code — the route answers 200 in every case here.
+ *
+ * FIXED in s76 (ADR 055). The three `test.failing` pins are plain tests: the
+ * link is `https://<host>/#rcf_edit=<code>`, where the code is a 60-second,
+ * single-use signed envelope naming this session and site — not the token —
+ * and it rides in the fragment, which no browser sends to a server or puts in
+ * a `Referer`. The signing key is set below because minting a code needs one.
  */
+
+// Must precede the imports: editor-crypto memoises the signing key on first use.
+process.env.EDITOR_GRANT_SECRET =
+  "test-editor-grant-secret-at-least-32-chars-long";
 
 import { NextRequest } from "next/server";
 
@@ -27,6 +37,7 @@ import { POST } from "@/app/api/edit-sessions/create/route";
 import { createClient } from "@/lib/supabase/server";
 import { EditSessionManager } from "@/lib/auth/edit-sessions";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { EDIT_LINK_TTL_MS, readEditLinkCode } from "@/lib/auth/edit-link";
 
 jest.mock("@/lib/supabase/server", () => ({ createClient: jest.fn() }));
 jest.mock("@/lib/auth/edit-sessions", () => ({
@@ -148,7 +159,7 @@ describe("A-29 — POST /api/edit-sessions/create", () => {
     expect(() => new URL(body.editUrl)).not.toThrow();
   });
 
-  test.failing("does not put the token in editUrl", async () => {
+  it("does not put the token in editUrl", async () => {
     const body = await createSession();
 
     expect(body.editUrl).not.toContain(TOKEN);
@@ -167,17 +178,14 @@ describe("A-29 — POST /api/edit-sessions/create", () => {
     });
   });
 
-  test.failing(
-    "does not put a credential in the query string at all",
-    async () => {
-      // Stated as a property of the URL rather than of one parameter name, so
-      // renaming `rcf_edit_token` does not quietly satisfy it.
-      const body = await createSession();
-      const url = new URL(body.editUrl);
+  it("does not put a credential in the query string at all", async () => {
+    // Stated as a property of the URL rather than of one parameter name, so
+    // renaming `rcf_edit_token` does not quietly satisfy it.
+    const body = await createSession();
+    const url = new URL(body.editUrl);
 
-      expect([...url.searchParams.keys()]).toEqual([]);
-    },
-  );
+    expect([...url.searchParams.keys()]).toEqual([]);
+  });
 
   it("still returns an editUrl when the domain carries a scheme", async () => {
     // Guard for the assertion below. A scheme-carrying domain is the unusual
@@ -189,14 +197,28 @@ describe("A-29 — POST /api/edit-sessions/create", () => {
     expect(body.editUrl.length).toBeGreaterThan(0);
   });
 
-  test.failing(
-    "builds a well-formed URL when the domain carries a scheme",
-    async () => {
-      // `sites.domain` is not normalised on every write, so rows holding
-      // "https://example.com" produce "https://https://example.com?...".
-      const body = await createSession("https://example.com");
+  it("builds a well-formed URL when the domain carries a scheme", async () => {
+    // `sites.domain` is not normalised on every write, so rows holding
+    // "https://example.com" produce "https://https://example.com?...".
+    const body = await createSession("https://example.com");
 
-      expect(new URL(body.editUrl).hostname).toBe("example.com");
-    },
-  );
+    expect(new URL(body.editUrl).hostname).toBe("example.com");
+  });
+
+  it("carries, in its fragment, a short-lived code for this session and site", async () => {
+    // What replaced the token: the widget sends this to its boot check, which
+    // spends it once (validate-edit-link.test.ts) and answers the token.
+    const before = Date.now();
+    const body = await createSession();
+    const url = new URL(body.editUrl);
+
+    expect(url.pathname).toBe("/");
+    expect(url.hash.startsWith("#rcf_edit=")).toBe(true);
+    const claim = readEditLinkCode(url.hash.slice("#rcf_edit=".length));
+    expect(claim).toMatchObject({ sessionId: "session-1", siteId: SITE_ID });
+    expect(claim!.expiresAt.getTime()).toBeGreaterThan(before);
+    expect(claim!.expiresAt.getTime()).toBeLessThanOrEqual(
+      Date.now() + EDIT_LINK_TTL_MS,
+    );
+  });
 });

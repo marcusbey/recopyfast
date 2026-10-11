@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServer, type Server } from "node:http";
 import { createHmac, randomUUID } from "node:crypto";
 import { hashVerificationCode } from "../src/lib/auth/editor-crypto";
+import { mintEditLinkCode } from "../src/lib/auth/edit-link";
 import {
   createLocalServiceRoleClient,
   deleteCapturedSiteFixture,
@@ -74,6 +75,7 @@ test.describe("share edit publish flow", () => {
     return `${payload}.${signature}`;
   })();
   const editToken = `e2e_edit_${randomUUID()}`;
+  let editSessionId: string | null = null;
   const ownerEmail = `e2e-owner-${siteId}@recopyfast.local`;
   let ownerId: string | null = null;
 
@@ -150,9 +152,16 @@ test.describe("share edit publish flow", () => {
   test("edit-session token edits staging content and publishes live", async ({
     page,
   }) => {
+    // The owner's link since s76 (ADR 055): a 60-second, single-use code in
+    // the fragment, which the widget spends at its boot check for the token.
+    // Minted for the seeded session immediately before the navigation, with
+    // the signing key the app uses (as hashVerificationCode above is). It used
+    // to be `?rcf_edit_token=<token>`, which the widget no longer reads.
+    if (!editSessionId) throw new Error("The edit session was not seeded.");
+    const code = mintEditLinkCode({ sessionId: editSessionId, siteId });
     await exerciseShareFlow(
       page,
-      `${TARGET_URL}/?rcf_edit_token=${encodeURIComponent(editToken)}`,
+      `${TARGET_URL}/#rcf_edit=${code}`,
       "edit-session",
       "Published through edit token",
     );
@@ -431,18 +440,25 @@ test.describe("share edit publish flow", () => {
     // s68a (ADR 047): a session grants at most its holder's live grant, so it
     // must name one. This seed used to write no `user_id`; the validator now
     // refuses that row. The owner's `admin` row is seeded first, in beforeAll.
-    const { error: editError } = await supabase.from("edit_sessions").insert({
-      site_id: siteId,
-      user_id: ownerId,
-      token: editToken,
-      permissions: ["view", "edit", "publish"],
-      expires_at: expiresAt,
-      is_active: true,
-    });
+    // Never used (`last_used_at` null): the link minted for it is spent by
+    // opening it (s76), exactly as a dashboard-issued session's is.
+    const { data: session, error: editError } = await supabase
+      .from("edit_sessions")
+      .insert({
+        site_id: siteId,
+        user_id: ownerId,
+        token: editToken,
+        permissions: ["view", "edit", "publish"],
+        expires_at: expiresAt,
+        is_active: true,
+      })
+      .select("id")
+      .single();
 
     if (editError) {
       throw editError;
     }
+    editSessionId = (session as { id: string }).id;
   }
 
   /**
