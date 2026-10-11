@@ -41,9 +41,11 @@ describe("Playwright CI contract", () => {
   // s74: 80 -> 81, E2E-019 in e2e/landing.spec.ts (a software WebGL renderer
   // gets the static sky).
   // s70b: 81 -> 86, the five Changes page tests (e2e/changes.spec.ts).
+  // s17: +2, the two request-only comparison route contract tests.
   // s79: 86 -> 91, the five e2e/csp.spec.ts tests (marketing surface, /login,
   // /signup, /edit, signed-in dashboard).
-  it("runs all 91 tests and always cleans up and uploads the redacted summary", () => {
+  // Combined: 86 + 2 + 5 = 93 distinct tests.
+  it("runs all 93 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -51,11 +53,11 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":91');
-    expect(workflow).toContain("report.expected !== 91");
-    expect(workflow).toContain("report.total !== 91");
-    expect(workflow).toContain("report.passed !== 91");
-    expect(config).toContain("expected: 91");
+    expect(workflow).toContain('"expected":93');
+    expect(workflow).toContain("report.expected !== 93");
+    expect(workflow).toContain("report.total !== 93");
+    expect(workflow).toContain("report.passed !== 93");
+    expect(config).toContain("expected: 93");
     expect(workflow).toContain("if-no-files-found: error");
   });
 

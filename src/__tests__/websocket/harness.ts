@@ -321,6 +321,40 @@ export interface HandshakeOutcome {
   refused: () => Promise<string | undefined>;
 }
 
+/**
+ * Add only structural Socket.IO state to a timed-out handshake assertion.
+ *
+ * The full-suite failure that introduced this helper moved between unrelated
+ * handshakes and left only "condition timed out" behind. The tracked error
+ * payload can contain credential or provider detail, so diagnostics retain its
+ * count while deliberately omitting every message, query, URL, and socket id.
+ * Predicates and deadlines remain owned by `waitFor`.
+ */
+export async function waitForHandshake(
+  outcome: Pick<HandshakeOutcome, "socket" | "authErrors">,
+  predicate: () => boolean,
+  description: string,
+  timeoutMs = 15_000,
+): Promise<void> {
+  try {
+    await waitFor(predicate, description, timeoutMs);
+  } catch (error) {
+    const manager = outcome.socket.io;
+    const engine = manager.engine;
+    const state = [
+      `connected=${outcome.socket.connected}`,
+      `disconnected=${outcome.socket.disconnected}`,
+      `active=${outcome.socket.active}`,
+      `manager=${manager._readyState ?? "absent"}`,
+      `engine=${engine?.readyState ?? "absent"}`,
+      `transport=${engine?.transport?.name ?? "absent"}`,
+      `authErrorCount=${outcome.authErrors.length}`,
+    ].join(" ");
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message}; socket state: ${state}`, { cause: error });
+  }
+}
+
 export function track(socket: Socket): HandshakeOutcome {
   const authErrors: Array<{ error?: string; message?: string }> = [];
   socket.on("auth-error", (payload) => {
@@ -330,15 +364,17 @@ export function track(socket: Socket): HandshakeOutcome {
     authErrors.push({ error: error.message });
   });
 
-  return {
+  const outcome: HandshakeOutcome = {
     socket,
     authErrors,
     async refused() {
-      await waitFor(
+      await waitForHandshake(
+        outcome,
         () => socket.disconnected && !socket.active,
         "the socket to be refused and closed",
       );
       return authErrors[0]?.error ?? authErrors[0]?.message;
     },
   };
+  return outcome;
 }

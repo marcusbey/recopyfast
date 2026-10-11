@@ -35,6 +35,7 @@ import {
   throwingStore,
   track,
   waitFor,
+  waitForHandshake,
   type Row,
 } from "./harness";
 
@@ -182,6 +183,45 @@ function runNode(
 }
 
 describe("realtime service lifecycle", () => {
+  it("reports sanitized Socket.IO state when a connection wait times out", async () => {
+    const socket = {
+      connected: true,
+      disconnected: false,
+      active: true,
+      io: {
+        _readyState: "open",
+        engine: {
+          readyState: "open",
+          transport: { name: "websocket" },
+        },
+      },
+    } as unknown as Socket;
+    const outcome = {
+      socket,
+      authErrors: [{ error: "sensitive refusal detail" }],
+    };
+
+    let failure: unknown;
+    try {
+      await waitForHandshake(
+        outcome,
+        () => false,
+        "the diagnostic condition",
+        1,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(
+      "connected=true disconnected=false active=true manager=open engine=open transport=websocket authErrorCount=1",
+    );
+    expect((failure as Error).message).not.toContain(
+      "sensitive refusal detail",
+    );
+  });
+
   it("starts no listener when the module is merely required", async () => {
     // `startServer(PORT)` used to run at module load, which is why the server
     // could not be imported by a test at all. The auto-start now lives behind
@@ -581,9 +621,10 @@ describe("degraded mode without Supabase", () => {
       },
     });
     open.push(socket);
-    track(socket);
+    const tracked = track(socket);
 
-    await waitFor(
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, `site:${SITE_ID}`) === 1,
       "the socket to land in the live room",
     );
@@ -1114,8 +1155,9 @@ describe("the socket is broadcast-only", () => {
       },
     });
     open.push(socket);
-    track(socket);
-    await waitFor(
+    const tracked = track(socket);
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, `site:${SITE_ID}:staging`) >= expected,
       "the editor to join the staging room",
     );
@@ -1131,8 +1173,9 @@ describe("the socket is broadcast-only", () => {
       query: { siteId: SITE_ID, token: SITE_TOKEN },
     });
     open.push(socket);
-    track(socket);
-    await waitFor(
+    const tracked = track(socket);
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, `site:${SITE_ID}`) >= expected,
       "the viewer socket to join the site room",
     );
@@ -1463,7 +1506,8 @@ describe("the dashboard room requires a live editor grant", () => {
     });
     open.push(socket);
     const tracked = track(socket);
-    await waitFor(
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, `site:${SITE_ID}:staging`) >= expected,
       "the editor to join the staging room",
     );
@@ -1479,7 +1523,8 @@ describe("the dashboard room requires a live editor grant", () => {
     });
     open.push(socket);
     const tracked = track(socket);
-    await waitFor(
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, `site:${SITE_ID}`) >= expected,
       "the viewer to join the live room",
     );
@@ -1664,7 +1709,8 @@ describe("revocation reaches a live socket", () => {
     });
     open.push(socket);
     const tracked = track(socket);
-    await waitFor(
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, `site:${SITE_ID}:staging`) >= expected,
       "the editor to join the staging room",
     );
@@ -1907,8 +1953,9 @@ describe("revocation reaches a live socket", () => {
       query: { siteId: SITE_ID, token: SITE_TOKEN },
     });
     open.push(socket);
-    track(socket);
-    await waitFor(
+    const tracked = track(socket);
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, `site:${SITE_ID}`) === 1,
       "the viewer to join the live room",
     );
@@ -2124,7 +2171,8 @@ describe("key rotation reaches a live socket", () => {
     const socket = openSocket({ port, origin, query: { siteId, token } });
     open.push(socket);
     const tracked = track(socket);
-    await waitFor(
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, room) >= expected,
       "the viewer to join its site room",
     );
@@ -2146,7 +2194,8 @@ describe("key rotation reaches a live socket", () => {
     });
     open.push(socket);
     const tracked = track(socket);
-    await waitFor(
+    await waitForHandshake(
+      tracked,
       () => roomSize(server, room) >= expected,
       "the editor to join the staging room",
     );
