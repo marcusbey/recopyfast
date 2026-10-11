@@ -1,5 +1,8 @@
 export const MAX_REDACTED_DIAGNOSTIC_LENGTH = 1600;
 
+const STRIPE_PROVIDER_ID_PATTERN =
+  /\b(?:cs_(?:test|live)_[A-Za-z0-9]{8,}|(?:acct|ba|ch|coupon|cus|dp|evt|ii|il|in|pi|plink|pm|po|price|prod|promo|re|req|seti|si|src|sub|tok|tr|txn|txr)_[A-Za-z0-9]{8,})\b/gi;
+
 /**
  * Redact every credential/identity shape the browser fixtures can place in an
  * error while retaining constraint names and provider error text. The caller
@@ -9,6 +12,9 @@ export function redactDiagnostic(
   value: string,
   maxLength = MAX_REDACTED_DIAGNOSTIC_LENGTH,
 ): string {
+  // Free-form provider errors feed both terminal output and the four-field
+  // failure artifact. Cleanup still owns the structured IDs in its 0600
+  // manifests/evidence; only diagnostic prose loses these identifiers.
   return value
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(
@@ -44,6 +50,7 @@ export function redactDiagnostic(
       /\bcs_(?:test|live)_[A-Za-z0-9_-]*secret[A-Za-z0-9_-]*\b/gi,
       "[REDACTED CHECKOUT SECRET]",
     )
+    .replace(STRIPE_PROVIDER_ID_PATTERN, "[REDACTED STRIPE ID]")
     .replace(/\b(?:\d[ -]?){13,19}\b/g, "[REDACTED CARD]")
     .replace(
       /(\b(?:card[_ -]?exp(?:iry|iration)?|expiry|expiration)\b\s*[:=]\s*)(?:\d{1,2}\s*\/\s*\d{2,4}|\d{3,4})/gi,

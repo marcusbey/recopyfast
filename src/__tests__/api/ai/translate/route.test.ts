@@ -831,4 +831,108 @@ describe("/api/ai/translate - POST", () => {
       expect(mockRefundCharge).not.toHaveBeenCalled();
     });
   });
+
+  /**
+   * s82, ADR 035: the site owner pays for AI on their site — never the
+   * caller. This route charged `user.id` through the cookie client, so an
+   * invited editor's own wallet was spent (or, holding no plan, they were
+   * refused for the owner's site). The fixture's caller (`user-123`) is not
+   * its owner (`owner-1`), so every case above was charging a non-owner.
+   */
+  describe("the payer is the site owner (ADR 035)", () => {
+    const OWNER_ID = "owner-1";
+
+    const translateOne = () =>
+      new NextRequest("http://localhost/api/ai/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          siteId: VALID_SITE_ID,
+          fromLanguage: "en",
+          toLanguage: "es",
+          elements: [{ id: "hero", text: "Hello" }],
+        }),
+      });
+
+    const oneTranslated = () =>
+      mockAiService.batchTranslate.mockResolvedValueOnce({
+        success: true,
+        data: [{ id: "hero", originalText: "Hello", translatedText: "Hola" }],
+        tokensUsed: 10,
+      });
+
+    it("charges the owner's wallet through the service client when an editor translates", async () => {
+      allowSiteAccess();
+      oneTranslated();
+
+      const response = await POST(translateOne());
+
+      expect(response.status).toBe(200);
+      expect(mockConsumeFeatureUsage).toHaveBeenCalledTimes(1);
+      expect(mockConsumeFeatureUsage).toHaveBeenCalledWith(
+        OWNER_ID,
+        "translation",
+        expect.objectContaining({
+          siteId: VALID_SITE_ID,
+          editor: TEST_USER.id,
+        }),
+        mockService,
+      );
+    });
+
+    it("charges the owner through the service client when the owner translates", async () => {
+      (checkOwnerCanEdit as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        ownerId: TEST_USER.id,
+      });
+      allowSiteAccess();
+      oneTranslated();
+
+      await POST(translateOne());
+
+      expect(mockConsumeFeatureUsage).toHaveBeenCalledWith(
+        TEST_USER.id,
+        "translation",
+        expect.objectContaining({ siteId: VALID_SITE_ID }),
+        mockService,
+      );
+    });
+
+    it("tells an editor to ask the owner when the owner's wallet refuses", async () => {
+      allowSiteAccess();
+      mockConsumeFeatureUsage.mockResolvedValueOnce({
+        success: false,
+        error: "Insufficient credits. You need 5 credits but only have 0.",
+      });
+
+      const response = await POST(translateOne());
+      const data = await response.json();
+
+      expect(response.status).toBe(403);
+      expect(data).toEqual({
+        error:
+          "AI translation isn't available on this site's plan right now. Ask the site owner to add AI credits.",
+        requiresUpgrade: true,
+      });
+      expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+    });
+
+    it("shows the owner the gate's own sentence", async () => {
+      (checkOwnerCanEdit as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        ownerId: TEST_USER.id,
+      });
+      allowSiteAccess();
+      mockConsumeFeatureUsage.mockResolvedValueOnce({
+        success: false,
+        error: "Insufficient credits. You need 5 credits but only have 0.",
+      });
+
+      const response = await POST(translateOne());
+
+      await expect(response.json()).resolves.toEqual({
+        error: "Insufficient credits. You need 5 credits but only have 0.",
+        requiresUpgrade: true,
+      });
+    });
+  });
 });

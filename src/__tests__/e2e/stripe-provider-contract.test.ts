@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = process.cwd();
@@ -12,7 +12,6 @@ describe("Stripe provider E2E operator contract", () => {
   const providerFixture = read("e2e/support/stripe-provider-fixture.ts");
   const failureSupport = read("e2e/support/stripe-provider-failure.ts");
   const hostedFieldSupport = read("e2e/support/stripe-hosted-fields.ts");
-  const disclosureSupport = read("e2e/support/stripe-agent-disclosure.ts");
   const teardownSupport = read("e2e/support/stripe-provider-teardown.ts");
   const janitor = read("scripts/stripe-provider-janitor.ts");
   const ownershipSupport = read("e2e/support/stripe-provider-ownership.ts");
@@ -21,13 +20,13 @@ describe("Stripe provider E2E operator contract", () => {
   const workflow = read(".github/workflows/ci.yml");
   const runbook = read("docs/operations/stripe-test-entitlement-e2e.md");
   const s24CliVersion = workflow.match(
-    /supabase\/setup-cli@v3[\s\S]*?version: "([^"]+)"/,
+    /supabase\/setup-cli@[^\n]+[\s\S]*?version: "([^"]+)"/,
   )?.[1];
   const s24SupabaseExclusions =
     "realtime,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor";
 
-  it("keeps the credentialed provider proof outside the default 39-test CI lane", () => {
-    expect(defaultConfig).toContain("expected: 39");
+  it("keeps the credentialed provider proof outside the default 86-test CI lane", () => {
+    expect(defaultConfig).toContain("expected: 86");
     expect(defaultConfig).not.toContain("stripe-test-entitlement.provider.ts");
     expect(providerConfig).toContain(
       'testMatch: "stripe-test-entitlement.provider.ts"',
@@ -37,6 +36,8 @@ describe("Stripe provider E2E operator contract", () => {
     expect(providerConfig).toContain('screenshot: "off"');
     expect(providerConfig).toContain('video: "off"');
     expect(providerConfig).toContain('preserveOutput: "never"');
+    expect(providerConfig).toContain("headless: false");
+    expect(providerConfig).toContain("STRIPE_PROVIDER_HUMAN_CHECKOUT");
     expect(providerConfig).toContain("STRIPE_PROVIDER_OUTPUT_DIR");
     expect(workflow).not.toContain("RUN_RECOPYFAST_STRIPE_E2E");
     expect(workflow).not.toContain("STRIPE_PROVIDER_EVIDENCE_FILE");
@@ -47,6 +48,10 @@ describe("Stripe provider E2E operator contract", () => {
       "node scripts/run-stripe-provider-e2e.mjs",
     );
     expect(runner).toContain("DEFAULT_RUNS = 2");
+    expect(runner).toContain('args.includes("--human-checkout")');
+    expect(runner.indexOf("assertHumanCheckoutOptIn")).toBeLessThan(
+      runner.indexOf("loadPrivateEnvironment()"),
+    );
     expect(s24CliVersion).toBe("2.117.0");
     expect(runner).toContain(`const SUPABASE_CLI_VERSION = "${s24CliVersion}"`);
     expect(runner).toContain(`"${s24SupabaseExclusions}"`);
@@ -64,6 +69,10 @@ describe("Stripe provider E2E operator contract", () => {
     expect(runner).toContain("removeProviderOutput(providerOutputDir)");
     expect(runner).toContain("STRIPE_PROVIDER_FAILURE_FILE");
     expect(runner).toContain("readAndValidateFailure");
+    expect(runner).toContain("recordExternalJanitorFailure");
+    expect(runner.indexOf("recordExternalJanitorFailure(")).toBeLessThan(
+      runner.indexOf("if (janitorError) throw janitorError"),
+    );
     expect(runner).toContain("removeSafeFailureFile(providerFailureFile)");
     expect(runner).toContain("randomUUID");
     expect(runner).toContain("STRIPE_PROVIDER_RUN_ID");
@@ -72,6 +81,8 @@ describe("Stripe provider E2E operator contract", () => {
     expect(runner).toContain("STRIPE_PROVIDER_STARTED_AT_UNIX");
     expect(runner).toContain("scripts/stripe-provider-janitor.ts");
     expect(runner).toContain("PLAYWRIGHT_PROCESS_TIMEOUT_MS");
+    expect(runner).toContain("PLAYWRIGHT_PROCESS_TIMEOUT_MS = 21 * 60_000");
+    expect(providerSpec).toContain("test.setTimeout(20 * 60_000)");
     expect(runner.indexOf("runJanitor:")).toBeLessThan(
       runner.indexOf("stopServices:"),
     );
@@ -98,7 +109,14 @@ describe("Stripe provider E2E operator contract", () => {
     expect(runner).toContain("hasCompletedParentJanitor = true");
     expect(runner).toContain("assertNoUncleanRunManifests(TEST_RESULTS_DIR)");
     expect(runner).toContain('STRIPE_PROVIDER_RUNNER_OWNED: "1"');
+    expect(runner).toContain('STRIPE_PROVIDER_HUMAN_CHECKOUT: "1"');
+    expect(runner).toContain("HUMAN_CHECKOUT_READY_NOTICE");
+    expect(processSupport).toContain("Stripe TEST Checkout is ready");
+    expect(runner).toContain("STRIPE_PROVIDER_HUMAN_CHECKOUT_NOTICE");
     expect(providerConfig).toContain("assertRunnerOwnedProviderInvocation");
+    expect(processSupport).toContain(
+      'env.STRIPE_PROVIDER_HUMAN_CHECKOUT !== "1"',
+    );
     expect(processSupport).toContain("validateProviderEvidence");
     expect(
       runner.indexOf('await cleanupMachine.cleanup("finally")'),
@@ -118,47 +136,96 @@ describe("Stripe provider E2E operator contract", () => {
     expect(runbook).toContain("RECOPYFAST_SUPABASE_CLI_BIN");
   });
 
-  it("exercises authenticated hosted Checkout and proves the durable outcome plus replay idempotency", () => {
+  it("prints only aggregate success status while retaining IDs in owner-only evidence", () => {
+    const completion = runner.slice(
+      runner.indexOf("if (!pendingEvidence)"),
+      runner.indexOf("function removeProviderOutput"),
+    );
+
+    expect(completion).toContain("finalEvidence.processedEvents.length");
+    expect(completion).toContain("finalEvidence.replay.duplicate");
+    expect(completion).toContain("cleanup=proved");
+    expect(completion).not.toContain("finalEvidence.checkout.id");
+    expect(completion).not.toContain("finalEvidence.subscription.id");
+    expect(completion).not.toMatch(/checkout \$\{/i);
+    expect(completion).not.toMatch(/subscription \$\{/i);
+  });
+
+  it("waits for bounded human Checkout without automating payment fields and proves the durable outcome plus replay idempotency", () => {
     expect(providerSpec).toContain("createStripeProviderFixture");
     expect(providerSpec).toContain("/api/billing/checkout");
     expect(providerSpec).toContain('intent: "subscription"');
     expect(providerSpec).toContain('planId: "pro"');
     expect(providerSpec).toContain('billingPeriod: "monthly"');
-    expect(providerSpec).toContain('input[name="cardNumber"]');
-    expect(providerSpec).toContain("performHostedFieldAction");
-    expect(providerSpec).toContain("performOptionalHostedFieldAction");
     expect(providerSpec).toContain("waitForHostedCheckoutReturn");
-    expect(hostedFieldSupport).toContain(
-      "const HOSTED_FIELD_TIMEOUT_MS = 30_000",
+    expect(providerSpec).toContain("HUMAN_CHECKOUT_TIMEOUT_MS = 10 * 60_000");
+    expect(providerSpec).toContain('failedStage = "checkout:human-completion"');
+    expect(providerSpec).toContain(
+      "process.stdout.write(HUMAN_CHECKOUT_READY_NOTICE)",
     );
-    expect(hostedFieldSupport).toContain("page.frames()");
+    expect(providerSpec).toContain(
+      "process.env.STRIPE_PROVIDER_HUMAN_CHECKOUT_NOTICE !==",
+    );
+    expect(providerSpec).toContain("expectedAppOrigin");
+    expect(providerSpec).toContain(
+      "expectedCheckoutSessionId: checkoutSessionId",
+    );
+    expect(providerSpec).toContain("state.abortController.signal");
+    const humanCheckoutBlock = providerSpec.slice(
+      providerSpec.indexOf("async function waitForHumanHostedCheckout"),
+      providerSpec.indexOf("async function readCheckoutStatus"),
+    );
+    expect(humanCheckoutBlock.indexOf("await page.goto")).toBeLessThan(
+      humanCheckoutBlock.indexOf(
+        "process.stdout.write(HUMAN_CHECKOUT_READY_NOTICE)",
+      ),
+    );
+    expect(
+      humanCheckoutBlock.indexOf(
+        "process.stdout.write(HUMAN_CHECKOUT_READY_NOTICE)",
+      ),
+    ).toBeLessThan(
+      humanCheckoutBlock.indexOf("await waitForHostedCheckoutReturn"),
+    );
+    expect(hostedFieldSupport).toContain("page.isClosed()");
+    expect(hostedFieldSupport).toContain("expectedAppOrigin");
+    expect(hostedFieldSupport).toContain('searchParams.getAll("checkout")');
+    expect(hostedFieldSupport).toContain('searchParams.getAll("session_id")');
+    expect(hostedFieldSupport).toContain("expectedCheckoutSessionId");
     expect(hostedFieldSupport).toContain("page.waitForTimeout");
-    expect(hostedFieldSupport).toContain("Frame was detached$");
-    const countrySelection = providerSpec.indexOf(
-      'selectHostedBillingCountry(page, "US")',
-    );
-    const postalEntry = providerSpec.indexOf('input[name="billingPostalCode"]');
-    expect(countrySelection).toBeGreaterThan(-1);
-    expect(postalEntry).toBeGreaterThan(countrySelection);
-    expect(providerSpec).toContain("checkAiAgentDisclosure(page)");
-    expect(disclosureSupport).toContain(
-      '"I am an AI agent acting on behalf of someone else"',
-    );
-    expect(disclosureSupport).toContain("getByText");
-    expect(disclosureSupport).toContain("exact: true");
-    expect(disclosureSupport).toContain('.dispatchEvent("click"');
-    expect(disclosureSupport).not.toContain(".click(");
-    expect(disclosureSupport).toContain(".isChecked({");
-    expect(disclosureSupport).toContain(
-      "timeout: actionDeadline.playwrightTimeoutMs()",
-    );
-    expect(disclosureSupport).not.toContain(".check(");
-    expect(hostedFieldSupport).toMatch(/postal code incomplete/i);
+    expect(hostedFieldSupport).toContain("signal?.aborted");
+    expect(
+      existsSync(join(ROOT, "e2e/support/stripe-agent-disclosure.ts")),
+    ).toBe(false);
+    expect(
+      existsSync(
+        join(ROOT, "src/__tests__/e2e/stripe-agent-disclosure.test.ts"),
+      ),
+    ).toBe(false);
+    for (const forbidden of [
+      "cardNumber",
+      "cardExpiry",
+      "cardCvc",
+      "billingName",
+      "billingCountry",
+      "billingPostalCode",
+      "AiAgentPaymentSteering",
+      "link_pay_token",
+      "checkAiAgentDisclosure",
+      "performHostedFieldAction",
+      "performOptionalHostedFieldAction",
+      'button[type="submit"]',
+    ]) {
+      expect(providerSpec).not.toContain(forbidden);
+      expect(hostedFieldSupport).not.toContain(forbidden);
+    }
     expect(providerSpec).toContain("failedStage: ProviderFailureStage");
     expect(providerSpec).toContain("writeProviderFailureEvidence");
     expect(providerSpec).toContain("billing_customers");
     expect(providerSpec).toContain("billing_subscriptions");
     expect(providerSpec).toContain("billing_events");
+    expect(providerSpec).toContain("checkout_pending_intents");
+    expect(providerSpec).toContain('status: "completed"');
     expect(providerSpec).toContain("/api/billing/entitlement");
     expect(providerSpec).toContain("generateTestHeaderString");
     expect(providerSpec).toContain("duplicate: true");
@@ -168,9 +235,6 @@ describe("Stripe provider E2E operator contract", () => {
     expect(providerSpec).toContain("state.fixturePromise");
     expect(providerSpec).toContain("state.flowPromise");
     expect(providerSpec).toContain("state.abortController");
-    expect(
-      providerSpec.indexOf("fixture.markCheckoutRequested()"),
-    ).toBeLessThan(providerSpec.indexOf("page.request.post"));
     const teardownBlock = providerSpec.slice(
       providerSpec.indexOf("test.afterEach"),
       providerSpec.indexOf('test("a genuine paid test subscription'),
@@ -193,31 +257,17 @@ describe("Stripe provider E2E operator contract", () => {
     expect(testBody).not.toContain("} finally {");
   });
 
-  it("proves post-cleanup provider history and clears the browser session", () => {
-    expect(providerFixture).toContain("stripe.checkout.sessions.retrieve");
-    expect(providerFixture).toContain("stripe.checkout.sessions.expire");
-    expect(providerFixture).toContain("stripe.checkout.sessions.list");
-    expect(providerFixture).toContain("client_reference_id");
-    expect(providerFixture).toContain("metadata?.user_id");
-    expect(providerFixture).toContain("onAuthUserCreated");
+  it("keeps worker teardown non-destructive and assigns cleanup to the external janitor", () => {
     expect(providerFixture).toContain("id: requestedAuthUserId");
-    expect(providerFixture).toContain("reconcileCapturedCheckoutForCleanup");
-    expect(providerFixture).toContain("expireOwnedCheckoutSession");
-    expect(providerFixture).toContain("cancelOwnedSubscription");
-    expect(providerFixture).toContain("deleteOwnedCustomer");
-    expect(providerFixture).toContain("stripe.events.retrieve");
-    expect(providerFixture).toContain("context.clearCookies()");
-    for (const cleanupLabel of [
-      "expire_checkout",
-      "cancel_subscription",
-      "delete_customer",
-      "wait_deliveries",
-      "discover_rows",
-      "delete_billing_events",
-      "delete_auth_user",
-    ]) {
-      expect(providerFixture).toContain(cleanupLabel);
-    }
+    expect(providerFixture).not.toContain("cleanupCapturedFixture");
+    expect(providerFixture).not.toContain(
+      "reconcileCapturedCheckoutForCleanup",
+    );
+    expect(providerFixture).not.toContain("auth.admin.deleteUser");
+    expect(providerFixture).not.toContain("stripe.checkout.sessions.expire");
+    expect(providerFixture).not.toContain("stripe.subscriptions.cancel");
+    expect(providerFixture).not.toContain("stripe.customers.del");
+    expect(providerFixture).not.toContain("cleanup(options");
     expect(failureSupport).toContain("redactDiagnostic");
     expect(failureSupport).toContain("mode: 0o600");
     expect(teardownSupport).toContain("Promise.race");
@@ -239,6 +289,8 @@ describe("Stripe provider E2E operator contract", () => {
     expect(janitor).toContain("cancelOwnedSubscription");
     expect(janitor).toContain("deleteOwnedCustomer");
     expect(janitor).toContain("persistTerminalDeliveryLedger");
+    expect(janitor).toContain("EXPLICITLY_DELETED_DATABASE_TABLES");
+    expect(janitor).toContain("databaseTablesCountedAsResidue");
     expect(ownershipSupport).toContain("assertOwnedCustomer");
     expect(ownershipSupport).toContain("assertOwnedCheckoutSession");
     expect(ownershipSupport).toContain("assertOwnedSubscription");
@@ -253,5 +305,11 @@ describe("Stripe provider E2E operator contract", () => {
     expect(runbook).toMatch(/maximum total[\s\S]*payer/i);
     expect(runbook).toMatch(/retain[\s\S]*cancel[\s\S]*refund/i);
     expect(runbook).toMatch(/never.*production/i);
+    expect(runbook).toMatch(/--human-checkout/);
+    expect(runbook).toMatch(/headed/i);
+    expect(runbook).toMatch(/ten minutes/i);
+    expect(runbook).toMatch(/CAPTCHA/i);
+    expect(runbook).toMatch(/two.*independently cleaned/i);
+    expect(runbook).toMatch(/Link Pay Token/i);
   });
 });

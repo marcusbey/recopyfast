@@ -1,26 +1,38 @@
 import {
+  chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import processHelpers from "../../../scripts/stripe-provider-process.cjs";
 
 const {
+  HUMAN_CHECKOUT_READY_NOTICE,
+  assertNoSensitiveArtifact,
   createCleanupStateMachine,
   registerProcess,
   assertNoUncleanRunManifest,
   assertNoUncleanRunManifests,
   assertRunnerOwnedProviderInvocation,
+  recordExternalJanitorFailure,
   spawnDetached,
   terminateProcessGroup,
   waitForProcessGroupGone,
   validateProviderEvidence,
   writeRunManifest,
 } = processHelpers as {
+  HUMAN_CHECKOUT_READY_NOTICE: string;
+  assertNoSensitiveArtifact(
+    text: string,
+    label: string,
+    options?: { allowProviderIds?: boolean },
+  ): void;
   createCleanupStateMachine(input: {
     writeState(reason: string): void;
     writeComplete?(): void;
@@ -36,6 +48,11 @@ const {
   assertNoUncleanRunManifests(directory: string): void;
   assertRunnerOwnedProviderInvocation(
     env: Record<string, string | undefined>,
+  ): void;
+  recordExternalJanitorFailure(
+    path: string,
+    runIndex: number,
+    hasPrimaryFailure: boolean,
   ): void;
   spawnDetached(
     command: string,
@@ -79,6 +96,140 @@ const {
 };
 
 describe("Stripe provider runner process cleanup", () => {
+  it("rejects provider IDs at the runner failure-artifact boundary", () => {
+    for (const providerId of [
+      "cs_test_checkout123456789",
+      "cus_customer123456789",
+      "sub_subscription123456789",
+      "evt_event123456789",
+      "price_price123456789",
+      "prod_product123456789",
+      "in_invoice123456789",
+      "pi_paymentintent123456789",
+      "pm_paymentmethod123456789",
+      "ch_charge123456789",
+      "seti_setupintent123456789",
+      "req_request123456789",
+    ]) {
+      expect(() =>
+        assertNoSensitiveArtifact(
+          JSON.stringify({ diagnostic: `provider failure ${providerId}` }),
+          "Provider failure evidence",
+        ),
+      ).toThrow(
+        /forbidden credential, identity, payment value, or provider ID/i,
+      );
+    }
+
+    expect(() =>
+      assertNoSensitiveArtifact(
+        JSON.stringify({ checkoutId: "cs_test_checkout123456789" }),
+        "Provider evidence",
+        { allowProviderIds: true },
+      ),
+    ).not.toThrow();
+  });
+
+  it("preserves a primary failure and appends only the fixed external janitor label", () => {
+    const directory = mkdtempSync(join(tmpdir(), "recopyfast-s25-failure-"));
+    const path = join(directory, "failure.json");
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        mode: "test",
+        runIndex: 2,
+        failedStage: "checkout:human-completion",
+        diagnostic: "Human Checkout completion timed out",
+      })}\n`,
+      { mode: 0o644 },
+    );
+
+    recordExternalJanitorFailure(path, 2, true);
+
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      mode: "test",
+      runIndex: 2,
+      failedStage: "checkout:human-completion",
+      diagnostic:
+        "Human Checkout completion timed out | cleanup failed: external_janitor",
+    });
+  });
+
+  it("creates a closed-schema cleanup failure when only the external janitor fails", () => {
+    const directory = mkdtempSync(join(tmpdir(), "recopyfast-s25-failure-"));
+    const path = join(directory, "failure.json");
+
+    recordExternalJanitorFailure(path, 1, false);
+
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    const evidence = JSON.parse(readFileSync(path, "utf8"));
+    expect(evidence).toEqual({
+      mode: "test",
+      runIndex: 1,
+      failedStage: "cleanup",
+      diagnostic: "cleanup failed: external_janitor",
+    });
+    expect(Object.keys(evidence).sort()).toEqual([
+      "diagnostic",
+      "failedStage",
+      "mode",
+      "runIndex",
+    ]);
+  });
+
+  it("replaces malformed primary evidence instead of copying unsafe janitor detail", () => {
+    const directory = mkdtempSync(join(tmpdir(), "recopyfast-s25-failure-"));
+    const path = join(directory, "failure.json");
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        mode: "test",
+        runIndex: 1,
+        failedStage: "provider:raw",
+        diagnostic: "janitor failed for cus_sensitive sub_sensitive",
+      })}\n`,
+    );
+
+    recordExternalJanitorFailure(path, 1, true);
+
+    const text = readFileSync(path, "utf8");
+    expect(JSON.parse(text)).toEqual({
+      mode: "test",
+      runIndex: 1,
+      failedStage: "cleanup",
+      diagnostic: "cleanup failed: external_janitor",
+    });
+    expect(text).not.toContain("cus_sensitive");
+    expect(text).not.toContain("sub_sensitive");
+  });
+
+  it("replaces an otherwise valid primary failure that contains a provider ID", () => {
+    const directory = mkdtempSync(join(tmpdir(), "recopyfast-s25-failure-"));
+    const path = join(directory, "failure.json");
+    const providerId = "cs_test_checkout123456789";
+    writeFileSync(
+      path,
+      `${JSON.stringify({
+        mode: "test",
+        runIndex: 1,
+        failedStage: "checkout:human-completion",
+        diagnostic: `provider failed for ${providerId}`,
+      })}\n`,
+    );
+
+    recordExternalJanitorFailure(path, 1, true);
+
+    const text = readFileSync(path, "utf8");
+    expect(JSON.parse(text)).toEqual({
+      mode: "test",
+      runIndex: 1,
+      failedStage: "cleanup",
+      diagnostic: "cleanup failed: external_janitor",
+    });
+    expect(text).not.toContain(providerId);
+  });
+
   it("serializes interruption cleanup and runs the janitor before services stop", async () => {
     const order: string[] = [];
     const machine = createCleanupStateMachine({
@@ -194,6 +345,8 @@ describe("Stripe provider runner process cleanup", () => {
     });
     const environment = {
       STRIPE_PROVIDER_RUNNER_OWNED: "1",
+      STRIPE_PROVIDER_HUMAN_CHECKOUT: "1",
+      STRIPE_PROVIDER_HUMAN_CHECKOUT_NOTICE: HUMAN_CHECKOUT_READY_NOTICE,
       STRIPE_PROVIDER_MANIFEST_FILE: manifestPath,
       STRIPE_PROVIDER_RUN_ID: "run-owned",
       STRIPE_PROVIDER_AUTH_USER_ID: "user-owned",
@@ -212,9 +365,55 @@ describe("Stripe provider runner process cleanup", () => {
     expect(() =>
       assertRunnerOwnedProviderInvocation({
         ...environment,
+        STRIPE_PROVIDER_HUMAN_CHECKOUT: undefined,
+      }),
+    ).toThrow(/human checkout/i);
+    expect(() =>
+      assertRunnerOwnedProviderInvocation({
+        ...environment,
+        STRIPE_PROVIDER_HUMAN_CHECKOUT_NOTICE: `${HUMAN_CHECKOUT_READY_NOTICE.trimEnd()} customer=cus_sensitive123456`,
+      }),
+    ).toThrow(/human checkout instructions/i);
+    expect(() =>
+      assertRunnerOwnedProviderInvocation({
+        ...environment,
         STRIPE_PROVIDER_RUN_ID: "wrong-run",
       }),
     ).toThrow(/runner-owned external janitor/i);
+  });
+
+  it("refuses a missing human opt-in before invoking any stack command", () => {
+    const directory = mkdtempSync(join(tmpdir(), "recopyfast-s25-opt-in-"));
+    const invoked = join(directory, "invoked");
+    const fakeSupabase = join(directory, "supabase");
+    writeFileSync(
+      fakeSupabase,
+      `#!/bin/sh\nprintf invoked > ${JSON.stringify(invoked)}\nexit 1\n`,
+    );
+    chmodSync(fakeSupabase, 0o700);
+
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/run-stripe-provider-e2e.mjs", "--runs=1"],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          RECOPYFAST_STRIPE_ENV_FILE: join(directory, "missing.env"),
+          RECOPYFAST_SUPABASE_CLI_BIN: fakeSupabase,
+          STRIPE_SECRET_KEY: "sk_test_contract",
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_test_contract",
+          STRIPE_PRO_PRICE_ID: "price_contract",
+          STRIPE_LIVE_MODE: "false",
+          VERCEL_ENV: "development",
+        },
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/--human-checkout/);
+    expect(existsSync(invoked)).toBe(false);
   });
 
   it("rejects stale or mismatched provider evidence from a previous run", () => {

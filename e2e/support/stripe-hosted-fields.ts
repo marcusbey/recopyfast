@@ -1,247 +1,150 @@
-import type { Frame, Locator, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
-export const HOSTED_FIELD_TIMEOUT_MS = 30_000;
-const HOSTED_FIELD_POLL_INTERVAL_MS = 250;
-const CHECKOUT_RETURN_TIMEOUT_MS = 90_000;
+const CHECKOUT_RETURN_TIMEOUT_MS = 10 * 60_000;
+const CHECKOUT_RETURN_POLL_INTERVAL_MS = 250;
 
-interface HostedFrameWaitOptions {
+interface HostedCheckoutReturnOptions {
+  expectedAppOrigin: string;
+  expectedCheckoutSessionId: string;
   timeoutMs?: number;
   intervalMs?: number;
+  signal?: AbortSignal;
 }
 
-interface HostedFrameActionOptions extends HostedFrameWaitOptions {
-  /** Only setters that are safe to repeat after a detached frame may opt in. */
-  retryDetachedAction?: "idempotent-setter";
+type CheckoutPage = Pick<Page, "isClosed" | "url" | "waitForTimeout">;
+
+function fixedFailure(message: string): Error {
+  return new Error(`Stripe-hosted Checkout ${message}.`);
 }
 
-interface HostedFrameSnapshotOptions extends HostedFrameWaitOptions {
-  exhaustedMessage: string;
+function assertLoopbackOrigin(origin: string): string {
+  const parsed = new URL(origin);
+  const isLoopback =
+    parsed.protocol === "http:" &&
+    ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);
+  if (!isLoopback || parsed.origin !== origin) {
+    throw fixedFailure("requires an exact loopback application origin");
+  }
+  return parsed.origin;
 }
 
-export type HostedFrameDecision<T> =
-  | { kind: "complete"; value: T }
-  | { kind: "retry" };
-
-export const completeHostedFrameSnapshot = <T>(
-  value: T,
-): HostedFrameDecision<T> => ({
-  kind: "complete",
-  value,
-});
-export const retryHostedFrameSnapshot: HostedFrameDecision<never> = {
-  kind: "retry",
-};
-
-class HostedFrameDeadlineExpiredError extends Error {}
-
-class NonRetryableHostedFrameActionError {
-  constructor(readonly original: unknown) {}
-}
-
-export interface HostedFrameDeadline {
-  remainingMs(): number;
-  playwrightTimeoutMs(): number;
-  cap(timeoutMs: number): HostedFrameDeadline;
-}
-
-function createHostedFrameDeadline(expiresAt: number): HostedFrameDeadline {
-  return {
-    remainingMs: () => Math.max(0, expiresAt - Date.now()),
-    playwrightTimeoutMs: () => {
-      const remainingMs = expiresAt - Date.now();
-      // Playwright treats zero as "no timeout". Never turn an exhausted outer
-      // deadline into an accidentally unbounded provider action.
-      if (remainingMs <= 0) throw new HostedFrameDeadlineExpiredError();
-      return remainingMs;
-    },
-    cap: (timeoutMs) =>
-      createHostedFrameDeadline(
-        Math.min(expiresAt, Date.now() + Math.max(0, timeoutMs)),
-      ),
-  };
-}
-
-function isDetachedFrameError(error: unknown): error is Error {
+function isStripeHostedUrl(url: URL): boolean {
   return (
-    error instanceof Error && /(?:^|: )Frame was detached$/.test(error.message)
+    url.protocol === "https:" &&
+    (url.hostname === "stripe.com" || url.hostname.endsWith(".stripe.com"))
   );
 }
 
-/**
- * A disclosure click or submit can change provider state before its frame
- * detaches. Preserve that exact failure instead of replaying a non-idempotent
- * action against a replacement frame.
- */
-export async function performNonIdempotentHostedFrameAction<T>(
-  action: () => Promise<T>,
-): Promise<T> {
+function isExactOwnedSuccessReturn(
+  url: URL,
+  expectedAppOrigin: string,
+  expectedCheckoutSessionId: string,
+): boolean {
+  const entries = [...url.searchParams.entries()];
+  const checkoutValues = url.searchParams.getAll("checkout");
+  const sessionValues = url.searchParams.getAll("session_id");
+  return (
+    url.origin === expectedAppOrigin &&
+    url.pathname === "/dashboard/billing" &&
+    url.hash === "" &&
+    entries.length === 2 &&
+    checkoutValues.length === 1 &&
+    checkoutValues[0] === "success" &&
+    sessionValues.length === 1 &&
+    sessionValues[0] === expectedCheckoutSessionId
+  );
+}
+
+async function waitForNextPoll(
+  page: CheckoutPage,
+  milliseconds: number,
+  signal?: AbortSignal,
+): Promise<void> {
   try {
-    return await action();
+    if (!signal) {
+      await page.waitForTimeout(milliseconds);
+      return;
+    }
+    if (signal.aborted) {
+      throw fixedFailure("human completion was interrupted");
+    }
+
+    let rejectAbort: ((error: Error) => void) | undefined;
+    const interrupted = new Promise<never>((_, reject) => {
+      rejectAbort = reject;
+    });
+    const onAbort = () =>
+      rejectAbort?.(fixedFailure("human completion was interrupted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      await Promise.race([page.waitForTimeout(milliseconds), interrupted]);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+    }
   } catch (error) {
-    if (isDetachedFrameError(error)) {
-      throw new NonRetryableHostedFrameActionError(error);
+    if (
+      page.isClosed() ||
+      (error instanceof Error &&
+        /page.*closed|browser.*closed/i.test(error.message))
+    ) {
+      throw fixedFailure("page was closed before human completion");
     }
     throw error;
   }
 }
 
 /**
- * Stripe replaces its hosted iframes during ordinary Checkout transitions. A
- * provider run first exposed that replacement during `locator.count()`, and a
- * later run detached the post-submit text scan. Treat every current frame set
- * as one snapshot: if inspection or an explicitly idempotent setter reports
- * Playwright's exact detached-frame error, discard every partial result and
- * spend the next existing caller check on a freshly acquired `page.frames()`
- * set. The caller's original bound is never restarted, non-idempotent actions
- * are never replayed, and a different browser/locator failure is never hidden.
+ * The 10 October provider run proved that Stripe's hosted payment DOM is not
+ * an automation contract: private field and agent-steering selectors changed
+ * while the supported success redirect remained stable. During the approved
+ * human checkpoint, observe only the top-level return location. Card fields,
+ * disclosure controls, Link markers and hosted text stay entirely outside the
+ * harness; closing, interrupting or returning anywhere except the exact
+ * loopback success route fails with an identity-free diagnostic.
  */
-export async function runHostedFrameSnapshots<T>(
-  page: Pick<Page, "frames" | "waitForTimeout">,
-  inspect: (
-    frames: Frame[],
-    deadline: HostedFrameDeadline,
-  ) => Promise<HostedFrameDecision<T>>,
-  options: HostedFrameSnapshotOptions,
-): Promise<T> {
-  const timeoutMs = options.timeoutMs ?? HOSTED_FIELD_TIMEOUT_MS;
-  const intervalMs = options.intervalMs ?? HOSTED_FIELD_POLL_INTERVAL_MS;
+export async function waitForHostedCheckoutReturn(
+  page: CheckoutPage,
+  options: HostedCheckoutReturnOptions,
+): Promise<void> {
+  const expectedAppOrigin = assertLoopbackOrigin(options.expectedAppOrigin);
+  if (!/^cs_test_[A-Za-z0-9]+$/.test(options.expectedCheckoutSessionId)) {
+    throw fixedFailure("requires the exact owned test Checkout Session");
+  }
+  const timeoutMs = options.timeoutMs ?? CHECKOUT_RETURN_TIMEOUT_MS;
+  const intervalMs = options.intervalMs ?? CHECKOUT_RETURN_POLL_INTERVAL_MS;
   const checks = Math.max(1, Math.ceil(timeoutMs / intervalMs) + 1);
-  const deadline = createHostedFrameDeadline(Date.now() + timeoutMs);
 
   for (let check = 0; check < checks; check += 1) {
-    if (check > 0 && deadline.remainingMs() <= 0) break;
-    try {
-      const decision = await inspect(page.frames(), deadline);
-      if (decision.kind === "complete") return decision.value;
-    } catch (error) {
-      if (error instanceof NonRetryableHostedFrameActionError) {
-        throw error.original;
+    if (options.signal?.aborted) {
+      throw fixedFailure("human completion was interrupted");
+    }
+    if (page.isClosed()) {
+      throw fixedFailure("page was closed before human completion");
+    }
+
+    const current = new URL(page.url());
+    if (current.origin === expectedAppOrigin) {
+      if (
+        isExactOwnedSuccessReturn(
+          current,
+          expectedAppOrigin,
+          options.expectedCheckoutSessionId,
+        )
+      ) {
+        return;
       }
-      if (error instanceof HostedFrameDeadlineExpiredError) break;
-      if (!isDetachedFrameError(error)) throw error;
+      throw fixedFailure("returned without the exact owned success contract");
+    }
+    if (!isStripeHostedUrl(current)) {
+      throw fixedFailure("used an unexpected return origin");
     }
 
     if (check + 1 < checks) {
-      const remainingMs = deadline.remainingMs();
-      if (remainingMs <= 0) break;
-      await page.waitForTimeout(Math.min(intervalMs, remainingMs));
+      await waitForNextPoll(page, intervalMs, options.signal);
     }
   }
 
-  throw new Error(options.exhaustedMessage);
-}
-
-async function performFieldAction<T>(
-  page: Pick<Page, "frames" | "waitForTimeout">,
-  selector: string,
-  action: (field: Locator, deadline: HostedFrameDeadline) => Promise<T>,
-  isOptional: boolean,
-  options: HostedFrameActionOptions,
-): Promise<T | null> {
-  return runHostedFrameSnapshots(
-    page,
-    async (frames, deadline) => {
-      for (const frame of frames) {
-        const candidates = frame.locator(selector);
-        deadline.playwrightTimeoutMs();
-        const candidateCount = await candidates.count();
-        for (let index = 0; index < candidateCount; index += 1) {
-          const candidate = candidates.nth(index);
-          if (
-            !(await candidate.isVisible({
-              timeout: deadline.playwrightTimeoutMs(),
-            }))
-          ) {
-            continue;
-          }
-          try {
-            return completeHostedFrameSnapshot(
-              await action(candidate, deadline),
-            );
-          } catch (error) {
-            if (
-              isDetachedFrameError(error) &&
-              options.retryDetachedAction !== "idempotent-setter"
-            ) {
-              throw new NonRetryableHostedFrameActionError(error);
-            }
-            throw error;
-          }
-        }
-      }
-      return isOptional
-        ? completeHostedFrameSnapshot(null)
-        : retryHostedFrameSnapshot;
-    },
-    {
-      ...options,
-      exhaustedMessage: isOptional
-        ? `Stripe-hosted Checkout could not stably inspect optional field ${selector}.`
-        : `Stripe-hosted Checkout did not render required field ${selector}.`,
-    },
-  );
-}
-
-export async function performHostedFieldAction<T>(
-  page: Pick<Page, "frames" | "waitForTimeout">,
-  selector: string,
-  action: (field: Locator, deadline: HostedFrameDeadline) => Promise<T>,
-  options: HostedFrameActionOptions = {},
-): Promise<T> {
-  return (await performFieldAction(
-    page,
-    selector,
-    action,
-    false,
-    options,
-  )) as T;
-}
-
-export async function performOptionalHostedFieldAction<T>(
-  page: Pick<Page, "frames" | "waitForTimeout">,
-  selector: string,
-  action: (field: Locator, deadline: HostedFrameDeadline) => Promise<T>,
-  options: HostedFrameActionOptions = {},
-): Promise<T | null> {
-  return performFieldAction(page, selector, action, true, options);
-}
-
-export async function waitForHostedCheckoutReturn(
-  page: Pick<Page, "frames" | "url" | "waitForTimeout">,
-  options: HostedFrameWaitOptions = {},
-): Promise<void> {
-  await runHostedFrameSnapshots(
-    page,
-    async (frames, deadline) => {
-      if (
-        page
-          .url()
-          .startsWith(
-            "http://127.0.0.1:3000/dashboard/billing?checkout=success",
-          )
-      ) {
-        return completeHostedFrameSnapshot(undefined);
-      }
-
-      let postalCodeIncompleteCount = 0;
-      for (const frame of frames) {
-        deadline.playwrightTimeoutMs();
-        postalCodeIncompleteCount += await frame
-          .getByText(/postal code incomplete/i)
-          .count();
-      }
-      if (postalCodeIncompleteCount > 0) {
-        throw new Error(
-          "Stripe-hosted Checkout reported a postal code incomplete after explicit US selection.",
-        );
-      }
-      return retryHostedFrameSnapshot;
-    },
-    {
-      timeoutMs: options.timeoutMs ?? CHECKOUT_RETURN_TIMEOUT_MS,
-      intervalMs: options.intervalMs ?? HOSTED_FIELD_POLL_INTERVAL_MS,
-      exhaustedMessage:
-        "Stripe-hosted Checkout did not return to the application.",
-    },
+  throw fixedFailure(
+    "did not return to the application within the human completion window",
   );
 }

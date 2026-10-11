@@ -1,6 +1,32 @@
 import { redactDiagnostic } from "../../../e2e/support/redacted-diagnostics";
 
 describe("redactDiagnostic payment-data handling", () => {
+  it("redacts every Stripe object ID family the provider lane can surface", () => {
+    const providerIds = [
+      "cs_test_checkout123456789",
+      "cs_live_checkout987654321",
+      "cus_customer123456789",
+      "sub_subscription123456789",
+      "evt_event123456789",
+      "price_price123456789",
+      "prod_product123456789",
+      "in_invoice123456789",
+      "pi_paymentintent123456789",
+      "pm_paymentmethod123456789",
+      "ch_charge123456789",
+      "seti_setupintent123456789",
+      "req_request123456789",
+    ];
+    const output = redactDiagnostic(
+      providerIds.map((id) => `provider_id=${id}`).join(" "),
+    );
+
+    expect(output).toContain("[REDACTED STRIPE ID]");
+    for (const providerId of providerIds) {
+      expect(output).not.toContain(providerId);
+    }
+  });
+
   it("removes card-shaped form values from provider failures", () => {
     const compactCard = "4242".repeat(4);
     const spacedCard = Array.from({ length: 4 }, () => "4242").join(" ");

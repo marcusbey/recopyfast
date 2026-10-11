@@ -14,9 +14,13 @@ import dotenv from "dotenv";
 import processHelpers from "./stripe-provider-process.cjs";
 
 const {
+  HUMAN_CHECKOUT_READY_NOTICE,
+  PROVIDER_FAILURE_STAGES,
+  assertNoSensitiveArtifact,
   assertNoUncleanRunManifest,
   assertNoUncleanRunManifests,
   createCleanupStateMachine,
+  recordExternalJanitorFailure,
   registerProcess,
   spawnDetached,
   terminateProcessGroup,
@@ -25,7 +29,7 @@ const {
 } = processHelpers;
 
 const DEFAULT_RUNS = 2;
-const PLAYWRIGHT_PROCESS_TIMEOUT_MS = 9 * 60_000;
+const PLAYWRIGHT_PROCESS_TIMEOUT_MS = 21 * 60_000;
 const JANITOR_PROCESS_TIMEOUT_MS = 10 * 60_000;
 const FAILURE_MIN_OBSERVATION_MS = 5 * 60_000;
 const SUCCESS_MIN_OBSERVATION_MS = 0;
@@ -47,24 +51,6 @@ const STRIPE_EVENTS = [
   "customer.subscription.updated",
   "invoice.payment_succeeded",
 ].join(",");
-const PROVIDER_FAILURE_STAGES = new Set([
-  "fixture:create",
-  "baseline:entitlement",
-  "checkout:create",
-  "checkout:inspect-open",
-  "checkout:hosted-form",
-  "checkout:reconcile",
-  "checkout:inspect-complete",
-  "billing:durable-state",
-  "billing:provider-subscription",
-  "billing:events",
-  "billing:entitlement",
-  "billing:replay",
-  "evidence:capture",
-  "cleanup",
-  "cleanup:assert",
-]);
-
 let activeRunCleanup;
 let activeCommandRegistry;
 let signalExitPromise;
@@ -87,7 +73,9 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
-const runs = parseRuns(process.argv.slice(2));
+const commandArguments = process.argv.slice(2);
+assertHumanCheckoutOptIn(commandArguments);
+const runs = parseRuns(commandArguments);
 loadPrivateEnvironment();
 assertTestStripeInputs(process.env);
 const supabaseCliBin = process.env.RECOPYFAST_SUPABASE_CLI_BIN || "supabase";
@@ -109,6 +97,14 @@ function parseRuns(args) {
     );
   }
   return value;
+}
+
+function assertHumanCheckoutOptIn(args) {
+  if (!args.includes("--human-checkout")) {
+    throw new Error(
+      "--human-checkout is required before the Stripe provider runner may start any local stack or provider mutation.",
+    );
+  }
 }
 
 function loadPrivateEnvironment() {
@@ -324,6 +320,8 @@ async function runOnce(index) {
       STRIPE_PROVIDER_FAILURE_FILE: providerFailureFile,
       STRIPE_PROVIDER_JANITOR_STATE_FILE: providerJanitorStateFile,
       STRIPE_PROVIDER_RUNNER_OWNED: "1",
+      STRIPE_PROVIDER_HUMAN_CHECKOUT: "1",
+      STRIPE_PROVIDER_HUMAN_CHECKOUT_NOTICE: HUMAN_CHECKOUT_READY_NOTICE,
       STRIPE_PROVIDER_MANIFEST_FILE: providerManifestFile,
     };
 
@@ -354,6 +352,7 @@ async function runOnce(index) {
 
     let playwrightError;
     let diagnosticError;
+    let hasValidatedPrimaryFailure = false;
     try {
       await command(
         "npx",
@@ -365,6 +364,7 @@ async function runOnce(index) {
       playwrightError = error;
       try {
         const failure = readAndValidateFailure(providerFailureFile, index);
+        hasValidatedPrimaryFailure = true;
         process.stderr.write(
           `[stripe-provider] run ${index}/${runs} failed at ` +
             `${failure.failedStage}: ${failure.diagnostic}\n`,
@@ -388,6 +388,11 @@ async function runOnce(index) {
       hasCompletedParentJanitor = true;
     } catch (error) {
       janitorError = error;
+      recordExternalJanitorFailure(
+        providerFailureFile,
+        index,
+        hasValidatedPrimaryFailure,
+      );
     }
     if (janitorError) throw janitorError;
     if (diagnosticError) throw diagnosticError;
@@ -425,9 +430,9 @@ async function runOnce(index) {
     requireCleanup: true,
   });
   process.stdout.write(
-    `[stripe-provider] run ${index}/${runs}: test mode checkout ${finalEvidence.checkout.id}, ` +
-      `subscription ${finalEvidence.subscription.id}, ${finalEvidence.processedEvents.length} processed ` +
-      `events, replay duplicate=${finalEvidence.replay.duplicate}, cleanup=proved\n`,
+    `[stripe-provider] run ${index}/${runs}: TEST Checkout verified, ` +
+      `processed_events=${finalEvidence.processedEvents.length}, ` +
+      `replay_duplicate=${finalEvidence.replay.duplicate}, cleanup=proved\n`,
   );
 }
 
@@ -632,7 +637,9 @@ async function waitForTcp(port, label) {
 
 function readAndValidateEvidence(path, expectations) {
   const text = readFileSync(path, "utf8");
-  assertNoSensitiveArtifact(text, "Provider evidence");
+  assertNoSensitiveArtifact(text, "Provider evidence", {
+    allowProviderIds: true,
+  });
   const evidence = JSON.parse(text);
   const nowUnix = Math.floor(Date.now() / 1_000);
   validateProviderEvidence(evidence, expectations, nowUnix);
@@ -675,21 +682,4 @@ function readAndValidateFailure(path, expectedRunIndex) {
     throw new Error("Provider failure evidence violated its safe schema.");
   }
   return failure;
-}
-
-function assertNoSensitiveArtifact(text, label) {
-  const forbidden = [
-    /\b(?:sk|pk)_(?:test|live)_[A-Za-z0-9_-]+\b/,
-    /\bwhsec_[A-Za-z0-9_-]+\b/,
-    /\b(?:\d[ -]?){13,19}\b/,
-    /\b(?:card[_ -]?exp(?:iry|iration)?|expiry|expiration)\b\s*[:=]\s*(?:\d{1,2}\s*\/\s*\d{2,4}|\d{3,4})/i,
-    /\b(?:card[_ -]?(?:cvc|cvv)|cvc|cvv)\b\s*[:=]\s*\d{3,4}/i,
-    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
-    /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/,
-    /\bhttps:\/\/checkout\.stripe\.com\/[^\s"'<>]*/i,
-    /\bcs_(?:test|live)_[A-Za-z0-9_-]*secret[A-Za-z0-9_-]*\b/i,
-  ];
-  if (forbidden.some((pattern) => pattern.test(text))) {
-    throw new Error(`${label} contained a forbidden credential or card shape.`);
-  }
 }

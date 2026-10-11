@@ -1,342 +1,191 @@
-import {
-  performHostedFieldAction,
-  performOptionalHostedFieldAction,
-  waitForHostedCheckoutReturn,
-} from "../../../e2e/support/stripe-hosted-fields";
+import { waitForHostedCheckoutReturn } from "../../../e2e/support/stripe-hosted-fields";
 
-const detachedFrameError = () => new Error("locator.count: Frame was detached");
+const APP_ORIGIN = "http://127.0.0.1:3000";
+const STRIPE_CHECKOUT_URL = "https://checkout.stripe.com/c/pay/test";
+const OWNED_SESSION_ID = "cs_test_ownedSession123456789";
+const OTHER_SESSION_ID = "cs_test_otherSession987654321";
 
-function fieldCollection(field: unknown, count = 1) {
+function checkoutPage(url: string) {
   return {
-    count: jest.fn().mockResolvedValue(count),
-    nth: jest.fn().mockReturnValue(field),
+    isClosed: jest.fn().mockReturnValue(false),
+    url: jest.fn().mockReturnValue(url),
+    waitForTimeout: jest.fn().mockResolvedValue(undefined),
   };
 }
 
-function frameWithField(field: unknown) {
-  return {
-    locator: jest.fn().mockReturnValue(fieldCollection(field)),
-  };
-}
-
-describe("Stripe-hosted frame snapshots", () => {
-  it.each(["count", "visibility", "action"])(
-    "discards a frame detached during %s and acts on its replacement",
-    async (detachedAt) => {
-      const staleField = {
-        isVisible: jest.fn().mockImplementation(() => {
-          if (detachedAt === "visibility") {
-            return Promise.reject(detachedFrameError());
-          }
-          return Promise.resolve(true);
-        }),
-      };
-      const staleCollection = fieldCollection(staleField);
-      if (detachedAt === "count") {
-        staleCollection.count.mockRejectedValue(detachedFrameError());
-      }
-      const staleFrame = {
-        locator: jest.fn().mockReturnValue(staleCollection),
-      };
-      const replacementField = { isVisible: jest.fn().mockResolvedValue(true) };
-      const replacementFrame = frameWithField(replacementField);
-      const page = {
-        frames: jest
-          .fn()
-          .mockReturnValueOnce([staleFrame])
-          .mockReturnValue([replacementFrame]),
-        waitForTimeout: jest.fn().mockResolvedValue(undefined),
-      };
-      const action = jest.fn().mockImplementation((field) => {
-        if (field === staleField && detachedAt === "action") {
-          return Promise.reject(detachedFrameError());
-        }
-        return Promise.resolve("acted");
-      });
-
-      await expect(
-        performHostedFieldAction(
-          page as never,
-          'input[name="cardNumber"]',
-          action,
-          {
-            timeoutMs: 500,
-            intervalMs: 250,
-            retryDetachedAction:
-              detachedAt === "action" ? "idempotent-setter" : undefined,
-          },
-        ),
-      ).resolves.toBe("acted");
-
-      expect(page.frames).toHaveBeenCalledTimes(2);
-      expect(action).toHaveBeenLastCalledWith(
-        replacementField,
-        expect.objectContaining({
-          playwrightTimeoutMs: expect.any(Function),
-        }),
-      );
-      expect(page.waitForTimeout).toHaveBeenCalledWith(250);
-    },
-  );
-
-  it("does not retry a detached non-idempotent action", async () => {
-    const actionError = detachedFrameError();
-    const field = { isVisible: jest.fn().mockResolvedValue(true) };
-    const page = {
-      frames: jest.fn().mockReturnValue([frameWithField(field)]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
-    const action = jest.fn().mockRejectedValue(actionError);
-
-    await expect(
-      performHostedFieldAction(page as never, 'button[type="submit"]', action, {
-        timeoutMs: 500,
-        intervalMs: 250,
-      }),
-    ).rejects.toBe(actionError);
-
-    expect(page.frames).toHaveBeenCalledTimes(1);
-    expect(action).toHaveBeenCalledTimes(1);
-    expect(page.waitForTimeout).not.toHaveBeenCalled();
-  });
-
-  it("does not hide an unrelated idempotent-setter failure", async () => {
-    const actionError = new Error("locator.fill: browser process exited");
-    const field = { isVisible: jest.fn().mockResolvedValue(true) };
-    const page = {
-      frames: jest.fn().mockReturnValue([frameWithField(field)]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
-    const action = jest.fn().mockRejectedValue(actionError);
-
-    await expect(
-      performHostedFieldAction(
-        page as never,
-        'input[name="cardNumber"]',
-        action,
-        {
-          timeoutMs: 500,
-          intervalMs: 250,
-          retryDetachedAction: "idempotent-setter",
-        },
-      ),
-    ).rejects.toBe(actionError);
-
-    expect(page.frames).toHaveBeenCalledTimes(1);
-    expect(action).toHaveBeenCalledTimes(1);
-    expect(page.waitForTimeout).not.toHaveBeenCalled();
-  });
-
-  it("gives a stalled idempotent setter a real remaining wall-clock bound", async () => {
-    const observedTimeouts: number[] = [];
-    const field = {
-      isVisible: jest.fn().mockResolvedValue(true),
-      fill: jest
-        .fn()
-        .mockImplementation(
-          (_value: string, { timeout }: { timeout: number }) => {
-            observedTimeouts.push(timeout);
-            return new Promise((_, reject) => {
-              setTimeout(() => reject(detachedFrameError()), timeout);
-            });
-          },
-        ),
-    };
-    const page = {
-      frames: jest.fn().mockReturnValue([frameWithField(field)]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
-    const startedAt = Date.now();
-
-    await expect(
-      performHostedFieldAction(
-        page as never,
-        'input[name="cardNumber"]',
-        (candidate, deadline) =>
-          candidate.fill("4242", {
-            timeout: deadline.playwrightTimeoutMs(),
-          }),
-        {
-          timeoutMs: 40,
-          intervalMs: 10,
-          retryDetachedAction: "idempotent-setter",
-        },
-      ),
-    ).rejects.toThrow(/did not render required field/i);
-
-    expect(Date.now() - startedAt).toBeLessThan(250);
-    expect(observedTimeouts).toHaveLength(1);
-    expect(observedTimeouts[0]).toBeGreaterThan(0);
-    expect(observedTimeouts[0]).toBeLessThanOrEqual(40);
-  });
-
-  it("fails within the existing bound when every current frame detaches", async () => {
-    const detachedCollection = fieldCollection(undefined);
-    detachedCollection.count.mockRejectedValue(detachedFrameError());
-    const page = {
-      frames: jest
-        .fn()
-        .mockReturnValue([
-          { locator: jest.fn().mockReturnValue(detachedCollection) },
-        ]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
-
-    await expect(
-      performHostedFieldAction(
-        page as never,
-        'input[name="cardNumber"]',
-        jest.fn(),
-        { timeoutMs: 500, intervalMs: 250 },
-      ),
-    ).rejects.toThrow(
-      /did not render required field input\[name="cardNumber"\]/i,
+describe("human-assisted Stripe Checkout return polling", () => {
+  it("accepts the exact loopback success return without inspecting hosted fields", async () => {
+    const page = checkoutPage(
+      `${APP_ORIGIN}/dashboard/billing?checkout=success&session_id=${OWNED_SESSION_ID}`,
     );
 
-    expect(page.frames).toHaveBeenCalledTimes(3);
-    expect(detachedCollection.count).toHaveBeenCalledTimes(3);
-    expect(page.waitForTimeout).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not hide unrelated locator failures", async () => {
-    const unrelatedError = new Error("locator.count: browser process exited");
-    const collection = fieldCollection(undefined);
-    collection.count.mockRejectedValue(unrelatedError);
-    const page = {
-      frames: jest
-        .fn()
-        .mockReturnValue([{ locator: jest.fn().mockReturnValue(collection) }]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
-
     await expect(
-      performHostedFieldAction(
+      waitForHostedCheckoutReturn(
         page as never,
-        'input[name="cardNumber"]',
-        jest.fn(),
-        { timeoutMs: 500, intervalMs: 250 },
+        {
+          expectedAppOrigin: APP_ORIGIN,
+          expectedCheckoutSessionId: OWNED_SESSION_ID,
+          timeoutMs: 500,
+          intervalMs: 250,
+        } as never,
       ),
-    ).rejects.toBe(unrelatedError);
+    ).resolves.toBeUndefined();
 
-    expect(page.frames).toHaveBeenCalledTimes(1);
+    expect(page.isClosed).toHaveBeenCalledTimes(1);
     expect(page.waitForTimeout).not.toHaveBeenCalled();
   });
 
-  it("keeps an absent optional field optional but retries a detached snapshot", async () => {
-    const detachedCollection = fieldCollection(undefined);
-    detachedCollection.count.mockRejectedValue(detachedFrameError());
-    const stableMissingCollection = fieldCollection(undefined, 0);
-    const page = {
-      frames: jest
-        .fn()
-        .mockReturnValueOnce([
-          { locator: jest.fn().mockReturnValue(detachedCollection) },
-        ])
-        .mockReturnValue([
-          { locator: jest.fn().mockReturnValue(stableMissingCollection) },
-        ]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
-    const action = jest.fn();
+  it("fails closed when a lookalike success path uses another origin", async () => {
+    const page = checkoutPage(
+      `http://127.0.0.1.attacker.invalid:3000/dashboard/billing?checkout=success&session_id=${OWNED_SESSION_ID}`,
+    );
 
     await expect(
-      performOptionalHostedFieldAction(
+      waitForHostedCheckoutReturn(
         page as never,
-        'input[name="billingName"]',
-        action,
-        { timeoutMs: 500, intervalMs: 250 },
+        {
+          expectedAppOrigin: APP_ORIGIN,
+          expectedCheckoutSessionId: OWNED_SESSION_ID,
+          timeoutMs: 500,
+          intervalMs: 250,
+        } as never,
       ),
-    ).resolves.toBeNull();
+    ).rejects.toThrow(/unexpected return origin/i);
 
-    expect(page.frames).toHaveBeenCalledTimes(2);
-    expect(action).not.toHaveBeenCalled();
+    expect(page.waitForTimeout).not.toHaveBeenCalled();
   });
 
-  it("discards a partial post-submit text count and returns after a replacement frame scan", async () => {
-    const firstFrame = {
-      getByText: jest.fn().mockReturnValue({
-        count: jest.fn().mockResolvedValue(1),
-      }),
-    };
-    const detachedFrame = {
-      getByText: jest.fn().mockReturnValue({
-        count: jest.fn().mockRejectedValue(detachedFrameError()),
-      }),
-    };
-    const replacementFrame = {
-      getByText: jest.fn().mockReturnValue({
-        count: jest.fn().mockResolvedValue(0),
-      }),
-    };
-    const page = {
-      url: jest
-        .fn()
-        .mockReturnValueOnce("https://checkout.stripe.com/c/pay/test")
-        .mockReturnValue(
-          "http://127.0.0.1:3000/dashboard/billing?checkout=success",
-        ),
-      frames: jest
-        .fn()
-        .mockReturnValueOnce([firstFrame, detachedFrame])
-        .mockReturnValue([replacementFrame]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
+  test.each([
+    ["missing session", `${APP_ORIGIN}/dashboard/billing?checkout=success`],
+    [
+      "wrong session",
+      `${APP_ORIGIN}/dashboard/billing?checkout=success&session_id=${OTHER_SESSION_ID}`,
+    ],
+    [
+      "duplicate checkout",
+      `${APP_ORIGIN}/dashboard/billing?checkout=success&checkout=success&session_id=${OWNED_SESSION_ID}`,
+    ],
+    [
+      "duplicate session",
+      `${APP_ORIGIN}/dashboard/billing?checkout=success&session_id=${OWNED_SESSION_ID}&session_id=${OWNED_SESSION_ID}`,
+    ],
+    [
+      "extra query key",
+      `${APP_ORIGIN}/dashboard/billing?checkout=success&session_id=${OWNED_SESSION_ID}&source=unexpected`,
+    ],
+    [
+      "fragment",
+      `${APP_ORIGIN}/dashboard/billing?checkout=success&session_id=${OWNED_SESSION_ID}#unexpected`,
+    ],
+    [
+      "wrong path",
+      `${APP_ORIGIN}/dashboard/other?checkout=success&session_id=${OWNED_SESSION_ID}`,
+    ],
+    [
+      "cancel result",
+      `${APP_ORIGIN}/dashboard/billing?checkout=cancelled&session_id=${OWNED_SESSION_ID}`,
+    ],
+  ])("rejects an inexact owned return: %s", async (_label, url) => {
+    const page = checkoutPage(url);
+    const error = await waitForHostedCheckoutReturn(
+      page as never,
+      {
+        expectedAppOrigin: APP_ORIGIN,
+        expectedCheckoutSessionId: OWNED_SESSION_ID,
+        timeoutMs: 500,
+        intervalMs: 250,
+      } as never,
+    ).catch((caught: unknown) => caught);
 
-    await waitForHostedCheckoutReturn(page as never, {
-      timeoutMs: 500,
-      intervalMs: 250,
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Stripe-hosted Checkout returned without the exact owned success contract.",
+    );
+    expect((error as Error).message).not.toContain(OWNED_SESSION_ID);
+    expect((error as Error).message).not.toContain(OTHER_SESSION_ID);
+    expect((error as Error).message).not.toContain(url);
+  });
+
+  it("rejects when the human closes the headed page", async () => {
+    const page = checkoutPage(STRIPE_CHECKOUT_URL);
+    page.isClosed.mockReturnValue(true);
+
+    await expect(
+      waitForHostedCheckoutReturn(
+        page as never,
+        {
+          expectedAppOrigin: APP_ORIGIN,
+          expectedCheckoutSessionId: OWNED_SESSION_ID,
+          timeoutMs: 500,
+          intervalMs: 250,
+        } as never,
+      ),
+    ).rejects.toThrow(/page was closed/i);
+
+    expect(page.waitForTimeout).not.toHaveBeenCalled();
+  });
+
+  it("converts a page close during polling into the fixed safe diagnostic", async () => {
+    let isClosed = false;
+    const page = checkoutPage(STRIPE_CHECKOUT_URL);
+    page.isClosed.mockImplementation(() => isClosed);
+    page.waitForTimeout.mockImplementation(async () => {
+      isClosed = true;
+      throw new Error("Target page, context or browser has been closed");
     });
 
-    expect(page.frames).toHaveBeenCalledTimes(2);
-    expect(page.url).toHaveBeenCalledTimes(2);
-    expect(page.waitForTimeout).toHaveBeenCalledWith(250);
-  });
-
-  it("never treats repeated detached post-submit scans as zero evidence", async () => {
-    const detachedText = {
-      count: jest.fn().mockRejectedValue(detachedFrameError()),
-    };
-    const page = {
-      url: jest.fn().mockReturnValue("https://checkout.stripe.com/c/pay/test"),
-      frames: jest
-        .fn()
-        .mockReturnValue([
-          { getByText: jest.fn().mockReturnValue(detachedText) },
-        ]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
-
     await expect(
-      waitForHostedCheckoutReturn(page as never, {
-        timeoutMs: 500,
-        intervalMs: 250,
-      }),
-    ).rejects.toThrow(/did not return to the application/i);
-
-    expect(page.frames).toHaveBeenCalledTimes(3);
-    expect(detachedText.count).toHaveBeenCalledTimes(3);
-  });
-
-  it("preserves the postal-code failure after a complete hosted-text scan", async () => {
-    const page = {
-      url: jest.fn().mockReturnValue("https://checkout.stripe.com/c/pay/test"),
-      frames: jest.fn().mockReturnValue([
+      waitForHostedCheckoutReturn(
+        page as never,
         {
-          getByText: jest.fn().mockReturnValue({
-            count: jest.fn().mockResolvedValue(1),
-          }),
-        },
-      ]),
-      waitForTimeout: jest.fn().mockResolvedValue(undefined),
-    };
+          expectedAppOrigin: APP_ORIGIN,
+          expectedCheckoutSessionId: OWNED_SESSION_ID,
+          timeoutMs: 500,
+          intervalMs: 250,
+        } as never,
+      ),
+    ).rejects.toThrow(
+      "Stripe-hosted Checkout page was closed before human completion.",
+    );
+  });
+
+  it("rejects when the runner interrupts the human wait", async () => {
+    const controller = new AbortController();
+    const page = checkoutPage(STRIPE_CHECKOUT_URL);
+    page.waitForTimeout.mockImplementation(async () => {
+      controller.abort();
+    });
 
     await expect(
-      waitForHostedCheckoutReturn(page as never, {
-        timeoutMs: 500,
-        intervalMs: 250,
-      }),
-    ).rejects.toThrow(/postal code incomplete/i);
+      waitForHostedCheckoutReturn(
+        page as never,
+        {
+          expectedAppOrigin: APP_ORIGIN,
+          expectedCheckoutSessionId: OWNED_SESSION_ID,
+          signal: controller.signal,
+          timeoutMs: 500,
+          intervalMs: 250,
+        } as never,
+      ),
+    ).rejects.toThrow(/interrupted/i);
+  });
 
-    expect(page.waitForTimeout).not.toHaveBeenCalled();
+  it("times out with a fixed diagnostic while Checkout remains hosted", async () => {
+    const page = checkoutPage(STRIPE_CHECKOUT_URL);
+
+    await expect(
+      waitForHostedCheckoutReturn(
+        page as never,
+        {
+          expectedAppOrigin: APP_ORIGIN,
+          expectedCheckoutSessionId: OWNED_SESSION_ID,
+          timeoutMs: 500,
+          intervalMs: 250,
+        } as never,
+      ),
+    ).rejects.toThrow(/did not return.*within the human completion window/i);
+
+    expect(page.url).toHaveBeenCalledTimes(3);
+    expect(page.waitForTimeout).toHaveBeenCalledTimes(2);
   });
 });

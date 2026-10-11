@@ -10,6 +10,55 @@ const {
 } = require("node:fs");
 const { dirname, normalize, sep } = require("node:path");
 
+const PROVIDER_FAILURE_STAGES = new Set([
+  "fixture:create",
+  "baseline:entitlement",
+  "checkout:create",
+  "checkout:inspect-open",
+  "checkout:human-completion",
+  "checkout:hosted-form",
+  "checkout:reconcile",
+  "checkout:inspect-complete",
+  "billing:durable-state",
+  "billing:provider-subscription",
+  "billing:events",
+  "billing:entitlement",
+  "billing:replay",
+  "evidence:capture",
+  "cleanup",
+  "cleanup:assert",
+]);
+
+const HUMAN_CHECKOUT_READY_NOTICE =
+  "[stripe-provider] Stripe TEST Checkout is ready in the headed browser. " +
+  "Complete it within ten minutes, including any human verification; " +
+  "the harness resumes after the loopback success return.\n";
+
+const STRIPE_PROVIDER_ID_PATTERN =
+  /\b(?:cs_(?:test|live)_[A-Za-z0-9]{8,}|(?:acct|ba|ch|coupon|cus|dp|evt|ii|il|in|pi|plink|pm|po|price|prod|promo|re|req|seti|si|src|sub|tok|tr|txn|txr)_[A-Za-z0-9]{8,})\b/i;
+
+function assertNoSensitiveArtifact(text, label, options = {}) {
+  const forbidden = [
+    /\b(?:sk|pk)_(?:test|live)_[A-Za-z0-9_-]+\b/,
+    /\bwhsec_[A-Za-z0-9_-]+\b/,
+    /\b(?:\d[ -]?){13,19}\b/,
+    /\b(?:card[_ -]?exp(?:iry|iration)?|expiry|expiration)\b\s*[:=]\s*(?:\d{1,2}\s*\/\s*\d{2,4}|\d{3,4})/i,
+    /\b(?:card[_ -]?(?:cvc|cvv)|cvc|cvv)\b\s*[:=]\s*\d{3,4}/i,
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
+    /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/,
+    /\bhttps:\/\/checkout\.stripe\.com\/[^\s"'<>]*/i,
+    /\bcs_(?:test|live)_[A-Za-z0-9_-]*secret[A-Za-z0-9_-]*\b/i,
+  ];
+  if (options.allowProviderIds !== true) {
+    forbidden.push(STRIPE_PROVIDER_ID_PATTERN);
+  }
+  if (forbidden.some((pattern) => pattern.test(text))) {
+    throw new Error(
+      `${label} contained a forbidden credential, identity, payment value, or provider ID.`,
+    );
+  }
+}
+
 function spawnDetached(command, args, options = {}) {
   return spawn(command, args, {
     ...options,
@@ -154,6 +203,52 @@ function writeRunManifest(path, manifest) {
   chmodSync(path, 0o600);
 }
 
+function recordExternalJanitorFailure(path, runIndex, hasPrimaryFailure) {
+  const cleanupDiagnostic = "cleanup failed: external_janitor";
+  let failure = {
+    mode: "test",
+    runIndex,
+    failedStage: "cleanup",
+    diagnostic: cleanupDiagnostic,
+  };
+
+  if (hasPrimaryFailure && existsSync(path)) {
+    const existing = JSON.parse(readFileSync(path, "utf8"));
+    const keys = Object.keys(existing).sort();
+    let hasSafeDiagnostic = false;
+    try {
+      assertNoSensitiveArtifact(
+        JSON.stringify(existing),
+        "Provider failure evidence",
+      );
+      hasSafeDiagnostic = true;
+    } catch {
+      // Replace the whole file below. Never append cleanup text to an unsafe
+      // primary diagnostic, even when its four-field shape is otherwise valid.
+    }
+    const hasSafePrimarySchema =
+      JSON.stringify(keys) ===
+        JSON.stringify(["diagnostic", "failedStage", "mode", "runIndex"]) &&
+      existing.mode === "test" &&
+      existing.runIndex === runIndex &&
+      hasSafeDiagnostic &&
+      PROVIDER_FAILURE_STAGES.has(existing.failedStage) &&
+      typeof existing.diagnostic === "string" &&
+      existing.diagnostic.length > 0 &&
+      existing.diagnostic.length <= 800;
+
+    if (hasSafePrimarySchema) {
+      const suffix = ` | ${cleanupDiagnostic}`;
+      failure = {
+        ...existing,
+        diagnostic: `${existing.diagnostic.slice(0, 800 - suffix.length)}${suffix}`,
+      };
+    }
+  }
+
+  writeRunManifest(path, failure);
+}
+
 function assertNoUncleanRunManifest(path) {
   if (!existsSync(path)) return;
   let previous;
@@ -183,6 +278,18 @@ function assertNoUncleanRunManifests(directory) {
 }
 
 function assertRunnerOwnedProviderInvocation(env) {
+  if (env.STRIPE_PROVIDER_HUMAN_CHECKOUT !== "1") {
+    throw new Error(
+      "Dedicated Stripe provider Playwright requires runner-owned human checkout mode.",
+    );
+  }
+  if (
+    env.STRIPE_PROVIDER_HUMAN_CHECKOUT_NOTICE !== HUMAN_CHECKOUT_READY_NOTICE
+  ) {
+    throw new Error(
+      "Dedicated Stripe provider Playwright requires the exact runner-owned human Checkout instructions.",
+    );
+  }
   const refuse = () => {
     throw new Error(
       "Dedicated Stripe provider Playwright requires runner-owned external janitor context.",
@@ -245,10 +352,14 @@ function validateProviderEvidence(evidence, expectations, nowUnix) {
 }
 
 module.exports = {
+  HUMAN_CHECKOUT_READY_NOTICE,
+  PROVIDER_FAILURE_STAGES,
+  assertNoSensitiveArtifact,
   assertNoUncleanRunManifest,
   assertNoUncleanRunManifests,
   assertRunnerOwnedProviderInvocation,
   createCleanupStateMachine,
+  recordExternalJanitorFailure,
   registerProcess,
   spawnDetached,
   terminateProcessGroup,

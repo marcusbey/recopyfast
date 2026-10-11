@@ -10,7 +10,9 @@ import type {
   TestError,
   TestResult,
 } from "@playwright/test/reporter";
-import StrictReporter from "../../../e2e/support/strict-reporter";
+import StrictReporter, {
+  HUMAN_CHECKOUT_READY_NOTICE,
+} from "../../../e2e/support/strict-reporter";
 
 function fakeTest(
   title: string,
@@ -210,6 +212,48 @@ describe("StrictReporter", () => {
     consoleLog.mockRestore();
   });
 
+  it("redacts Stripe provider IDs from terminal and summary diagnostics", async () => {
+    const outputFile = join(
+      mkdtempSync(join(tmpdir(), "rcf-e2e-")),
+      "summary.json",
+    );
+    const reporter = new StrictReporter({ expected: 1, outputFile });
+    const consoleLog = jest.spyOn(console, "log").mockImplementation(() => {});
+    const providerIds = [
+      "cs_test_checkout123456789",
+      "cus_customer123456789",
+      "sub_subscription123456789",
+      "evt_event123456789",
+      "price_price123456789",
+      "prod_product123456789",
+      "in_invoice123456789",
+      "pi_paymentintent123456789",
+      "pm_paymentmethod123456789",
+      "ch_charge123456789",
+      "seti_setupintent123456789",
+      "req_request123456789",
+    ];
+    const failed = fakeTest("provider assertion", "unexpected", "failed", [
+      `provider failure ${providerIds.join(" ")}`,
+    ]);
+    reporter.onBegin({ rootDir: "/repo" } as FullConfig, fakeSuite([failed]));
+    reporter.onTestEnd(failed, failed.results[0] as TestResult);
+
+    await expect(
+      reporter.onEnd({ status: "failed" } as FullResult),
+    ).resolves.toEqual({ status: "failed" });
+
+    const reportText = readFileSync(outputFile, "utf8");
+    const terminalText = consoleLog.mock.calls.flat().join("\n");
+    expect(reportText).toContain("[REDACTED STRIPE ID]");
+    expect(terminalText).toContain("[REDACTED STRIPE ID]");
+    for (const providerId of providerIds) {
+      expect(reportText).not.toContain(providerId);
+      expect(terminalText).not.toContain(providerId);
+    }
+    consoleLog.mockRestore();
+  });
+
   it("does not forward unrelated worker output from either channel", () => {
     const reporter: Reporter = new StrictReporter();
     const stdoutWrite = jest
@@ -234,6 +278,31 @@ describe("StrictReporter", () => {
     expect(stderrWrite).not.toHaveBeenCalled();
     stdoutWrite.mockRestore();
     stderrWrite.mockRestore();
+  });
+
+  it("forwards only the exact fixed human-ready notice from worker stdout", () => {
+    const reporter: Reporter = new StrictReporter();
+    const stdoutWrite = jest
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    reporter.onStdOut?.(HUMAN_CHECKOUT_READY_NOTICE, undefined, undefined);
+
+    expect(stdoutWrite).toHaveBeenCalledTimes(1);
+    expect(stdoutWrite).toHaveBeenCalledWith(HUMAN_CHECKOUT_READY_NOTICE);
+    stdoutWrite.mockClear();
+
+    for (const unsafe of [
+      `${HUMAN_CHECKOUT_READY_NOTICE.trimEnd()} customer=cus_sensitive123456\n`,
+      `${HUMAN_CHECKOUT_READY_NOTICE}session=cs_test_sensitive123456`,
+      `prefix ${HUMAN_CHECKOUT_READY_NOTICE}`,
+      HUMAN_CHECKOUT_READY_NOTICE.replace("TEST", "LIVE"),
+    ]) {
+      reporter.onStdOut?.(unsafe, undefined, undefined);
+    }
+
+    expect(stdoutWrite).not.toHaveBeenCalled();
+    stdoutWrite.mockRestore();
   });
 
   it("forwards one bounded redacted core setup stderr line", () => {

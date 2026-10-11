@@ -11,7 +11,9 @@ import Stripe from "stripe";
 import {
   CAPTURED_DATABASE_IDENTITIES,
   CAPTURED_DATABASE_TABLES,
+  EXPLICITLY_DELETED_DATABASE_TABLES,
   capturedCleanupDeliveries,
+  databaseTablesCountedAsResidue,
   type CapturedDatabaseRows,
   type CapturedFixtureIds,
 } from "../e2e/support/stripe-provider-fixture";
@@ -541,6 +543,15 @@ async function discoverDatabaseRows(): Promise<void> {
   ] as const) {
     recordRows(table, await rowsForUser(table));
   }
+  // `checkout_pending_intents` belongs to the disposable Auth user. Do not turn
+  // whatever effective privileges the local service role happens to inherit
+  // into deletion authority; replace the snapshot on every pass so the final
+  // pass proves the declared ON DELETE CASCADE actually removed the row.
+  recordRows(
+    "checkout_pending_intents",
+    await rowsForUser("checkout_pending_intents"),
+    { replace: true },
+  );
   const customerRowIds = captured.databaseRows.billing_customers;
   if (customerRowIds.length > 0) {
     for (const table of [
@@ -575,14 +586,18 @@ async function rowsForUser(
   return (data ?? []) as unknown as Array<Record<string, unknown>>;
 }
 
-function recordRows(table: keyof CapturedDatabaseRows, rows: object[]): void {
+function recordRows(
+  table: keyof CapturedDatabaseRows,
+  rows: object[],
+  options: { replace?: boolean } = {},
+): void {
   const identity = CAPTURED_DATABASE_IDENTITIES[table];
-  captured.databaseRows[table] = merge(
-    captured.databaseRows[table],
-    rows
-      .map((row) => (row as Record<string, unknown>)[identity])
-      .filter((id): id is string => typeof id === "string"),
-  );
+  const ids = rows
+    .map((row) => (row as Record<string, unknown>)[identity])
+    .filter((id): id is string => typeof id === "string");
+  captured.databaseRows[table] = options.replace
+    ? ids
+    : merge(captured.databaseRows[table], ids);
 }
 
 function referenceId(value: string | { id: string } | null): string | null {
@@ -669,7 +684,7 @@ async function waitForTerminalDeliveries(): Promise<void> {
 
 async function deleteCapturedRows(): Promise<boolean> {
   let didDelete = false;
-  for (const table of CAPTURED_DATABASE_TABLES) {
+  for (const table of EXPLICITLY_DELETED_DATABASE_TABLES) {
     const ids = captured.databaseRows[table];
     if (ids.length === 0) continue;
     const identity = CAPTURED_DATABASE_IDENTITIES[table];
@@ -706,8 +721,10 @@ async function countMutableResidue(): Promise<number> {
     if (!isDeletedCustomer(customer)) count += 1;
   }
   await discoverDatabaseRows();
-  count += Object.values(captured.databaseRows).reduce(
-    (total, ids) => total + ids.length,
+  const databaseTablesToCount =
+    databaseTablesCountedAsResidue(hasOwnedAuthUser);
+  count += databaseTablesToCount.reduce(
+    (total, table) => total + captured.databaseRows[table].length,
     0,
   );
   return count;

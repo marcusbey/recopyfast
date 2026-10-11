@@ -20,21 +20,41 @@ never inserts an entitlement directly and never treats test mode as evidence of 
 Run:
 
 ```bash
-npm run test:e2e:stripe-provider
+npm run test:e2e:stripe-provider -- --human-checkout
 ```
 
-The command runs twice by default. Each pass starts the exact lean s24-shaped local stack with
+`--human-checkout` is mandatory and is checked before the runner reads private configuration,
+invokes the pinned Supabase CLI or changes local/provider state. The command runs twice by default.
+Each pass starts the exact lean s24-shaped local stack with
 `supabase start -x realtime,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor`.
 That leaves the database, Kong, Auth, PostgREST and Storage running for the application and health
 checks without pulling the unrelated Studio, Edge, Realtime and observability services. It then
 starts Redis, Socket.IO, production Next and a Stripe CLI test listener, injects the listener's
-ephemeral signing secret into that local Next process only, completes hosted Checkout and tears the
-entire stack down with `supabase stop --no-backup`. `--runs=1` exists only for focused local
-diagnosis; release evidence is the default twice-clean command.
+ephemeral signing secret into that local Next process only, opens a headed Chromium window for the
+human checkpoint and tears the entire stack down with `supabase stop --no-backup`. Each pass must
+finish its independent janitor proof before the next begins. `--runs=1` exists only for focused
+local diagnosis; release evidence is the default two independently cleaned passes.
 
-## Confirmed operator outcome
+## Human Checkout checkpoint
 
-On 24 September 2026, the default command completed two consecutive runs successfully. Each strict
+1. Remain present for both test-mode Checkout pages. The runner prints a fixed identity-free notice
+   only after the owned Stripe TEST Checkout is open in the headed browser. The strict reporter
+   forwards only that exact complete line; altered text, prefixes, suffixes and arbitrary worker
+   output remain suppressed.
+2. Complete the visible hosted page with Stripe's documented test payment method. Never use a real
+   card. The harness does not inspect, fill, copy, log, screenshot, trace or retain any payment field.
+3. Complete any CAPTCHA or other human verification yourself. The harness does not bypass it.
+4. Do not use a Link Pay Token or Link Agent Wallet. That flow does not support this test-mode proof.
+5. Finish within ten minutes. Closing the page, interruption, timeout, a provider error or returning
+   anywhere except the exact loopback success route fails closed and invokes the external janitor.
+6. After the loopback success return, the automated reconciliation, durable entitlement, replay and
+   cleanup assertions resume. Do not count a failed or timed-out pass toward the required two.
+
+## Historical operator outcome
+
+On 24 September 2026, the former automated command completed two consecutive runs successfully. That
+evidence predates the approved human-assisted boundary and does not satisfy the current two-pass
+acceptance by itself. Each historical strict
 Playwright invocation passed its one expected test with zero failed, skipped or flaky tests. Each
 run proved complete, paid and reconciled Checkout; Pro entitlement; exactly one active subscription
 during the assertion; four processed genuine events; a signed replay reported as a duplicate; and
@@ -61,58 +81,52 @@ summary, evidence, failure and janitor-state files for that run index.
   active monthly USD Pro Price with `livemode=false` before it creates a user.
 - A directly confirmed disposable Auth user signs into an app-compatible cookie session without
   visiting `/auth/callback` or `/auth/confirm`, so no production trial callback can mask payment.
-- The authenticated real `/api/billing/checkout` route creates the Session; Stripe-hosted Checkout
-  uses Stripe's public success test value entirely in memory, explicitly selects the United States
-  before entering its ZIP code, and dispatches a click event on the visible exact AI-agent
-  disclosure text before asserting its associated hidden checkbox is checked. The DOM event avoids
-  Playwright's viewport actionability gate: a real run found the exact visible label but Stripe's
-  nested scrollport still reported it outside the internal viewport. The helper rescans newly
-  mounted frames for the exact label/control pair, has its own five-second discovery/action bounds,
-  fails when the pair never appears, and never targets the hidden input with `check()`. Mandatory
-  field discovery and fill/select, optional-field inspection, disclosure interaction and the
-  post-submit hosted error-text scan all use one bounded frame-snapshot primitive. Stripe may replace
-  a hosted frame while that primitive is counting, checking visibility, acting or aggregating text.
-  Only Playwright's exact `Frame was detached` failure during inspection or an explicitly idempotent
-  setter discards the whole partial snapshot and resumes from a fresh `page.frames()` set; the caller's
-  original 30-second field, five-second disclosure or
-  90-second return budget is not restarted. The primitive threads that one absolute deadline through
-  snapshot inspection and supplies every waiting Playwright action/assertion with the positive
-  remaining timeout; zero can therefore never disable Playwright's timeout. Disclosure dispatch and
-  checked-state polling share a child deadline capped by both the action and outer discovery bounds.
-  They also share one non-idempotent action boundary, so a checked-state detachment after dispatch
-  propagates rather than dispatching a second time. Only fill/select setters explicitly marked
-  idempotent retry after detachment; the submit click is outside this retry path, and unrelated
-  failures still propagate. An optional field remains optional only after one complete stable
-  snapshot proves it absent. Each mandatory hosted field is rescanned every 250 ms using the proven
-  field names, never an arbitrary fixed sleep or selector. The post-submit scan likewise never treats
-  a partial or detached count as zero evidence.
+- The authenticated real `/api/billing/checkout` route creates the Session. Headed Chromium opens
+  that owned Stripe TEST Checkout, then the harness observes only the top-level location while a human
+  completes the provider page. No executable card, disclosure or Link Pay Token selector remains.
+  The ten-minute wait accepts only the exact expected loopback origin and
+  `/dashboard/billing?checkout=success&session_id=<just-created owned Session>`. It requires one
+  `checkout` key and one matching `session_id` key, with no extra query key or fragment. Missing,
+  wrong or duplicate values, another path/result, page close, interruption, or a foreign/lookalike
+  origin fail with a fixed diagnostic that contains no URL or ID and produces no success evidence.
 - Checkout is complete, paid and reconciled; the captured customer, one active subscription,
-  processed genuine event IDs and `/api/billing/entitlement` all agree on Pro.
+  completed durable checkout intent, processed genuine event IDs and `/api/billing/entitlement`
+  all agree on the same monthly Pro purchase and configured test Price.
 - One captured event is re-signed with the ephemeral local listener secret and replayed. The route
   reports it as a duplicate and neither the subscription nor ledger count changes.
-- Cleanup cancels the captured test subscription, deletes the captured test customer, deletes only
-  captured IDs from the local tables, deletes the captured Auth user and proves no mutable residue.
-  Cleanup always re-reads the captured Checkout Session first, records any Customer/Subscription
-  created after form submission, and expires the Session when it is still open.
+- The process-external janitor cancels the captured test subscription, deletes the captured test
+  customer, deletes only captured IDs from local tables, deletes the captured Auth user and proves
+  no mutable residue. The current `checkout_pending_intents` row is inventory-only before Auth
+  deletion: the janitor does not turn inherited service-role privileges into direct deletion
+  authority, and the final pass must prove the exact owned Auth deletion cascaded that row. It
+  repeatedly rediscovers run-owned Checkout Sessions, Customers, subscriptions and local rows,
+  including objects created after form submission, and expires every owned Session that remains
+  open. The Playwright fixture exposes no provider/local/Auth cleanup API.
 
 The safe evidence files under `test-results/` contain the run ID, provider object IDs, statuses,
 event types and cleanup booleans only. The runner accepts evidence only when its run ID, run index,
 configured Price and timestamp match the current pass; a stale prior pass cannot be reported as a
 success. These files contain no API key, signing secret, Auth token, email, password, card value,
-hosted Checkout URL or Checkout Session secret. Trace, screenshot and video capture stay off even on failure. Playwright is configured with
+hosted Checkout URL or Checkout Session secret. Their structured provider IDs remain owner-only
+because the external janitor needs them; the operator success line reports only fixed status,
+processed-event count, replay status and cleanup status. Trace, screenshot and video capture stay
+off even on failure. Playwright is configured with
 `preserveOutput: "never"`, and the runner removes its exact per-run provider output directory again
 in `finally`; a failed run must not retain `error-context.md` or any other browser artifact.
 
 On failure the spec writes one owner-only (`0600`) JSON file named
 `stripe-provider-failure-run-<n>.json`. Its schema is deliberately closed to four fields:
 `mode=test`, the run index, a bounded lifecycle stage such as `checkout:inspect-open` or
-`checkout:hosted-form`, and a redacted diagnostic. The runner validates that schema and rejects any
-email, card, key, signing secret or JWT shape before printing it. The next run removes the previous
-safe failure file before starting; raw Playwright output is never retained.
+`checkout:human-completion`, and a redacted diagnostic. The shared redactor removes ordinary Stripe
+Checkout Session, Customer, subscription, event, Price, Product, invoice, PaymentIntent,
+PaymentMethod, Charge, SetupIntent and request IDs in addition to email, card, key, signing-secret
+and JWT shapes. The runner independently rejects any such ID if it reaches the four-field file.
+The next run removes the previous safe failure file before starting; raw Playwright output is never
+retained.
 
-Cleanup failures expose only a count and fixed operation labels (`expire_checkout`,
-`cancel_subscription`, `delete_customer`, `wait_deliveries`, `discover_rows`, known-table deletes
-and `delete_auth_user`). Raw provider errors and object IDs never enter the safe diagnostic.
+The janitor keeps its detailed stage diagnostics on stderr for the operator, while the persisted
+failure artifact receives only the fixed `external_janitor` cleanup label. Raw provider errors and
+object IDs never enter the safe failure JSON.
 
 The state-backed `afterEach` hook is deliberately non-destructive. It writes bounded failure
 diagnostics, gives the still-running flow ten seconds to settle, aborts its harness signal and closes
@@ -123,7 +137,7 @@ prove its metadata ownership. The runner pre-generates the run ID, exact Auth UU
 and start timestamp, bounds the Playwright child, and launches the sole mutation authority: a
 separate janitor process while Next, Stripe CLI and local Supabase are still alive. Direct invocation
 of the dedicated Playwright config fails closed unless its exact runner-owned starting manifest and
-internal runner flag are present.
+internal human-checkout flag are present.
 
 The janitor independently repeats the complete local/test-mode guard and validates the configured
 Price before constructing clients or mutating anything. It fully paginates Customers, Checkout
@@ -171,8 +185,11 @@ and creates a fail-closed human recovery gate: a new run is blocked until an ope
 exact test run from provider truth. The manifest and janitor state never contain credentials, email,
 card data or Checkout URLs.
 
-When cleanup fails after a primary timeout, the safe failure JSON keeps the primary stage diagnostic
-and appends the fixed cleanup operation labels within the same bounded/redacted four-field schema.
+When the external janitor fails after a validated primary Playwright failure, the safe failure JSON
+keeps the primary stage diagnostic and appends only the fixed label
+`cleanup failed: external_janitor` within the same bounded/redacted four-field schema. If the janitor
+is the only failure, the runner creates an owner-only four-field failure at stage `cleanup` with that
+same fixed diagnostic. Raw janitor exceptions and provider IDs are never copied into this artifact.
 
 Stripe retains immutable Checkout Session and event history after cleanup. The evidence reports
 that history as retained; it must never claim those immutable records were deleted. A canceled
@@ -185,5 +202,5 @@ Stop after this test-mode proof. A live payment is a separate human financial ac
 live step, the user must explicitly choose the exact SKU and period, maximum total including tax,
 identify the payer, and choose whether the resulting subscription is retained, canceled or
 refunded. The payer enters payment details directly. Only then may an operator verify the signed
-live event, durable ledger, entitlement and requested cleanup. Never reuse this automated lane,
+live event, durable ledger, entitlement and requested cleanup. Never reuse this human-assisted test lane,
 its test values or its cleanup assumptions against production.

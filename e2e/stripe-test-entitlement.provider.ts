@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import type Stripe from "stripe";
+import processHelpers from "../scripts/stripe-provider-process.cjs";
 import {
   createStripeProviderFixture,
   type StripeProviderFixture,
@@ -10,12 +11,7 @@ import {
   writeProviderFailureEvidence,
   type ProviderFailureStage,
 } from "./support/stripe-provider-failure";
-import {
-  performHostedFieldAction,
-  performOptionalHostedFieldAction,
-  waitForHostedCheckoutReturn,
-} from "./support/stripe-hosted-fields";
-import { checkAiAgentDisclosure } from "./support/stripe-agent-disclosure";
+import { waitForHostedCheckoutReturn } from "./support/stripe-hosted-fields";
 import { settleProviderFlowForTeardown } from "./support/stripe-provider-teardown";
 
 interface CheckoutResponse {
@@ -81,12 +77,14 @@ interface ProviderRunState {
 }
 
 const PROVIDER_FLOW_SETTLEMENT_TIMEOUT_MS = 10_000;
+const HUMAN_CHECKOUT_TIMEOUT_MS = 10 * 60_000;
+const { HUMAN_CHECKOUT_READY_NOTICE } = processHelpers;
 
 let activeRunState: ProviderRunState | undefined;
 
 test.describe("Stripe test Checkout entitlement provider proof", () => {
   test.describe.configure({ mode: "serial" });
-  test.setTimeout(5 * 60_000);
+  test.setTimeout(20 * 60_000);
 
   test.afterEach(async ({}, testInfo) => {
     const state = activeRunState;
@@ -141,6 +139,12 @@ test.describe("Stripe test Checkout entitlement provider proof", () => {
     if (!runId) {
       throw new Error("STRIPE_PROVIDER_RUN_ID is required.");
     }
+    if (
+      process.env.STRIPE_PROVIDER_HUMAN_CHECKOUT_NOTICE !==
+      HUMAN_CHECKOUT_READY_NOTICE
+    ) {
+      throw new Error("Runner-owned human Checkout instructions are required.");
+    }
     const failureFile =
       process.env.STRIPE_PROVIDER_FAILURE_FILE ??
       "test-results/stripe-provider-failure.json";
@@ -175,7 +179,6 @@ test.describe("Stripe test Checkout entitlement provider proof", () => {
         });
 
         state.failedStage = "checkout:create";
-        fixture.markCheckoutRequested();
         const checkoutResponse = await page.request.post(
           `${fixture.environment.appUrl}/api/billing/checkout`,
           {
@@ -202,8 +205,14 @@ test.describe("Stripe test Checkout entitlement provider proof", () => {
         fixture.captured.stripeCustomerId =
           idOf(openSession.customer) ?? undefined;
 
-        state.failedStage = "checkout:hosted-form";
-        await completeHostedCheckout(page, checkout.url!);
+        state.failedStage = "checkout:human-completion";
+        await waitForHumanHostedCheckout(
+          page,
+          checkout.url!,
+          fixture.environment.appUrl,
+          checkout.sessionId!,
+          state.abortController.signal,
+        );
 
         state.failedStage = "checkout:reconcile";
         await expect
@@ -237,7 +246,10 @@ test.describe("Stripe test Checkout entitlement provider proof", () => {
         fixture.captured.stripeSubscriptionId = subscriptionId!;
 
         state.failedStage = "billing:durable-state";
-        const durable = await waitForDurableBillingState(fixture);
+        const durable = await waitForDurableBillingState(
+          fixture,
+          checkout.sessionId!,
+        );
         state.failedStage = "billing:provider-subscription";
         const providerSubscription =
           await fixture.stripe.subscriptions.retrieve(subscriptionId!);
@@ -257,6 +269,13 @@ test.describe("Stripe test Checkout entitlement provider proof", () => {
         });
         expect(durable.subscriptions[0].current_period_start).toBeTruthy();
         expect(durable.subscriptions[0].current_period_end).toBeTruthy();
+        expect(durable.checkoutIntent).toMatchObject({
+          stripe_session_id: checkout.sessionId,
+          stripe_price_id: fixture.environment.priceId,
+          plan_id: "pro",
+          billing_period: "monthly",
+          status: "completed",
+        });
 
         state.failedStage = "billing:events";
         const genuineEvents = await Promise.all(
@@ -349,88 +368,22 @@ function idOf(value: string | { id: string } | null): string | null {
   return typeof value === "string" ? value : value.id;
 }
 
-async function fillOptionalHostedField(
+async function waitForHumanHostedCheckout(
   page: Page,
-  selector: string,
-  value: string,
+  checkoutUrl: string,
+  appUrl: string,
+  checkoutSessionId: string,
+  signal: AbortSignal,
 ): Promise<void> {
-  await performOptionalHostedFieldAction(
-    page,
-    selector,
-    (field, deadline) =>
-      field.fill(value, { timeout: deadline.playwrightTimeoutMs() }),
-    { retryDetachedAction: "idempotent-setter" },
-  );
-}
-
-async function selectHostedBillingCountry(
-  page: Page,
-  countryCode: "US",
-): Promise<void> {
-  await performHostedFieldAction(
-    page,
-    'select[name="billingCountry"], select[name="country"]',
-    async (native, deadline) => {
-      await native.selectOption(countryCode, {
-        timeout: deadline.playwrightTimeoutMs(),
-      });
-      await expect(native).toHaveValue(countryCode, {
-        timeout: deadline.playwrightTimeoutMs(),
-      });
-    },
-    { retryDetachedAction: "idempotent-setter" },
-  );
-}
-
-async function completeHostedCheckout(page: Page, checkoutUrl: string) {
   await page.goto(checkoutUrl, { waitUntil: "domcontentloaded" });
   expect(new URL(page.url()).hostname).toMatch(/(^|\.)stripe\.com$/);
-
-  // Stripe's public success test value is assembled in memory so no complete
-  // card-shaped value is retained in source, logs, traces or reports.
-  const cardNumber = "4242".repeat(4);
-  const cardExpiry = ["12", "34"].join("");
-  const cardCvc = ["1", "2", "3"].join("");
-  await performHostedFieldAction(
-    page,
-    'input[name="cardNumber"]',
-    (field, deadline) =>
-      field.fill(cardNumber, { timeout: deadline.playwrightTimeoutMs() }),
-    { retryDetachedAction: "idempotent-setter" },
-  );
-  await performHostedFieldAction(
-    page,
-    'input[name="cardExpiry"]',
-    (field, deadline) =>
-      field.fill(cardExpiry, { timeout: deadline.playwrightTimeoutMs() }),
-    { retryDetachedAction: "idempotent-setter" },
-  );
-  await performHostedFieldAction(
-    page,
-    'input[name="cardCvc"]',
-    (field, deadline) =>
-      field.fill(cardCvc, { timeout: deadline.playwrightTimeoutMs() }),
-    { retryDetachedAction: "idempotent-setter" },
-  );
-  await fillOptionalHostedField(page, 'input[name="billingName"]', "S25 Test");
-  await selectHostedBillingCountry(page, "US");
-  await checkAiAgentDisclosure(page);
-  await performHostedFieldAction(
-    page,
-    'input[name="billingPostalCode"]',
-    async (postalCode, deadline) => {
-      await postalCode.fill("10001", {
-        timeout: deadline.playwrightTimeoutMs(),
-      });
-      await expect(postalCode).toHaveValue("10001", {
-        timeout: deadline.playwrightTimeoutMs(),
-      });
-    },
-    { retryDetachedAction: "idempotent-setter" },
-  );
-
-  await page.locator('button[type="submit"]').last().click();
-  await waitForHostedCheckoutReturn(page);
+  process.stdout.write(HUMAN_CHECKOUT_READY_NOTICE);
+  await waitForHostedCheckoutReturn(page, {
+    expectedAppOrigin: new URL(appUrl).origin,
+    expectedCheckoutSessionId: checkoutSessionId,
+    timeoutMs: HUMAN_CHECKOUT_TIMEOUT_MS,
+    signal,
+  });
 }
 
 async function readCheckoutStatus(
@@ -445,7 +398,10 @@ async function readCheckoutStatus(
   return (await response.json()) as CheckoutStatus;
 }
 
-async function waitForDurableBillingState(fixture: StripeProviderFixture) {
+async function waitForDurableBillingState(
+  fixture: StripeProviderFixture,
+  checkoutSessionId: string,
+) {
   type DurableState = {
     customer: { id: string; stripe_customer_id: string };
     subscriptions: Array<{
@@ -458,32 +414,48 @@ async function waitForDurableBillingState(fixture: StripeProviderFixture) {
       current_period_end: string | null;
     }>;
     events: BillingEventRow[];
+    checkoutIntent: {
+      id: string;
+      stripe_session_id: string | null;
+      stripe_price_id: string | null;
+      plan_id: string | null;
+      billing_period: string | null;
+      status: string;
+    };
   };
 
   const readState = async (): Promise<DurableState | null> => {
-    const [customers, subscriptions, events] = await Promise.all([
-      fixture.serviceClient
-        .from("billing_customers")
-        .select("id, stripe_customer_id")
-        .eq("user_id", fixture.user.userId),
-      fixture.serviceClient
-        .from("billing_subscriptions")
-        .select(
-          "id, customer_id, stripe_subscription_id, plan, status, current_period_start, current_period_end",
-        )
-        .eq("user_id", fixture.user.userId),
-      fixture.serviceClient
-        .from("billing_events")
-        .select("id, event_type, processed, stripe_event_id")
-        .eq("user_id", fixture.user.userId),
-    ]);
-    for (const result of [customers, subscriptions, events]) {
+    const [customers, subscriptions, events, checkoutIntents] =
+      await Promise.all([
+        fixture.serviceClient
+          .from("billing_customers")
+          .select("id, stripe_customer_id")
+          .eq("user_id", fixture.user.userId),
+        fixture.serviceClient
+          .from("billing_subscriptions")
+          .select(
+            "id, customer_id, stripe_subscription_id, plan, status, current_period_start, current_period_end",
+          )
+          .eq("user_id", fixture.user.userId),
+        fixture.serviceClient
+          .from("billing_events")
+          .select("id, event_type, processed, stripe_event_id")
+          .eq("user_id", fixture.user.userId),
+        fixture.serviceClient
+          .from("checkout_pending_intents")
+          .select(
+            "id, stripe_session_id, stripe_price_id, plan_id, billing_period, status",
+          )
+          .eq("user_id", fixture.user.userId),
+      ]);
+    for (const result of [customers, subscriptions, events, checkoutIntents]) {
       if (result.error) throw result.error;
     }
 
     const customerRows = customers.data ?? [];
     const subscriptionRows = subscriptions.data ?? [];
     const eventRows = (events.data ?? []) as BillingEventRow[];
+    const checkoutIntentRows = checkoutIntents.data ?? [];
     const processedTypes = new Set(
       eventRows
         .filter((row) => row.processed === true)
@@ -493,6 +465,12 @@ async function waitForDurableBillingState(fixture: StripeProviderFixture) {
       customerRows.length === 1 &&
       subscriptionRows.length === 1 &&
       subscriptionRows[0].status === "active" &&
+      checkoutIntentRows.length === 1 &&
+      checkoutIntentRows[0].stripe_session_id === checkoutSessionId &&
+      checkoutIntentRows[0].stripe_price_id === fixture.environment.priceId &&
+      checkoutIntentRows[0].plan_id === "pro" &&
+      checkoutIntentRows[0].billing_period === "monthly" &&
+      checkoutIntentRows[0].status === "completed" &&
       processedTypes.has("customer.subscription.created") &&
       processedTypes.has("checkout.session.completed") &&
       processedTypes.has("invoice.payment_succeeded") &&
@@ -503,6 +481,7 @@ async function waitForDurableBillingState(fixture: StripeProviderFixture) {
       customer: customerRows[0] as DurableState["customer"],
       subscriptions: subscriptionRows as DurableState["subscriptions"],
       events: eventRows,
+      checkoutIntent: checkoutIntentRows[0] as DurableState["checkoutIntent"],
     };
   };
 

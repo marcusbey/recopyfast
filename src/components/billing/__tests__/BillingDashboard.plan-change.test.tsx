@@ -282,3 +282,44 @@ describe("a subscriber changes plan in place", () => {
     ).toBeDisabled();
   });
 });
+
+/**
+ * s82, Devin Review on PR #81 (finding 2): the plan change now clears a
+ * scheduled cancellation — buying another plan means keeping it — so the
+ * dialog has to say so before the click, or a subscriber who had set theirs to
+ * end is surprised by a renewal.
+ */
+describe("a subscriber whose subscription is set to end changes plan", () => {
+  const unchanged =
+    "Switch plans at any time. Stripe prorates the difference and charges your card on file straight away.";
+
+  it("is told the change keeps the subscription, which will renew", async () => {
+    const user = userEvent.setup();
+    serve(
+      payload({
+        subscription: {
+          ...subscription("pro"),
+          cancel_at_period_end: true,
+          // Midday, so the date reads October 10 in any test timezone.
+          current_period_end: "2026-10-10T12:00:00.000Z",
+        },
+      }),
+    );
+
+    const dialog = await openPlans(user, "Change plan");
+
+    expect(dialog).toHaveTextContent(
+      "Your subscription is set to end on October 10, 2026. Switching plans keeps it: it will renew instead of ending.",
+    );
+  });
+
+  it("reads the description unchanged for a subscription that renews", async () => {
+    const user = userEvent.setup();
+    serve(payload({ subscription: subscription("pro") }));
+
+    const dialog = await openPlans(user, "Change plan");
+
+    expect(within(dialog).getByText(unchanged)).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/set to end/);
+  });
+});

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
+import { readGrantedPlans } from "@/lib/billing/effective-plan";
 import { getFoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import { isAgencyCheckoutEnabled } from "@/lib/stripe/plans";
 import { BillingDashboard } from "@/components/billing/BillingDashboard";
@@ -47,11 +47,27 @@ async function readLifetimeGrant(): Promise<LifetimeGrantStatus> {
       return { kind: "unknown" };
     }
 
-    // Shared with the checkout guard, so the card cannot offer something the
-    // server will refuse — or hide something the server would allow.
-    const planIds = await readGrantedPlanIds(supabase, user.id);
+    // Shared with the checkout guard (`readGrantedPlanIds` is this read's
+    // ids), so the card cannot offer something the server will refuse — or
+    // hide something the server would allow. The same query says when a
+    // dated grant ends, so the plan dialog never calls it lifetime (s82
+    // review, second pass, m3).
+    const grants = await readGrantedPlans(supabase, user.id);
+    if (grants.length === 0) {
+      return { kind: "none" };
+    }
 
-    return planIds.length > 0 ? { kind: "granted", planIds } : { kind: "none" };
+    return {
+      kind: "granted",
+      planIds: grants.map((granted) => granted.planId),
+      endsAt: Object.fromEntries(
+        grants.flatMap((granted) =>
+          granted.expiresAt === null
+            ? []
+            : [[granted.planId, granted.expiresAt]],
+        ),
+      ),
+    };
   } catch (error) {
     console.error("[billing] could not read plan entitlements:", error);
     return { kind: "unknown" };
