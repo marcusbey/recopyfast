@@ -1269,16 +1269,23 @@ describe("M-2: the refusal's money guards, recorded after the grant", () => {
     );
   });
 
-  it("M21: records a subscription already cancelled for another reason as it is, and never refunds it", async () => {
+  it("M21: refunds a covered subscription bought after the grant even if the customer already cancelled it", async () => {
     stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
       SUBSCRIPTION_ID,
       "pro",
       {
         status: "canceled",
         canceled_at: PERIOD_START + 30,
+        latest_invoice: {
+          id: INVOICE_ID,
+          parent: {
+            type: "subscription_details",
+            subscription_details: { subscription: SUBSCRIPTION_ID },
+          },
+        },
         cancellation_details: {
-          comment: null,
-          feedback: null,
+          comment: "Cancelled by the customer",
+          feedback: "too_expensive",
           reason: "cancellation_requested",
         },
       },
@@ -1290,9 +1297,120 @@ describe("M-2: the refusal's money guards, recorded after the grant", () => {
 
     expect(response.status).toBe(200);
     expect(mockSubscriptionCancel).not.toHaveBeenCalled();
-    expect(mockRefundsList).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_intent: SUBSCRIPTION_PAYMENT_INTENT,
+        metadata: {
+          reason_code: "covered_by_lifetime",
+          subscription_id: SUBSCRIPTION_ID,
+        },
+      }),
+      { idempotencyKey: REFUND_KEY },
+    );
+    expect(mockRefundsCreate.mock.calls[0][0]).not.toHaveProperty("amount");
+    expect(stripeSubscriptions[SUBSCRIPTION_ID].cancellation_details).toEqual({
+      comment: "Cancelled by the customer",
+      feedback: "too_expensive",
+      reason: "cancellation_requested",
+    });
+    expect(storedSubscription(SUBSCRIPTION_ID)?.status).toBe("canceled");
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.stringContaining("subscription is canceled"),
+      undefined,
+      expect.any(Object),
+      expect.any(Object),
+    );
+  });
+
+  it("does not refund or update an already-terminal subscription bought before the grant", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { status: "canceled", created: LIFETIME_PAID_AT - 60 },
+    );
+
+    const response = await deliver(
+      subscriptionCreated("evt_terminal_before_grant", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockInvoicePaymentsList).not.toHaveBeenCalled();
     expect(mockRefundsCreate).not.toHaveBeenCalled();
     expect(storedSubscription(SUBSCRIPTION_ID)?.status).toBe("canceled");
+  });
+
+  it("refunds an already-terminal subscription once across replay and a new event after Stripe's idempotency key expires", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      {
+        status: "canceled",
+        metadata: { user_id: USER_ID, cancelled_reason: "customer_requested" },
+        cancellation_details: {
+          comment: "Cancelled by the customer",
+          feedback: null,
+          reason: "cancellation_requested",
+        },
+      },
+    );
+    const original = JSON.parse(
+      JSON.stringify(stripeSubscriptions[SUBSCRIPTION_ID]),
+    );
+    const event = subscriptionCreated("evt_terminal_replay", SUBSCRIPTION_ID);
+
+    expect((await deliver(event)).status).toBe(200);
+    expect(await (await deliver(event)).json()).toEqual({
+      received: true,
+      duplicate: true,
+    });
+    refundsByIdempotencyKey = {};
+    expect(
+      (
+        await deliver(
+          subscriptionCreated("evt_terminal_resend", SUBSCRIPTION_ID),
+        )
+      ).status,
+    ).toBe(200);
+
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(stripeRefunds).toHaveLength(1);
+    expect(mockInvoicePaymentsList).toHaveBeenCalledTimes(2);
+    expect(mockRefundsList).toHaveBeenCalledTimes(2);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(stripeSubscriptions[SUBSCRIPTION_ID]).toEqual(original);
+    expect(storedSubscription(SUBSCRIPTION_ID)?.status).toBe("canceled");
+  });
+
+  it("checks an incomplete_expired subscription's invoice but refunds nothing when it collected nothing", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { status: "incomplete_expired" },
+    );
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [{ id: "inpay_uncollected", status: "canceled", amount_paid: 0 }],
+      has_more: false,
+    });
+
+    const response = await deliver(
+      subscriptionCreated("evt_terminal_expired", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockInvoicePaymentsList).toHaveBeenCalledWith(
+      expect.objectContaining({ invoice: INVOICE_ID }),
+    );
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(storedSubscription(SUBSCRIPTION_ID)?.status).toBe(
+      "incomplete_expired",
+    );
   });
 
   it("M01: refunds under a key derived from the subscription and the payment", async () => {

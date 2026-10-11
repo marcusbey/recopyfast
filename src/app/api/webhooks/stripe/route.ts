@@ -604,21 +604,24 @@ async function refuseIfLifetimeCovers(
   userId: string,
   supabase: ServiceClient,
 ): Promise<StripeSubscriptionWithPeriod> {
+  const isTerminal = isTerminalSubscriptionStatus(subscription.status);
   // Set to end at period end for a lifetime purchase, by either ordering: it
   // predates the lifetime and runs out the period it paid for.
   if (
+    !isTerminal &&
     subscription.metadata?.cancelled_reason ===
-    CANCELLED_REASON.lifetimePurchase
+      CANCELLED_REASON.lifetimePurchase
   ) {
     return subscription;
   }
 
   if (!isRefusedAsCoveredByLifetime(subscription)) {
-    // Already over, and not by this refusal — cancelled by the customer, by
-    // support, by Stripe: record it as it is, and never refund it.
-    if (isTerminalSubscriptionStatus(subscription.status)) {
-      return subscription;
-    }
+    // s82, Devin Review on PR #81 (finding 4): a customer can pay an old
+    // Checkout after buying lifetime, then cancel before this webhook arrives.
+    // Terminal means there is nothing left to cancel, not that the invoice
+    // should stay charged. Check coverage and payment order before returning;
+    // the existing refusal helper skips cancellation for terminal subscriptions,
+    // preserves their reason, and refunds through the durable idempotency guard.
     const cover = await readCoverOrAlert(
       subscription,
       planId,
@@ -629,6 +632,7 @@ async function refuseIfLifetimeCovers(
       return subscription;
     }
     if (!wasBoughtWithPlanAlreadyOwned(subscription.created, cover.paidAt)) {
+      if (isTerminal) return subscription;
       return endPredatingSubscription(subscription, planId, userId, cover);
     }
   }
@@ -795,7 +799,7 @@ async function reportCoveredSubscriptionRefused(
 
   logger.error(
     `Subscription ${subscription.id} (${planId}) was bought while a lifetime ` +
-      `grant already covered its plan (${when}): cancelled at once, ` +
+      `grant already covered its plan (${when}): subscription is ${subscription.status}, ` +
       `${refundIds.length} refund(s) created or found.` +
       (inFlightPaymentIds.length > 0
         ? ` ${inFlightPaymentIds.length} refund(s) were already being made ` +

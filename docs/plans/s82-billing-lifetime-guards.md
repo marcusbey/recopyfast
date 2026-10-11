@@ -1000,6 +1000,22 @@ The complete webhook backstop file passes 85 tests after this reviewer pass.
   that Task 40 requires, as a live subscription with no refusal marker. Its existing invoice and
   customer assertions are unchanged.
 
+### Task 44 — terminal covered subscriptions still receive their refund
+
+Owner-directed Devin Review fix, PR #81, 2026-10-11: before returning an already
+terminal subscription, verify coverage and the existing payment-order rule.
+Bought after coverage: reuse the invoice refund helper without canceling or
+changing the reason. Bought before coverage: neither refund nor schedule a new
+cancellation. Preserve the durable metadata/idempotency guard.
+
+`stripe-webhook-lifetime-covered.test.ts`: M21's blanket no-refund expectation
+was corrected; added predating-terminal, replay/distinct-event-after-key-expiry,
+and unpaid `incomplete_expired` cases. Red: 3 failed, 85 passed. Green: 88 passed.
+The ops report now states the subscription's actual status. Full verification
+and architect review are tracked in `docs/reviews/s82-billing-lifetime-guards.md`.
+
+- [x] Task 44
+
 ## Follow-ups (not this story)
 
 - Translate and A/B generate refunds report failures to `console.error` only (decision 5).
