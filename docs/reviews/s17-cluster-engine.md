@@ -50,13 +50,15 @@ This source and local evidence produced the earlier `Max severity: none` / `Ship
 
 Manual merge, deployment, and production verification are downstream human/release gates and are not prerequisites for `Ship allowed: yes`.
 
-## Hosted acceptance reopened — major
+## Historical hosted acceptance failure on prior head
 
 The first mandatory hosted Lighthouse attempt on exact head `e0019c7` produced a valid 40-report corpus with the exact approved profile, but every route failed the committed TBT <= 200 ms threshold. Independently recomputed medians are 236.849-277.251 ms. Performance, LCP, and CLS pass; current-head CI also passes, including strict Playwright 88/88 with zero failed, skipped, or flaky tests. Neither result cancels the dedicated TBT gate.
 
 The failure is systematic across all eight routes and five runs per route, so it is not an incomplete artifact, profile mismatch, duplicate-path defect, or isolated outlier. The reports support host-sensitive parse/evaluation/layout work as a diagnosis direction, but host sensitivity is not permission to relax ADR 013's threshold.
 
 Required closure is a bounded source repair followed by a clean first hosted Lighthouse run and a second pass on the same repaired SHA, with current-head CI green. Constraints remain unchanged: no threshold/profile/run-count relaxation, no deferral of synchronous pre-hydration Sentry, and no competing AuthModal lazy import because s79 already removes it from the integrated marketing path. The failed head must not be rerun merely to sample for green.
+
+That required closure is now satisfied on the stacked exact head, as documented in the final section below.
 
 Independent assessment: `.omx/ultragoal/evidence/s17/hosted-verification-20261011/hosted-attempt1-independent-assessment.md`.
 
@@ -76,5 +78,24 @@ The only follow-up source is test diagnostics. `waitForHandshake` preserves each
 
 The writer's five post-diagnostic full-file runs passed 455/455 with type-check, focused lint, formatting, and diff checks green. Those passes show the diagnostic is non-regressive; they do not prove the intermittent timeout fixed because it did not recur. Independent delta review found no diagnostic defect. Evidence: `.omx/ultragoal/evidence/s17/stacked-candidate/websocket-timeout-diagnosis/independent-review.md`.
 
-Max severity: major
-Ship allowed: no
+## Final stacked exact-head acceptance — 2026-10-11
+
+The prior hosted TBT major is closed on reviewed source head `ad175824ad858d2e5ca60bae773b2ddf5cc2681d`. CI run `38135556546` passed, including the strict Playwright inventory at 93 expected / 93 total / 93 passed / 0 failed / 0 skipped / 0 flaky. Server dependency security run `38135556901` also passed on the same head.
+
+Two distinct attempts of Lighthouse workflow run `38135556522` then passed on that exact SHA. Independent raw-artifact review verified both downloaded archives byte-for-byte against their extracted corpora, recomputed all medians from the 80 Lighthouse JSON reports, and checked all 184 captured hashes:
+
+- attempt 1 artifact `11701396398`, archive SHA-256 `7e45ff256041948b1d65ac5f1d1dcd198475d5135f466dee9e1c24e96eb9e260`: 40 reports / 8 exact URLs / 5 runs per URL / 8 representatives / 80 globally distinct report paths; median performance 96-97, LCP 1673.366-1686.994 ms, CLS 0.001092-0.015045, and TBT 171.361-179.121 ms;
+- attempt 2 artifact `11702056992`, archive SHA-256 `05e184e07bd47723a187364cc8df2e9bd62d49c3a1b71bd8f9f193f43d86f776`: the same complete inventory; median performance 98-99, LCP 1620.024-1637.301 ms, CLS 0.001092-0.015045, and TBT 82.573-100.870 ms.
+
+Every report preserves the approved ADR 061 applied-mobile profile and exact loopback URL, contains finite required metrics, and passes the unchanged performance >= 0.90, LCP <= 2500 ms, CLS <= 0.1, and TBT <= 200 ms five-run-median thresholds. The artifact ids, digests, filenames, and corpora are distinct while the workflow run id and head SHA agree.
+
+Fresh independent Node 24.21.0 verification on the frozen tree passed 15 focused comparison, registry, dynamic-route, SEO, Lighthouse/Playwright-contract, Header, CSP, and document-boundary suites with 206/206 tests. The exact sanitized WebSocket diagnostic test also passed. That focused diagnostic result does not change the limitation recorded above: the intermittent inherited WebSocket suite timeout remains unresolved and is not claimed fixed.
+
+The final merge topology remains correct: s17 `e0019c7` is the first parent, approved s79 `a768ca5` is the second parent and merge base, and the visible diff against s79 is all 42 original s17 paths plus only the two reviewed diagnostic-only WebSocket test paths. Header and Sentry stay byte-identical to approved s79; Lighthouse config and runner retain their independently pinned bytes. No new actionable source, test, workflow, or artifact finding was identified.
+
+This verdict approves the s17 source/configuration stacked on exact approved s79. A subsequent review/plan documentation-only commit may move the PR SHA without invalidating these same-source Lighthouse proofs; current-head CI after that commit remains a PR-readiness gate. Parent/main refresh, the human decision to merge it, deployment, and production proof remain separate downstream gates and are not prerequisites for this source-review verdict.
+
+Final independent evidence: `.omx/ultragoal/evidence/s17/stacked-candidate/final-review-20261011/independent-final-review.md`.
+
+Max severity: none
+Ship allowed: yes

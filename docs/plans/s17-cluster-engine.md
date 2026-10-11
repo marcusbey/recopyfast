@@ -47,7 +47,7 @@ implementation was authorized before this checkpoint. Execution may now follow t
 - [x] Adding one valid data entry automatically adds its route, hub, sitemap, llms.txt
   and Lighthouse target without a separate route wrapper or URL list edit.
 - [x] Unknown slugs return a real 404. There is no duplicate `/alternatives` cluster.
-- [ ] The hub and every detail pass ADR 013's blocking Lighthouse lab thresholds:
+- [x] The hub and every detail pass ADR 013's blocking Lighthouse lab thresholds:
   performance >=90, LCP <=2500ms, CLS <=0.1, TBT <=200ms. No claim of field INP proof.
 
 ## Tasks (ordered; tests before behavior changes)
@@ -86,7 +86,7 @@ implementation was authorized before this checkpoint. Execution may now follow t
    URLs, no invented modification dates, and a fixture entry flowing through all consumers
    without editing their source. Preserve the shared Footer link and attributed signup CTA;
    incorporate s79's full-document navigation boundary when integrating that story.
-6. [ ] **Blocking Lighthouse job.** After explicit dependency approval, select and pin a
+6. [x] **Blocking Lighthouse job.** After explicit dependency approval, select and pin a
    Node24-compatible stable `@lhci/cli` using its current official documentation. Add one
    `lighthouse:ci` command and committed configuration following ADR013 and ADR061. Pin the
    approved applied-mobile profile and validate it in every emitted report. Derive eight URLs
@@ -96,7 +96,7 @@ implementation was authorized before this checkpoint. Execution may now follow t
    credential-free reports as CI artifacts. No production credentials, live paid API calls,
    score suppression or threshold reduction. Prove an intentionally failing threshold
    makes the command/job fail, then restore and measure every required URL locally and in CI.
-7. [ ] **Browser, integration and delivery gates.** Capture before/after for the existing
+7. [x] **Browser, integration and delivery gates.** Capture before/after for the existing
    comparison surface and new content at mobile/desktop widths; check navigation, visible
    FAQs, long copy/table overflow and unknown-slug404. Run lint, type-check,
    type-check:build, format:check, build, tests/coverage, audit:prod and relevant E2E.
@@ -215,6 +215,22 @@ implementation was authorized before this checkpoint. Execution may now follow t
   Task 6 and the current `major` / `Ship allowed: no` review remain open until the stacked exact head
   passes current CI and two same-SHA hosted Lighthouse runs. Any main merge, deployment, parent/base
   promotion, or later authenticated-shell redesign remains a separate human release/plan decision.
+
+- Hosted performance closure on 2026-10-11: combined head
+  `ad175824ad858d2e5ca60bae773b2ddf5cc2681d` passed current CI (strict 93/93, no
+  failures/skips/flakes), server dependency security, and two distinct same-SHA Lighthouse
+  attempts. Each retains 40 valid reports across eight routes, exact approved profile,
+  80 globally unique JSON/HTML paths and all four passing median thresholds. Attempt 1
+  TBT medians were 171.361–179.121 ms; attempt 2 medians were 82.573–100.870 ms.
+  Artifacts `11701396398` and `11702056992` have distinct verified archive digests.
+  Evidence: `.omx/ultragoal/evidence/s17/stacked-candidate/hosted-verification-20261011/`.
+  This closes task 6 and the lab acceptance criterion. Final independent review then
+  passed 15 focused suites / 206 tests plus the exact diagnostic regression and issued
+  `Max severity: none` / `Ship allowed: yes`, completing the prerelease task 7 evidence.
+  The documentation commit must pass current-head checks before PR readiness. Parent/main
+  refresh, manual merge and production verification remain separate release gates.
+  The intermittent local WebSocket timeout remains unresolved; added diagnostics and
+  subsequent passing suites do not establish a root-cause fix.
 
 ## Scope limits
 
