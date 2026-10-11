@@ -576,6 +576,91 @@ export async function claimRefusalReport(
   return true;
 }
 
+/** `billing_events.event_type` of the refusal of a subscription already over. */
+const TERMINAL_REFUSAL_EVENT_TYPE = "internal.terminal_subscription_refused";
+
+function terminalRefusalEventId(subscriptionId: string): string {
+  return `${COVERED_BY_LIFETIME}_terminal:${subscriptionId}`;
+}
+
+/**
+ * Record, durably, that a subscription already over when it was refused was
+ * refused as covered by a lifetime grant.
+ *
+ * s82, Devin Review on PR #81 (finding 5): the refusal's record is Stripe's
+ * cancellation marker, which only its own cancellation writes. A subscription
+ * the customer cancelled before its webhook ran is refused without one
+ * (`cancelCovered` keeps the customer's reason, and Stripe will not update a
+ * cancelled subscription), so a payment still in flight at the refusal settled
+ * later, found no marker, and stayed charged. This row is the marker's stand-in,
+ * in `billing_events` beside the refusal report, under a synthetic
+ * `stripe_event_id` whose UNIQUE constraint makes it write-once.
+ *
+ * Written BEFORE the invoice is scanned for payments: a payment that settles
+ * before the row lands is `paid` when the scan reads it and refunded there; one
+ * that settles after finds the row. Either way `refundOnce` refunds it once.
+ *
+ * Unlike the report claim, a failed write throws: without the row a late payment
+ * would stay charged, so the caller alerts and Stripe redelivers. A duplicate is
+ * an earlier delivery's record, which stands.
+ */
+export async function recordTerminalRefusal(
+  supabase: SupabaseClient,
+  subscription: Stripe.Subscription,
+  userId: string,
+  planId: string,
+): Promise<void> {
+  const { error } = await supabase.from("billing_events").insert({
+    user_id: userId,
+    event_type: TERMINAL_REFUSAL_EVENT_TYPE,
+    stripe_event_id: terminalRefusalEventId(subscription.id),
+    data: {
+      subscription_id: subscription.id,
+      plan_id: planId,
+      status: subscription.status,
+    },
+    processed: true,
+  });
+
+  if (error && error.code !== UNIQUE_VIOLATION) {
+    throw new Error(
+      `could not record the refusal of subscription ${subscription.id}: ` +
+        error.message,
+    );
+  }
+}
+
+/**
+ * Was this subscription refused as covered by a lifetime grant: by the marker
+ * the refusal's cancellation wrote, or, for one already over when refused, by
+ * `recordTerminalRefusal`'s row?
+ *
+ * Only a subscription that is over can carry that row, and over is final, so a
+ * live one is answered from Stripe alone: a renewal never waits on this read.
+ * Throws when the row cannot be read: never decide about money without knowing.
+ */
+export async function wasRefusedAsCoveredByLifetime(
+  supabase: SupabaseClient,
+  subscription: Stripe.Subscription,
+): Promise<boolean> {
+  if (isRefusedAsCoveredByLifetime(subscription)) return true;
+  if (!isTerminalSubscriptionStatus(subscription.status)) return false;
+
+  const { data, error } = await supabase
+    .from("billing_events")
+    .select("id")
+    .eq("stripe_event_id", terminalRefusalEventId(subscription.id))
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `could not read whether subscription ${subscription.id} was refused ` +
+        `as covered by a lifetime grant: ${error.message}`,
+    );
+  }
+  return data !== null;
+}
+
 /** What closing the covered Checkouts did, for the ops report. */
 export interface CoveredCheckoutExpiry {
   expiredSessionIds: string[];

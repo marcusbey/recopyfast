@@ -114,6 +114,13 @@ const LIFETIME_PAID_AT = PERIOD_START - 600;
 let db: Record<string, Row[]> = {};
 let grantReadFails = false;
 let subscriptionReadFails = false;
+/**
+ * Finding 5: the durable record of a refusal of a subscription already over
+ * (a `billing_events` row under this synthetic id) cannot be written / read.
+ */
+let terminalRefusalWriteFails = false;
+let terminalRefusalReadFails = false;
+const TERMINAL_REFUSAL_ID_PREFIX = "covered_by_lifetime_terminal:";
 
 /** One arm of a PostgREST `.or()` expression, e.g. `expires_at.gt.<iso>`. */
 function armPredicate(arm: string): (row: Row) => boolean {
@@ -139,6 +146,7 @@ function createFakeClient() {
     let operation: "select" | "insert" | "upsert" | "update" = "select";
     let values: Row = {};
     let conflictColumn: string | null = null;
+    let stripeEventId: unknown = null;
 
     const rows = (): Row[] => db[table] ?? [];
     const matched = () =>
@@ -148,6 +156,23 @@ function createFakeClient() {
       if (table === "plan_entitlements" && operation === "select") {
         if (grantReadFails) {
           return { data: null, error: { message: "connection reset" } };
+        }
+      }
+      if (table === "billing_events") {
+        const id =
+          operation === "insert" ? values.stripe_event_id : stripeEventId;
+        const isTerminalRefusal = String(id ?? "").startsWith(
+          TERMINAL_REFUSAL_ID_PREFIX,
+        );
+        if (
+          isTerminalRefusal &&
+          ((operation === "insert" && terminalRefusalWriteFails) ||
+            (operation === "select" && terminalRefusalReadFails))
+        ) {
+          return {
+            data: null,
+            error: { code: "PGRST500", message: "connection reset" },
+          };
         }
       }
       if (
@@ -206,6 +231,7 @@ function createFakeClient() {
     const builder = {
       select: () => builder,
       eq: (column: string, value: unknown) => {
+        if (column === "stripe_event_id") stripeEventId = value;
         predicates.push((row) => row[column] === value);
         return builder;
       },
@@ -512,6 +538,8 @@ beforeEach(() => {
   jest.spyOn(console, "error").mockImplementation(() => {});
   grantReadFails = false;
   subscriptionReadFails = false;
+  terminalRefusalWriteFails = false;
+  terminalRefusalReadFails = false;
   stripeSubscriptions = {};
   stripeRefunds = [];
   refundsByIdempotencyKey = {};
@@ -2094,6 +2122,282 @@ describe("m-2: a refused subscription's payment that settles later", () => {
 
     expect(response.status).toBe(200);
     expect(mockSubscriptionRetrieve).toHaveBeenCalledWith(SUBSCRIPTION_ID);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * s82, Devin Review on PR #81 (finding 5): a covered subscription the customer
+ * cancelled before its webhook ran is refused without a cancellation of ours,
+ * so Stripe carries no `covered_by_lifetime` marker on it. A payment still in
+ * flight at that refusal must still be refunded when it settles.
+ */
+describe("finding 5: a refused subscription already cancelled by the customer, whose payment settles later", () => {
+  const CUSTOMER_REASON = {
+    comment: "Cancelled by the customer",
+    feedback: null,
+    reason: "cancellation_requested",
+  };
+
+  function cancelledByCustomer(
+    plan: "pro" | "agency" = "pro",
+    overrides: Row = {},
+  ): Row {
+    return stripeSubscription(SUBSCRIPTION_ID, plan, {
+      status: "canceled",
+      canceled_at: PERIOD_START + 30,
+      cancellation_details: CUSTOMER_REASON,
+      ...overrides,
+    });
+  }
+
+  function paymentInFlight() {
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_debit", "open", "pi_debit")],
+      has_more: false,
+    });
+  }
+
+  function paymentSettles() {
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_debit", "paid", "pi_debit")],
+      has_more: false,
+    });
+  }
+
+  const DEBIT_REFUND_KEY = `covered_by_lifetime-refund-${SUBSCRIPTION_ID}-pi_debit`;
+
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = cancelledByCustomer();
+    paymentInFlight();
+  });
+
+  it("(a) refunds a subscription bought after the grant exactly once when its payment settles", async () => {
+    const refused = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(refused.status).toBe(200);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const [report] = refusalReports();
+    expect(report[0]).toContain("refunded when it settles");
+
+    // The bank debit settles days later.
+    paymentSettles();
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate).toHaveBeenCalledWith(
+      {
+        payment_intent: "pi_debit",
+        metadata: {
+          reason_code: "covered_by_lifetime",
+          subscription_id: SUBSCRIPTION_ID,
+        },
+      },
+      { idempotencyKey: DEBIT_REFUND_KEY },
+    );
+    // Nothing of the customer's own cancellation is touched.
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(stripeSubscriptions[SUBSCRIPTION_ID].cancellation_details).toEqual(
+      CUSTOMER_REASON,
+    );
+  });
+
+  it("(b) refunds it once across a replayed settlement, a new one after Stripe's idempotency key expires, and a resent refusal", async () => {
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+    paymentSettles();
+    const settled = invoicePaid("evt_invoice_paid");
+
+    expect((await deliver(settled)).status).toBe(200);
+    expect(await (await deliver(settled)).json()).toEqual({
+      received: true,
+      duplicate: true,
+    });
+    refundsByIdempotencyKey = {};
+    expect((await deliver(invoicePaid("evt_invoice_paid_resend"))).status).toBe(
+      200,
+    );
+    // The settlement alone made the refund, once.
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(stripeRefunds).toHaveLength(1);
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_resend", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(stripeRefunds).toHaveLength(1);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("(c) never refunds a cancelled subscription bought before the grant when its payment settles", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = cancelledByCustomer("pro", {
+      created: LIFETIME_PAID_AT - 60,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+    paymentSettles();
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(200);
+    expect(mockInvoicePaymentsList).not.toHaveBeenCalled();
+    expect(mockRefundsList).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an Agency subscription beside Lifetime Pro", "agency", [grantRow("pro")]],
+    ["a subscription on an account with no lifetime grant", "pro", []],
+  ] as const)(
+    "(d) never refunds %s, cancelled by the customer, when its payment settles",
+    async (_case, plan, grants) => {
+      db.plan_entitlements = [...grants];
+      stripeSubscriptions[SUBSCRIPTION_ID] = cancelledByCustomer(plan);
+
+      expect(
+        (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+          .status,
+      ).toBe(200);
+      paymentSettles();
+      const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+      expect(response.status).toBe(200);
+      expect(mockRefundsList).not.toHaveBeenCalled();
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("(e) still refunds a subscription the refusal cancelled itself from Stripe's marker alone, without reading any local record", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+    );
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+    expect(
+      stripeSubscriptions[SUBSCRIPTION_ID].cancellation_details,
+    ).toMatchObject({ comment: "covered_by_lifetime" });
+    expect(
+      db.billing_events.some((row) =>
+        String(row.stripe_event_id).startsWith(TERMINAL_REFUSAL_ID_PREFIX),
+      ),
+    ).toBe(false);
+
+    terminalRefusalReadFails = true;
+    paymentSettles();
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate.mock.calls[0][1]).toEqual({
+      idempotencyKey: DEBIT_REFUND_KEY,
+    });
+  });
+
+  it("refunds once a payment that settles while the refusal is scanning its invoice", async () => {
+    const settlements: WebhookResponse[] = [];
+    mockInvoicePaymentsList.mockImplementationOnce(async () => {
+      // The refusal reads the payment in flight; it settles at once, and its
+      // event is processed before the refusal goes on.
+      paymentSettles();
+      settlements.push(await deliver(invoicePaid("evt_invoice_paid")));
+      return {
+        data: [invoicePayment("inpay_debit", "open", "pi_debit")],
+        has_more: false,
+      };
+    });
+
+    const refused = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(refused.status).toBe(200);
+    expect(settlements.map((settled) => settled.status)).toEqual([200]);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(stripeRefunds).toHaveLength(1);
+  });
+
+  it("asks Stripe to retry, alerts in words, and scans nothing when the refusal cannot be recorded", async () => {
+    terminalRefusalWriteFails = true;
+    const event = subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID);
+
+    const response = await deliver(event);
+
+    expect(response.status).toBe(500);
+    expect(mockInvoicePaymentsList).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(storedSubscription(SUBSCRIPTION_ID)).toBeUndefined();
+    const [alert] = alertsSaying("could not be recorded");
+    expect(alert[0]).toContain(SUBSCRIPTION_ID);
+    expect(alert[0]).toContain("Returning 5xx so Stripe redelivers");
+    expect(alert[0]).toContain("refund it by hand");
+    expect(alert[1]).toBeUndefined();
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        action: "record_terminal_refusal",
+        subscriptionId: SUBSCRIPTION_ID,
+        cause: expect.objectContaining({
+          message: expect.stringContaining("connection reset"),
+        }),
+      }),
+    );
+
+    // Stripe's redelivery records it; the payment's settlement is refunded.
+    terminalRefusalWriteFails = false;
+    expect((await deliver(event)).status).toBe(200);
+    paymentSettles();
+    expect((await deliver(invoicePaid("evt_invoice_paid"))).status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks Stripe to retry, and alerts in words, when the refusal record cannot be read at settlement", async () => {
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+    paymentSettles();
+    terminalRefusalReadFails = true;
+    const settled = invoicePaid("evt_invoice_paid");
+
+    const response = await deliver(settled);
+
+    expect(response.status).toBe(500);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const [alert] = alertsSaying("could not be refunded");
+    expect(alert[0]).toContain(INVOICE_ID);
+    expect(alert[0]).toContain("Returning 5xx so Stripe redelivers");
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        action: "refund_covered_invoice",
+        subscriptionId: SUBSCRIPTION_ID,
+        invoiceId: INVOICE_ID,
+        cause: expect.objectContaining({
+          message: expect.stringContaining("connection reset"),
+        }),
+      }),
+    );
+
+    terminalRefusalReadFails = false;
+    expect((await deliver(settled)).status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("never makes a live subscription's renewal depend on the refusal record", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "agency",
+    );
+    terminalRefusalReadFails = true;
+    paymentSettles();
+
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(200);
     expect(mockRefundsCreate).not.toHaveBeenCalled();
   });
 });

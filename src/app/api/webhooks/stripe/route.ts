@@ -45,9 +45,11 @@ import {
   isRefusedAsCoveredByLifetime,
   lifetimePaymentTime,
   readLifetimeCover,
+  recordTerminalRefusal,
   refundCoveredInvoice,
   refuseSubscriptionCoveredByLifetime,
   wasBoughtWithPlanAlreadyOwned,
+  wasRefusedAsCoveredByLifetime,
   type CoveredSubscriptionRefusal,
   type LifetimeCover,
 } from "@/lib/stripe/lifetime-covered-billing";
@@ -637,6 +639,14 @@ async function refuseIfLifetimeCovers(
     }
   }
 
+  // s82, Devin Review on PR #81 (finding 5): refused without a cancellation of
+  // ours, a subscription already over carries no marker in Stripe, and a
+  // payment still in flight on it would stay charged when it settles. Recorded
+  // here, before its invoice is scanned; see `recordTerminalRefusal`.
+  if (isTerminal && !isRefusedAsCoveredByLifetime(subscription)) {
+    await recordTerminalRefusalOrAlert(subscription, planId, userId, supabase);
+  }
+
   try {
     const refusal = await refuseSubscriptionCoveredByLifetime(subscription);
     await reportCoveredSubscriptionRefused(
@@ -704,6 +714,39 @@ async function readCoverOrAlert(
       {
         component: "webhooks/stripe",
         action: "read_lifetime_cover",
+        subscriptionId: subscription.id,
+        planId,
+      },
+    );
+    throw error;
+  }
+}
+
+/**
+ * Record the refusal of a subscription already over (finding 5), alerting
+ * before it throws. Retryable: nothing is scanned, refunded or recorded live
+ * until it is written, and Stripe redelivers.
+ */
+async function recordTerminalRefusalOrAlert(
+  subscription: StripeSubscriptionWithPeriod,
+  planId: PaidPlanId,
+  userId: string,
+  supabase: ServiceClient,
+): Promise<void> {
+  try {
+    await recordTerminalRefusal(supabase, subscription, userId, planId);
+  } catch (error) {
+    alertOps(
+      `Subscription ${subscription.id} (${planId}) is covered by a lifetime ` +
+        `grant and already ${subscription.status}, but its refusal could not ` +
+        `be recorded: a payment still processing on it would stay charged ` +
+        `when it settles. Returning 5xx so Stripe redelivers; if this ` +
+        `repeats, refund it by hand.`,
+      error,
+      { userId },
+      {
+        component: "webhooks/stripe",
+        action: "record_terminal_refusal",
         subscriptionId: subscription.id,
         planId,
       },
@@ -989,14 +1032,17 @@ async function handleInvoicePaymentSucceeded(
   // authority: the local row can still be active or absent when this event
   // overtakes `customer.subscription.deleted`. The previous local terminal
   // shortcut answered 200 without a refund in both orderings. Checking Stripe
-  // costs one retrieve for a legitimate renewal, but only the refusal marker
-  // permits a refund and the customer id must still match this invoice.
+  // costs one retrieve for a legitimate renewal, but only a refusal — the
+  // marker, or for a subscription already over when refused, the refusal's
+  // own record (finding 5) — permits a refund, and the customer id must still
+  // match this invoice.
   if (invoice.id && subscriptionId) {
     await refundIfRefusedAsCovered(
       invoice.id,
       subscriptionId,
       customer.stripe_customer_id,
       customer.user_id,
+      supabase,
     );
   }
 }
@@ -1014,6 +1060,7 @@ async function refundIfRefusedAsCovered(
   subscriptionId: string,
   expectedStripeCustomerId: string,
   userId: string,
+  supabase: ServiceClient,
 ): Promise<void> {
   try {
     const current = await retrieveCurrentSubscription(subscriptionId);
@@ -1025,7 +1072,7 @@ async function refundIfRefusedAsCovered(
       );
     }
     // Live, or over for another reason — never refunded by this rule.
-    if (!isRefusedAsCoveredByLifetime(current)) return;
+    if (!(await wasRefusedAsCoveredByLifetime(supabase, current))) return;
 
     const { refundIds, pendingPaymentIds } = await refundCoveredInvoice(
       invoiceId,

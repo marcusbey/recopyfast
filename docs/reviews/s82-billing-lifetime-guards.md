@@ -140,6 +140,89 @@ entry; both main's entries and this branch's entry remain intact.
    for every customer-canceled subscription, including purchases after coverage.
    That expectation encoded this finding. It now requires the refund; a separate
    predating case retains the legitimate no-refund behavior.
+5. **Late payments on canceled subscriptions stay charged**
+   (`route.ts:619`). Finding 4 refuses a terminal covered subscription without
+   cancelling it, so Stripe carries no `covered_by_lifetime` marker on it. A
+   payment still in flight at that refusal is reported as "refunded when it
+   settles", but the settlement handler (`refundIfRefusedAsCovered`, on
+   `invoice.payment_succeeded`) refunded only subscriptions with the marker, so
+   the settled payment stayed charged.
+
+   **Fix: a durable refusal record, read beside the marker.**
+   - `recordTerminalRefusal` writes a `billing_events` row when the refusal of a
+     terminal, unmarked subscription runs. It uses the synthetic
+     `stripe_event_id` `covered_by_lifetime_terminal:<subscription>` and
+     `event_type` `internal.terminal_subscription_refused`. This is the
+     write-once pattern of `claimRefusalReport` and `credit-revocations.ts`.
+     The table's UNIQUE constraint makes the row write-once, and the prefix can
+     never match a Stripe event id. The table already has RLS: service role
+     manages, users read their own rows. No migration and no Stripe write: a
+     canceled subscription is never updated.
+   - The row is written **before** the invoice is scanned for payments. If a
+     payment settles before the row lands, it is `paid` when the scan reads it
+     and is refunded there. If it settles after, its settlement finds the row.
+     `refundOnce` (metadata lookup plus a deterministic idempotency key) makes
+     it one refund either way.
+   - A failed write alerts (`record_terminal_refusal`, "refund it by hand") and
+     returns 5xx. Nothing is scanned, refunded or recorded live until Stripe
+     redelivers. This differs from the report claim on purpose: here, a lost row
+     means a payment stays charged.
+   - Settlement now asks `wasRefusedAsCoveredByLifetime`: the Stripe marker,
+     or, for a terminal subscription only, the record. A live subscription's
+     renewal never reads the record. A record that cannot be read alerts and
+     returns 5xx. The customer-binding check still runs first, and the marker
+     path is unchanged.
+
+   **Why not re-run coverage and payment order at settlement.** That design
+   also works and needs no write, but it is not as safe. (1) It re-decides with
+   the grants that exist at settlement. If the lifetime is refunded or revoked
+   between refusal and settlement, the payment stays charged, even though the
+   refusal told ops it would be refunded. The record keeps the decision that was
+   made and reported. (2) It would also refund canceled covered subscriptions
+   that the refusal never decided on. The existing case "never refunds an
+   invoice of a subscription that ended for another reason" pins that it must
+   not. (3) It adds a grant read and a Stripe payment-intent read to
+   settlement.
+
+   Test-first evidence, in `stripe-webhook-lifetime-covered.test.ts` under a new
+   `finding 5` describe: **5 failed, 93 passed** before the production change,
+   then **98/98**. Cases:
+   (a) a terminal subscription bought after the grant, payment in flight, is
+   refused, then refunded exactly once on settlement, with the customer's own
+   reason untouched;
+   (b) the same across an identical settlement replay, a new settlement event
+   after Stripe's idempotency key expires, and a resent refusal: one refund;
+   (c) a terminal subscription bought before the grant: no refund on
+   settlement;
+   (d) an Agency subscription beside Lifetime Pro, and an account with no grant,
+   both canceled by the customer: no refund on settlement;
+   (e) a subscription the refusal cancelled itself is refunded from the marker
+   alone, without reading the record;
+   plus a payment that settles while the refusal is scanning its invoice (one
+   refund), a failed record write (5xx, alert, nothing scanned, then fixed on
+   redelivery), a failed record read at settlement (5xx, alert, then refunded on
+   redelivery), and a live renewal that does not depend on the record.
+   (c), (d), (e) and the live-renewal case are guards: they pass before and
+   after the fix.
+
+   Mutations, each restored afterwards (files byte-identical to the backup; baseline 98/98):
+   settlement reads the marker only (5 red); record written after the scan
+   (2 red); record read for live subscriptions too (1 red); write failure
+   swallowed (1 red); read failure taken as "not refused" (1 red). Total: 10
+   red, none surviving.
+
+   Test fixture changed, declared: the fake database can fail the record's
+   write or read separately (`terminalRefusalWriteFails` /
+   `terminalRefusalReadFails`, matched by the synthetic id's prefix). No
+   existing assertion changed.
+
+   Not fixed, pre-existing, other ordering: `stopBillingForLifetimeOwner` (the
+   grant's event processed after the subscription's) still skips a covered
+   subscription that is already terminal. A subscription bought after the
+   lifetime and canceled by the customer before the lifetime's event is
+   neither refunded nor recorded there. This finding concerns only the
+   settlement of a refusal; the architect should decide whether that ordering
+   needs the finding-4 treatment.
 
 ### Current implementation verification
 
@@ -164,6 +247,23 @@ used `NEXT_PUBLIC_APP_URL=http://localhost:3000`.
 The architect reviewed and approved the finding-4 fix: terminal subscriptions go
 through the coverage and payment-order check; `cancelCovered` skips terminal ones;
 the refund is idempotent; a predating terminal subscription returns without a refund.
+
+### Finding 5 verification
+
+Same environment: Node `24.14.0`, `NEXT_PUBLIC_APP_URL=http://localhost:3000`,
+no provider environment variables, and no Stripe, Supabase or production calls.
+
+- `npm run lint`: passed, 0 errors / 31 existing warnings.
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath src/__tests__/api/billing/stripe-webhook-lifetime-covered.test.ts`:
+  1 suite, 98/98 passed. Before the production change: 5 failed / 93 passed.
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/'`:
+  53 suites / 879 tests passed, 0 failures.
+- `npm test`: 437 suites passed, 2 skipped; 6,080 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added, and the record reuses
+  `billing_events` and its existing UNIQUE constraint and RLS.
 
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.
