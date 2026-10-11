@@ -76,7 +76,7 @@ export const installRecipes: readonly InstallRecipe[] = [
     location:
       'For React or Next.js, load the generated tag after the page has hydrated. In Next.js, next/script with strategy="afterInteractive" is one option; preserve every generated attribute and value.',
     notes:
-      "The widget follows client-side route changes made with the History API (links, Back and Forward in a history-mode router): each in-app navigation loads that page's published copy and makes its newly rendered elements editable. Hash routes (/#/route) are not supported; switch the router to history mode, or give each route's elements a unique author-written data-rcf-id. Verify a full page load and an in-app navigation, then Back, reload, and returning to an edited page. Before the widget loads on editor-entry URLs, ensure analytics and session-replay scripts cannot read rcf_handoff, rcf_edit_token, rcf_staging, or rcf_token.",
+      "The widget follows client-side route changes made with the History API (links, Back and Forward in a history-mode router): each in-app navigation loads that page's published copy and makes its newly rendered elements editable. Hash routes (/#/route) are not supported; switch the router to history mode, or give each route's elements a unique author-written data-rcf-id. Verify a full page load and an in-app navigation, then Back, reload, and returning to an edited page. Before the widget loads on editor-entry URLs, ensure analytics and session-replay scripts cannot read rcf_handoff, rcf_staging, or rcf_token in the query, or the #rcf_edit= fragment: exclude it from URL capture.",
   },
   {
     id: "html",

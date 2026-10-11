@@ -122,6 +122,15 @@ fly secrets set \
 fly secrets list -a recopyfast-ws     # names only; values are never readable back
 ```
 
+**Optional: `SENTRY_DSN`** (s84). When set, an uncaught exception or unhandled rejection is
+sent to Sentry — scrubbed of tokens, credentials and client IPs — before the process exits 1
+exactly as it always did (`sentry.js`). Unset, nothing is sent. Only this name is read, never
+`NEXT_PUBLIC_SENTRY_DSN`: in development this process loads the repo root's `.env.local`, and
+local crashes must not land in production's project. `SENTRY_RELEASE` (optional) names the
+release; without it events carry none. Set it the same staged way:
+`fly secrets set SENTRY_DSN=... --stage -a recopyfast-ws`, then deploy. See
+[`docs/operations/monitoring.md`](../docs/operations/monitoring.md).
+
 **`--stage` is not optional, and the incident at the bottom of this file is why.** Without it
 `fly secrets set` releases immediately, against whatever image is currently deployed — so the
 machine restarts once for the secret and again for the `fly deploy` that follows. `fly.toml`'s

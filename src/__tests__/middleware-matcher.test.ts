@@ -73,8 +73,40 @@ function middlewareRuns(pathname: string): boolean {
   return matchers.some((match) => match(pathname) !== false);
 }
 
-/** The middleware reads `nextUrl` and the request cookies. Nothing else. */
+/**
+ * The DSN the tunnel cases run under. Since s84 the tunnel forwards only our own
+ * browser's envelopes (`src/__tests__/sentry-tunnel-guard.test.ts` pins the
+ * refusals), so the cases below — which are about what an ACCEPTED tunnel
+ * request costs and carries — send exactly that: a POST naming this DSN's org
+ * and project in the query and this DSN in the envelope header.
+ */
+const TUNNEL_DSN = "https://s84dummypublickey@o1.ingest.sentry.io/2";
+const savedSentryDsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+beforeAll(() => {
+  process.env.NEXT_PUBLIC_SENTRY_DSN = TUNNEL_DSN;
+});
+
+afterAll(() => {
+  if (savedSentryDsn === undefined) delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+  else process.env.NEXT_PUBLIC_SENTRY_DSN = savedSentryDsn;
+});
+
+/**
+ * The middleware reads `nextUrl` and the request cookies — and, on the tunnel
+ * path only, the method and the body.
+ */
 function request(pathname: string): NextRequest {
+  if (pathname === SENTRY_TUNNEL_ROUTE) {
+    const url = `https://app.test${pathname}?o=1&p=2`;
+    return {
+      url,
+      method: "POST",
+      nextUrl: new URL(url),
+      cookies: { getAll: () => [], set: jest.fn() },
+      text: async () => `{"dsn":"${TUNNEL_DSN}"}\n{"type":"event"}\n{}`,
+    } as unknown as NextRequest;
+  }
   return {
     url: `https://app.test${pathname}`,
     nextUrl: new URL(pathname, "https://app.test"),

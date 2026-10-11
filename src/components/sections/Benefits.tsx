@@ -55,7 +55,7 @@ const supporting = [
     title: "Click. Edit. Done.",
     // "Click any text on your live site" skipped the one precondition that
     // matters: the widget only enters edit mode behind an edit-session link
-    // (`rcf_edit_token`), which the dashboard mints. A visitor to the live URL
+    // (`#rcf_edit=`, s76), which the dashboard mints. A visitor to the live URL
     // gets a normal page, which is the whole point of the design.
     description:
       "Open your site from the dashboard and edit in place. No CMS screens to learn.",

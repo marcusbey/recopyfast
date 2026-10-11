@@ -166,6 +166,8 @@ function grantRow(grant: string, permissions: string[] = ["edit"]) {
     grant_hash: hashOpaqueSecret(grant),
     user_agent_hash: hashUserAgent(USER_AGENT),
     origin_hash: hashOrigin(MINTING_ORIGIN),
+    // NOT NULL DEFAULT now() on the real table; s76 dates a lineage by it.
+    created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
     expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     revoked_at: null,
     revoked_reason: null,
@@ -197,15 +199,17 @@ function siteHandler(options: {
         ? { data: options.grantRow ?? null, error: null }
         : { data: null, error: null };
     }
+    // No row is `{ data: null, error: null }`, as `maybeSingle` answers it.
+    // These used to model `.single()`'s PGRST116 "error" for no row; since s76
+    // the validators read with `maybeSingle` and an error means the database
+    // failed (503), so a fixture that errs on "not found" models an outage.
     if (op.table === "edit_sessions") {
       return op.kind === "select" && options.editSession
         ? { data: options.editSession, error: null }
-        : op.kind === "select"
-          ? { data: null, error: { code: "PGRST116", message: "no rows" } }
-          : { data: null, error: null };
+        : { data: null, error: null };
     }
     if (op.table === "staging_access") {
-      return { data: null, error: { code: "PGRST116", message: "no rows" } };
+      return { data: null, error: null };
     }
     if (op.table === "site_permissions") {
       // s68a (ADR 047): the edit-session validator reads the HOLDER's own row,
