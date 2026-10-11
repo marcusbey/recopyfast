@@ -1,8 +1,8 @@
 # Review — Story s06b-embed-fixture-harness
 
 > Fresh-context review by the `reviewer` subagent. Reviewed the complete story diff from
-> `origin/main` (`0dea1c05`) through committed head `1d7581d8`, plus the frozen three-file
-> review repair in `stub-api.ts`, `languages-images.spec.ts` and the plan evidence note.
+> `origin/main` (`0dea1c05`) through PR head `2b8273e3`, plus the frozen post-Devin repair in
+> `stub-api.ts`, `edit-publish.spec.ts`, `cls.spec.ts`, the plan and this review.
 > Draft PR: <https://github.com/marcusbey/recopyfast/pull/88>.
 > No product UI changes, so design-system and customer screenshot review do not apply.
 
@@ -13,19 +13,23 @@
   differ and the staging widget initializes.
 - [x] **Task 2:** the in-memory API covers the widget endpoints named by the plan, records method,
   path, query, headers, JSON/raw/multipart bodies, and returns shapes checked against the current
-  route handlers. Narrow upload and language credential checks prevent the stub from manufacturing
-  success when a required wire field disappears; the stub does not pretend to implement backend
-  authorization policy.
+  route handlers. Narrow upload, language and staging-publish credential checks prevent the stub
+  from manufacturing success when a required wire field disappears; the stub does not pretend to
+  implement backend authorization policy.
 - [x] **Task 3:** a real widget gesture edits the host DOM, records the staging write, proves the
-  published row is initially unchanged, then publishes the staged value and clears the draft.
+  published row is initially unchanged, pins preview `siteId` / `page_path` / `rcf_token` and POST
+  `siteId` / `stagingToken`, then publishes the staged value and clears the draft. Missing or wrong
+  fixture credentials are refused before state mutation.
 - [x] **Task 4:** staging validation/banner, draft-only state, history list, Bearer credential,
   restore request, restored fixture state and restored host DOM are all asserted.
 - [x] **Task 5:** the user-approved 2026-10-11 scope is implemented exactly: existing language
   list/add, including site id, POST body and staging Bearer contract, plus image upload with exact
   file bytes/name/type/site id, site Bearer, staging write and changed host `src`. No language
   switching or translation-delivery feature was invented.
-- [x] **Task 6:** the same host page is measured with and without the widget; only shifts without
-  recent input count; the printed delta is gated at `<= 0.001`.
+- [x] **Task 6:** the same host page is measured with and without the widget from navigation start
+  through network idle plus the named 750 ms startup settle window. Only shifts without recent
+  input count; the printed delta remains gated at `<= 0.001`. This is bounded Chromium startup-lab
+  evidence, not lifetime/session or field CLS.
 - [x] **Task 7:** the isolated config owns exactly six Chromium tests with no `webServer`; the main
   config excludes the fixture and still owns exactly 86 tests. The unguarded, credential-free CI
   job performs install, browser install, embed build and fixture run.
@@ -51,22 +55,36 @@
 - [x] AGENTS.md's permanent artifact URL, degrade-not-break, generated-source and no-secret rules
   are respected.
 
-## Tests run by the reviewer
+## Tests and verification
+
+### Post-Devin focused proof, run by the reviewer on the frozen repair
 
 - `CI=1 npm run test:embed:fixture` — **6 passed, 0 failed, 0 skipped, 0 flaky**.
+- Exact immutable credential-less publish mutant
+  `acb0ce5fa988cf35e8d71ba4b5610b52f0bd2d29ba7afd246df5b4e69b49544b` — **5 passed, 1
+  targeted edit/publish failure, 0 skipped, 0 flaky**. The failure showed the POST retained
+  `siteId` but lacked `stagingToken`; CLS, boot, language, image and history remained green.
 - `NEXT_PUBLIC_APP_URL=http://localhost:3000 CI=1 npm test -- src/__tests__/e2e/playwright-ci-contract.test.ts --runInBand`
   — **12/12 passed**.
-- `NEXT_PUBLIC_APP_URL=http://localhost:3000 CI=1 npm test -- src/__tests__/embed --runInBand`
-  — **24 suites, 305/305 tests passed**.
-- `NEXT_PUBLIC_APP_URL=http://localhost:3000 CI=1 npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB`
-  — **412 suites passed, 2 skipped; 5,571 tests passed, 38 database-dependent tests skipped**.
-- `npm run type-check` — passed.
+- `git diff --check` and product-file diff checks — passed after the clean and mutant runs.
+
+### Earlier reviewer gates on locked PR source `2b8273e3`
+
+- Source embed suite — **24 suites, 305/305 tests passed**.
+- Full Jest — **412 suites passed, 2 skipped; 5,571 tests passed, 38 database-dependent tests
+  skipped**.
+- Full TypeScript check — passed.
 - Playwright enumeration — main config **86 tests in 15 files**; fixture config **6 tests in 4
   files**.
-- `git diff --check` and product-file diff checks — passed.
+- `node scripts/build-embed.mjs --check` — artifact fresh at 45,828 bundle / 33,062 widget /
+  13,141 transport gzipped bytes.
 
-The review used the lockfile-exact Node 24 install after the stale local dependency tree was
-replaced. Product files remain unchanged:
+Those earlier full-suite gates predate only the post-Devin fixture assertions, CLS naming and docs;
+they remain locked-source evidence rather than being presented as a repeat of the final focused
+repair. The normal report commit/push hooks own the next complete build/coverage pass.
+
+All reviewer commands used the lockfile-exact Node 24 install after the stale local dependency tree
+was replaced. Product files remain unchanged:
 
 - `public/embed/recopyfast.js` SHA-256
   `2756a6897f09bbea2684460cab24b8fa39cfffb74d8a353d67d0bd725d4723df`, Git blob
@@ -84,9 +102,15 @@ replaced. Product files remain unchanged:
   staging Bearer on language GET and POST. Re-running the same immutable mutant
   (`d31b51373c151d5e43e62f477d911d26803d0d8816fde4de6e34638098dd9d38`) produced **one targeted
   language failure and five passes**, including a green image case.
+- Authenticated Devin review exposed the same false-positive class on staging publish. Removing
+  only `editorTokenBody()` from the built POST initially escaped the fixture. The repaired stub now
+  refuses missing/wrong preview and POST staging credentials before reading or mutating pending
+  rows, and the browser spec pins the exact GET query and POST body. The unchanged mutant
+  (`acb0ce5fa988cf35e8d71ba4b5610b52f0bd2d29ba7afd246df5b4e69b49544b`) now produces **one
+  targeted edit/publish failure and five passes**.
 - The retained History-renderer, publish-action, Languages-renderer and delayed-CLS mutants each
   produced one targeted failure and five passes. The CLS mutant measured `0.217101`, above the
-  unchanged `0.001` ceiling.
+  unchanged `0.001` ceiling inside the named startup window.
 - All mutations targeted scratch copies through `RECOPYFAST_FIXTURE_ARTIFACT`; product files stayed
   byte-identical and required no restoration.
 
@@ -94,10 +118,10 @@ replaced. Product files remain unchanged:
 
 No unresolved critical, major or minor finding remains in the reviewed story diff.
 
-Two major false-positive gaps were found before this verdict: missing multipart-file validation and
-missing language Bearer validation. Both were fixed test-first and independently neutralized again;
-the exact broken artifacts now fail only their intended cases. They are recorded as resolved review
-history, not open findings.
+Three major false-positive gaps were found before this verdict: missing multipart-file validation,
+missing language Bearer validation and missing staging-publish credential validation. All three
+were fixed test-first and independently neutralized again; the exact broken artifacts now fail only
+their intended cases. They are recorded as resolved review history, not open findings.
 
 ## Evidence boundaries
 
@@ -106,19 +130,29 @@ history, not open findings.
   substitute for `e2e/share-edit-publish.spec.ts` against the disposable Supabase/Next stack, a
   deployed customer host, or production authorization/data behavior.
 - The reviewer did not start a provider stack, make paid/provider calls, deploy, merge or exercise
-  production. Root verified that initial PR head `1d7581d8` passed every hosted check, including
-  the fixture and disposable-stack E2E jobs. The reviewed language repair has not yet been pushed;
-  hosted CI for that final source/report head remains required and is not claimed here.
+  production. Earlier hosted results do not prove this frozen post-Devin repair; current-head CI
+  after the report/fix commit and push remains required and is not claimed here.
 - Greptile availability could not be verified with the repository permissions available in this
   recovery, as disclosed in the draft PR. No Greptile score is claimed; the repository's
   `Ship allowed` review gate remains authoritative.
-- Chromium is the only browser used by this story. The CLS result is a local comparative lab
-  measurement, not field performance evidence.
+- Chromium is the only browser used by this story. The CLS result covers navigation start through
+  network idle plus the unchanged 750 ms settle interval. It is startup lab evidence, not
+  lifetime/session or field performance evidence; the authenticated Devin UI flag remains for the
+  PR owner to answer or resolve.
 - The locked production build and coverage gates will run again through the repository's normal
   review-report commit/push hooks. The earlier pre-push build used a stale installed Next version,
   so it is not treated here as locked-current build evidence.
 
 ## Verdict
+
+Authenticated Devin review exposed a real major publish-credential false positive and correctly
+questioned the CLS observation boundary. The publish gap is now repaired and independently proven
+with the exact broken artifact. The CLS code, plan and report now state the intended bounded startup
+window explicitly; the 750 ms duration, `0.001` threshold and in-window mutation were not relaxed.
+
+No unresolved finding remains. PR readiness still depends on root-owned commit/push hooks,
+current-head hosted CI and the separate PR-review UI disposition; those delivery gates are not
+collapsed into this code-review verdict.
 
 Max severity: none
 Ship allowed: yes

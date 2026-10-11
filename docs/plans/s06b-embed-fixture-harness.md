@@ -11,7 +11,7 @@ Research: `docs/research/s06-embed-budget-gate.md` — read it first; this plan 
 `s06b-embed-fixture-harness`, split out of `s06-embed-budget-gate` (`docs/stories.md` →
 *Revised after research*, complexity 3). Carries **AC 7 and AC 8** of `stories.md:446-447`:
 editing, publishing, staging, history, languages and image replacement each working against a
-real fixture page, and the widget's contribution to host-page CLS.
+real fixture page, and the widget's contribution to bounded host-page startup CLS.
 
 **This story sequences before `s06c` and is the reason `s06c` is reviewable at all.** Trap 3 of
 the research: the 43 existing embed tests cover editor auth, element ids and the handoff
@@ -57,9 +57,10 @@ file. Nothing a customer or an operator sees is different afterwards.
   add/list behavior, not page-language switching or translation delivery. The user explicitly
   approved this scope amendment on 2026-10-11. Fresh clean six-test and mutation evidence,
   including the independently verified missing-file upload repair, proves this task.
-- [x] **6. CLS spec, with the baseline stated.** Two loads of the *same* host page — one with the
-  `<script>` tag, one without — collecting `PerformanceObserver` `layout-shift` entries
-  (`hadRecentInput === false`) until network idle plus a fixed settle window. Assert
+- [x] **6. Startup CLS spec, with the baseline stated.** Two loads of the *same* host page — one
+  with the `<script>` tag, one without — collecting `PerformanceObserver` `layout-shift` entries
+  (`hadRecentInput === false`) from navigation start through network idle plus the fixed
+  `STARTUP_CLS_SETTLE_MS = 750` window. Assert
   **delta ≤ 0.001**, and print both figures. The baseline is the widget-less page, per open
   question 4: "0 absolute" is not measurable on a page whose own images shift. If the delta is
   non-zero today, that is a **finding recorded in the PR** — the threshold does not move to
@@ -89,7 +90,8 @@ local evidence. Final review, PR/current-head CI and manual release remain separ
   `refs/recopyfast-recovery/s06b-pre-main-20261010`.
 - Tasks 1–4 and 6–8 now have fresh Chromium evidence against the built artifact. The clean local
   run is six of six; CI mode's strict reporter records 6 passed, 0 failed, 0 skipped and 0 flaky.
-  The CLS figures are `without=0.000000`, `with=0.000000`, `delta=0.000000`. Editing, staging,
+  The bounded startup CLS figures (navigation through network idle plus 750 ms) are
+  `without=0.000000`, `with=0.000000`, `delta=0.000000`. Editing, staging,
   publishing, history restore and image replacement each assert both host/editor state and their
   recorded request. History additionally proves the restored copy reaches the host DOM after the
   widget reloads.
@@ -106,7 +108,8 @@ local evidence. Final review, PR/current-head CI and manual release remain separ
 - Task 8 was run per spec group through `RECOPYFAST_FIXTURE_ARTIFACT`. Disabling History rendering,
   the publish POST, or Languages rendering each produced exactly one targeted failure and five
   passes; the Languages failure still ran and passed the image test. A delayed layout-shift mutant
-  produced `delta=0.217101`, one targeted CLS failure and five passes. The clean artifact remained
+  scheduled inside that startup window produced `delta=0.217101`, one targeted startup-CLS failure
+  and five passes. The clean artifact remained
   byte-identical to main before and after `npm run build:embed` (`8b43d15e…` as a Git blob).
 - Final review then removed the language POST Authorization header from a scratch built artifact.
   The pre-fix harness incorrectly stayed six of six green. Test-first controls now require the real
@@ -114,6 +117,13 @@ local evidence. Final review, PR/current-head CI and manual release remain separ
   401, and retain the GET site-id plus POST body/render assertions. The exact reviewer mutant
   `d31b5137…` now produces one targeted language failure and five passes; the clean artifact remains
   six of six with no skips or flakes.
+- Authenticated Devin review then identified the same request-contract gap on staging publish. The
+  permissive stub was observed red at 200 versus the required 401 before repair. Preview GET now
+  requires and records exact fixture `siteId`, `page_path=/` and `rcf_token`; publish POST
+  requires and records exact `siteId` and `stagingToken`; missing/wrong credential controls for
+  both methods return 401 before state mutation. Exact scratch artifact `acb0ce5f…`, which removes
+  only the publish POST `editorTokenBody()` call, produces one targeted edit/publish failure and
+  five passes. The clean artifact remains six of six with no skips or flakes.
 - Repository gates are green on Node 24: the current source-level embed suite passed 305/305;
   lint exited zero with 34 existing warnings; `format:check`, full and production type-checks,
   build, full Jest (5,571 passed, 38 skipped) and coverage all passed. Coverage reported 71.60%
@@ -164,7 +174,8 @@ by construction: shapes are copied from the route files with the path in a comme
 judges that insufficient, the alternative is to run the harness against a real Supabase — at
 which cost it inherits the disposable stack's setup and provider failure modes and stops being
 the unconditional credential-free gate this story needs. Second exposure: JSDOM-free Playwright
-CLS numbers are chromium-only and machine-sensitive; the
+Startup CLS numbers are chromium-only and machine-sensitive; the bounded interval does not claim
+full-session or field CLS after network idle plus 750 ms. Within that startup interval, the
 **delta** between two loads on the same machine is stable in a way an absolute figure is not,
 which is why the criterion is written as a delta.
 
@@ -193,7 +204,8 @@ than what covers it.
 - **Each spec must be able to fail for its own reason.** Task 8's mutation is run per spec group,
   not once — breaking the History renderer must redden the history spec and leave the other three
   green, or the specs are coupled and prove less than they appear to.
-- **Determinism before coverage.** Fixed ports, fixed stub responses, fixed settle window; a
+- **Determinism before coverage.** Fixed ports, fixed stub responses, and the named 750 ms startup
+  settle window; a
   flaky harness will be disabled by the first agent it inconveniences, and then `s06c` ships
   unguarded.
 - **Existing suites unchanged.** The current source-level embed suites stay green, main's strict
@@ -207,8 +219,9 @@ than what covers it.
 - `npm run test:embed:fixture` passes from a clean checkout with no environment variables set.
 - The six AC-7 flows each have a spec that asserts DOM *and* request, all green against the built
   artifact served cross-origin.
-- The CLS spec reports the with-widget and without-widget figures and asserts the delta; the
-  measured delta is stated in the PR description whatever it is.
+- The startup CLS spec reports its navigation-through-network-idle-plus-750-ms boundary, the
+  with-widget and without-widget figures, and the delta; the measured delta is stated in the PR
+  description whatever it is.
 - Task 8's mutation run is reproduced in the PR description: the command, and which spec went red.
 - The new CI job runs unconditionally and is green.
 - `lint`, `type-check`, `format:check`, `build`, `test` green.

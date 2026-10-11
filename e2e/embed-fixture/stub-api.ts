@@ -354,6 +354,16 @@ export class StubApi {
     if (url.pathname === "/api/staging/publish") {
       if (method === "GET") {
         // src/app/api/staging/publish/route.ts GET
+        // An authenticated Devin mutation removed only `editorTokenBody()`
+        // from the built publish POST and the fixture still returned success.
+        // The production preview and mutation both validate the editor
+        // principal before service-role access, so this staging-link fixture
+        // must refuse to manufacture either response when its wire credential
+        // is absent or has drifted.
+        if (url.searchParams.get("rcf_token") !== FIXTURE_STAGING_TOKEN) {
+          this.writeJson(response, 401, { error: "Unauthorized" });
+          return true;
+        }
         const pending = this.pendingRows();
         this.writeJson(response, 200, {
           success: true,
@@ -375,6 +385,13 @@ export class StubApi {
       }
       if (method === "POST") {
         // src/app/api/staging/publish/route.ts POST
+        const body = this.objectBody(json);
+        if (this.stringField(body, "stagingToken") !== FIXTURE_STAGING_TOKEN) {
+          this.writeJson(response, 401, {
+            error: "Authentication required",
+          });
+          return true;
+        }
         const pending = this.pendingRows();
         const published = pending.map((row) => ({
           element_id: row.element_id,

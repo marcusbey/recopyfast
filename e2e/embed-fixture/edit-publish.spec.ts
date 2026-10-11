@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   FIXTURE_ELEMENT_IDS,
   FIXTURE_SITE_ID,
+  FIXTURE_STAGING_TOKEN,
   startFixtureServers,
   type FixtureServers,
   waitForWidget,
@@ -44,7 +45,30 @@ test.describe("built embed fixture: edit and publish", () => {
 
   test("edits through the widget and publishes the staged value", async ({
     page,
+    request,
   }) => {
+    const publishUrl = `${fixture.servingOrigin}/api/staging/publish`;
+    for (const token of [undefined, "wrong-staging-token"]) {
+      const previewUrl = new URL(publishUrl);
+      previewUrl.searchParams.set("siteId", FIXTURE_SITE_ID);
+      previewUrl.searchParams.set("page_path", "/");
+      if (token) previewUrl.searchParams.set("rcf_token", token);
+      const response = await request.get(previewUrl.toString(), {
+        failOnStatusCode: false,
+      });
+      expect(response.status()).toBe(401);
+    }
+    for (const stagingToken of [undefined, "wrong-staging-token"]) {
+      const response = await request.post(publishUrl, {
+        failOnStatusCode: false,
+        data: {
+          siteId: FIXTURE_SITE_ID,
+          ...(stagingToken ? { stagingToken } : {}),
+        },
+      });
+      expect(response.status()).toBe(401);
+    }
+
     await page.goto(fixture.stagingUrl(), { waitUntil: "networkidle" });
     await waitForWidget(page);
 
@@ -84,13 +108,25 @@ test.describe("built embed fixture: edit and publish", () => {
     await expect(
       page.getByRole("button", { name: /publish now/i }),
     ).toBeEnabled();
+    await expect
+      .poll(
+        () => fixture.api.latestRequest("/api/staging/publish", "GET")?.search,
+      )
+      .toEqual({
+        siteId: FIXTURE_SITE_ID,
+        page_path: "/",
+        rcf_token: FIXTURE_STAGING_TOKEN,
+      });
     await page.getByRole("button", { name: /publish now/i }).click();
 
     await expect
       .poll(
         () => fixture.api.latestRequest("/api/staging/publish", "POST")?.json,
       )
-      .toMatchObject({ siteId: FIXTURE_SITE_ID });
+      .toEqual({
+        siteId: FIXTURE_SITE_ID,
+        stagingToken: FIXTURE_STAGING_TOKEN,
+      });
     await expect(page.getByText(/published 1 change/i)).toBeVisible();
     expect(fixture.api.publishedContent(FIXTURE_ELEMENT_IDS.heading)).toBe(
       editedText,
