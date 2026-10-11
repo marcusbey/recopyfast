@@ -82,7 +82,10 @@ jest.mock("@/lib/auth/editor-verification");
 jest.mock("@/lib/api/rate-limit");
 
 import { POST } from "@/app/api/editor/submit-code/route";
-import { listSitesForEditor } from "@/lib/auth/editor-directory";
+import {
+  findActiveSiteEditor,
+  listSitesForEditor,
+} from "@/lib/auth/editor-directory";
 import { consumeVerificationCode } from "@/lib/auth/editor-verification";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import {
@@ -90,6 +93,7 @@ import {
   readHubSession,
 } from "@/lib/auth/editor-hub-session";
 import { resetSigningKeyCache } from "@/lib/auth/editor-crypto";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 
 const mockListSitesForEditor = listSitesForEditor as jest.MockedFunction<
   typeof listSitesForEditor
@@ -258,5 +262,58 @@ describe("POST /api/editor/submit-code — siteId canonicalisation", () => {
     expect(mockConsumeCode).toHaveBeenCalledWith(
       expect.objectContaining({ siteId: null }),
     );
+  });
+});
+
+describe("POST /api/editor/submit-code — an outage is not an origin verdict (s76)", () => {
+  const SITE_ID = "5f0c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f";
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resetSigningKeyCache();
+    mockEnforceRateLimit.mockResolvedValue(null);
+    mockConsumeCode.mockResolvedValue({ ok: true });
+    // The `sites` read behind the origin check fails.
+    jest.mocked(createServiceRoleClient).mockReturnValue({
+      from: () => {
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: null,
+              error: { message: "connection reset" },
+            }),
+        };
+        return chain;
+      },
+    } as unknown as ReturnType<typeof createServiceRoleClient>);
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("answers 503, not 403 origin_mismatch, and mints nothing", async () => {
+    // Review minor 2: a failed `sites` read answered "This site isn't served
+    // from its registered domain." — a verdict nobody reached.
+    const response = (await POST(
+      new NextRequest("https://www.recopyfa.st/api/editor/submit-code", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://helloworld.com",
+          "User-Agent": "Mozilla/5.0 (Macintosh) Chrome/120",
+        },
+        body: JSON.stringify({ email: EMAIL, code: "123456", siteId: SITE_ID }),
+      }),
+    )) as unknown as CookieJarResponse;
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "unavailable",
+    });
+    expect(findActiveSiteEditor).not.toHaveBeenCalled();
   });
 });

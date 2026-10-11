@@ -22,8 +22,9 @@
  * `createRateLimitConfig` are left real so a `checkCache()` written against
  * them works unchanged.
  *
- * `test.failing` — there is no cache check to fail today; these flip green→red
- * the moment one is added.
+ * These were `test.failing` pins until s84-observability added the check; they
+ * are plain tests now, and the mutation that removes `checkCache()` turns all
+ * three red again.
  */
 
 import { NextRequest } from "next/server";
@@ -51,11 +52,18 @@ jest.mock("@/lib/supabase/server", () => ({
   })),
 }));
 
+// Indirected through an arrow function: the route imports `rateLimiter` at
+// module load, which runs this factory before `mockCheckLimit` above is
+// initialised. Referencing it lazily keeps the double the same one each test
+// configures.
 jest.mock("@/lib/security/rate-limiter", () => {
   const actual = jest.requireActual("@/lib/security/rate-limiter");
   return {
     ...actual,
-    rateLimiter: { checkLimit: mockCheckLimit, resetLimit: jest.fn() },
+    rateLimiter: {
+      checkLimit: (...args: unknown[]) => mockCheckLimit(...args),
+      resetLimit: jest.fn(),
+    },
   };
 });
 
@@ -129,7 +137,7 @@ describe("A-30 /api/health does not check the rate-limit store", () => {
     expect(body.checks.storage.status).toBe("ok");
   });
 
-  test.failing("reports the cache as ok while Redis is reachable", async () => {
+  it("reports the cache as ok while Redis is reachable", async () => {
     const response = await GET(healthRequest());
     const body = await response.json();
 
@@ -153,34 +161,65 @@ describe("A-30 /api/health does not check the rate-limit store", () => {
     expect(body).toHaveProperty("timestamp");
   });
 
-  test.failing(
-    "reports unhealthy when the rate-limit store throws",
-    async () => {
-      cacheDown();
+  it("reports unhealthy when the rate-limit store throws", async () => {
+    cacheDown();
 
-      const response = await GET(healthRequest());
-      const body = await response.json();
+    const response = await GET(healthRequest());
+    const body = await response.json();
 
-      expect(body.checks.cache?.status).toBe("error");
-      // Editor login is refusing every request at this point; the probe must
-      // not answer 200.
-      expect(response.status).toBe(503);
-      expect(body.status).not.toBe("healthy");
-    },
-  );
+    expect(body.checks.cache?.status).toBe("error");
+    // Editor login is refusing every request at this point; the probe must
+    // not answer 200.
+    expect(response.status).toBe(503);
+    expect(body.status).not.toBe("healthy");
+  });
 
-  test.failing(
-    "HEAD answers 503 when the rate-limit store is down",
-    async () => {
-      cacheDown();
+  it("HEAD answers 503 when the rate-limit store is down", async () => {
+    cacheDown();
 
-      const response = await HEAD();
+    const response = await HEAD(healthRequest());
 
-      // HEAD is what the uptime monitor calls. It checks the database alone,
-      // so it stays 200 straight through a Redis outage.
-      expect(response.status).toBe(503);
-    },
-  );
+    // HEAD is what a HEAD-based monitor calls. Until s84 it checked the
+    // database alone, so it stayed 200 straight through a Redis outage; it
+    // now reads the cache too.
+    expect(response.status).toBe(503);
+  });
+
+  it("GET answers 503 when the database alone is down, as HEAD does", async () => {
+    // s84. The severity maths used to need two failing checks before it said
+    // `unhealthy`, so a database outage on its own answered GET with 200
+    // `degraded` — while HEAD, on the same outage, answered 503. The uptime
+    // workflow (`.github/workflows/uptime.yml`) GETs this endpoint: it would
+    // have read the one outage that stops every save as "up".
+    mockLimit.mockResolvedValue({
+      data: null,
+      error: { code: "08006", message: "connection failure" },
+    });
+
+    const response = await GET(healthRequest());
+    const body = await response.json();
+
+    expect(body.checks.database.status).toBe("error");
+    expect(body.checks.storage.status).toBe("ok");
+    expect(body.status).toBe("unhealthy");
+    expect(response.status).toBe(503);
+  });
+
+  it("keeps a storage-only outage at degraded and 200 (control)", async () => {
+    // The other half of the rule: storage serves image uploads, not the copy a
+    // visitor reads or the save an editor makes. Alone it degrades.
+    mockGetBucket.mockResolvedValue({
+      data: null,
+      error: { message: "storage down" },
+    });
+
+    const response = await GET(healthRequest());
+    const body = await response.json();
+
+    expect(body.checks.storage.status).toBe("error");
+    expect(body.status).toBe("degraded");
+    expect(response.status).toBe(200);
+  });
 
   it("HEAD still answers 503 when the database is down (control)", async () => {
     mockLimit.mockResolvedValue({
@@ -188,7 +227,7 @@ describe("A-30 /api/health does not check the rate-limit store", () => {
       error: { code: "08006", message: "connection failure" },
     });
 
-    const response = await HEAD();
+    const response = await HEAD(healthRequest());
 
     expect(response.status).toBe(503);
   });

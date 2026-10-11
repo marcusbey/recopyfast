@@ -119,6 +119,8 @@ function makeWorld(options: { sweepGrants: boolean }) {
               grant_hash: hashOpaqueSecret(GRANT),
               user_agent_hash: hashUserAgent(USER_AGENT),
               origin_hash: hashOrigin(ORIGIN),
+              // NOT NULL DEFAULT now() on the real table; s76 dates a lineage by it.
+              created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
               expires_at: new Date(Date.now() + 3_600_000).toISOString(),
               revoked_at: state.grantRevokedAt,
               revoked_reason: state.grantRevokedReason,

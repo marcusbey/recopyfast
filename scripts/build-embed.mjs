@@ -312,8 +312,85 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * across eight comment salts. Only the two ends are measurements of shipped
  * bytes. build-size-gate.test.ts pins the same pair.
  */
-const MAX_BUNDLE_GZ = 45828;
-const MAX_WIDGET_GZ = 33062;
+/*
+ * RATCHETED DOWN 2026-10-09 (s76-grant-and-edit-token-hardening), from
+ * 45828 / 33062.
+ *
+ * The owner's "Edit website" link stopped carrying the edit session in its
+ * query string (A-29, ADR 055): it lands as `#rcf_edit=<code>`, a 60-second,
+ * single-use code the widget sends to its boot check, which answers the
+ * session's token. Zero headroom on main, so the story paid in this file,
+ * measured on prototypes in sequence (research table):
+ *
+ *   45828 / 33062  ceilings before s76 = measured on main at 72f4cff
+ *   +50 / +56      the code in the edit-token slot: read from the fragment,
+ *                  stripped from the address bar, swapped for the answered
+ *                  token in memory and storage (a dedicated redeem request
+ *                  measured +88 / +79 and was not built)
+ *   −5 / −16       one keepEditLink() for parse time and the swap
+ *   −18 / −16      `kind: result.kind` — the server sends it with every valid
+ *                  answer, so the client-side fallback was dead
+ *   −4 / −3        no `rememberDevice` in the refresh body — the server reads
+ *                  the lineage and ignores it (A-28)
+ *   −10 / −8       init() tests `this.stagingMode` alone; it implies a token
+ *   −4 / −5        no `|| null` on the new read; `location.hash`
+ *   −12 / −12      `|| undefined` dropped from the boot check's body and
+ *                  `editorTokenBody()` (servers read strings only), and a
+ *                  destructured restore
+ *   +2 / +1        the story's tombstone comments (banner hash only; the
+ *                  lines above were measured without them, 45825 / 33058)
+ *   45827 / 33059  measured on the branch — the new ceilings
+ *
+ * Only the two ends are measurements of shipped bytes: every source edit moves
+ * the banner hash, and with it gzip, by up to ±2 B, so the middle lines (each
+ * a prototype run) carry that noise. build-size-gate.test.ts pins the same pair.
+ *
+ * RATCHETED DOWN again in the s76 review fix pass, from 45827 / 33059:
+ *
+ *   45827 / 33059  the s76 ceilings above, re-measured after the rebase on
+ *                  main at fc5968b (s73 changed no embed byte)
+ *   +13 / +15      a legacy `?rcf_edit_token=` is stripped from the address
+ *                  bar, tested for presence and never read (review minor 4)
+ *   −27 / −22      offsets: `window.` dropped from globals that always exist —
+ *                  `location` ×11, `open` ×2, `addEventListener` ×3,
+ *                  `removeEventListener`, `sessionStorage` ×2,
+ *                  `localStorage`, `history` — and `urlParams + ''` for
+ *                  `.toString()` with the one-use `cleanUrl` inlined
+ *   45813 / 33052  measured on the branch — the new ceilings
+ *
+ * CORRECTED in the s76 review fix pass 2, 45813 / 33052 → 45818 / 33059. Up
+ * from fix pass 1's pair, which never reached main; still DOWN from main's
+ * 45828 / 33062, the last ceilings that shipped. Fix pass 1's offset was a
+ * defect (review major): a bare `open` / `history` / `addEventListener` /
+ * `removeEventListener` / `localStorage` / `sessionStorage` resolves to a
+ * host page's own top-level `let`/`const` first, and the TypeError lands in
+ * the host page (non-negotiable #4, host-page-globals.test.ts).
+ *
+ *   45813 / 33052  fix pass 1 (branch only)
+ *   +10 / +12      `window.` on every use of those names: `open` ×2,
+ *                  `history` ×3, `addEventListener` ×3, `removeEventListener`,
+ *                  `localStorage`, `sessionStorage` ×5 — five of them (the
+ *                  parse-time strip's `history` ×2, the edit link's
+ *                  `sessionStorage` ×3) were bare on main too — and the
+ *                  tombstone saying why
+ *   −5 / −5        `864e5` for the two `24 * 60 * 60 * 1000` products, which
+ *                  esbuild keeps as `1440*60*1e3`
+ *   45818 / 33059  measured on the branch — the new ceilings
+ *
+ * `location` stays bare on all 13 references, on 11 lines — the 11 fix pass 1
+ * un-prefixed and the story's two `location.hash` reads: it is unforgeable, so
+ * a page's top-level `let`/`const`/`class location` is a SyntaxError and
+ * `var location` binds nothing new (measured in Chromium 145 and WebKit 26).
+ * Counted with ESLint's `no-restricted-globals` — the scope analysis
+ * host-page-globals-census.test.ts runs on the other six names — not by grep.
+ * Tried and rejected, each larger: the scroll listener on the editor's
+ * AbortSignal (+6 / +5), a local for `window.visualViewport` (+16 / +10), one
+ * storage helper for the auth client (+9 / +5), one captured sessionStorage
+ * (+0 / +1). The middle lines carry the banner hash's ±2 B; only the two ends
+ * are measurements.
+ */
+const MAX_BUNDLE_GZ = 45818;
+const MAX_WIDGET_GZ = 33059;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

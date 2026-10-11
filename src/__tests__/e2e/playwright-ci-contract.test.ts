@@ -41,7 +41,7 @@ describe("Playwright CI contract", () => {
   // s74: 80 -> 81, E2E-019 in e2e/landing.spec.ts (a software WebGL renderer
   // gets the static sky).
   // s70b: 81 -> 86, the five Changes page tests (e2e/changes.spec.ts).
-  // s17: 86 -> 88, the two request-only comparison route contract tests.
+  // s17: +2, the two request-only comparison route contract tests.
   // s79: 86 -> 91, the five e2e/csp.spec.ts tests (marketing surface, /login,
   // /signup, /edit, signed-in dashboard).
   // Combined: 86 + 2 + 5 = 93 distinct tests.
