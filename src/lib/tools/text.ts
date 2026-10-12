@@ -11,23 +11,30 @@
  *   "Trojan Source" class;
  * - default-ignorable characters (Unicode's `Default_Ignorable_Code_Point`:
  *   zero-width characters, the soft hyphen U+00AD, the Mongolian vowel
- *   separator U+180E, the combining grapheme joiner U+034F, the Hangul fillers,
- *   variation selectors, tag characters, …) render as nothing and split one
- *   word into two tokens invisibly, which turns "spell<U+00AD>ing" into a
- *   false typo.
+ *   separator U+180E, the combining grapheme joiner U+034F, the Hangul
+ *   fillers, …) have no glyph of their own — some, like the joiners, only
+ *   change how their neighbours join — and split one word into two tokens
+ *   invisibly, which turns "spell<U+00AD>ing" into a false typo.
  *
  * Both are stripped at extraction, and stripped again by the report schema on
  * read, so a row written by a buggy or older build cannot reintroduce them.
  * They are matched by Unicode PROPERTY (s96 review round 2, nit 7): the
- * hand-kept list this replaced missed U+034F, U+115F, U+3164, U+FE0F and the
- * tag block. The property set covers every character that list had.
+ * hand-kept list this replaced missed U+034F, U+115F and U+3164. The property
+ * set covers every character that list had.
+ *
+ * EXCEPT the characters an emoji, a flag or an ideograph is drawn with
+ * (verification review of e7bdd09, F2). The stripped text is what a report
+ * SHOWS, and dropping them turned ❤️ into ❤ and the England flag into a
+ * black flag: variation selectors U+FE00–FE0F and U+E0100–E01EF, and the
+ * tag characters U+E0020–E007F that spell a subdivision flag. The joiners
+ * (ZWJ, ZWNJ) are still stripped, as they were before the property set.
  */
 
 /** C0 and C1 control characters, as `src/lib/api/validation.ts` defines them. */
 export const TEXT_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
 const INVISIBLE_CHARACTERS =
-  /[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}]/gu;
+  /(?![\ufe00-\ufe0f\u{e0020}-\u{e007f}\u{e0100}-\u{e01ef}])[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}]/gu;
 
 /** Removes bidi controls and default-ignorable characters. */
 export function stripInvisibleCharacters(text: string): string {

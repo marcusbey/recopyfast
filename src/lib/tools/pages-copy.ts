@@ -44,7 +44,7 @@ export const ABOUT_SCANNER = {
     "A scan reads only public pages of the site you enter: its robots.txt, its homepage, up to two sitemap files and up to nine more pages on the same host — never more than 24 requests in all. The same address is read at most once a day per tool; asking again within 24 hours returns the saved report.",
   identity: `It identifies itself as ${SCANNER_USER_AGENT}, sends no cookies and does not run the page's JavaScript.`,
   stored:
-    "We store the address you entered, without anything after a ? or #, and the report: short excerpts of public page text around each finding. Reports are kept for up to 30 days; when many scans run at once, older ones can be removed sooner. The address your request came from is used only to limit how many scans it can run; it is kept for at most 24 hours and never stored with a report.",
+    "We store the address you entered, without anything after a ? or #, and the report: short excerpts of public page text around each finding. Reports are kept for up to 30 days; when many scans run at once, older ones can be removed sooner. The address your request came from is used only to limit how many scans it can run; it is kept for about 24 hours and never stored with a report.",
   optOut:
     "To keep the scanner off your site, add this to your robots.txt. It is checked before every page it reads.",
 } as const;

@@ -11,7 +11,8 @@
  *   serve. On Vercel it is unreachable (the platform overwrites
  *   `x-forwarded-for`, s77 review).
  *
- * The key lives only in Redis keys with a TTL of at most 24 h. It is never
+ * The key lives only in Redis keys that expire about 24 h after their window
+ * opens (the window's end plus a 10 s grace, `rate-limiter.ts`). It is never
  * logged and never stored with a report.
  */
 

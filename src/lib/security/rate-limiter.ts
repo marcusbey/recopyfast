@@ -332,19 +332,21 @@ export class RedisRateLimiter {
     /**
      * Two commands, not three.
      *
-     * The key is already scoped to a fixed window, so it expires exactly at
-     * `windowEnd` — the TTL round-trip that used to be here only re-derived a
-     * number this function had already computed. It was also less accurate:
-     * `now + ttl * 1000` measures the TTL forward from the CURRENT request, so
-     * the first request of a window reported a reset up to a full window late
-     * and clients got an inflated Retry-After.
+     * The key is already scoped to a fixed window, so its expiry is known
+     * here — `windowEnd` plus EXPIRY_GRACE_MS — and the reset time reported is
+     * `windowEnd` itself. The TTL round-trip that used to be here only
+     * re-derived a number this function had already computed. It was also
+     * less accurate: `now + ttl * 1000` measures the TTL forward from the
+     * CURRENT request, so the first request of a window reported a reset up
+     * to a full window late and clients got an inflated Retry-After.
      *
      * The third of the traffic this removes matters on a metered store: the
      * auth endpoints fail closed, so exhausting a command quota takes down
      * editor login exactly the way a dead instance does.
      *
-     * The expiry is ABSOLUTE: PEXPIREAT at `windowEnd` (s96 review, minor 4).
-     * It was `EXPIRE key <windowMs>`, re-sent with every increment, which
+     * The expiry is ABSOLUTE: PEXPIREAT at `windowEnd + EXPIRY_GRACE_MS`
+     * (s96 review, minor 4; the grace since round 2, minor 1). It was
+     * `EXPIRE key <windowMs>`, re-sent with every increment, which
      * pushed the expiry forward each time — a key last touched near its
      * window's end outlived the window by almost a whole window. For the free
      * tools' daily buckets that kept a client address ~48 h while /privacy

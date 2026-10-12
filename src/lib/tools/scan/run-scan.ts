@@ -67,10 +67,12 @@ export interface RunScanInput {
    * Charges the per-target hourly cap for a registrable domain (s96 review
    * round 2, minor 3). Asked once per scan for every domain other than the
    * submitted one, by any hop of any fetch, before that domain receives a
-   * request. False refuses those hops: the scan fails `target_limited` on the
-   * homepage's chain; a robots.txt, sitemap or page there is skipped.
+   * request. False refuses those hops, and a refused robots.txt is an
+   * unreachable one (it refuses what it gates): the scan fails
+   * `target_limited` on the homepage's chain, robots.txt included; a sitemap
+   * or page there is skipped.
    */
-  authorizeTargetDomain?: (registrableDomain: string) => Promise<boolean>;
+  authorizeTargetDomain: (registrableDomain: string) => Promise<boolean>;
 }
 
 export type RunScanResult =
@@ -151,9 +153,10 @@ export async function runScan(input: RunScanInput): Promise<RunScanResult> {
     policy: input.policy,
     resolver: input.resolver,
     isDenylistedHost: isDenied,
-    authorizeHost: input.authorizeTargetDomain
-      ? createTargetAuthorizer(input.url.hostname, input.authorizeTargetDomain)
-      : undefined,
+    authorizeHost: createTargetAuthorizer(
+      input.url.hostname,
+      input.authorizeTargetDomain,
+    ),
     deadline,
   };
 

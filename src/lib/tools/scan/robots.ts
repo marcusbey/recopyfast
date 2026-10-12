@@ -13,13 +13,18 @@
  * - 4xx ("unavailable") → no rules, the scan proceeds;
  * - a non-text answer (a single-page app serving its HTML shell for every
  *   path) → treated as no robots.txt;
- * - a redirect to a domain whose per-target cap is spent (`target_limited`)
- *   → treated as no robots.txt, as RFC 9309 allows when redirects cannot be
- *   followed; the other domain receives nothing (s96 review round 2, minor 3);
  * - anything else — 5xx, timeout, refused address, too large ("unreachable")
  *   → the scan is REFUSED with that same reason. RFC 9309 says to assume
  *   complete disallow; reporting the real reason (not "robots.txt says no")
  *   keeps the message true.
+ * - That includes a redirect to a domain whose per-target cap refuses the
+ *   charge (`target_limited`): the other domain receives nothing, and what
+ *   the robots.txt gates is refused. RFC 9309 §2.3.1.2 says a robots.txt
+ *   reached within five redirects MUST be fetched and followed — it allows
+ *   "unavailable" only past five — so a redirect we decline to follow is not
+ *   "no robots.txt". Reading it that way (as e7bdd09 did) let anyone bypass a
+ *   site's opt-out by spending the bucket of the domain its robots.txt
+ *   redirects to (verification review of e7bdd09, F1).
  *
  * Each origin's robots.txt is read once per scan, through the same guarded
  * fetcher and request budget as the pages.
@@ -184,8 +189,7 @@ export function createRobotsAuthorizer(
               result.status !== undefined &&
               result.status >= 400 &&
               result.status < 500) ||
-            result.reason === "not_html" ||
-            result.reason === "target_limited";
+            result.reason === "not_html";
           return isUnavailable
             ? { kind: "rules", rules: [] }
             : { kind: "refused", reason: result.reason };

@@ -171,8 +171,8 @@ export default function Privacy() {
               </li>
               <li>
                 Your IP address is used only to limit how many scans can be run
-                from it. Our rate limiter holds it for at most 24 hours, and it
-                is never stored with a report.
+                from it. Our rate limiter holds it for about 24 hours, and it is
+                never stored with a report.
               </li>
               <li>
                 The report is stored with short excerpts of that public page

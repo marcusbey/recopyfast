@@ -124,12 +124,31 @@ describe("visible text, by block", () => {
     ["U+034F combining grapheme joiner", "\u034f"],
     ["U+115F Hangul choseong filler", "\u115f"],
     ["U+3164 Hangul filler", "\u3164"],
-    ["U+FE0F variation selector-16", "\ufe0f"],
-    ["U+E0041 tag latin capital A", "\u{e0041}"],
+    ["U+200D zero-width joiner (as before this PR)", "\u200d"],
   ])("strips %s", (_label, character) => {
     const page = extract(`<p>spell${character}ing</p>`);
 
     expect(texts(page)).toEqual(["spelling"]);
+  });
+
+  /**
+   * Verification review of e7bdd09, F2: the stripped text is what a report
+   * SHOWS, and variation selectors and tag characters are part of how an
+   * emoji or a flag renders — ❤️ became ❤ and the England flag a black flag.
+   * U+FE00–FE0F, U+E0020–E007F and U+E0100–E01EF are kept.
+   */
+  it.each([
+    ["a red heart with VS16 (U+2764 U+FE0F)", "\u2764\ufe0f"],
+    ["a keycap one (1 U+FE0F U+20E3)", "1\ufe0f\u20e3"],
+    [
+      "the England flag (U+1F3F4 + tags + U+E007F)",
+      "\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}",
+    ],
+    ["an ideographic variation sequence (U+845B U+E0100)", "\u845b\u{e0100}"],
+  ])("keeps %s intact", (_label, sequence) => {
+    const page = extract(`<p>We love bread ${sequence} every day</p>`);
+
+    expect(texts(page)).toEqual([`We love bread ${sequence} every day`]);
   });
 
   it("caps blocks, block length and the page's text", () => {

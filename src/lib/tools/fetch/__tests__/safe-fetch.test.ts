@@ -145,6 +145,8 @@ function options(overrides: Partial<SafeFetchOptions> = {}): SafeFetchOptions {
     policy: fixturePolicy(),
     resolver: tableResolver({ "fixture.test": ["127.0.0.1"] }),
     budget: createRequestBudget(MAX_REQUESTS_PER_SCAN),
+    // Every host allowed, said out loud: the per-target charge is required.
+    authorizeHost: async () => null,
     ...overrides,
   };
 }
@@ -887,6 +889,7 @@ describe("an environment proxy never applies", () => {
           budget: createRequestBudget(4),
           policy: { isAllowedAddress: (a) => a === "127.0.0.1", isAllowedPort: () => true },
           resolver: async (host) => { calls.push(host); return [{ address: "127.0.0.1", family: 4 }]; },
+          authorizeHost: async () => null,
         });
         process.stdout.write(JSON.stringify({ defaultAgent, ok: result.ok, body: result.ok ? result.value.body : result.reason, calls }));
       });

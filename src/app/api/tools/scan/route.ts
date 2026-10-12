@@ -245,9 +245,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // charged once, before its first request (s96 review round 2, minor 3), so
   // a host that redirects — its homepage, robots.txt, sitemap or a page — to
   // a victim cannot spend the victim's scans from its own bucket. A 429 on
-  // the homepage's chain is returned as is; elsewhere that one resource is
-  // skipped. A store failure at ANY charge is the fail-closed 503, and the
-  // scan's result is discarded.
+  // the homepage's chain — its robots.txt included: a robots.txt we may not
+  // follow refuses the scan, never "allows everything" — is returned as is;
+  // elsewhere that one resource is skipped. A store failure at ANY charge is
+  // the fail-closed 503, and the scan's result is discarded.
   const charges: { refusal?: NextResponse; storeFailure?: NextResponse } = {};
   const result = await runScan({
     tool,

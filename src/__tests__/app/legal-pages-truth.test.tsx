@@ -189,8 +189,10 @@ describe("the free tools on the legal pages", () => {
       "we process the website address you enter, without anything after a ? or #, and the public text of the pages we read from that site.",
     );
     expect(text).toContain(
-      "Your IP address is used only to limit how many scans can be run from it. Our rate limiter holds it for at most 24 hours, and it is never stored with a report.",
+      "Your IP address is used only to limit how many scans can be run from it. Our rate limiter holds it for about 24 hours, and it is never stored with a report.",
     );
+    // F4: the key outlives its day by a 10 s grace; "at most" overstated it.
+    expect(text).not.toContain("at most 24 hours");
     expect(text).toContain(
       "It is public to anyone with its link and is kept for up to 30 days.",
     );

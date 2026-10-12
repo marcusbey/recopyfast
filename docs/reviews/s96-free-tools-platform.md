@@ -430,8 +430,11 @@ registrable domains without being charged.
 - **What a refusal does, by resource:**
   - **The homepage's chain:** the scan fails `target_limited`. The route returns the limiter's
     429, and nothing is stored.
-  - **A robots.txt:** treated as unavailable. RFC 9309 allows this when a redirect cannot be
-    followed (`robots.ts`).
+  - **A robots.txt:** ~~treated as unavailable. RFC 9309 allows this when a redirect cannot be
+    followed (`robots.ts`).~~ **Wrong, and a misquote of RFC 9309** (verification review F1): a
+    robots.txt reached within five redirects MUST be followed. Since the fix after `e7bdd09`, a
+    refused charge on a robots.txt chain refuses what that robots.txt gates, like an unreachable
+    robots.txt.
   - **A sitemap:** it is skipped, and the scan falls back to the homepage's links.
   - **A page:** skipped as "We couldn't fetch this page."
 - **`src/app/api/tools/scan/route.ts`.** It records the first 429 and the first store failure. A
@@ -443,8 +446,8 @@ requests" means none to any `*victim.test` host, its robots.txt included.
 
 - A homepage redirect to a limited domain: the scan fails `target_limited`, the domain is charged
   once, and the victim gets zero requests.
-- A robots.txt that redirects to a victim: the scan goes on, the victim is charged once, and it
-  gets zero requests.
+- ~~A robots.txt that redirects to a victim: the scan goes on, the victim is charged once, and it
+  gets zero requests.~~ Flipped after the verification review (F1): the scan is now refused.
 - A sitemap that redirects to a victim: the scan falls back to the homepage's links (both pages
   checked), and the victim gets zero requests.
 - Two pages that redirect to `victim.test` and `www.victim.test`: the victim is charged once,
@@ -507,6 +510,7 @@ digits and spaces are untouched.
 
 **Test.** `extract-page.test.ts` strips each of U+034F, U+115F, U+3164, U+FE0F and U+E0041 from
 `spell?ing`, leaving "spelling". The test source uses `\u` escapes, not literal characters.
+*(Narrowed after the verification review, F2: variation selectors and tag characters are kept.)*
 
 ### Nit 8 — not-found copy and cleanup lag
 
@@ -531,7 +535,8 @@ days", never "kept for 30 days".
 - hop charge removed (7 red);
 - hop charge on the first hop only (5 red);
 - per-scan verdict cache removed (8 red);
-- a robots refusal fails the scan (1 red);
+- a robots refusal fails the scan (1 red) — this pinned the F1 defect; the test it broke is the
+  one flipped after the verification review;
 - the route ignores a store failure on a finished scan (1 red);
 - per-decoder counter removed (1 red);
 - two-byte zlib check restored (1 red);
@@ -556,5 +561,319 @@ days", never "kept for 30 days".
 - **Type-check:** clean.
 - **Lint of the changed files:** clean. The commit hooks run the full lint and type-check again.
 
-Max severity: pending
-Ship allowed: pending
+## Verification review of e7bdd09
+
+A fresh-context review of `e7bdd09`, PR #93's head. The reviewer did not change any code. Each
+mutation below was applied on its own, run, restored with `git checkout`, and `git diff
+--exit-code` was clean before this section was written.
+
+### What was run
+
+| Check | Result |
+|---|---|
+| `npx jest src/lib/tools src/lib/security --silent` | 21 suites, 541 tests, all passed |
+| `npx jest redis-rate-limiter scan-route tool-report legal-pages tools-pages --silent` | 7 suites, 186 tests, all passed |
+| Every test file that touches the limiter (74 files, `--runTestsByPath`) | 74 suites, 1,196 tests, all passed |
+| Full `npx jest --silent` | 482 suites passed, 2 skipped, 1 failed; 6,864 tests passed, 38 skipped, 1 failed |
+| `npx tsc --noEmit -p .` | exit 0 |
+| `eslint --max-warnings=0` on the 17 source files changed by `e7bdd09` | exit 0 |
+| `gh pr checks 93` | all green except "Comparison Lighthouse", still pending at review time |
+
+The one failure in the full run is `src/__tests__/api/content/[siteId]/route.test.ts` (first-party
+CORS). It is environmental:
+
+- The test reads `NEXT_PUBLIC_APP_URL`, and this worktree has no `.env.local`.
+- With that variable set, the file passes 42 of 42.
+- The branch does not touch that route.
+
+### Round-2 findings, checked against the code
+
+| Round-2 finding | Verdict | Evidence |
+|---|---|---|
+| Minor 1, expiry at `windowEnd` | Fixed | `rate-limiter.ts:359` sends `windowEnd + EXPIRY_GRACE_MS`. The key still ends in the window index, so two windows never share a count. Only `redis-rate-limiter.test.ts` asserts on the expiry (grep for `pExpireAt` and `ttl` across `src` and `server`). `server/rate-limit.js` has its own `EXPIRE` and is untouched. |
+| Minor 2, non-LDH hosts | Fixed | Checked in Node: tldts 6.1.86 returns null for `-a.`, `a-.`, `a!b.` and `..victim.com` with validation on, and `victim.com` with `validateHostname: false`. `normalize-url.ts:104` refuses non-LDH labels. Every redirect hop and sitemap URL goes through the same normaliser. |
+| Minor 3, per-hop charge | Fixed, with one new defect (F1) | See "Is every hop charged?" below. |
+| Minor 4, nested decoder | Fixed | `safe-fetch.ts:470` puts a capped counter after every decoder. |
+| Nit 5, zlib sniff | Fixed | `safe-fetch.ts:303` reads byte 0 only. |
+| Nit 6, empty encoded body | Fixed | `safe-fetch.ts:249` returns no decoder for an empty body. `peekFirstChunk` also resolves null on `error` and `close`, and a stall before the first byte is still ended by the request's abort signal. |
+| Nit 7, invisible characters | Fixed, with a display side effect (F2) | The old list's 23 code points are all in the new set, checked over U+0000–U+10FFFF on Node 24.14; 4,151 code points are added. |
+| Nit 8, not-found copy | Fixed | `not-found.tsx` says "up to 30 days"; the ops doc notes the cleanup lag. |
+
+### Is every hop charged?
+
+Yes. Every hop of every fetch type is charged before it can open a socket.
+
+- **All four fetch types carry the charge.** All four `safeFetch(` calls are in `run-scan.ts`:
+  - line 161, robots.txt;
+  - line 173, the homepage;
+  - line 193, the sitemap and its child;
+  - line 208, the pages.
+
+  Each one spreads `base`, which carries `authorizeHost`.
+- **The charge comes before the socket and before DNS.** `safe-fetch.ts:542` awaits
+  `authorizeHost` on every hop. It runs after the denylist and before the URL authoriser, the
+  literal-address check, the request budget and `request()`. DNS only runs inside `request()`,
+  through `lookup` at `:396`. So a refused host gets no socket and no name resolution.
+- **A new host's robots.txt is covered too.** For a host first reached by a redirect, the robots.txt
+  fetch is itself a `safeFetch` with `base.authorizeHost`. That host is charged, or refused,
+  before the robots.txt socket opens.
+- **There is no unguarded call site in production.** Leaving the charge out allows everything, but
+  `runScan` has one production caller, `route.ts:252`, and it always passes
+  `authorizeTargetDomain`. No code under `src/lib/tools` or `src/app/api/tools` makes an outbound
+  request any other way.
+
+### Can a scan that fails 503 midway leave anything behind?
+
+Nothing is stored. Some caps stay spent, as documented.
+
+- **Storage:** `insertReport` (`route.ts:283`) runs only after the `charges.storeFailure` check
+  (`:265`).
+- **Caps spent before the scan stay spent:** the caller's daily cap, the /48 cap, the global cap and
+  the submitted domain's charge. This matches the route's documented rule that "a limiter counts
+  when checked".
+- **Other domains stay charged** if they were charged before the store failed.
+- **The scan is not stopped.** It keeps fetching from domains it has already charged (at most 24
+  requests and 20 s), and then the result is thrown away.
+
+### Mutations (each applied alone, then restored)
+
+| Mutation | Red |
+|---|---|
+| Host charge removed from `safeFetch` | 7 |
+| Host refusal honoured on hop 0 only | 5 |
+| Host refusal ignored for robots.txt fetches | 1 |
+| robots.txt fetch built without `authorizeHost` | 1 |
+| Submitted domain not pre-seeded in the per-scan map | 8 |
+| Per-scan verdict cache removed | 4 |
+| Route ignores `charges.storeFailure` | 2 |
+| robots.txt `target_limited` no longer read as "unavailable" | 1 |
+| `PEXPIREAT` back to `windowEnd` | 3 |
+| LDH check removed | 9 |
+| `validateHostname: true`, on the code line | 3 |
+| Counter after the last decoder only | 1 |
+| Two-byte zlib check | 1 |
+| Empty-body skip removed | 3 |
+| Hand-kept invisible-character list restored | 5 |
+| Host charge moved after `authorizeUrl` | 0 |
+
+The last row survived because it is an equivalent mutant: the robots.txt fetch charges the host
+itself, so the victim still receives nothing. The implementer's note above says the same.
+
+### New findings
+
+**F1 — major — a robots.txt on another domain is ignored when that domain's bucket is spent.**
+
+Where: `src/lib/tools/scan/robots.ts:188`, and the comment at `:16-18`.
+
+What happens: `createRobotsAuthorizer` now reads `target_limited` as "no robots.txt" (`rules: []`),
+so the scan goes ahead as if the site allowed everything.
+
+How it is exploited:
+
+1. Site S serves `/robots.txt` as a 301 to `T/robots.txt` on another registrable domain, which
+   says `User-agent: * / Disallow: /`.
+2. Anyone spends T's 20/hour bucket with 20 cache-missing scans of T.
+3. A scan of S now runs robots-free: its homepage, sitemap and pages are fetched, and a public
+   report is stored for up to 30 days.
+
+A popular T can spend its own bucket with no attacker at all. The same path opens when the store
+fails at that charge, because the route turns a 503 into `false`. The result is then discarded with
+a 503, but the requests have already gone out.
+
+Reproduced with a temporary loopback probe in `run-scan.test.ts`, removed afterwards:
+
+- With T allowed, the scan returns `{ ok: false, reason: "robots_disallowed" }`.
+- With T's bucket spent, it returns `ok: true` and requests `bakery.test/robots.txt`,
+  `bakery.test/` and `bakery.test/sitemap.xml`.
+
+This is a regression introduced by `e7bdd09`: at `ae249ad`, a robots.txt on another domain was always
+fetched and obeyed. It contradicts:
+
+- ADR 062 §5, accepted: robots.txt is honoured on every hop; only a 4xx allows, and an
+  unreachable file refuses the scan.
+- `/privacy`: "the scanner checks robots.txt before reading a page".
+- RFC 9309 §2.3.1.2: a robots.txt reached within five redirects "MUST be fetched, parsed, and its
+  rules followed". The RFC allows "unavailable" only after more than five redirects.
+
+The `robots.ts` comment and the round-2 text above ("RFC 9309 allows this when a redirect cannot be
+followed") misquote the RFC.
+
+Fix, one line: drop `|| result.reason === "target_limited"`, so the verdict is "refused" with
+`target_limited`.
+
+- On the homepage's origin, the scan then fails `target_limited`, and the route returns its 429.
+- On a page's origin, that page is skipped.
+- The test at `run-scan.test.ts:297` flips to expect this. It is the only test that pins the
+  current behaviour (mutation above: 1 red).
+
+**F2 — nit — the Unicode property class changes the text shown in reports.**
+
+Where: `src/lib/tools/text.ts:29-30`.
+
+The stripped text is what a report shows:
+
+- a finding's `match`, `before`, `after` and `code` (`lens.ts:94`, `:142`);
+- every stored string on read (`report-schema.ts:140`), so older rows change too.
+
+What is newly dropped from the displayed text:
+
+- VS16: ❤️ becomes ❤, and 1️⃣ becomes 1⃣.
+- Tag sequences: the England flag becomes 🏴.
+- Ideographic variation selectors (U+E0100–E01EF) in CJK names.
+- Mongolian free variation selectors.
+
+What is not affected:
+
+- ZWJ and ZWNJ were already stripped before `e7bdd09` (old range U+200B–U+200F), so this commit
+  adds nothing for them.
+- No false typos: the tokenizer is `[\p{L}\p{M}]+` (`tokenize.ts:29`), the lens is
+  English-gated, and none of the added characters is a letter.
+
+The comment "render as nothing" is wrong for ZWJ, ZWNJ, VS and FVS, which change how the
+neighbouring glyphs render. The effect is cosmetic only.
+
+**F3 — nit — the per-target charge is opt-in.**
+
+Where: `run-scan.ts:73` and `:154-156`, `safe-fetch.ts:140`.
+
+When `authorizeTargetDomain` is undefined, nothing is charged. Only tests leave it out today.
+Making it required on `RunScanInput` would turn a future caller's omission into a type error.
+
+**F4 — nit — some wording does not account for the grace.**
+
+- `rate-limiter.ts:335-336` still says the key "expires exactly at `windowEnd`", and `:346` says
+  "PEXPIREAT at `windowEnd`".
+- `/privacy` (`page.tsx:174`) says the limiter holds an IP "for at most 24 hours". With the
+  10-second grace it is now 24 hours plus 10 seconds.
+
+**Observation (no severity).** A domain is charged before DNS runs, so a redirect to
+`nothing.victim.com` spends `victim.com`'s bucket without any request reaching it. One scan can
+spend one unit from each of about 23 domains. This comes with "charge before the first request"
+and is bounded by the per-caller caps.
+
+### Not verified, and what a human should do instead
+
+| Not verified | Why | What a human should do |
+|---|---|---|
+| The grace against a real Redis | Only the mocked pipeline was run; the live Redis 7.4.11 table above was not reproduced | On Upstash, `PTTL` a fresh `rate_limit:*` key. Expect the window's remaining time plus about 10 s. |
+| Real DNS and the real network | Every fetch ran on loopback with an injected resolver. "Charged before DNS" comes from reading the code. | After F1's fix, on a preview, scan a site whose robots.txt 301s to another domain with `Disallow: /`. Expect 422 or 429, and no report. |
+| A store outage in the middle of a scan | The route's store-failure path was only run with a mocked `checkLimit` | No cheap gesture. Rely on the mocked test. |
+| Emoji and flags in a rendered report | No page was rendered | On a preview, scan a page with a misspelt sentence next to ❤️ or a flag, and look at the excerpt. |
+| Comparison Lighthouse | The CI job was still pending | Wait for it to go green before merging. |
+
+Under this review's gate, only a critical finding blocks the ship. F1 is major, so the ship is
+allowed. F1 is a one-line fix with its test already in place, so land it before merging.
+
+## Fixes after the verification review of `e7bdd09`
+
+The fix commit after `e7bdd09` lands all four findings test-first. Each new test was red before its
+fix, except the T-allowed control, which is green either way. The gate lines at the end of this
+file are the verification reviewer's verdict on `e7bdd09`; they are left as the reviewer wrote
+them.
+
+### F1 (major) — a robots.txt on another domain was ignored when that domain's bucket was spent
+
+**Fix.**
+
+- **`src/lib/tools/scan/robots.ts`.** `|| result.reason === "target_limited"` is removed. A
+  refused charge on the robots.txt chain is now a refused verdict with reason `target_limited`,
+  exactly like an unreachable robots.txt. Only a 4xx, or a non-text answer, still means "no
+  robots.txt" (ADR 062 §5).
+- **The comment now quotes RFC 9309 §2.3.1.2 correctly.** A robots.txt reached within five
+  redirects MUST be fetched and followed; "unavailable" is allowed only past five.
+- **The comments in `run-scan.ts` and `route.ts`** say the same.
+
+**What a refusal now does:**
+
+- On the homepage's origin, the scan fails `target_limited`. The route returns the limiter's 429
+  and stores nothing.
+- On a page's origin, that page is skipped.
+- On a sitemap's origin, the sitemap is skipped, and the scan falls back to the homepage's links.
+
+**Tests** (`run-scan.test.ts`):
+
+| Scenario | Before the fix | After |
+|---|---|---|
+| S's robots.txt redirects to T, T spent (the flipped test) | `ok`, S scanned | `target_limited`; the only request is `bakery.test/robots.txt` |
+| S → T, T says `Disallow: /`, T allowed (control) | `robots_disallowed` | `robots_disallowed`; requests `bakery.test/robots.txt` and `victim.test/robots.txt` |
+| S → T, T says `Disallow: /`, T spent | `ok`, S scanned | `target_limited`; S's homepage is never fetched, T gets nothing |
+| A page redirects to `other.test`, whose robots.txt redirects to a spent T | page checked | that page is skipped, `other.test/a` is never fetched, T gets nothing; the rest of the scan is checked |
+
+**Mutations:**
+
+- Reading `target_limited` as "no robots.txt" again: killed, 3 red.
+- Reading `unreachable` and `target_limited` as "no robots.txt": killed, 3 red.
+
+### F2 (nit) — emoji and flags lost their selectors in displayed excerpts
+
+**Fix.** `INVISIBLE_CHARACTERS` is now:
+
+```
+/(?![\ufe00-\ufe0f\u{e0020}-\u{e007f}\u{e0100}-\u{e01ef}])[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}]/gu
+```
+
+- **Kept:** the variation selectors and the tag characters a flag is spelt with.
+- **Still stripped, as before this PR series:** ZWJ and ZWNJ. Every character of the pre-PR list
+  is still covered, checked on Node 24.14; 3,822 code points are stripped in total.
+- **Comment fixed:** it no longer says these characters "render as nothing". The joiners change
+  how their neighbours join.
+- **No false typos:** a typo-lens probe finds no typo in "spell<U+FE0F>ing" or in a ❤️ next to
+  prose, while still finding "recieve" in the same text.
+
+**Tests** (`extract-page.test.ts`):
+
+- Kept intact:
+  - ❤️ (U+2764 U+FE0F);
+  - the keycap 1️⃣;
+  - the England flag (U+1F3F4, then tags, then U+E007F);
+  - an ideographic variation sequence (U+845B U+E0100).
+
+  All four were red before the fix.
+- Still stripped: U+034F, U+115F, U+3164 and ZWJ.
+- Removing the exclusion again is killed, with 4 red.
+
+### F3 (nit) — the per-target charge was opt-in
+
+**Fix.** The charge is now a required field in both places, so leaving it out is a type error:
+
+- `RunScanInput.authorizeTargetDomain`;
+- `SafeFetchOptions.authorizeHost`.
+
+`runScan` always builds the target authorizer.
+
+**Tests pass explicit allow-all stubs:**
+
+- `safe-fetch.test.ts` `options()`: `authorizeHost: async () => null`;
+- `run-scan.test.ts` `scan()`: `authorizeTargetDomain ?? (async () => true)`;
+- the route test mocks call `input.authorizeTargetDomain(…)` without `?.`.
+
+### F4 (nit) — wording that ignored the grace
+
+**Fix:**
+
+- **`rate-limiter.ts`.** The comments say the key expires at `windowEnd + EXPIRY_GRACE_MS`, while
+  the reset time reported is `windowEnd`.
+- **"at most 24 hours" → "about 24 hours"** in:
+  - `/privacy`;
+  - the scanner's "What we store" copy (`pages-copy.ts`);
+  - the `client-key.ts` comment.
+
+**Tests.** `legal-pages-truth` and `tools-pages` expect "about 24 hours" and forbid "at most 24
+hours". Both were red before the fix.
+
+### Verification for this fix
+
+- **Jest**, with `NEXT_PUBLIC_APP_URL` set: 483 suites passed, 2 skipped; 6,871 tests passed, 38
+  skipped. That is 6 more than at `e7bdd09`.
+  - The first full run caught one miss: the child-process proxy test builds its own
+    `safeFetch` options and lacked the newly required `authorizeHost`. It now passes an allow-all
+    stub, and the suite is green.
+- **DB harness (PG17):** 16 suites; 121 passed, 1 skipped.
+- **Playwright `--list`:** 97 of 97 expected.
+- **`npm run build`:** passes.
+- **Embed check:** up to date, at the byte ceiling (45,818 B of 45,818).
+- **Type-check:** clean.
+- **Prettier and `eslint --max-warnings=0`** on every changed source file: clean.
+
+Max severity: major
+Ship allowed: yes

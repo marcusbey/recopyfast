@@ -101,7 +101,9 @@ function scan(
   } = {},
 ) {
   return runScan({
-    authorizeTargetDomain: overrides.authorizeTargetDomain,
+    // Every domain allowed unless a test says otherwise: the charge is required.
+    authorizeTargetDomain:
+      overrides.authorizeTargetDomain ?? (async () => true),
     tool: "website-spell-checker",
     lens: typoLens,
     url: site(),
@@ -294,7 +296,16 @@ describe("runScan", () => {
       expect(charged).toEqual([]);
     });
 
-    it("treats a robots.txt that redirects to a limited domain as unavailable, and the victim gets nothing", async () => {
+    /**
+     * Verification review of e7bdd09, F1 (major). A refused charge on the
+     * robots.txt chain was read as "no robots.txt", so a site whose
+     * robots.txt redirects to a spent domain was scanned as if it allowed
+     * everything — its owner's opt-out bypassed by spending someone else's
+     * bucket. RFC 9309 §2.3.1.2 says a robots.txt reached within five
+     * redirects MUST be followed; ADR 062 §5 allows only a 4xx. A refused
+     * charge is now an unreachable robots.txt: the scan is refused.
+     */
+    it("refuses the scan when its robots.txt redirects to a limited domain; the homepage is never fetched", async () => {
       routes.set(
         "bakery.test /robots.txt",
         redirect(`http://victim.test:${port}/robots.txt`, 301),
@@ -304,8 +315,82 @@ describe("runScan", () => {
 
       const result = await scan({ authorizeTargetDomain });
 
-      expect(result.ok).toBe(true);
+      expect(result).toEqual({ ok: false, reason: "target_limited" });
       expect(charged).toEqual(["victim.test"]);
+      expect(requestedHosts).toEqual(["bakery.test/robots.txt"]);
+    });
+
+    describe("S's robots.txt redirects to T, whose robots.txt says Disallow: /", () => {
+      beforeEach(() => {
+        routes.set(
+          "bakery.test /robots.txt",
+          redirect(`http://victim.test:${port}/robots.txt`, 301),
+        );
+        routes.set(
+          "victim.test /robots.txt",
+          text("User-agent: *\nDisallow: /"),
+        );
+        routes.set("/", html(`<p>${FILLER}</p>`));
+      });
+
+      it("is obeyed when T's bucket allows the charge: S is not scanned", async () => {
+        const { charged, authorizeTargetDomain } = charger(() => true);
+
+        const result = await scan({ authorizeTargetDomain });
+
+        expect(result).toEqual({ ok: false, reason: "robots_disallowed" });
+        expect(charged).toEqual(["victim.test"]);
+        expect(requestedHosts).toEqual([
+          "bakery.test/robots.txt",
+          "victim.test/robots.txt",
+        ]);
+      });
+
+      it("refuses the scan when T's bucket is spent: S's homepage is never fetched, T gets nothing", async () => {
+        const { charged, authorizeTargetDomain } = charger(() => false);
+
+        const result = await scan({ authorizeTargetDomain });
+
+        expect(result).toEqual({ ok: false, reason: "target_limited" });
+        expect(charged).toEqual(["victim.test"]);
+        expect(requestedHosts).toEqual(["bakery.test/robots.txt"]);
+      });
+    });
+
+    it("skips a page whose host's robots.txt redirects to a limited domain", async () => {
+      routes.set(
+        "/",
+        html(`<p>${FILLER}</p><a href="/one">one</a><a href="/menu">menu</a>`),
+      );
+      routes.set("bakery.test /one", redirect(`http://other.test:${port}/a`));
+      routes.set(
+        "other.test /robots.txt",
+        redirect(`http://victim.test:${port}/robots.txt`, 301),
+      );
+      routes.set("other.test /a", html(`<p>${FILLER}</p>`));
+      routes.set("/menu", html(`<p>${FILLER}</p>`));
+      const { charged, authorizeTargetDomain } = charger(
+        (domain) => domain !== "victim.test",
+      );
+
+      const result = await scan({ authorizeTargetDomain });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const byUrl = Object.fromEntries(
+          result.report.pages.map((page) => [
+            new URL(page.url).pathname,
+            page.status,
+          ]),
+        );
+        expect(byUrl).toEqual({
+          "/": "checked",
+          "/menu": "checked",
+          "/one": "skipped",
+        });
+      }
+      expect(charged).toEqual(["other.test", "victim.test"]);
+      expect(requestedHosts).not.toContain("other.test/a");
       expect(victimRequests()).toEqual([]);
     });
 

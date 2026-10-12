@@ -180,7 +180,10 @@ describe("/tools", () => {
     // s96 review (minor 4): the row ceiling can remove a report sooner.
     expect(ABOUT_SCANNER.stored).toContain("kept for up to 30 days");
     expect(HUB_FAQS[1].answer).toContain("kept for up to 30 days");
-    expect(ABOUT_SCANNER.stored).toContain("kept for at most 24 hours");
+    // Verification review of e7bdd09, F4: the limiter's key outlives its day
+    // by a 10 s grace, so "at most 24 hours" is no longer exact.
+    expect(ABOUT_SCANNER.stored).toContain("kept for about 24 hours");
+    expect(ABOUT_SCANNER.stored).not.toContain("at most 24 hours");
   });
 });
 

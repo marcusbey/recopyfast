@@ -362,7 +362,7 @@ describe("the per-target cap", () => {
 
   it("charges another domain a homepage hop reaches; its refusal is a 429 with nothing stored", async () => {
     mockedRunScan.mockImplementationOnce(async (input) => {
-      const allowed = await input.authorizeTargetDomain?.("victim.example");
+      const allowed = await input.authorizeTargetDomain("victim.example");
       return allowed
         ? { ok: true, report: REPORT }
         : { ok: false, reason: "target_limited" };
@@ -386,7 +386,7 @@ describe("the per-target cap", () => {
 
   it("fails closed when the store is down at a hop's charge", async () => {
     mockedRunScan.mockImplementationOnce(async (input) => {
-      const allowed = await input.authorizeTargetDomain?.("victim.example");
+      const allowed = await input.authorizeTargetDomain("victim.example");
       return allowed
         ? { ok: true, report: REPORT }
         : { ok: false, reason: "target_limited" };
@@ -405,7 +405,7 @@ describe("the per-target cap", () => {
 
   it("stores the report when the other domain's bucket allows it", async () => {
     mockedRunScan.mockImplementationOnce(async (input) => {
-      const allowed = await input.authorizeTargetDomain?.("victim.example");
+      const allowed = await input.authorizeTargetDomain("victim.example");
       return allowed
         ? { ok: true, report: REPORT }
         : { ok: false, reason: "target_limited" };
@@ -420,7 +420,7 @@ describe("the per-target cap", () => {
   it("stores the report when only a robots.txt, sitemap or page hop was refused", async () => {
     mockedRunScan.mockImplementationOnce(async (input) => {
       // A page redirected to the victim; the scan skipped it and went on.
-      await input.authorizeTargetDomain?.("victim.example");
+      await input.authorizeTargetDomain("victim.example");
       return { ok: true, report: REPORT };
     });
     checkLimit.mockImplementation(async (config) => {
@@ -438,7 +438,7 @@ describe("the per-target cap", () => {
 
   it("fails closed with a 503 when the store dies at a page hop's charge, even if the scan finished", async () => {
     mockedRunScan.mockImplementationOnce(async (input) => {
-      await input.authorizeTargetDomain?.("victim.example");
+      await input.authorizeTargetDomain("victim.example");
       return { ok: true, report: REPORT };
     });
     checkLimit.mockImplementation(async (config) => {

@@ -135,9 +135,11 @@ export interface SafeFetchOptions {
   /**
    * Asked for every hop's host before anything else may reach it — the URL
    * authoriser's robots.txt fetch included (the per-target cap in
-   * production). A reason refuses the hop.
+   * production). A reason refuses the hop. REQUIRED (verification review of
+   * e7bdd09, F3): a caller that forgets it is a type error, not an uncharged
+   * scan; a test that means "allow every host" says so with a stub.
    */
-  authorizeHost?: (hostname: string) => Promise<FetchFailureReason | null>;
+  authorizeHost: (hostname: string) => Promise<FetchFailureReason | null>;
   /** Asked before every hop (robots.txt in production). A reason refuses it. */
   authorizeUrl?: (url: NormalizedScanUrl) => Promise<FetchFailureReason | null>;
   timeoutMs?: number;
@@ -539,7 +541,7 @@ export async function safeFetch(
     const target = normalized.value;
 
     if (options.isDenylistedHost?.(target.hostname)) return fail("denylisted");
-    const hostRefusal = await options.authorizeHost?.(target.hostname);
+    const hostRefusal = await options.authorizeHost(target.hostname);
     if (hostRefusal) return fail(hostRefusal);
     const refusal = await options.authorizeUrl?.(target);
     if (refusal) return fail(refusal);
