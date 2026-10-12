@@ -542,13 +542,20 @@ export function manualReviewFor(
  * (`partly_paid_by_credit`) named only when money was refunded or found
  * refunded (Devin 4245730010): the alert says the invoice "was refunded for
  * its money". A refund that failed threw before this; a disputed or
- * still-processing payment refunded nothing.
+ * still-processing payment refunded nothing. A charge someone already
+ * refunded in full by hand counts (Devin review of 9304500): its money is
+ * back, and the credit is still not.
  */
 export function withCreditReview(
   refund: CoveredInvoiceRefund,
   creditReview: readonly ManualReviewInvoice[],
 ): CoveredInvoiceRefund {
-  if (refund.refundIds.length === 0) return refund;
+  if (
+    refund.refundIds.length === 0 &&
+    refund.refundedOutsideChargeIds.length === 0
+  ) {
+    return refund;
+  }
   return {
     ...refund,
     manualReviewInvoices: [...refund.manualReviewInvoices, ...creditReview],
@@ -1271,6 +1278,8 @@ async function paymentReviewOf(
  * payment intent (API 2025-07-30.basil, `invoicePayments.list` `payment`
  * filter); a `charge` payment, which cannot be listed so, pays the one invoice
  * it was made for. More than one page of invoices is shared by definition.
+ * A list that does not include this invoice's own payment cannot be trusted
+ * to show the others (Devin review of 9304500): treated as shared.
  */
 async function paidAnotherInvoice(
   payment: Stripe.InvoicePayment,
@@ -1285,6 +1294,7 @@ async function paidAnotherInvoice(
   });
   return (
     page.has_more ||
+    !page.data.some((other) => other.id === payment.id) ||
     page.data.some(
       (other) =>
         other.status !== "canceled" && idOf(other.invoice) !== invoiceId,
@@ -1648,23 +1658,62 @@ const MANUAL_INVOICE_WARNING_EVENT_TYPE =
   "internal.covered_invoice_manual_review";
 
 /**
- * Claim the one warning that an invoice of a refused subscription needs a
- * person (Devin round on 8744bed): the refusal and every settlement of the
- * invoice ask, ops hear once.
+ * Claim the warning that an invoice of a refused subscription needs a person
+ * (Devin round on 8744bed): the refusal and every settlement of the invoice
+ * ask, ops hear once per amount it has collected. Devin 4246216894: an open
+ * invoice alerted on a partial payment that later collects more is alerted
+ * again; a redelivery at the same amount is not.
  */
 export async function claimManualInvoiceWarning(
   supabase: SupabaseClient,
   invoiceId: string,
   subscriptionId: string,
   userId: string,
+  amountPaid = 0,
 ): Promise<boolean> {
   return claimWarningOnce(supabase, {
     userId,
     eventType: MANUAL_INVOICE_WARNING_EVENT_TYPE,
-    eventId: `${COVERED_BY_LIFETIME}_manual_invoice:${invoiceId}`,
-    data: { invoice_id: invoiceId, subscription_id: subscriptionId },
+    eventId: `${COVERED_BY_LIFETIME}_manual_invoice:${invoiceId}:${amountPaid}`,
+    data: {
+      invoice_id: invoiceId,
+      subscription_id: subscriptionId,
+      amount_paid: String(amountPaid),
+    },
     subject: `invoice ${invoiceId}`,
   });
+}
+
+/**
+ * The highest amount an earlier warning about this invoice was claimed at,
+ * below `amountPaid` (Devin 4246216894): what the invoice collected since ops
+ * last heard of it. Null when there was none, or the warnings cannot be read
+ * (said, and the alert then names the total only). Never throws.
+ */
+export async function amountWarnedBefore(
+  supabase: SupabaseClient,
+  invoiceId: string,
+  userId: string,
+  amountPaid: number,
+): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("billing_events")
+    .select("data")
+    .eq("event_type", MANUAL_INVOICE_WARNING_EVENT_TYPE)
+    .eq("user_id", userId);
+  if (error) {
+    console.error(
+      `Could not read the earlier warnings about invoice ${invoiceId}; ` +
+        `naming its total only: ${error.message}`,
+    );
+    return null;
+  }
+  const earlier = (data ?? [])
+    .map((row) => (row as { data?: Record<string, unknown> }).data)
+    .filter((claim) => claim?.invoice_id === invoiceId)
+    .map((claim) => Number(claim?.amount_paid))
+    .filter((amount) => Number.isFinite(amount) && amount < amountPaid);
+  return earlier.length > 0 ? Math.max(...earlier) : null;
 }
 
 /** `billing_events.event_type` of the once-only unknown-price warning. */

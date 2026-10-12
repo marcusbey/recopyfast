@@ -558,8 +558,10 @@ function armStripe() {
       return { ...refund };
     },
   );
-  // Final check of 7f8e8b5: by default a payment intent paid no other invoice.
-  mockInvoicePaymentsOfPayment.mockResolvedValue({ data: [], has_more: false });
+  // Final check of 7f8e8b5: by default a payment intent paid only the
+  // invoice it was last listed for. Devin review of 9304500: Stripe lists the
+  // payment's own invoice payment too, so it is answered from that listing.
+  mockInvoicePaymentsOfPayment.mockImplementation(invoicePaymentsOfPayment);
   mockDisputesList.mockImplementation(async (params: Row) => ({
     data: stripeDisputes[String(params.charge)] ?? [],
     has_more: false,
@@ -714,6 +716,33 @@ function productOf(priceId: string): string {
       price_shared: "prod_shared",
     }[priceId] ?? `prod_of_${priceId}`
   );
+}
+
+/**
+ * `invoicePayments.list({ payment })`: the payment intent's invoice payments
+ * from the last by-invoice listing, as belonging to that invoice. A test that
+ * shares a payment across invoices answers this itself.
+ */
+async function invoicePaymentsOfPayment(params: Row) {
+  const last = mockInvoicePaymentsList.mock.calls.length - 1;
+  if (last < 0) return { data: [], has_more: false };
+  const invoice = (mockInvoicePaymentsList.mock.calls[last][0] as Row)?.invoice;
+  const page = (await mockInvoicePaymentsList.mock.results[last].value) as {
+    data?: Row[];
+  };
+  const paymentIntent = (params.payment as Row).payment_intent;
+  return {
+    data: (page.data ?? [])
+      .filter((payment) => {
+        // A reference may come expanded.
+        const reference = (payment.payment as Row | undefined)?.payment_intent;
+        return (
+          ((reference as Row | undefined)?.id ?? reference) === paymentIntent
+        );
+      })
+      .map((payment) => ({ ...payment, invoice })),
+    has_more: false,
+  };
 }
 
 /** `paymentIntents.retrieve`: paid at the lifetime's time, with its charge. */
@@ -5469,6 +5498,109 @@ describe("Devin + final check of 7f8e8b5", () => {
         "need a person",
       );
     });
+  });
+
+  describe("Devin review of 9304500", () => {
+    it("Devin 4246216894: an invoice that collects 1,900 then 6,800 is alerted twice, the second naming the total and what was added; redeliveries add none", async () => {
+      let invoice = mixedOpenInvoice(1900);
+      mockInvoicesRetrieve.mockImplementation(async () => invoice);
+      // Another invoice of the account was alerted before, at less.
+      db.billing_events = [
+        {
+          user_id: USER_ID,
+          event_type: "internal.covered_invoice_manual_review",
+          stripe_event_id: "covered_by_lifetime_manual_invoice:in_other:900",
+          data: {
+            invoice_id: "in_other",
+            subscription_id: "sub_other",
+            amount_paid: "900",
+          },
+          processed: true,
+        },
+      ];
+
+      expect((await settle("evt_late_partial")).status).toBe(200);
+      expect((await settle("evt_late_partial_again")).status).toBe(200);
+      expect(manualReviewAlerts()).toHaveLength(1);
+
+      invoice = {
+        ...invoice,
+        status: "paid",
+        amount_paid: 6800,
+        amount_remaining: 0,
+        status_transitions: { paid_at: LIFETIME_PAID_AT + 7200 },
+      };
+      expect((await settle("evt_late_paid")).status).toBe(200);
+      expect((await settle("evt_late_paid_again")).status).toBe(200);
+      // The first event redelivered now reads the invoice as it is: 6,800.
+      expect((await settle("evt_late_partial")).status).toBe(200);
+
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      const alerts = manualReviewAlerts();
+      expect(alerts).toHaveLength(2);
+      expect(alerts[0][0]).toContain("1900 of 6800 collected");
+      expect(alerts[0][0]).not.toContain("more since");
+      expect(alerts[1][0]).toContain("6800 of 6800 collected");
+      expect(alerts[1][0]).toContain("4900 more since the alert at 1900");
+      expect(alerts[1][3]).toEqual(
+        expect.objectContaining({
+          invoiceId: "in_late",
+          amountPaid: 6800,
+          amountPaidBefore: 1900,
+        }),
+      );
+    });
+
+    it("panel: an invoice partly paid by credit whose money was refunded by hand outside this flow still names the credit, once", async () => {
+      mockInvoicesRetrieve.mockImplementation(async () =>
+        lateInvoice({ total: 1900, amount_paid: 1000 }),
+      );
+      mockInvoicePaymentsList.mockResolvedValue({
+        data: [invoicePayment("inpay_late", "paid", "pi_late", 1000)],
+        has_more: false,
+      });
+      stripeCharges.pi_late = {
+        amount: 1000,
+        amount_captured: 1000,
+        amount_refunded: 1000,
+        refunded: true,
+      };
+
+      expect((await settle("evt_late_paid")).status).toBe(200);
+      expect((await settle("evt_late_paid_again")).status).toBe(200);
+
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      const alerts = creditAlerts();
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0][0]).toContain("restore that credit");
+    });
+
+    it.each([
+      ["Stripe lists no invoice payment for it", []],
+      [
+        "Stripe lists it only against another invoice",
+        [{ id: "inpay_other", invoice: "in_other", status: "paid" }],
+      ],
+    ])(
+      "a payment whose own invoice payment is missing when %s is treated as shared: a person, no refund",
+      async (_case, data) => {
+        mockInvoicePaymentsOfPayment.mockResolvedValue({
+          data,
+          has_more: false,
+        });
+
+        expect((await settle("evt_late_paid")).status).toBe(200);
+
+        expect(mockRefundsCreate).not.toHaveBeenCalled();
+        const [alert] = manualReviewAlerts();
+        expect(alert[3]).toEqual(
+          expect.objectContaining({
+            invoiceId: "in_late",
+            reason: "shared_payment",
+          }),
+        );
+      },
+    );
   });
 
   describe("MINOR: a coverage failure that is not a passing outage is an alert", () => {

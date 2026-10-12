@@ -1066,6 +1066,54 @@ After: 222/222.
 
 Total: 40 red. All 21 mutations were caught.
 
+## Devin review of `9304500`
+
+The independent final check of `9304500` rated it NIT, ship allowed. CI was
+green apart from one flaky E2E (`ECONNRESET` in `site-pages.spec`, unrelated,
+re-run by the architect). Devin's analysis found two new bugs. They were fixed
+together with the reviewer's other NIT, and `origin/main` was merged in.
+
+| Finding | Fix | Tests |
+|---|---|---|
+| **Devin 4246216894** (red): the manual-review claim was keyed by invoice only. After an alert for a partial payment, money the same invoice collected later never alerted. | The claim is keyed by invoice and amount collected: `covered_by_lifetime_manual_invoice:<invoice>:<amount_paid>`. Its row records `amount_paid`. A redelivery at the same amount finds the claim and stays silent. Each new amount alerts once more. The alert names the new total and what was added since the last alert ("6800 of 6800 collected; 4900 more since the alert at 1900"). The previous amount is read by `amountWarnedBefore`: the highest earlier claim for this invoice below the new amount, never another invoice's. If that read fails, the alert names the total only. | "Devin 4246216894: an invoice that collects 1,900 then 6,800 is alerted twice, the second naming the total and what was added; redeliveries add none". Exactly two alerts across five deliveries. A lower-amount alert for another invoice of the same account is seeded and is not read as this one's. |
+| **Devin panel, "Externally refunded invoices lose credit alerts"** (yellow, the reviewer's NIT; no GitHub comment): ops may already have refunded a partly credit-paid covered invoice by hand. Our metadata lookup then finds no refund of ours, so the unrestored credit was never flagged. | `withCreditReview` also counts a charge refunded in full outside this flow (`refundedOutsideChargeIds`, from the charge pre-check in `refundOnce`) as "refund found". A charge refunded in part outside already leads to our refund of the remainder, which counts as before. Same claim, so the alert is sent once. | "panel: an invoice partly paid by credit whose money was refunded by hand outside this flow still names the credit, once". |
+| **Reviewer NIT** (`paidAnotherInvoice`): the sharing check trusted a list that might not show this invoice's own payment. | Stripe's by-payment list must include this invoice's own invoice payment (`other.id === payment.id`). An empty list, or one without it, counts as shared and goes to manual review. | "a payment whose own invoice payment is missing when Stripe lists no invoice payment for it / Stripe lists it only against another invoice is treated as shared: a person, no refund" (2). |
+
+**Red first:** 3 failed / 223 passed (226). The "only against another
+invoice" case passed before; it is a guard. After: 226/226.
+
+**Existing assertions changed, declared:** none. The test fake's by-payment
+default changed, harness only. It used to return an empty list. It now
+answers with the payment intent's invoice payments from the last by-invoice
+listing, as belonging to that invoice, as Stripe would. It also follows
+expanded references.
+
+**Mutations,** each restored afterwards (files byte-identical; baseline
+226/226):
+
+| Mutation | Red |
+|---|---:|
+| N1a claim keyed by invoice only | 1 |
+| N1b the amount not passed to the claim | 1 |
+| N1c the earlier amount never read | 1 |
+| N1d the earlier amount includes the current one | 1 |
+| N1e other invoices' alerts counted | 1 |
+| N2a a charge refunded outside not counted for the credit | 1 |
+| N3a this invoice's own payment not required | 1 |
+
+Total: 7 red. All 7 mutations were caught.
+
+**Merge of `origin/main`** (`c905292`, s96 free tools; merge commit, no
+rebase):
+- Git merged it with no conflict. In `docs/stories.md`, this story's entry
+  was then moved by hand to follow main's entries (s88 … s101). It is a pure
+  112-line append against main; prettier was not run on it.
+- This branch touches no `e2e/`, `playwright.config.ts` or CI files, so the
+  strict Playwright count stays at main's 97.
+- Note: this story's entry says it "folds in s96 (dated grant on the plan in
+  force)". That s96 is an earlier, unrelated queued item. On main, `s96` is
+  now the free-tools platform. The architect may want to rename the reference.
+
 ### Current implementation verification
 
 Node `24.14.0`, npm `11.9.0`; dependencies installed with `npm ci`. No provider
@@ -1258,6 +1306,29 @@ Same environment and rules: no Stripe, Supabase or production calls, no
 The CI run and independent check on `7f8e8b5` approved at MINOR. Both Devin
 comments, the flag, the MINOR and both NITs are fixed above. Nothing above
 MINOR remains.
+
+### Devin review of `9304500` verification
+
+The tree is merged with `origin/main` (`c905292`), and dependencies were
+reinstalled with `npm ci`. Same rules: no Stripe, Supabase or production
+calls, no `next dev`. Test commands used
+`NEXT_PUBLIC_APP_URL=http://localhost:3000`.
+
+- `npm run lint`: passed, 0 errors / 34 warnings (main's existing set).
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath` over the lifetime-covered,
+  covered-refund-decision, one-time-purchases, stripe-webhook-invoice-customer,
+  plans, lifetime-grant-plan and ops-alert suites: 7 suites, 346/346 passed.
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/|src/__tests__/lib/monitoring/'`:
+  55 suites / 1,042 tests passed, 0 failures.
+- `npm test`: 495 suites passed, 2 skipped; 7,325 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added.
+
+The independent final check of `9304500` rated it NIT, ship allowed. Both of
+Devin's new bugs and the reviewer's NITs are fixed above. Nothing above MINOR
+remains.
 
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.

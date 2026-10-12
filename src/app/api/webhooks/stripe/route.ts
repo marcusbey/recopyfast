@@ -44,6 +44,7 @@ import { planOfProducts } from "@/lib/stripe/covered-refund-decision";
 import {
   CoveredRefundFailed,
   claimDisputeWarning,
+  amountWarnedBefore,
   claimManualInvoiceWarning,
   claimRefusalReport,
   claimUnknownPriceWarning,
@@ -1178,25 +1179,37 @@ async function alertManualReviewInvoicesOnce(
       );
       continue;
     }
+    // Devin 4246216894: once per amount collected, so money an invoice
+    // collects after its alert is alerted too.
     if (
       !(await claimManualInvoiceWarning(
         supabase,
         invoiceId,
         subscriptionId,
         userId,
+        invoice.amountPaid,
       ))
     ) {
       continue;
     }
+    const amountPaidBefore =
+      invoice.amountPaid > 0
+        ? await amountWarnedBefore(
+            supabase,
+            invoiceId,
+            userId,
+            invoice.amountPaid,
+          )
+        : null;
+    const collected = collectedSoFar(invoice, amountPaidBefore);
     alertOps(
       reason === "partly_paid_by_credit"
         ? // Sent once its refund was made (Devin 4245730010).
           `Subscription ${subscriptionId} is covered by a lifetime grant: ` +
-            `${manualReviewSentence(invoiceId, reason)} ` +
-            `(${collectedSoFar(invoice)}).`
+            `${manualReviewSentence(invoiceId, reason)} (${collected}).`
         : `Subscription ${subscriptionId} is covered by a lifetime grant, ` +
             `but ${manualReviewSentence(invoiceId, reason)} ` +
-            `(${collectedSoFar(invoice)}), so nothing on it was refunded ` +
+            `(${collected}), so nothing on it was refunded ` +
             `automatically; refund the covered lines by hand.`,
       undefined,
       { userId },
@@ -1209,6 +1222,7 @@ async function alertManualReviewInvoicesOnce(
         invoiceStatus,
         amountPaid: invoice.amountPaid,
         amountDue: invoice.amountDue,
+        amountPaidBefore,
       },
     );
   }
@@ -1224,17 +1238,25 @@ function isActionableReview(invoice: ManualReviewInvoice): boolean {
   return invoice.invoiceStatus === "paid" || invoice.amountPaid > 0;
 }
 
-/** What an invoice left to a person collected, in words (smallest unit). */
-function collectedSoFar({
-  invoiceStatus,
-  amountPaid,
-  amountDue,
-}: ManualReviewInvoice): string {
+/**
+ * What an invoice left to a person collected, in words (smallest unit), and
+ * what it added since an earlier alert at `amountPaidBefore`.
+ */
+function collectedSoFar(
+  { invoiceStatus, amountPaid, amountDue }: ManualReviewInvoice,
+  amountPaidBefore: number | null,
+): string {
   const status = invoiceStatus ? `invoice ${invoiceStatus}, ` : "";
-  if (amountDue === null) return `${status}${amountPaid} collected`;
+  const since =
+    amountPaidBefore === null
+      ? ""
+      : `; ${amountPaid - amountPaidBefore} more since the alert at ` +
+        `${amountPaidBefore}`;
+  if (amountDue === null) return `${status}${amountPaid} collected${since}`;
   return (
     `${status}${amountPaid} of ${amountDue} collected` +
-    (amountDue > amountPaid ? `, ${amountDue - amountPaid} still due` : "")
+    (amountDue > amountPaid ? `, ${amountDue - amountPaid} still due` : "") +
+    since
   );
 }
 
