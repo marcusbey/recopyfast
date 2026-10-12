@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { createAnonClient } from "@/lib/supabase/anon";
 import { comparisonList } from "@/lib/compare/comparisons";
+import { TOOL_CATALOGUE, toolPath } from "@/lib/tools/catalogue";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 /**
@@ -33,9 +34,14 @@ type StaticRoute = {
  * every crawl claimed every page had just changed — which teaches crawlers to
  * ignore this file's dates, the real ones on blog posts included. No page
  * records when its content last changed, so none is claimed.
+ *
+ * The free tools come from their catalogue (s96): `/tools` and every live
+ * tool page. A tool REPORT is never listed — reports are noindex, and a
+ * stranger's scanned site is not ours to submit.
  */
 export function buildStaticSitemapRoutes(
   comparisons: readonly { readonly slug: string }[] = comparisonList,
+  tools: readonly { readonly slug: string }[] = TOOL_CATALOGUE,
 ): readonly StaticRoute[] {
   return [
     { path: "/", changeFrequency: "weekly", priority: 1 },
@@ -49,6 +55,15 @@ export function buildStaticSitemapRoutes(
           path: `/compare/${comparison.slug}`,
           changeFrequency: "monthly",
           priority: 0.7,
+        }) as const,
+    ),
+    { path: "/tools", changeFrequency: "monthly", priority: 0.7 },
+    ...tools.map(
+      (tool) =>
+        ({
+          path: toolPath(tool.slug),
+          changeFrequency: "monthly",
+          priority: 0.6,
         }) as const,
     ),
     { path: "/blog", changeFrequency: "daily", priority: 0.7 },

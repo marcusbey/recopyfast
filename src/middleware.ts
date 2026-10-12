@@ -105,6 +105,15 @@ async function isUnentitled(
  * A prefix, because the site id is a path segment; the sibling `/api/published`
  * and every other `/api/*` path keep the session-aware path.
  *
+ * `/tools` and below, and `/api/tools/` (s96): the free tools are public
+ * pages and a public scan endpoint. No response there depends on a session —
+ * the hub and tool pages are static, a report is read by id through the
+ * service role, the scan is metered per IP — so a GoTrue round trip would buy
+ * nothing, and a visitor signed in to ReCopyFast must not have a rotated
+ * session cookie land on a report. Segment-exact (`/toolsx` is not here).
+ * A report's nonce is still issued: the policy is chosen above, before this
+ * check returns.
+ *
  * These paths stay *in* `config.matcher`. Skipping the middleware entirely
  * would also skip the security headers below, and `/embed/recopyfast.js` is
  * executable JavaScript loaded cross-origin onto every customer site — the one
@@ -121,6 +130,9 @@ function isSessionlessPath(pathname: string): boolean {
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
     pathname === "/llms.txt" ||
+    pathname === "/tools" ||
+    pathname.startsWith("/tools/") ||
+    pathname.startsWith("/api/tools/") ||
     isSentryTunnelPath(pathname)
   );
 }

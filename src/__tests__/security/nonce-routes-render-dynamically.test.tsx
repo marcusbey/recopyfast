@@ -45,7 +45,10 @@ import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import RootLayout from "@/app/layout";
 import { DashboardFrame } from "@/app/dashboard/DashboardFrame";
-import { NONCE_POLICY_PATH_PREFIXES } from "@/lib/security/content-security-policy";
+import {
+  NONCE_POLICY_PATH_PATTERNS,
+  NONCE_POLICY_PATH_PREFIXES,
+} from "@/lib/security/content-security-policy";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/theme-init-script";
 
 type Layout = (props: { children: ReactNode }) => Promise<ReactNode>;
@@ -164,4 +167,57 @@ it("the root layout renders the very script the policy hashes", () => {
     (scripts[0].props as { dangerouslySetInnerHTML: { __html: string } })
       .dangerouslySetInnerHTML.__html,
   ).toBe(THEME_INIT_SCRIPT);
+});
+
+/**
+ * s96 (ADR 062): the free-tool report joins the nonce policy by exact pattern,
+ * not by prefix. Its segment's layout must render per request like the
+ * prefixes' layouts, and its 404 is a per-request `not-found.tsx` below that
+ * layout. Keyed by the pattern's source, compared with the list, so a new
+ * pattern without a layout fails here.
+ */
+const PATTERN_LAYOUTS: Record<string, () => Promise<{ default: Layout }>> = {
+  [NONCE_POLICY_PATH_PATTERNS[0].source]: () =>
+    import("@/app/tools/[slug]/r/[id]/layout"),
+};
+
+it("covers exactly the nonce-policy path patterns", () => {
+  expect(Object.keys(PATTERN_LAYOUTS)).toEqual(
+    NONCE_POLICY_PATH_PATTERNS.map((pattern) => pattern.source),
+  );
+});
+
+describe.each(NONCE_POLICY_PATH_PATTERNS.map((pattern) => pattern.source))(
+  "the layout for %s",
+  (source) => {
+    it("renders nothing until the request is there", async () => {
+      let release: () => void = () => undefined;
+      (connection as jest.Mock).mockImplementation(
+        () => new Promise<void>((resolve) => (release = resolve)),
+      );
+      const { default: Layout } = await PATTERN_LAYOUTS[source]();
+      const child = <p>report</p>;
+
+      let isSettled = false;
+      const rendering = Layout({ children: child }).then((tree) => {
+        isSettled = true;
+        return tree;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(connection).toHaveBeenCalledTimes(1);
+      expect(isSettled).toBe(false);
+
+      release();
+      expect(contains(await rendering, child)).toBe(true);
+    });
+  },
+);
+
+it("the report segment owns a not-found page rendered below its dynamic layout", async () => {
+  const { default: NotFound } = await import(
+    "@/app/tools/[slug]/r/[id]/not-found"
+  );
+
+  expect(typeof NotFound).toBe("function");
 });

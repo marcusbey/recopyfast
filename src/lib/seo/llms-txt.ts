@@ -1,4 +1,9 @@
 import { comparisonList, type Comparison } from "@/lib/compare/comparisons";
+import {
+  TOOL_CATALOGUE,
+  toolPath,
+  type ToolEntry,
+} from "@/lib/tools/catalogue";
 import { SITE_DESCRIPTION, SITE_NAME } from "./site-identity";
 
 /**
@@ -14,14 +19,24 @@ import { SITE_DESCRIPTION, SITE_NAME } from "./site-identity";
  *
  * The comparison links come from `comparisonList`, the data the `/compare/*`
  * routes and the sitemap are built from (ADR 012 §4), so a new comparison is
- * listed here without touching this file.
+ * listed here without touching this file. The free tools come the same way
+ * from their catalogue (s96), which also drives `/tools` and the sitemap.
  */
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
 export function buildLlmsTxt(
   siteUrl: string,
   comparisonEntries: readonly Comparison[] = comparisonList,
+  toolEntries: readonly ToolEntry[] = TOOL_CATALOGUE,
 ): string {
   const link = (label: string, path: string, note: string) =>
     `- [${label}](${siteUrl}${path}): ${note}`;
+
+  const toolLinks = toolEntries.map((tool) =>
+    link(tool.name, toolPath(tool.slug), lowerFirst(tool.description)),
+  );
 
   const comparisonLinks = comparisonEntries.map((comparison) =>
     link(
@@ -79,6 +94,15 @@ export function buildLlmsTxt(
       "how ReCopyFast compares with other ways to let clients edit a website, including where the others are the better choice.",
     ),
     ...comparisonLinks,
+    "",
+    "## Free tools",
+    "",
+    link(
+      "Free website tools",
+      "/tools",
+      "free tools that read a public website and report what to fix, with what the scanner reads and how a site owner opts out.",
+    ),
+    ...toolLinks,
     "",
     "## Legal",
     "",

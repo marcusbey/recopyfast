@@ -50,7 +50,9 @@ describe("Playwright CI contract", () => {
   // s79: 86 -> 91, the five e2e/csp.spec.ts tests (marketing surface, /login,
   // /signup, /edit, signed-in dashboard).
   // Combined: 86 + 2 + 5 = 93 distinct tests.
-  it("runs all 93 tests and always cleans up and uploads the redacted summary", () => {
+  // s96: 93 -> 96, the three e2e/tools.spec.ts tests (hub and tool page, a
+  // scan landing on a nonce report document, a hostile report rendered inert).
+  it("runs all 96 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -58,15 +60,15 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":93');
-    expect(workflow).toContain("report.expected !== 93");
-    expect(workflow).toContain("report.total !== 93");
-    expect(workflow).toContain("report.passed !== 93");
-    expect(config).toContain("expected: 93");
+    expect(workflow).toContain('"expected":96');
+    expect(workflow).toContain("report.expected !== 96");
+    expect(workflow).toContain("report.total !== 96");
+    expect(workflow).toContain("report.passed !== 96");
+    expect(config).toContain("expected: 96");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
-  it("keeps the credential-free built-embed harness outside the strict 93-test suite", () => {
+  it("keeps the credential-free built-embed harness outside the strict 96-test suite", () => {
     // s06b was recovered after the strict-count reporter became a hard CI contract.
     // Its specs live below e2e/ for shared Playwright conventions, so without an
     // explicit exclusion Playwright recursively collects six extra tests into

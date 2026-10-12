@@ -57,12 +57,15 @@ describe("robots.txt", () => {
     expect(isBlocked(pathname)).toBe(true);
   });
 
-  it.each(["/login", "/signup", "/edit"])(
-    "leaves %s crawlable so its noindex can be read",
-    (pathname) => {
-      expect(isBlocked(pathname)).toBe(false);
-    },
-  );
+  it.each([
+    "/login",
+    "/signup",
+    "/edit",
+    // s96: a free-tool report is noindex; disallowing it would hide that.
+    "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+  ])("leaves %s crawlable so its noindex can be read", (pathname) => {
+    expect(isBlocked(pathname)).toBe(false);
+  });
 
   it("blocks nothing the sitemap submits", async () => {
     const submitted = (await sitemap()).map(

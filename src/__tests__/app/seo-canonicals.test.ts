@@ -124,6 +124,17 @@ const INDEXABLE: Route[] = [
     layers: async () => [layerOf(await import("@/app/compare/page"))],
   },
   ...comparisonRoutes,
+  // s96: the free tools hub and the Website Typo Finder.
+  {
+    path: "/tools",
+    layers: async () => [layerOf(await import("@/app/tools/page"))],
+  },
+  {
+    path: "/tools/website-spell-checker",
+    layers: async () => [
+      layerOf(await import("@/app/tools/website-spell-checker/page")),
+    ],
+  },
   {
     path: "/blog",
     layers: async () => [layerOf(await import("@/app/blog/page"))],
@@ -215,6 +226,17 @@ const NOINDEX: Route[] = [
   {
     path: "/auth/error",
     layers: async () => [layerOf(await import("@/app/auth/error/page"))],
+  },
+  // s96: a free-tool report — a stranger's scanned page, never indexed.
+  {
+    path: "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+    layers: async () => [
+      null,
+      layerOf(await import("@/app/tools/[slug]/r/[id]/page"), {
+        slug: "website-spell-checker",
+        id: "6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+      }),
+    ],
   },
 ];
 

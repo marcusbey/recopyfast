@@ -175,3 +175,37 @@ describe("legal pages truth", () => {
     expect(screen.queryByRole("heading", { name: /^9\.2\b/ })).toBeNull();
   });
 });
+
+/**
+ * s96 (architect decision 9) — the free tools are described with factual
+ * wording only, each line backed by the scan route and its migration.
+ */
+describe("the free tools on the legal pages", () => {
+  it("/privacy says what a scan processes, what is kept, for how long, and the opt-out", () => {
+    render(<Privacy />);
+    const text = document.body.textContent?.replace(/\s+/g, " ") ?? "";
+
+    expect(text).toContain(
+      "we process the website address you enter, without anything after a ? or #, and the public text of the pages we read from that site.",
+    );
+    expect(text).toContain(
+      "Your IP address is used only to limit how many scans can be run from it. Our rate limiter holds it for at most 24 hours, and it is never stored with a report.",
+    );
+    expect(text).toContain(
+      "It is public to anyone with its link and is deleted after 30 days.",
+    );
+    expect(text).toContain(
+      "A site owner can keep our scanner, RecopyFastToolsBot, off their site with a robots.txt rule; the scanner checks robots.txt before reading a page.",
+    );
+    expect(text).toContain("Free tool reports: Deleted after 30 days");
+  });
+
+  it("/terms says reports are public by link, kept 30 days, and how to opt out", () => {
+    render(<Terms />);
+    const text = document.body.textContent?.replace(/\s+/g, " ") ?? "";
+
+    expect(text).toContain(
+      "A report is public to anyone with its link and is deleted after 30 days. A site owner can keep our scanner off their site with a robots.txt rule.",
+    );
+  });
+});

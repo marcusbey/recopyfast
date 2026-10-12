@@ -23,6 +23,12 @@ type SoftwareApplicationInput = {
   offers: readonly MonthlyOffer[];
 };
 
+type WebApplicationInput = {
+  url: string;
+  name: string;
+  description: string;
+};
+
 type BreadcrumbItem = {
   readonly name: string;
   readonly url: string;
@@ -80,6 +86,28 @@ function toMonthlyOfferLd(offer: MonthlyOffer) {
         unitCode: "MON",
       },
     },
+  };
+}
+
+/**
+ * schema.org `WebApplication` for a free in-browser tool (s96 decision 12,
+ * first used by s98).
+ *
+ * The one price is the truth: the tool is free, so `offers` is a $0 `Offer`
+ * and `isAccessibleForFree` is true. As with `SoftwareApplication`, ADR 032 §5
+ * applies: no `aggregateRating` and no `review`, so no star snippet.
+ */
+export function buildWebApplicationLd(input: WebApplicationInput) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    name: input.name,
+    description: input.description,
+    url: input.url,
+    applicationCategory: "UtilitiesApplication",
+    operatingSystem: "Web",
+    isAccessibleForFree: true,
+    offers: { "@type": "Offer", price: 0, priceCurrency: "USD" },
   };
 }
 

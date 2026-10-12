@@ -423,14 +423,14 @@ scans; the report page 404s).
 
 ## Tasks (ordered, test-first)
 
-0. [ ] **Docs commit** per decision 17. Research confirms:
+0. [x] **Docs commit** per decision 17. Research confirms (all but `pg_database_size`, which needs production access and is left to the architect):
    - Vercel's `x-forwarded-for` overwrite;
    - the Sentry v10 propagation default;
    - the route table for `[slug]/r/[id]`;
    - today's `pg_database_size`.
 
    Baseline: the targeted suites green on `7185da5`.
-1. [ ] **Address classifier, extracted.**
+1. [x] **Address classifier, extracted.**
    - RED `src/lib/security/__tests__/public-address.test.ts`:
      - Refused, each verified against ipaddr.js 2.2 on 2026-10-11: `127.0.0.1`, `10.1.2.3`,
        `172.16.0.1`, `192.168.1.1`, `169.254.169.254`, `100.64.0.1` (carrierGradeNat), `0.0.0.0`,
@@ -442,7 +442,7 @@ scans; the report page 404s).
    - GREEN: move `refusalFor`/`RANGE_DESCRIPTIONS`/`unwrapHostname` into
      `src/lib/security/public-address.ts`; `webhook-url-safety.ts` imports them. **Every existing
      webhook suite passes unchanged.**
-2. [ ] **URL normalisation, cache key, denylist.**
+2. [x] **URL normalisation, cache key, denylist.**
    - RED `src/lib/tools/scan/__tests__/normalize-url.test.ts`:
      - `example.com` → `https://example.com/`; `HTTP://Example.COM:80/a?b#c` → `http://example.com/a`;
      - user info refused; `:8080` → `blocked_port`;
@@ -456,7 +456,7 @@ scans; the report page 404s).
      - the cache key is stable and tool-scoped;
      - the denylist matches host and subdomains, not look-alike suffixes (`evilexample.com`).
    - GREEN `normalize-url.ts`, `cache-key.ts`, `denylist.ts`.
-3. [ ] **Pinned-address fetcher.**
+3. [x] **Pinned-address fetcher.**
    - RED `src/lib/tools/fetch/__tests__/safe-fetch.test.ts`. It runs a real `http.createServer` on
      127.0.0.1, counting connections, with an injected resolver and policy:
      - **IP literals [A]:** `http://127.0.0.1:<port>/`, `[::1]`, `2130706433`, `0x7f.1`,
@@ -482,7 +482,7 @@ scans; the report page 404s).
      - `MAX_REQUESTS_PER_SCAN` enforced across hops.
      - **No resolved address appears in any refusal string.**
    - GREEN `validating-lookup.ts`, `safe-fetch.ts`, `captured-headers.ts`.
-4. [ ] **Extraction.**
+4. [x] **Extraction.**
    - RED `src/lib/tools/extract/__tests__/extract-page.test.ts`:
      - excluded elements; hidden and `aria-hidden`;
      - entities; inline merge; whitespace;
@@ -494,14 +494,14 @@ scans; the report page 404s).
        attributes; same-host links;
      - malformed and binary input and a 2 MB page never throw; 2 MB in < 2 s.
    - GREEN `extract-page.ts`, `package.json` (`parse5` `^7.3.0`).
-5. [ ] **Sampling.**
+5. [x] **Sampling.**
    - RED `sample-pages.test.ts`:
      - final host only; one index level; `.pdf`/`.jpg` dropped; dedupe; shallow first; ≤ 9;
      - fallback to links;
      - `<!DOCTYPE … [<!ENTITY …>]>` is inert (no expansion);
      - a 2 MB pathological sitemap in < 1 s.
    - GREEN.
-6. [ ] **Lens contract and Typo lens.**
+6. [x] **Lens contract and Typo lens.**
    - RED, all with synthetic fixtures (`src/lib/tools/lenses/typos/__tests__/`):
      - `dictionary.test.ts`;
      - `tokenize.test.ts`: U+2019 contractions, soft-hyphen-free input, URLs and emails;
@@ -516,7 +516,7 @@ scans; the report page 404s).
        `outputFileTracingIncludes: { "/api/tools/scan": ["./node_modules/wordlist-english/*.json",
        "./node_modules/wordlist-english/Copyright"] }`;
      - test `src/__tests__/next-config-tools-packaging.test.ts`.
-7. [ ] **Report schema and store; migration (its own commit).**
+7. [x] **Report schema and store; migration (its own commit).**
    - RED `report-schema.test.ts`:
      - round trip;
      - compact ≤ 12 KB enforced by truncation;
@@ -537,7 +537,7 @@ scans; the report page 404s).
      - PostgREST step: an anon-key `GET /rest/v1/tool_reports` returns no row (401/404), named in the
        `ci.yml` e2e DB step beside `content-write-privileges`.
    - GREEN: migration, `report-schema.ts`, `report-store.ts`.
-8. [ ] **Scan route.**
+8. [x] **Scan route.**
    - RED `src/__tests__/api/tools/scan-route.test.ts` (dependencies mocked at module boundaries):
      - **Same-origin [A]:** `text/plain` → 415; `Sec-Fetch-Site: cross-site` → 403;
        `Origin: https://evil.example` → 403. All before any limiter (assert no `checkLimit`).
@@ -562,7 +562,7 @@ scans; the report page 404s).
    - RED `client-key.test.ts`: IPv4; IPv6 → /64 and /48; `::ffff:1.2.3.4` → `1.2.3.4` **[A]**;
      `unknown` → null.
    - GREEN `route.ts`, `run-scan.ts`, `limits.ts`, `rate-limiter.ts` presets and identifier types.
-9. [ ] **Pages and components.**
+9. [x] **Pages and components.**
    - RED:
      - **`ToolScanForm.test.tsx`:**
        - labelled `type="url"` input; the query-string hint;
@@ -605,7 +605,7 @@ scans; the report page 404s).
        ReportSummary,FindingList,FindingInSentence}.tsx`.
      - **Lib:** `src/lib/tools/{catalogue,cta-copy}.ts`, `og-image.tsx`, `json-ld.ts`.
      - `MARKETING_BOUNDARY_FILES` += 4.
-10. [ ] **Discovery, CSP path and middleware.**
+10. [x] **Discovery, CSP path and middleware.**
     - RED:
       - **`src/__tests__/app/tools-discovery.test.ts`:**
         - the hub renders exactly the live entries;
@@ -631,26 +631,26 @@ scans; the report page 404s).
         with a comment);
       - `middleware.ts`;
       - `Footer.tsx` "Free tools".
-11. [ ] **Cleanup cron.**
+11. [x] **Cleanup cron.**
     - RED `src/__tests__/api/cron/tool-reports-cleanup.test.ts`:
       - wrong bearer → 401, no RPC;
       - right → `rpc("prune_tool_reports", { p_max_rows: 5000 })`, counts logged, 200;
       - RPC error → 500;
       - `vercel.json` has the path once, daily.
     - GREEN the route and `vercel.json`.
-12. [ ] **Sentry propagation (if research confirms the default propagates) [A].**
+12. [x] **Sentry propagation (if research confirms the default propagates) [A].**
     - RED `src/__tests__/sentry-trace-propagation.test.ts`: the server and edge configs set
       `tracePropagationTargets` to the app origin and the realtime origin only.
     - GREEN the two configs.
     - If research shows v10 does not propagate by default, the test pins that the option stays
       unset, with the evidence in a comment.
-13. [ ] **Privacy copy.** `src/app/privacy/page.tsx`, a "Free tools" paragraph (owner-approved
+13. [x] **Privacy copy.** `src/app/privacy/page.tsx`, a "Free tools" paragraph (owner-approved
     wording). `legal-pages-truth.test.tsx` pins:
     - the 30-day storage statement;
     - the query-string removal;
     - the 24-hour rate-limit key;
     - the opt-out sentence.
-14. [ ] **Playwright** `e2e/tools.spec.ts`, +3. Against the CI production build with the disposable
+14. [x] **Playwright** `e2e/tools.spec.ts`, +3. Against the CI production build with the disposable
     Supabase stack. Moves `watchScriptViolations` from `e2e/csp.spec.ts` to
     `e2e/support/csp-violations.ts` (no behaviour change).
     1. `/tools` → tool → `/tools/website-spell-checker`: hydrated, no script CSP violation,
@@ -669,7 +669,7 @@ scans; the report page 404s).
       - the contract test: comment, name and five expects.
     - A real end-to-end scan is impossible by design (no environment bypass). Task 3's real-socket
       suite proves the network behaviour.
-15. [ ] **Gates, measurements and mutations.**
+15. [ ] **Gates, measurements and mutations.** _(Done except the real scan on a Vercel preview, which needs the migration applied — deferred to the architect; see `docs/reviews/s96-free-tools-platform.md`.)_
     - **Gates and builds:**
       - `npm test`, `type-check`, `type-check:build`, `lint`, `format:check`;
       - offline `build`: `/tools` and the tool page `○`, the report `ƒ`; the scan route's `.nft.json`

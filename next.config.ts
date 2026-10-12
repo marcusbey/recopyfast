@@ -21,6 +21,20 @@ const nextConfig: NextConfig = {
   // Turbopack configuration (required in Next.js 16 when webpack config is present)
   turbopack: {},
 
+  // s96 — the Typo Finder's dictionary. `wordlist-english` reads its JSON
+  // through a `__dirname` trick a bundler cannot follow, so it stays a runtime
+  // require and its data files (and SCOWL's notice) are traced into the scan
+  // function explicitly. Bundled, the function would ship without the word
+  // lists and fail in production only
+  // (src/__tests__/next-config-tools-packaging.test.ts).
+  serverExternalPackages: ["wordlist-english"],
+  outputFileTracingIncludes: {
+    "/api/tools/scan": [
+      "./node_modules/wordlist-english/*.json",
+      "./node_modules/wordlist-english/Copyright",
+    ],
+  },
+
   // Configure webpack for Node.js compatibility
   webpack: (config, { isServer }) => {
     // Handle Node.js modules that don't work in browser

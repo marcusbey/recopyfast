@@ -54,7 +54,7 @@ export default function Terms() {
             </span>
             <span className="hidden sm:inline">|</span>
             <span>
-              <strong>Last Updated:</strong> September 28, 2026
+              <strong>Last Updated:</strong> October 11, 2026
             </span>
           </div>
         </div>
@@ -106,6 +106,14 @@ export default function Terms() {
               content editing through secure script integration. We provide
               real-time content editing, AI-powered content suggestions, and
               collaboration features.
+            </p>
+            {/* s96 (architect decision 9): factual wording only. */}
+            <p className="text-slate-600 mb-4">
+              The free website tools at /tools read the public pages of a
+              website address you enter and produce a report. They need no
+              account. A report is public to anyone with its link and is deleted
+              after 30 days. A site owner can keep our scanner off their site
+              with a robots.txt rule.
             </p>
             <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-r-lg">
               <p className="text-sm text-amber-800">

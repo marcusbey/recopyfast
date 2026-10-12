@@ -24,6 +24,7 @@ jest.mock("@/lib/supabase/anon", () => ({
 import { GET, dynamic } from "@/app/llms.txt/route";
 import sitemap from "@/app/sitemap";
 import { comparisonList } from "@/lib/compare/comparisons";
+import { TOOL_CATALOGUE } from "@/lib/tools/catalogue";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 const siteUrl = resolveSiteUrl();
@@ -77,6 +78,18 @@ describe("GET /llms.txt", () => {
         `${siteUrl}/terms`,
       ]),
     );
+  });
+
+  it("has one Free tools section listing /tools and every catalogue tool (s96)", async () => {
+    const text = await body();
+    const linked = await links();
+
+    expect(text.match(/^## Free tools$/gm)).toHaveLength(1);
+    expect(linked).toContain(`${siteUrl}/tools`);
+    for (const tool of TOOL_CATALOGUE) {
+      expect(linked).toContain(`${siteUrl}/tools/${tool.slug}`);
+    }
+    expect(linked.filter((url) => /\/tools\/[^/]+\/r\//.test(url))).toEqual([]);
   });
 
   it("lists every comparison page, from the routes' own data", async () => {

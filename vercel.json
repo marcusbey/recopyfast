@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/webhook-dispatch",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/tool-reports-cleanup",
+      "schedule": "15 3 * * *"
     }
   ]
 }

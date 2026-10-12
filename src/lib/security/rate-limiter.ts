@@ -45,11 +45,23 @@ export function isProductionLikeEnvironment(): boolean {
   return !DEVELOPER_ENVIRONMENTS.has(environment);
 }
 
+/**
+ * What a bucket's identifier names. `global` (one bucket for every caller)
+ * and `host` (a scanned site's host name) were added by s96 for the free
+ * tools' scan caps; the Redis key format is unchanged.
+ */
+export type RateLimitIdentifierType =
+  | "user"
+  | "ip"
+  | "api_key"
+  | "global"
+  | "host";
+
 export interface RateLimitConfig {
   windowMs: number;
   maxRequests: number;
   identifier: string;
-  identifierType: "user" | "ip" | "api_key";
+  identifierType: RateLimitIdentifierType;
   endpoint?: string;
 }
 
@@ -440,6 +452,16 @@ export const RATE_LIMIT_CONFIGS = {
   // for why this number can never meet an uptime monitor.
   IP_HEALTH: { windowMs: 60 * 1000, maxRequests: 60 },
 
+  // Free tools' scan (s96, src/app/api/tools/scan/route.ts). Every one fails
+  // closed: a scan spends outbound fetches, function seconds and a row, with
+  // no authorization behind it. The burst bucket is checked before the body is
+  // read; the daily, /48, global and per-target buckets only on a cache miss.
+  TOOLS_SCAN_BURST: { windowMs: 60 * 1000, maxRequests: 5 }, // 5 per minute per /64 or IPv4
+  TOOLS_SCAN_DAILY: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 5 }, // 5 scans a day per /64 or IPv4
+  TOOLS_SCAN_DAILY_48: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 20 }, // 20 a day per IPv6 /48
+  TOOLS_SCAN_GLOBAL_DAILY: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 500 }, // 500 a day, everyone together
+  TOOLS_SCAN_TARGET_HOURLY: { windowMs: 60 * 60 * 1000, maxRequests: 20 }, // 20 an hour per scanned host
+
   // API key-based limits
   API_KEY_DEFAULT: { windowMs: 60 * 1000, maxRequests: 1000 }, // 1000 requests per minute
   API_KEY_PREMIUM: { windowMs: 60 * 1000, maxRequests: 5000 }, // 5000 requests per minute
@@ -451,7 +473,7 @@ export const RATE_LIMIT_CONFIGS = {
  */
 export function createRateLimitConfig(
   identifier: string,
-  identifierType: "user" | "ip" | "api_key",
+  identifierType: RateLimitIdentifierType,
   limitType: keyof typeof RATE_LIMIT_CONFIGS,
   endpoint?: string,
 ): RateLimitConfig {
