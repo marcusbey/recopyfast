@@ -16,6 +16,7 @@ import {
   type FinalTestRecord,
 } from "./strict-run-contract";
 import { redactDiagnostic } from "./redacted-diagnostics";
+import processHelpers from "../../scripts/stripe-provider-process.cjs";
 
 interface StrictReporterOptions {
   expected?: number;
@@ -36,6 +37,13 @@ interface SerializableReport {
 
 const MAX_DIAGNOSTICS_PER_TEST = 3;
 const CORE_SETUP_DIAGNOSTIC_PREFIX = "[core-e2e setup]";
+export const HUMAN_CHECKOUT_READY_NOTICE =
+  processHelpers.HUMAN_CHECKOUT_READY_NOTICE as string;
+
+function exactHumanCheckoutReadyChunk(chunk: string | Buffer): string | null {
+  const value = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+  return value === HUMAN_CHECKOUT_READY_NOTICE ? value : null;
+}
 
 function redactedCoreSetupChunk(chunk: string | Buffer): string | null {
   const line = (typeof chunk === "string" ? chunk : chunk.toString("utf8"))
@@ -146,7 +154,12 @@ export default class StrictReporter implements Reporter {
    * suppressed because page/fixture logs can contain short-lived editor URLs.
    */
   onStdOut(chunk: string | Buffer): void {
-    const output = redactedCoreSetupChunk(chunk);
+    // The provider operator must see this one checkpoint only after the owned
+    // page opens. Exact equality is deliberate: prefix/suffix text, a changed
+    // mode, or a second line could smuggle a URL, identity, payment value or
+    // provider ID through an otherwise safe prefix.
+    const output =
+      exactHumanCheckoutReadyChunk(chunk) ?? redactedCoreSetupChunk(chunk);
     if (output) process.stdout.write(output);
   }
 
