@@ -189,6 +189,32 @@ function armPredicate(arm: string): (row: Row) => boolean {
   throw new Error(`Unsupported or() arm in test stub: ${arm}`);
 }
 
+/**
+ * PostgREST's `db-max-rows`: a read returns at most this many rows (Devin
+ * review of 03100a8). Supabase's default is 1,000.
+ */
+const FAKE_MAX_ROWS = 1000;
+
+/** Every filter, order and range the fake was asked for, per test. */
+let fakeQueryLog: Array<{
+  table: string;
+  method: string;
+  column?: string;
+  value?: unknown;
+}> = [];
+
+/**
+ * A row's value for a column, or a `data->>key` JSON path as text.
+ */
+function fieldOf(row: Row, column: string): unknown {
+  if (column.includes("->>")) {
+    const [base, key] = column.split("->>");
+    const value = (row[base] as Row | undefined)?.[key];
+    return value === undefined || value === null ? null : String(value);
+  }
+  return row[column];
+}
+
 const UNIQUE_COLUMNS: Record<string, string> = {
   billing_events: "stripe_event_id",
   plan_entitlements: "stripe_payment_intent_id",
@@ -201,6 +227,11 @@ function createFakeClient() {
     let values: Row = {};
     let conflictColumn: string | null = null;
     let stripeEventId: unknown = null;
+    let ordering: { column: string; ascending: boolean } | null = null;
+    let rowLimit: number | null = null;
+    let rowOffset = 0;
+    const log = (method: string, column?: string, value?: unknown) =>
+      fakeQueryLog.push({ table, method, column, value });
 
     const rows = (): Row[] => db[table] ?? [];
     const matched = () =>
@@ -277,8 +308,29 @@ function createFakeClient() {
             error: null,
           };
         }
-        default:
-          return { data: matched(), error: null };
+        default: {
+          const found = matched();
+          if (ordering) {
+            const { column, ascending } = ordering;
+            found.sort((a, b) => {
+              const [x, y] = [fieldOf(a, column), fieldOf(b, column)];
+              const comparison =
+                x === y
+                  ? 0
+                  : (x as string | number) < (y as string | number)
+                    ? -1
+                    : 1;
+              return ascending ? comparison : -comparison;
+            });
+          }
+          return {
+            data: found.slice(
+              rowOffset,
+              rowOffset + Math.min(rowLimit ?? FAKE_MAX_ROWS, FAKE_MAX_ROWS),
+            ),
+            error: null,
+          };
+        }
       }
     };
 
@@ -286,7 +338,19 @@ function createFakeClient() {
       select: () => builder,
       eq: (column: string, value: unknown) => {
         if (column === "stripe_event_id") stripeEventId = value;
-        predicates.push((row) => row[column] === value);
+        log("eq", column, value);
+        predicates.push((row) => fieldOf(row, column) === value);
+        return builder;
+      },
+      order: (column: string, options?: { ascending?: boolean }) => {
+        log("order", column, options?.ascending ?? true);
+        ordering = { column, ascending: options?.ascending ?? true };
+        return builder;
+      },
+      range: (from: number, to: number) => {
+        log("range", undefined, { from, to });
+        rowOffset = from;
+        rowLimit = to - from + 1;
         return builder;
       },
       in: (column: string, allowed: unknown[]) => {
@@ -813,6 +877,7 @@ beforeEach(() => {
   stripeRefunds = [];
   stripeCharges = {};
   stripeDisputes = {};
+  fakeQueryLog = [];
   refundsByIdempotencyKey = {};
   db = {
     billing_customers: [
@@ -5549,6 +5614,143 @@ describe("Devin + final check of 7f8e8b5", () => {
           amountPaidBefore: 1900,
         }),
       );
+    });
+
+    describe("Devin review of 03100a8: earlier amounts are read only for this invoice, in stable pages", () => {
+      /** The open mixed invoice, having collected `amountPaid`. */
+      function collected(amountPaid: number): Row {
+        return {
+          ...mixedOpenInvoice(amountPaid),
+          ...(amountPaid >= 6800
+            ? {
+                status: "paid",
+                amount_remaining: 0,
+                status_transitions: { paid_at: LIFETIME_PAID_AT + 7200 },
+              }
+            : {}),
+        };
+      }
+
+      it("asks for stable invoice-scoped pages and preserves the existing string claim representation", async () => {
+        let invoice = collected(1900);
+        mockInvoicesRetrieve.mockImplementation(async () => invoice);
+        expect((await settle("evt_late_partial")).status).toBe(200);
+        invoice = collected(6800);
+        fakeQueryLog = [];
+        expect((await settle("evt_late_paid")).status).toBe(200);
+
+        const reads = fakeQueryLog.filter(
+          (entry) => entry.table === "billing_events",
+        );
+        expect(reads).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              method: "eq",
+              column: "data->>invoice_id",
+              value: "in_late",
+            }),
+            expect.objectContaining({
+              method: "order",
+              column: "stripe_event_id",
+              value: true,
+            }),
+            expect.objectContaining({
+              method: "range",
+              value: { from: 0, to: 999 },
+            }),
+          ]),
+        );
+        const claims = (db.billing_events ?? []).filter(
+          (row) => (row.data as Row | undefined)?.invoice_id === "in_late",
+        );
+        // Deployed claims already use text. The reader normalizes text and
+        // numbers itself, so changing new writes would only split the JSONB
+        // representation without making the comparison safer.
+        expect(
+          claims.map((row) => (row.data as Row).amount_paid).sort(),
+        ).toEqual(["1900", "6800"]);
+      });
+
+      it("an account with more than 1,000 earlier warnings still names this invoice's last amount", async () => {
+        // 1,500 warnings about other invoices, at amounts between this
+        // invoice's: an unscoped read stops at the first 1,000.
+        db.billing_events = Array.from({ length: 1500 }, (_, index) => ({
+          user_id: USER_ID,
+          event_type: "internal.covered_invoice_manual_review",
+          stripe_event_id: `covered_by_lifetime_manual_invoice:in_other_${index}:5000`,
+          data: {
+            invoice_id: `in_other_${index}`,
+            subscription_id: "sub_other",
+            amount_paid: 5000,
+          },
+          processed: true,
+        }));
+        let invoice = collected(1900);
+        mockInvoicesRetrieve.mockImplementation(async () => invoice);
+
+        expect((await settle("evt_late_partial")).status).toBe(200);
+        invoice = collected(4000);
+        expect((await settle("evt_late_more")).status).toBe(200);
+        invoice = collected(6800);
+        expect((await settle("evt_late_paid")).status).toBe(200);
+
+        const alerts = manualReviewAlerts();
+        expect(alerts).toHaveLength(3);
+        expect(alerts[0][0]).not.toContain("more since");
+        expect(alerts[1][0]).toContain("2100 more since the alert at 1900");
+        expect(alerts[2][0]).toContain("2800 more since the alert at 4000");
+      });
+
+      it("keeps the numerically highest earlier amount from legacy string-valued claims", async () => {
+        db.billing_events = [900, 1900].map((amountPaid) => ({
+          user_id: USER_ID,
+          event_type: "internal.covered_invoice_manual_review",
+          stripe_event_id: `covered_by_lifetime_manual_invoice:in_late:${amountPaid}`,
+          data: {
+            invoice_id: "in_late",
+            subscription_id: SUBSCRIPTION_ID,
+            // 03100a8 stored this field as text. PostgreSQL orders these
+            // lexicographically, where "900" sorts above "1900".
+            amount_paid: String(amountPaid),
+          },
+          processed: true,
+        }));
+        mockInvoicesRetrieve.mockResolvedValue(collected(6800));
+
+        expect((await settle("evt_late_paid")).status).toBe(200);
+
+        const [alert] = manualReviewAlerts();
+        expect(alert[0]).toContain("4900 more since the alert at 1900");
+        expect(alert[3]).toEqual(
+          expect.objectContaining({ amountPaidBefore: 1900 }),
+        );
+      });
+
+      it("pages legacy string-valued claims for one invoice past PostgREST's row cap", async () => {
+        db.billing_events = Array.from({ length: 1500 }, (_, index) => {
+          const amountPaid = index + 1;
+          return {
+            user_id: USER_ID,
+            event_type: "internal.covered_invoice_manual_review",
+            stripe_event_id: `covered_by_lifetime_manual_invoice:in_late:${amountPaid}`,
+            data: {
+              invoice_id: "in_late",
+              subscription_id: SUBSCRIPTION_ID,
+              amount_paid: String(amountPaid),
+            },
+            processed: true,
+          };
+        });
+        mockInvoicesRetrieve.mockResolvedValue(collected(1900));
+
+        expect((await settle("evt_late_paid")).status).toBe(200);
+
+        const [alert] = manualReviewAlerts();
+        expect(alert[0]).toContain("400 more since the alert at 1500");
+        expect(alert[3]).toEqual(
+          expect.objectContaining({ amountPaidBefore: 1500 }),
+        );
+      });
     });
 
     it("panel: an invoice partly paid by credit whose money was refunded by hand outside this flow still names the credit, once", async () => {

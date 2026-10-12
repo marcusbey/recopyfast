@@ -1656,6 +1656,7 @@ export async function claimDisputeWarning(
 /** `billing_events.event_type` of the once-only manual-review warning. */
 const MANUAL_INVOICE_WARNING_EVENT_TYPE =
   "internal.covered_invoice_manual_review";
+const MANUAL_INVOICE_WARNING_PAGE_SIZE = 1000;
 
 /**
  * Claim the warning that an invoice of a refused subscription needs a person
@@ -1689,6 +1690,15 @@ export async function claimManualInvoiceWarning(
  * below `amountPaid` (Devin 4246216894): what the invoice collected since ops
  * last heard of it. Null when there was none, or the warnings cannot be read
  * (said, and the alert then names the total only). Never throws.
+ *
+ * Devin review of 03100a8: scope the read to this invoice in PostgREST, then
+ * page it in a stable unique order. Reading every warning of the account and
+ * filtering here stopped at PostgREST's row cap (1,000 on Supabase).
+ *
+ * Parse both historical JSON strings and JSON numbers before comparing.
+ * PostgreSQL sorts strings lexicographically (`"900"` above `"1900"`) and
+ * orders JSON types separately, so neither representation can safely be
+ * ordered as the numeric amount through this generic JSONB column.
  */
 export async function amountWarnedBefore(
   supabase: SupabaseClient,
@@ -1696,24 +1706,46 @@ export async function amountWarnedBefore(
   userId: string,
   amountPaid: number,
 ): Promise<number | null> {
-  const { data, error } = await supabase
-    .from("billing_events")
-    .select("data")
-    .eq("event_type", MANUAL_INVOICE_WARNING_EVENT_TYPE)
-    .eq("user_id", userId);
-  if (error) {
-    console.error(
-      `Could not read the earlier warnings about invoice ${invoiceId}; ` +
-        `naming its total only: ${error.message}`,
-    );
-    return null;
+  let highest: number | null = null;
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("billing_events")
+      .select("data")
+      .eq("event_type", MANUAL_INVOICE_WARNING_EVENT_TYPE)
+      .eq("user_id", userId)
+      .eq("data->>invoice_id", invoiceId)
+      .order("stripe_event_id", { ascending: true })
+      .range(offset, offset + MANUAL_INVOICE_WARNING_PAGE_SIZE - 1);
+    if (error) {
+      console.error(
+        `Could not read the earlier warnings about invoice ${invoiceId}; ` +
+          `naming its total only: ${error.message}`,
+      );
+      return null;
+    }
+
+    const page = data ?? [];
+    if (page.length === 0) return highest;
+    for (const row of page) {
+      const stored = (row as { data?: Record<string, unknown> }).data
+        ?.amount_paid;
+      if (typeof stored !== "string" && typeof stored !== "number") continue;
+      const candidate = Number(stored);
+      if (
+        Number.isFinite(candidate) &&
+        candidate < amountPaid &&
+        (highest === null || candidate > highest)
+      ) {
+        highest = candidate;
+      }
+    }
+
+    // Advance by what PostgREST actually returned. Its server-side max_rows
+    // can be lower than the requested range; an empty page is the only safe
+    // terminal condition.
+    offset += page.length;
   }
-  const earlier = (data ?? [])
-    .map((row) => (row as { data?: Record<string, unknown> }).data)
-    .filter((claim) => claim?.invoice_id === invoiceId)
-    .map((claim) => Number(claim?.amount_paid))
-    .filter((amount) => Number.isFinite(amount) && amount < amountPaid);
-  return earlier.length > 0 ? Math.max(...earlier) : null;
 }
 
 /** `billing_events.event_type` of the once-only unknown-price warning. */
