@@ -65,7 +65,7 @@ describe("decideInvoiceRefund", () => {
         LIFETIME_PRO,
         productIndex,
       ),
-    ).toEqual({ kind: "skip" });
+    ).toEqual({ kind: "skip", reason: "uncovered" });
   });
 
   it("sends a mixed invoice (Pro and Agency on one payment) to a person, never refunding it", () => {
@@ -164,9 +164,10 @@ describe("decideInvoiceRefund", () => {
         LIFETIME_PRO,
         productIndex,
       ),
-    ).toEqual({ kind: "skip" });
+    ).toEqual({ kind: "skip", reason: "nothing_charged" });
     expect(decideInvoiceRefund([], LIFETIME_PRO, productIndex)).toEqual({
       kind: "skip",
+      reason: "nothing_charged",
     });
   });
 
@@ -177,7 +178,7 @@ describe("decideInvoiceRefund", () => {
         { grantPlanIds: [] },
         productIndex,
       ),
-    ).toEqual({ kind: "skip" });
+    ).toEqual({ kind: "skip", reason: "uncovered" });
   });
 
   it("names ambiguity before a missing product, and both before a mix", () => {
@@ -200,6 +201,67 @@ describe("decideInvoiceRefund", () => {
         productIndex,
       ),
     ).toEqual({ kind: "manual", reason: "unresolvable" });
+  });
+});
+
+/*
+ * Review of 67c6caf (minors): a grant paid after the subscription but before
+ * the invoice, and an invoice paid without money (credit balance, coupon).
+ */
+describe("decideInvoiceRefund: review of 67c6caf", () => {
+  it("sends a line covered only by a grant paid after the subscription, before the invoice, to a person", () => {
+    // Uncovered when the subscription was bought (Lifetime Pro only); covered
+    // by a Founding Agency paid before this invoice was: never a silent skip.
+    expect(
+      decideInvoiceRefund(
+        [line("prod_agency", 4900)],
+        { grantPlanIds: ["pro"], laterGrantPlanIds: ["agency"] },
+        productIndex,
+      ),
+    ).toEqual({ kind: "manual", reason: "covered_later" });
+    expect(
+      decideInvoiceRefund(
+        [line("prod_pro"), line("prod_agency", 4900)],
+        { grantPlanIds: ["pro"], laterGrantPlanIds: ["agency"] },
+        productIndex,
+      ),
+    ).toEqual({ kind: "manual", reason: "covered_later" });
+  });
+
+  it("still skips a line no grant ever covered, later grants or not", () => {
+    expect(
+      decideInvoiceRefund(
+        [line("prod_agency", 4900)],
+        { grantPlanIds: ["pro"], laterGrantPlanIds: ["starter"] },
+        productIndex,
+      ),
+    ).toEqual({ kind: "skip", reason: "uncovered" });
+  });
+
+  it("sends a covered invoice paid without money (credit balance, 100% coupon) to a person", () => {
+    expect(
+      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, 0),
+    ).toEqual({ kind: "manual", reason: "paid_by_credit" });
+  });
+
+  it("refunds a covered invoice paid with money, or not yet paid", () => {
+    expect(
+      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, 1900),
+    ).toEqual({ kind: "refund" });
+    expect(
+      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, null),
+    ).toEqual({ kind: "refund" });
+  });
+
+  it("never turns a skip into a manual review because nothing was paid", () => {
+    expect(
+      decideInvoiceRefund(
+        [line("prod_agency", 4900)],
+        LIFETIME_PRO,
+        productIndex,
+        0,
+      ),
+    ).toEqual({ kind: "skip", reason: "uncovered" });
   });
 });
 

@@ -750,6 +750,99 @@ own event treats a live subscription it covers in the usual way (set to end
 at period end). This is recorded so the architect can confirm it is the
 intended boundary.
 
+## Review of `67c6caf`
+
+The independent review gave `Max severity: MAJOR`, `Ship allowed: no`. The
+architect accepted both "decisions to confirm" from the Devin round: an
+unknown product goes to a person, and coverage is judged at the subscription's
+purchase. Stripe behaviour was checked against the docs for
+`2025-07-30.basil` (context7, docs.stripe.com) and the pinned SDK types
+before coding:
+- A subscription's draft invoice cannot be deleted, only voided once
+  finalized.
+- `auto_advance: false` stops a draft from finalizing on its own, and
+  `finalizeInvoice` accepts `auto_advance: false`.
+- `voidInvoice` applies only to finalized invoices, and Stripe refuses it while
+  an invoice has an open or paid payment.
+- Immediate cancellation stops collection of finalized invoices, and a
+  canceled subscription's `metadata` stays updatable.
+- `InvoicePayment.amount_paid` can be less than the PaymentIntent when one
+  payment pays several invoices.
+
+| Finding | Fix | Tests |
+|---|---|---|
+| **MAJOR 1**: a manual-review invoice only got `warnOps`, and the refusal report said nothing was owed. | `alertManualReviewInvoicesOnce` uses `alertOps`, still once per invoice through the write-once `billing_events` row. `manualReviewInvoices` joins `outcomes`, and its actionable (paid) entries join the error-level condition of the report. | The N2 case "sends an invoice whose line product is configured for two plans to a person" (declared change) now expects exactly one alert, none on a second delivery, no warning, and an error-level refusal report. Every manual-review assertion reads alerts (`manualReviewAlerts`, error level). |
+| **MAJOR 2** (pre-existing): a subscription bought before the lifetime was only set to cancel at period end, so a renewal collected after the lifetime was never refunded or flagged. | **Layer (a)**: `stopPredatingSubscription`, used by `stopBillingForLifetimeOwner` and `endPredatingSubscription`, reads the latest invoice. Collected before the lifetime (or none): period end, as before. Draft: `auto_advance: false`, finalized with `auto_advance: false`, voided. Open: voided, unless a payment is processing (left to settlement). Paid at or after the lifetime: `decideInvoiceRefund` against the grants paid by then, then refund (same keys) or a person. Void or uncollectible: nothing collected. Every case but the first is cancelled now (`prorate: false`, `invoice_now: false`). **Layer (b)**: the stop's marker is written first: `cancelled_reason: lifetime_purchase` (which the period-end stop already wrote), the payment intent, and the new `lifetime_paid_at`, all in Stripe metadata. At settlement (`lifetimeStopOf`), any invoice of a stopped subscription paid at or after the lifetime is decided the same way. One collected before is logged and left. `console.log` is replaced by structured logs (`reportPredatingStop`). | New describe, 8 cases: a draft renewal is never collected; an open renewal is voided; the lifetime event processed after the renewal was charged refunds once, and a later settlement refunds nothing more; a renewal paid before the lifetime is untouched; a mixed renewal gets one alert and no refund; the renewal race (payment processing, so no void; refunded once when it settles; replays); a period-end subscription charged anyway is refunded once at settlement; the subscription-first ordering runs the same stop. |
+| Minor: `loadPlanProductIndex` threw on a configured price Stripe lacks; a rejected lookup stayed cached. | `resource_missing` gives null, logged; the price is omitted and its lines go to a person. Other errors are thrown and evicted from the run's cache. | "omits a configured price Stripe does not have"; "answers 5xx when a configured price's product cannot be read for another reason"; "evicts a failed price lookup from the run's cache". |
+| Minor: a covered invoice paid with no money was refunded silently (nothing to refund). | `decideInvoiceRefund(…, amountPaid)`: a paid invoice whose `amount_paid` is 0 goes to a person (`paid_by_credit`). | Pure: "sends a covered invoice paid without money … to a person", "refunds a covered invoice paid with money, or not yet paid", "never turns a skip into a manual review because nothing was paid". Webhook: "alerts once … for a covered invoice paid by credit balance". |
+| Minor: 4244837673 boundary. A line uncovered at purchase but covered by a grant paid before the invoice was skipped silently. | `coverageFor(grants, judgedAt, invoicePaidAt)` also returns `laterGrantPlanIds`. A charge only they cover goes to a person (`covered_later`). | Pure: "sends a line covered only by a grant paid after the subscription, before the invoice, to a person", "still skips a line no grant ever covered". Webhook: "alerts, never skips, an Agency invoice covered only by a grant paid after the subscription but before the invoice". |
+| Minor: the marker path refunded any later invoice without the line decision. | A refusal by our marker refunds its own latest invoice as before; every other invoice settling later gets the same per-invoice decision (judged at purchase). | "decides any invoice of a marker refusal other than its own". |
+| Minor: a manual-review invoice still processing was flagged before it was actionable. | `ManualReviewInvoice.invoiceStatus`. One not yet paid is logged and decided again at settlement, then alerted once, the alert naming its status. | "defers a manual review of an invoice still processing to its settlement". |
+| Minor: `refundOnce` could refund more than the invoice collected through a shared payment. | The refund is capped at `InvoicePayment.amount_paid` and at what is left on the charge; a partial amount uses the `-remainder-<amount>` key. | "caps a refund at what the invoice collected through a shared payment". |
+| NIT: skip decisions were not logged. | Logged at info, with invoice id and reason, in the refusal and at settlement. | "logs a skipped invoice, with its id and why, at info". |
+| NIT: the alert told ops to "cancel and refund" an already-ended subscription. | Says "already <status> … refund it by hand". | (wording) |
+
+Also covered: a line without `pricing` (an older API version) is read through its price's product ("reads a line without `pricing` …"), and a webhook-level unresolvable case ("alerts once, refunding nothing, for a charge whose product no plan sells").
+
+**Red first:** pure suite 7 failed / 15 passed (22). Lifetime-covered suite 22
+failed / 141 passed (163): the 17 new cases that failed, plus the 5
+existing manual-review cases whose expectation moved from a warning to an
+alert. The cases on a transient price failure and a legacy line passed
+before; they are guards. After: 22/22 and 163/163.
+
+**Existing assertions changed, declared:**
+- (MAJOR 1) Manual-review notices are alerts: `manualReviewAlerts` reads
+  `logger.error`, so the metadata is argument 3, not 2.
+- (MAJOR 1) The N2 ambiguous-product case expects one alert, none on a
+  duplicate delivery, and an error-level report.
+- (MAJOR 2) The two m-1 period-end cases expect `lifetime_paid_at` in the
+  stop's metadata.
+- (MAJOR 2) The m-1 period-end failure case reads the new alert ("could not be
+  stopped …").
+- (pure) A skip carries its reason (`uncovered`, `nothing_charged`).
+- One new case was corrected while writing it: the `covered_later` webhook
+  case also refunds the subscription's own Pro latest invoice, which is
+  correct.
+
+**Fixtures changed, declared:**
+- The Stripe fake gained `invoices.update`, `finalizeInvoice` and `voidInvoice`.
+- Invoices carry `amount_paid` and `status_transitions.paid_at`; a
+  subscription's latest invoice defaults to paid when it was bought.
+- `invoicePayment` takes an optional `amount_paid`.
+
+**Mutations,** each restored afterwards (files byte-identical; baselines
+163/163 and 22/22):
+
+| Mutation | Red |
+|---|---:|
+| MA1 layer (a) removed: always cancel at period end | 6 |
+| MA2 layer (b) removed: no settlement for a stopped subscription | 2 |
+| MA3 manual review `alertOps` → `warnOps` | 11 |
+| MA4 refund amount cap removed | 1 |
+| MA5 stopped: payment time not checked | 1 |
+| MA6 draft renewal not voided | 1 |
+| MA7 processing payment ignored (void attempted) | 1 |
+| MA8 marker refusal decides no other invoice | 1 |
+| MA9 an open manual review not deferred | 1 |
+| MA10 later grants ignored | 1 |
+| MA11 missing price thrown | 1 |
+| MA12 rejected lookup not evicted | 1 |
+| MA13 skip not logged | 1 |
+| MP1 `covered_later` ignored (pure) | 1 |
+| MP2 `paid_by_credit` ignored (pure) | 1 |
+
+Total: 31 red. All 15 mutations were caught. MA5 first survived: judging
+coverage at the payment time already excludes the stopping lifetime. Its
+observable effect is now pinned: the "collected before the lifetime" log, and
+no catalogue reads.
+
+**Residual, recorded:** refunds are still found by (subscription, payment).
+If one payment paid two invoices of the same subscription and both are
+covered, the cap refunds the first invoice's share, and the second would be
+found as "already refunded". That is an under-refund, never a double refund
+or an uncovered refund. This app pays each invoice with its own PaymentIntent,
+so it does not arise today.
+
 ### Current implementation verification
 
 Node `24.14.0`, npm `11.9.0`; dependencies installed with `npm ci`. No provider
@@ -856,11 +949,33 @@ Same environment and rules: no Stripe, Supabase or production calls.
   reuses `billing_events`.
 
 The gate lines below were `pending` until the architect's re-review. The
-re-review's verdict (minor, ship allowed) stood with N1–N3 fixed and stands
-with the Devin round on `8744bed` fixed. s82b remains the recorded follow-up.
+re-review's verdict (minor, ship allowed) stood with N1–N3 fixed and with the
+Devin round on `8744bed` fixed.
+
+### Review of `67c6caf` verification
+
+Same environment and rules: no Stripe, Supabase or production calls, no
+`next dev`.
+
+- `npm run lint`: passed, 0 errors / 31 existing warnings.
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath src/__tests__/api/billing/stripe-webhook-lifetime-covered.test.ts src/__tests__/lib/stripe/covered-refund-decision.test.ts src/__tests__/lib/stripe/plans.test.ts src/__tests__/api/billing/lifetime-grant-plan.test.ts src/__tests__/lib/monitoring/ops-alert.test.ts`:
+  5 suites, 263/263 passed (163 + 22 + 55 + 18 + 5).
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/|src/__tests__/lib/monitoring/'`:
+  55 suites / 977 tests passed, 0 failures.
+- `npm test`: 438 suites passed, 2 skipped; 6,175 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added; the stop's marker is Stripe
+  metadata.
+
+The review of `67c6caf` blocked ship at MAJOR. Its findings are fixed and
+tested above, but the fixes have not been reviewed yet. So the gate lines are
+`pending` until the architect's re-review. s82b remains the recorded
+follow-up.
 
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.
 
-Max severity: minor
-Ship allowed: yes
+Max severity: pending
+Ship allowed: pending

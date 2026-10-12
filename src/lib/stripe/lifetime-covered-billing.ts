@@ -12,6 +12,7 @@ import {
   type LifetimeGrant,
 } from "@/lib/billing/effective-plan";
 import { loadPaidPlanPriceIndex, type PaidPlanId } from "./plans";
+import { logger } from "@/lib/monitoring/logger";
 import {
   decideInvoiceRefund,
   type InvoiceCoverage,
@@ -140,18 +141,31 @@ export function coverFrom(
 }
 
 /**
- * The plans an ended subscription's invoices are judged against (Devin
- * 4244837673): every grant paid at or before it was bought, by the same
- * payment-order rule, not only the earliest grant covering its last plan.
+ * The plans an invoice is judged against (Devin 4244837673): every grant paid
+ * at or before `judgedAt`, by the same payment-order rule, not only the
+ * earliest grant covering one plan. `judgedAt` is the subscription's purchase
+ * for a refusal, the invoice's payment for a subscription stopped for a
+ * lifetime.
+ *
+ * Grants paid after `judgedAt` but at or before the invoice was paid
+ * (`invoicePaidAt`; until now for one not paid yet) come back apart (review of
+ * 67c6caf): a charge only they cover goes to a person, never to a silent skip.
  */
-export function coverageAt(
+export function coverageFor(
   grants: readonly DatedGrant[],
-  subscriptionCreated: number,
+  judgedAt: number,
+  invoicePaidAt: number | null,
 ): InvoiceCoverage {
+  const paidBy = invoicePaidAt ?? Number.POSITIVE_INFINITY;
   return {
     grantPlanIds: grants
-      .filter((grant) =>
-        wasBoughtWithPlanAlreadyOwned(subscriptionCreated, grant.paidAt),
+      .filter((grant) => wasBoughtWithPlanAlreadyOwned(judgedAt, grant.paidAt))
+      .map((grant) => grant.planId),
+    laterGrantPlanIds: grants
+      .filter(
+        (grant) =>
+          !wasBoughtWithPlanAlreadyOwned(judgedAt, grant.paidAt) &&
+          wasBoughtWithPlanAlreadyOwned(paidBy, grant.paidAt),
       )
       .map((grant) => grant.planId),
   };
@@ -222,14 +236,222 @@ export function wasBoughtWithPlanAlreadyOwned(
 export async function endAtPeriodEndForLifetime(
   subscriptionId: string,
   paymentIntentId: string | null,
+  lifetimePaidAt?: number,
 ): Promise<Stripe.Subscription> {
   return stripe.subscriptions.update(subscriptionId, {
     cancel_at_period_end: true,
-    metadata: {
-      cancelled_reason: CANCELLED_REASON.lifetimePurchase,
-      ...(paymentIntentId ? { paymentIntentId } : {}),
-    },
+    metadata: lifetimeStopMetadata(paymentIntentId, lifetimePaidAt),
   });
+}
+
+/**
+ * Stripe metadata key holding when the lifetime that stopped a subscription
+ * was paid (review of 67c6caf, MAJOR 2): every later payment of that
+ * subscription is judged against it (`lifetimeStopOf`).
+ */
+const LIFETIME_PAID_AT_KEY = "lifetime_paid_at";
+
+/** The stop's marker: why, by which lifetime, paid when. */
+function lifetimeStopMetadata(
+  paymentIntentId: string | null,
+  lifetimePaidAt?: number,
+): Record<string, string> {
+  return {
+    cancelled_reason: CANCELLED_REASON.lifetimePurchase,
+    ...(paymentIntentId ? { paymentIntentId } : {}),
+    ...(lifetimePaidAt !== undefined
+      ? { [LIFETIME_PAID_AT_KEY]: String(lifetimePaidAt) }
+      : {}),
+  };
+}
+
+/**
+ * The lifetime a subscription was stopped for, from its marker, or null when
+ * it was not stopped for one. A stop written before its payment time was
+ * recorded names the payment intent, whose time is read from Stripe.
+ */
+export async function lifetimeStopOf(
+  subscription: Stripe.Subscription,
+): Promise<{ paidAt: number } | null> {
+  const metadata = subscription.metadata ?? {};
+  if (metadata.cancelled_reason !== CANCELLED_REASON.lifetimePurchase) {
+    return null;
+  }
+  const recorded = Number(metadata[LIFETIME_PAID_AT_KEY]);
+  if (Number.isFinite(recorded) && recorded > 0) return { paidAt: recorded };
+  return metadata.paymentIntentId
+    ? { paidAt: await lifetimePaymentTime(metadata.paymentIntentId) }
+    : null;
+}
+
+/** What stopping a subscription bought before the lifetime did. */
+export type PredatingStop =
+  /** Its latest invoice was collected before the lifetime: it runs out. */
+  | { kind: "ends_at_period_end"; subscription: Stripe.Subscription }
+  /** Cancelled now; what became of its latest invoice. */
+  | {
+      kind: "cancelled_now";
+      subscription: Stripe.Subscription;
+      latestInvoice:
+        | { handling: "voided"; invoiceId: string }
+        | { handling: "payment_in_flight"; invoiceId: string }
+        | { handling: "nothing_to_collect"; invoiceId: string | null }
+        | {
+            handling: "decided";
+            invoiceId: string;
+            refund: CoveredInvoiceRefund;
+          };
+    };
+
+/**
+ * Stop a subscription bought BEFORE the lifetime that now covers it, without
+ * ever keeping money collected at or after the lifetime's payment (review of
+ * 67c6caf, MAJOR 2, layer a).
+ *
+ * Setting it to cancel at period end, as before, honours the period its latest
+ * invoice paid for, but only if that invoice was collected before the lifetime.
+ * A renewal drafted just before the grant is finalized and charged about an
+ * hour later; a lifetime event processed late can find one already charged.
+ * So the latest invoice decides:
+ *  - collected before the lifetime (or none): cancel at period end, as before;
+ *  - a draft: never collected. `auto_advance: false`, finalized with
+ *    `auto_advance: false` (no payment attempted) and voided, since a
+ *    subscription's draft cannot be deleted. Then cancelled now;
+ *  - open: voided, unless a payment on it is already processing (Stripe will
+ *    not void an invoice with an open payment); that one is decided when it
+ *    settles (layer b). Then cancelled now;
+ *  - paid at or after the lifetime: `decideInvoiceRefund` against the grants
+ *    paid by then, refunded through `refundCoveredInvoice` (same keys) or left
+ *    to a person. Then cancelled now;
+ *  - void or uncollectible: nothing was collected. Cancelled now.
+ *
+ * The marker (`cancelled_reason`, the lifetime's payment intent and payment
+ * time) is written first, so every later payment of the subscription is judged
+ * at settlement even if a step after it fails (layer b). Throws on any
+ * failure; each step is idempotent for the caller's retry.
+ */
+export async function stopPredatingSubscription(
+  subscription: Stripe.Subscription,
+  lifetime: { paymentIntentId: string | null; paidAt: number },
+  readGrants: () => Promise<readonly DatedGrant[]>,
+  productIndex?: PlanProductIndex,
+): Promise<PredatingStop> {
+  const latestId = idOf(subscription.latest_invoice);
+  const latest = latestId ? await stripe.invoices.retrieve(latestId) : null;
+  const latestPaidAt = latest?.status_transitions?.paid_at ?? null;
+
+  if (
+    !latest ||
+    (latest.status === "paid" &&
+      (latestPaidAt === null || latestPaidAt < lifetime.paidAt))
+  ) {
+    return {
+      kind: "ends_at_period_end",
+      subscription: await endAtPeriodEndForLifetime(
+        subscription.id,
+        lifetime.paymentIntentId,
+        lifetime.paidAt,
+      ),
+    };
+  }
+
+  await stripe.subscriptions.update(subscription.id, {
+    metadata: lifetimeStopMetadata(lifetime.paymentIntentId, lifetime.paidAt),
+  });
+  const latestInvoice = await settleLatestInvoice(
+    latest,
+    subscription.id,
+    readGrants,
+    productIndex,
+  );
+  const cancelled = await stripe.subscriptions.cancel(subscription.id, {
+    prorate: false,
+    invoice_now: false,
+  });
+  return { kind: "cancelled_now", subscription: cancelled, latestInvoice };
+}
+
+/** Make sure a stopped subscription's latest invoice keeps nothing it should not. */
+async function settleLatestInvoice(
+  latest: Stripe.Invoice,
+  subscriptionId: string,
+  readGrants: () => Promise<readonly DatedGrant[]>,
+  productIndex: PlanProductIndex | undefined,
+): Promise<Extract<PredatingStop, { kind: "cancelled_now" }>["latestInvoice"]> {
+  const invoiceId = latest.id as string;
+  switch (latest.status) {
+    case "draft":
+      if (latest.amount_due <= 0) {
+        return { handling: "nothing_to_collect", invoiceId };
+      }
+      await stripe.invoices.update(invoiceId, { auto_advance: false });
+      await stripe.invoices.finalizeInvoice(invoiceId, { auto_advance: false });
+      await stripe.invoices.voidInvoice(invoiceId);
+      return { handling: "voided", invoiceId };
+    case "open":
+      if (await hasPaymentUnderWay(invoiceId)) {
+        return { handling: "payment_in_flight", invoiceId };
+      }
+      await stripe.invoices.voidInvoice(invoiceId);
+      return { handling: "voided", invoiceId };
+    case "paid": {
+      const paidAt = latest.status_transitions?.paid_at ?? null;
+      const decision = await decideEndedInvoiceRefund(
+        latest,
+        { grants: await readGrants(), judgedAt: paidAt ?? 0 },
+        productIndex ?? (await loadPlanProductIndex()),
+      );
+      if (decision.kind === "refund") {
+        return {
+          handling: "decided",
+          invoiceId,
+          refund: await refundCoveredInvoice(invoiceId, subscriptionId),
+        };
+      }
+      return {
+        handling: "decided",
+        invoiceId,
+        refund: {
+          ...NO_REFUNDS,
+          manualReviewInvoices:
+            decision.kind === "manual"
+              ? [
+                  {
+                    invoiceId,
+                    reason: decision.reason,
+                    invoiceStatus: latest.status,
+                  },
+                ]
+              : [],
+        },
+      };
+    }
+    default:
+      return { handling: "nothing_to_collect", invoiceId };
+  }
+}
+
+/** Is a payment on this invoice still processing (an `open` invoice payment)? */
+async function hasPaymentUnderWay(invoiceId: string): Promise<boolean> {
+  let startingAfter: string | undefined;
+  const seenCursors = new Set<string>();
+  for (;;) {
+    const page = await stripe.invoicePayments.list({
+      invoice: invoiceId,
+      limit: INVOICE_PAYMENT_LOOKUP_LIMIT,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    if (page.data.some((payment) => payment.status === "open")) return true;
+    const nextCursor = nextStripePageCursor(
+      page.data,
+      page.has_more,
+      startingAfter,
+      seenCursors,
+      `invoice-payment lookup for invoice ${invoiceId}`,
+    );
+    if (!nextCursor) return false;
+    startingAfter = nextCursor;
+  }
 }
 
 /** Has this refusal already cancelled this subscription (a retry's view)? */
@@ -280,6 +502,12 @@ export interface CoveredInvoiceRefund {
 export interface ManualReviewInvoice {
   invoiceId: string;
   reason: ManualReviewReason;
+  /**
+   * The invoice's status when decided. One still `open` (a payment
+   * processing) is decided again, and alerted, when it settles (review of
+   * 67c6caf): one alert, when it is actionable.
+   */
+  invoiceStatus: string | null;
 }
 
 /** What a refusal took back, for the ops report. */
@@ -408,12 +636,18 @@ export async function refuseSubscriptionCoveredByLifetime(
 
 /**
  * What an ended subscription's invoices are judged against (Devin round on
- * 8744bed): the plans its customer's grants covered when it was bought
- * (`coverageAt`), and the catalogue's products.
+ * 8744bed): the customer's grants, the moment they are judged at (the
+ * subscription's purchase, `coverageFor`), and the catalogue's products.
  */
-export interface InvoicePlanCoverage extends InvoiceCoverage {
+export interface InvoicePlanCoverage extends GrantsJudgedAt {
   /** Loaded when absent: one catalogue load and one price read per price. */
   readonly productIndex?: PlanProductIndex;
+}
+
+/** The customer's grants, and the moment an invoice is judged at. */
+export interface GrantsJudgedAt {
+  readonly grants: readonly DatedGrant[];
+  readonly judgedAt: number;
 }
 
 /**
@@ -459,7 +693,28 @@ async function invoicesToRefund(
     );
     if (decision.kind === "refund") refund.push(invoice.id);
     if (decision.kind === "manual") {
-      manual.push({ invoiceId: invoice.id, reason: decision.reason });
+      manual.push({
+        invoiceId: invoice.id,
+        reason: decision.reason,
+        invoiceStatus: invoice.status ?? null,
+      });
+    }
+    if (decision.kind === "skip") {
+      logger.info(
+        `Invoice ${invoice.id} of subscription ${subscription.id}, refused as ` +
+          `covered by a lifetime grant, not refunded: ` +
+          (decision.reason === "uncovered"
+            ? `it bills no plan the customer's grants covered.`
+            : `nothing on it was a charge.`),
+        undefined,
+        {
+          component: "stripe/lifetime-covered-billing",
+          action: "skip_covered_invoice",
+          subscriptionId: subscription.id,
+          invoiceId: invoice.id,
+          reason: decision.reason,
+        },
+      );
     }
   }
   return { refund, manual };
@@ -481,12 +736,32 @@ export interface PlanProductIndex extends ProductPlanLookup {
 export async function loadPlanProductIndex(): Promise<PlanProductIndex> {
   const priceIndex = await loadPaidPlanPriceIndex();
   const products = new Map<string, Promise<string | null>>();
+  // Review of 67c6caf: a price Stripe does not have (deleted, or configured in
+  // the other mode) has no product: null, said, and its lines go to a person.
+  // Any other failure is thrown, and evicted, so a later ask reads it again.
   const productOfPrice = (priceId: string): Promise<string | null> => {
     const known = products.get(priceId);
     if (known) return known;
-    const read = stripe.prices
-      .retrieve(priceId)
-      .then((price) => idOf(price.product));
+    const read = stripe.prices.retrieve(priceId).then(
+      (price) => idOf(price.product),
+      (error: unknown) => {
+        if (isStripeResourceMissing(error)) {
+          logger.warn(
+            `Stripe price ${priceId} does not exist: no plan can be told ` +
+              `from it, so the invoice lines billing it go to a person.`,
+            undefined,
+            {
+              component: "stripe/lifetime-covered-billing",
+              action: "price_missing",
+              priceId,
+            },
+          );
+          return null;
+        }
+        products.delete(priceId);
+        throw error;
+      },
+    );
     products.set(priceId, read);
     return read;
   };
@@ -516,7 +791,7 @@ export async function loadPlanProductIndex(): Promise<PlanProductIndex> {
  */
 export async function decideEndedInvoiceRefund(
   invoice: Stripe.Invoice,
-  coverage: InvoiceCoverage,
+  judged: GrantsJudgedAt,
   productIndex: PlanProductIndex,
 ): Promise<InvoiceRefundDecision> {
   const lines = await allInvoiceLines(invoice);
@@ -530,7 +805,16 @@ export async function decideEndedInvoiceRefund(
         line.amount > 0 ? await lineProductId(line, productIndex) : null,
     });
   }
-  return decideInvoiceRefund(charges, coverage, productIndex);
+  return decideInvoiceRefund(
+    charges,
+    coverageFor(
+      judged.grants,
+      judged.judgedAt,
+      invoice.status_transitions?.paid_at ?? null,
+    ),
+    productIndex,
+    invoice.status === "paid" ? invoice.amount_paid : null,
+  );
 }
 
 /** Line-item page size: Stripe's maximum. */
@@ -719,7 +1003,7 @@ export async function refundCoveredInvoice(
       }
       if (payment.status !== "paid") continue;
 
-      const outcome = await refundOnce(payment.payment, subscriptionId);
+      const outcome = await refundOnce(payment, subscriptionId);
       switch (outcome.kind) {
         case "refunded":
           refundIds.push(outcome.refundId);
@@ -732,6 +1016,8 @@ export async function refundCoveredInvoice(
           break;
         case "disputed":
           disputedChargeIds.push(outcome.chargeId);
+          break;
+        case "nothing_collected":
           break;
       }
     }
@@ -760,7 +1046,9 @@ type RefundOutcome =
   /** Already refunded in full outside this flow (s82 review, MAJOR 1). */
   | { kind: "refunded_outside"; chargeId: string }
   /** Disputed: the dispute decides, not a refund (s82 review, MAJOR 1). */
-  | { kind: "disputed"; chargeId: string };
+  | { kind: "disputed"; chargeId: string }
+  /** The payment collected nothing for this invoice. */
+  | { kind: "nothing_collected" };
 
 /**
  * Invoice-payment page size. A subscription's first invoice is normally paid
@@ -788,11 +1076,17 @@ const INVOICE_PAYMENT_LOOKUP_LIMIT = 10;
  * refund, the dispute decides. The same two refusals from Stripe
  * (`charge_already_refunded`, `charge_disputed`) are caught as a backstop for
  * a change between the read and the refund.
+ *
+ * Review of 67c6caf: never more than this invoice collected through this
+ * payment (`InvoicePayment.amount_paid`, less than the charge when one
+ * payment paid several invoices), nor more than is left on the charge. A
+ * payment shared with an uncovered invoice is never refunded for it.
  */
 async function refundOnce(
-  payment: Stripe.InvoicePayment.Payment,
+  invoicePayment: Stripe.InvoicePayment,
   subscriptionId: string,
 ): Promise<RefundOutcome> {
+  const payment = invoicePayment.payment;
   const target =
     payment.type === "payment_intent"
       ? { payment_intent: idOf(payment.payment_intent) ?? undefined }
@@ -816,13 +1110,23 @@ async function refundOnce(
   const charge = await readChargeOf(target);
   const chargeId = charge?.id ?? targetId;
   if (charge?.disputed) return { kind: "disputed", chargeId };
-  const remainder = charge
+  const chargeLeft = charge
     ? charge.amount_captured - charge.amount_refunded
-    : 0;
-  if (charge && (charge.refunded || remainder <= 0)) {
+    : null;
+  if (charge && (charge.refunded || (chargeLeft ?? 0) <= 0)) {
     return outsideUnlessOurs(target, subscriptionId, chargeId);
   }
-  const partial = charge !== null && charge.amount_refunded > 0;
+  const invoiceShare = invoicePayment.amount_paid ?? null;
+  if (invoiceShare !== null && invoiceShare <= 0) {
+    return { kind: "nothing_collected" };
+  }
+  const known = [chargeLeft, invoiceShare].filter(
+    (amount): amount is number => amount !== null,
+  );
+  const remainder = known.length > 0 ? Math.min(...known) : null;
+  const partial =
+    remainder !== null &&
+    (charge ? remainder < charge.amount_captured : invoiceShare !== null);
 
   const baseKey = `${COVERED_BY_LIFETIME}-refund-${subscriptionId}-${targetId}`;
   let refund: Stripe.Refund;
