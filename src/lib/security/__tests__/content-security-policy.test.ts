@@ -132,6 +132,90 @@ describe("the nonce (app surface) policy", () => {
   });
 });
 
+/**
+ * s107 (ADR 063) — Google Analytics on the static marketing policy, and only
+ * there. The middleware sets `analytics` only for an allowlisted marketing
+ * path with a configured measurement id; the builder still refuses it under a
+ * nonce, so the app surface can never carry Google's hosts.
+ */
+describe("Google Analytics sources", () => {
+  const GTM = "https://www.googletagmanager.com";
+
+  it("adds exactly what GA4 needs to the static policy", () => {
+    const policy = directives(
+      buildContentSecurityPolicy({ isDev: false, env: {}, analytics: true }),
+    );
+
+    expect(policy["script-src"]).toBe(`'self' 'unsafe-inline' ${GTM}`);
+    expect(policy["script-src-elem"]).toBe(policy["script-src"]);
+    expect(policy["connect-src"]).toBe(
+      "'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com",
+    );
+    expect(policy["img-src"]).toBe(
+      "'self' data: https: https://*.google-analytics.com https://*.googletagmanager.com",
+    );
+  });
+
+  it("changes nothing but script, connect and img sources", () => {
+    const withGa = directives(
+      buildContentSecurityPolicy({ isDev: false, env: {}, analytics: true }),
+    );
+    const without = directives(
+      buildContentSecurityPolicy({ isDev: false, env: {} }),
+    );
+
+    expect(Object.keys(withGa)).toEqual(Object.keys(without));
+    for (const name of Object.keys(without)) {
+      if (
+        ["script-src", "script-src-elem", "connect-src", "img-src"].includes(
+          name,
+        )
+      ) {
+        continue;
+      }
+      expect([name, withGa[name]]).toEqual([name, without[name]]);
+    }
+  });
+
+  it("keeps the env-derived origins and appends Google's after them", () => {
+    const connect = directives(
+      buildContentSecurityPolicy({
+        isDev: false,
+        env: { NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co" },
+        analytics: true,
+      }),
+    )["connect-src"].split(" ");
+
+    expect(connect.slice(0, 3)).toEqual([
+      "'self'",
+      "https://project.supabase.co",
+      "wss://project.supabase.co",
+    ]);
+    expect(connect).toContain("https://*.google-analytics.com");
+  });
+
+  it("is still nonce-free, so 'unsafe-inline' keeps working for prerendered pages", () => {
+    const policy = buildContentSecurityPolicy({
+      isDev: false,
+      env: {},
+      analytics: true,
+    });
+
+    expect(policy).not.toMatch(/'nonce-|'sha256-|'strict-dynamic'/);
+  });
+
+  it("never reaches the nonce (app) policy, even when asked", () => {
+    expect(
+      buildContentSecurityPolicy({
+        nonce: NONCE,
+        isDev: false,
+        env: {},
+        analytics: true,
+      }),
+    ).toBe(buildContentSecurityPolicy({ nonce: NONCE, isDev: false, env: {} }));
+  });
+});
+
 describe("the theme script's hash", () => {
   it("is the SHA-256 of the script the root layout renders", () => {
     const expected = createHash("sha256")

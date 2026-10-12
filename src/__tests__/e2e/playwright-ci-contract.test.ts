@@ -52,8 +52,11 @@ describe("Playwright CI contract", () => {
   // s98: +1, the maintenance cost calculator flow (e2e/tools-maintenance-cost.spec.ts).
   // s96: +3, the three e2e/tools.spec.ts tests (hub and tool page, a scan
   // landing on a nonce report document, a hostile report rendered inert).
-  // Combined: 86 + 2 + 5 + 1 + 3 = 97 distinct tests.
-  it("runs all 97 tests and always cleans up and uploads the redacted summary", () => {
+  // s107: +7, the seven e2e/google-analytics.spec.ts tests (US visitor, auth
+  // pages, a client navigation from /login to /terms and back, a page view
+  // per client navigation, EEA visitor, no country hint, signed-in dashboard).
+  // Combined: 86 + 2 + 5 + 1 + 3 + 7 = 104 distinct tests.
+  it("runs all 104 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -61,15 +64,25 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":97');
-    expect(workflow).toContain("report.expected !== 97");
-    expect(workflow).toContain("report.total !== 97");
-    expect(workflow).toContain("report.passed !== 97");
-    expect(config).toContain("expected: 97");
+    expect(workflow).toContain('"expected":104');
+    expect(workflow).toContain("report.expected !== 104");
+    expect(workflow).toContain("report.total !== 104");
+    expect(workflow).toContain("report.passed !== 104");
+    expect(config).toContain("expected: 104");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
-  it("keeps the credential-free built-embed harness outside the strict 97-test suite", () => {
+  // s107: the e2e job builds with a fake GA4 id, or e2e/google-analytics.spec.ts
+  // would test a build with no analytics in it. The id must stay a fake one:
+  // a real id would send this job's page views to the production property.
+  it("builds the e2e app with a fake Google Analytics id", () => {
+    const e2eJob = workflow.slice(workflow.indexOf("\n  e2e:\n"));
+
+    expect(e2eJob).toContain('NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-E2ETEST000"');
+    expect(workflow.match(/NEXT_PUBLIC_GA_MEASUREMENT_ID:/g)).toHaveLength(1);
+  });
+
+  it("keeps the credential-free built-embed harness outside the strict 104-test suite", () => {
     // s06b was recovered after the strict-count reporter became a hard CI contract.
     // Its specs live below e2e/ for shared Playwright conventions, so without an
     // explicit exclusion Playwright recursively collects six extra tests into

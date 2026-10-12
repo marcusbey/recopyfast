@@ -438,6 +438,10 @@ describe("comparison Lighthouse CI contract", () => {
     expect(workflow).toContain(
       'NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:1"',
     );
+    // s107: the gate measures the build with Google Analytics in it (the
+    // consent-required path: init script + banner, nothing from Google), and
+    // with a fake id only.
+    expect(workflow).toContain('NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-E2ETEST000"');
     expect(workflow).not.toContain("secrets.");
     expect(packageManifest).toContain(
       '"lighthouse:ci": "tsx scripts/run-lighthouse-ci.ts"',

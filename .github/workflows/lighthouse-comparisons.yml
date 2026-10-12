@@ -26,6 +26,11 @@ jobs:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJyY2YtbGhjLWZpeHR1cmUiLCJyZWYiOiJsb2NhbCIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjAwMDAwMDAwLCJleHAiOjIwMDAwMDAwMDB9.fixture-signature"
       SUPABASE_SERVICE_ROLE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJyY2YtbGhjLWZpeHR1cmUiLCJyZWYiOiJsb2NhbCIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJpYXQiOjE2MDAwMDAwMCwiZXhwIjoyMDAwMDAwMDB9.fixture-signature"
       AGENCY_CHECKOUT_ENABLED: "false"
+      # s107 (ADR 063): a fake GA4 id, so the measured build carries Google
+      # Analytics as production does. No country header is sent, so every run
+      # takes the consent-required path production serves the EEA: the init
+      # script and the banner, and no request to Google.
+      NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-E2ETEST000"
 
     steps:
       - name: Checkout repository

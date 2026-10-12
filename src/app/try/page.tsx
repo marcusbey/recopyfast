@@ -69,6 +69,7 @@ export default function TryPage() {
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/signup?utm_source=try&utm_medium=page&utm_campaign=try_on_any_site"
+              data-cta-location="try_page"
               className="pressable group mt-8 inline-flex items-center gap-2 rounded-full bg-slate-900 px-8 py-4 text-base font-semibold text-white transition-[background-color,transform] hover:bg-slate-800"
             >
               Start your free trial

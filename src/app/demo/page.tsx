@@ -117,6 +117,7 @@ export default function Demo() {
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/signup"
+              data-cta-location="demo"
               className="pressable group inline-flex items-center gap-2 rounded-full bg-slate-900 px-8 py-4 text-base font-semibold text-white transition-colors hover:bg-slate-800"
             >
               <span>Add it to your site</span>

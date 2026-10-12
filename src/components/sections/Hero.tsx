@@ -220,6 +220,7 @@ export default function Hero({ offer }: { offer: FoundingOfferView }) {
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/signup"
+            data-cta-location="hero"
             className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-sky-700"
           >
             <span>Start your free trial</span>

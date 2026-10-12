@@ -302,6 +302,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                   {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a
                     href="/signup"
+                    data-cta-location="pricing_plan"
                     className={`block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all ${
                       plan.highlight
                         ? "pressable bg-sky-600 text-white hover:bg-sky-700"
@@ -353,6 +354,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                 {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                 <a
                   href="/dashboard/billing"
+                  data-cta-location="pricing_lifetime_pro"
                   className="pressable mt-5 block rounded-xl bg-sky-600 px-6 py-3 text-center font-semibold text-white hover:bg-sky-700"
                 >
                   Buy Lifetime Pro
@@ -411,6 +413,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                         <a
                           href="/dashboard/billing"
+                          data-cta-location="pricing_founding_agency"
                           className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800"
                         >
                           Buy founding access

@@ -163,7 +163,9 @@ export function Header() {
                     {/* The native anchor also keeps modifier keys and ordinary
                         link accessibility at this security boundary. */}
                     {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                    <a href="/signup">Get started</a>
+                    <a href="/signup" data-cta-location="header">
+                      Get started
+                    </a>
                   </Button>
                 </>
               )}

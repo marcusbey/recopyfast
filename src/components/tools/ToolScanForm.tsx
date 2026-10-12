@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { track } from "@/lib/analytics/google-analytics/gtag";
 
 /**
  * The scan form on every scanning tool page (s96).
@@ -86,6 +87,13 @@ export function ToolScanForm({
 
     const reportUrl = (body as { reportUrl?: unknown } | null)?.reportUrl;
     if (response.ok && isReportPathFor(tool, reportUrl)) {
+      // s107: the scan is measured here, on the tool page (marketing CSP,
+      // on the analytics allowlist), never on the report it opens: reports
+      // are capability URLs under the nonce policy and carry no analytics
+      // (ADR 063). Slug only; never the scanned address. A no-op unless GA
+      // runs on this page. gtag.js sends queued events with `sendBeacon` as
+      // the page is left, so the navigation below does not lose it.
+      track("tool_scan_completed", { tool_slug: tool });
       navigate(reportUrl);
       return;
     }
