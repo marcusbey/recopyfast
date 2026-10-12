@@ -1,3 +1,4 @@
+import { bindAnalyticsContext } from "@/lib/analytics/google-analytics/context-server";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -171,6 +172,8 @@ export async function POST(req: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    await bindAnalyticsContext(req, user.id);
 
     const body = (await req.json()) as CheckoutRequestBody;
     const parsed = await parseIntent(body);

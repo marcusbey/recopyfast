@@ -18,6 +18,11 @@ import {
 } from "@/lib/analytics/google-analytics/gtag";
 import { getDocumentPathname } from "@/lib/analytics/google-analytics/document-path";
 import { isAnalyticsPage } from "@/lib/analytics/google-analytics/routes";
+import {
+  captureAnalyticsContext,
+  revokeAnalyticsContext,
+  retryAnalyticsRevocation,
+} from "@/lib/analytics/google-analytics/context";
 import { ConsentBanner } from "./ConsentBanner";
 
 /** What the init script leaves on `window` (see `init-script.ts`). */
@@ -110,8 +115,11 @@ export function GoogleAnalyticsRuntime({
   );
 
   React.useEffect(() => {
-    if (isActive) trackPageView();
-  }, [isActive, pathname]);
+    if (isActive) {
+      trackPageView();
+      void captureAnalyticsContext(measurementId);
+    } else if (choice === "denied") void retryAnalyticsRevocation();
+  }, [isActive, pathname, measurementId, choice]);
 
   React.useEffect(() => {
     if (!isActive) return;
@@ -133,6 +141,7 @@ export function GoogleAnalyticsRuntime({
 
   const choose = (next: ConsentChoice) => {
     applyConsentChoice(measurementId, next);
+    if (next === "denied") void revokeAnalyticsContext();
     setChoice(next);
     setIsSettingsOpen(false);
   };
@@ -164,6 +173,9 @@ export function GoogleAnalyticsRuntime({
           id="rcf-ga-gtag"
           src={`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`}
           strategy="afterInteractive"
+          onReady={() => {
+            void captureAnalyticsContext(measurementId);
+          }}
         />
       ) : null}
       <div aria-live="polite">

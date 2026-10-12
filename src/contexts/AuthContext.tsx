@@ -4,6 +4,11 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { clearChangeHistory } from "@/hooks/useChangeHistory";
+import {
+  signOutAnalyticsContext,
+  invalidateAnalyticsCapture,
+  retryAnalyticsRevocation,
+} from "@/lib/analytics/google-analytics/context";
 import { useRouter } from "next/navigation";
 
 /** Optional extras callers can attach to a magic-link request. */
@@ -50,6 +55,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
 
   useEffect(() => {
+    // Retry first-party withdrawal on private documents too; this imports no
+    // Google resource and never changes their CSP (ADR070).
+    void retryAnalyticsRevocation();
+    const retryWithdrawal = () => {
+      void retryAnalyticsRevocation();
+    };
+    document.addEventListener("click", retryWithdrawal);
     // Check active sessions and sets the user
     const checkUser = async () => {
       try {
@@ -72,12 +84,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, session) => {
       // Per-user caches kept in module scope survive a client-side sign-out;
       // this is the one place every sign-out passes (s70b review m6).
-      if (event === "SIGNED_OUT") clearChangeHistory();
+      if (event === "SIGNED_OUT") {
+        clearChangeHistory();
+        // Another tab can finish logout while this document is waiting for
+        // Google's get callback. Cancel that old interaction synchronously;
+        // never await Supabase or start a request inside its notification.
+        invalidateAnalyticsCapture();
+      }
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      document.removeEventListener("click", retryWithdrawal);
+    };
   }, [supabase.auth]);
 
   const signInWithMagicLink = async (
@@ -109,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
+      await signOutAnalyticsContext();
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
       router.push("/");

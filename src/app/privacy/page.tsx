@@ -502,7 +502,31 @@ export default function Privacy() {
                   domain, only once analytics is allowed. They expire after 13
                   months unless you visit again. We set{" "}
                   <code>{"rcf_analytics_consent"}</code> to remember your answer
-                  for 6 months.
+                  for 6 months, alongside the time of that choice.
+                </li>
+                <li>
+                  <strong>First-party conversion attribution:</strong> while
+                  analytics is allowed, we retain its pseudonymous client ID
+                  with an opaque, secure browser cookie for up to 30 days from
+                  an eligible public visit, never beyond your consent expiry.
+                  This can connect a confirmed signup or payment after the
+                  14-day trial to your visit. No Google script runs on private
+                  account, authentication or report pages. Analytics is a
+                  consented subset; our account and billing records remain the
+                  complete business records.
+                </li>
+                <li>
+                  <strong>Context deletion:</strong> withdrawal requests erase
+                  the retained identifiers; expiry immediately prevents further
+                  use. A cleanup job normally removes expired records within
+                  five minutes. An outage may delay deletion but cannot extend
+                  eligibility. We alert on cleanup more than ten minutes
+                  overdue. Failed withdrawal requests retry on your next
+                  same-origin interaction. Requests already claimed for delivery
+                  may still arrive, and data already sent cannot be recalled by
+                  this control. Minimal internal conversion records follow the
+                  underlying account and billing retention; they are sensitive,
+                  not anonymous.
                 </li>
                 <li>
                   <strong>Retention:</strong> Google Analytics keeps this data

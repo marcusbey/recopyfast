@@ -1,3 +1,4 @@
+import { bindAnalyticsContext } from "@/lib/analytics/google-analytics/context-server";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
@@ -123,8 +124,10 @@ export async function GET(request: NextRequest) {
   try {
     const {
       data: { user },
+      error: userError,
     } = await supabase.auth.getUser();
-    if (user) {
+    if (user && !userError) {
+      await bindAnalyticsContext(request, user.id);
       await ensureTrialStarted(supabase, user.id);
     }
   } catch (trialError) {
