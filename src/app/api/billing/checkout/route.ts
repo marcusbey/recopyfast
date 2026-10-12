@@ -22,6 +22,7 @@ import {
   isPaidPlanId,
   resolveStripePriceId,
 } from "@/lib/stripe/plans";
+import { isPlanCoveredByGrants } from "@/lib/stripe/plan-types";
 import {
   getEffectivePlan,
   getGrantedPlanIds,
@@ -45,6 +46,7 @@ import {
 } from "@/lib/billing/founding-agency";
 import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { billingErrorResponse } from "@/lib/billing/billing-refusal";
 
 /**
  * Stripe Checkout entry point.
@@ -65,6 +67,10 @@ interface CheckoutRequestBody {
 type ParsedIntent =
   | { ok: true; intent: CheckoutIntent }
   | { ok: false; error: string };
+
+/** s82: said when a permanent grant already includes the plan asked for. */
+const LIFETIME_COVERS_PLAN_REFUSAL =
+  "Your lifetime plan already includes this one. There is nothing further to buy.";
 
 function isStripeIdempotencyConflict(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -204,6 +210,29 @@ export async function POST(req: NextRequest) {
         { error: "Agency checkout is temporarily unavailable." },
         { status: 503 },
       );
+    }
+
+    // s82 review, finding 1: a subscription a permanent grant already
+    // includes is never sold. Only the lifetime intent below used to read
+    // grants, so a Lifetime Pro owner with nothing billing could pick Starter
+    // (or Pro, by request) in "Change plan" and be charged every month for a
+    // plan they own — and nothing stops it afterwards: the Stripe webhook
+    // cancels subscriptions only when a lifetime is BOUGHT
+    // (`stopBillingForLifetimeOwner`), never when one starts beside it.
+    //
+    // Same reader and same rank rule as the reactivate and plan-change paths
+    // (`isPlanCoveredByGrants`): an Agency subscription beside Lifetime Pro
+    // stays on sale, exactly as the webhook keeps it. Decided before the
+    // recovery lookup below, which is the first Stripe call. A read failure
+    // throws into the catch and sells nothing.
+    if (parsed.intent.type === "subscription") {
+      const heldGrants = await getGrantedPlanIds(user.id);
+      if (isPlanCoveredByGrants(parsed.intent.planId, heldGrants)) {
+        return NextResponse.json(
+          { error: LIFETIME_COVERS_PLAN_REFUSAL },
+          { status: 409 },
+        );
+      }
     }
 
     const existingSubscription =
@@ -781,15 +810,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(session);
   } catch (error: unknown) {
-    console.error("Error creating checkout session:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to start checkout. Please try again.",
-      },
-      { status: 500 },
+    // s82 review (second pass), m1: this answered `error.message`, so a grant
+    // or subscription read failure reached the browser as the database's own
+    // text ("Failed to read plan entitlements: connection reset"). Every
+    // sentence written for the customer is returned above; what lands here is
+    // logged and answered generically.
+    return billingErrorResponse(
+      error,
+      "Error creating checkout session",
+      "Failed to start checkout. Please try again.",
     );
   }
 }
