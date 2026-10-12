@@ -1100,5 +1100,132 @@ orders" finds `["recieve"]`; at `b6ad9ff` it found `["recieve", "fre"]`.
 - **Type-check:** clean.
 - **Prettier and `eslint --max-warnings=0`** on the changed files: clean.
 
+## Devin review of `0c5c5e4`: findings and fixes
+
+Devin reported one vulnerability and three bugs on `0c5c5e4`, in comments 4244458215, 4244458113,
+4244458152 and 4244458064. All four are fixed in the commit after `0c5c5e4`, test-first. The gate
+lines below are the verification reviewer's verdict on `b6ad9ff`, left as written.
+
+### Security (4244458215) — scanner requests could carry Sentry tracing headers
+
+**How the SDK injects.** This was read in `node_modules`, @sentry/core and @sentry/node-core
+10.58. On Node ≥ 22.12, `SentryHttpInstrumentation` subscribes to the
+`http.client.request.created` diagnostics channel. For a URL that matches
+`tracePropagationTargets`, it calls `request.setHeader` for `sentry-trace`, `baggage` and
+`traceparent`, synchronously, while `http.request()` runs. It skips any request created inside
+`suppressTracing`.
+
+**Fix** (`safe-fetch.ts` `request()`), belt and braces:
+
+1. The request is created inside `Sentry.suppressTracing`. The SDK then adds no header, no span
+   and no breadcrumb that names the scanned URL.
+2. Afterwards, `sentry-trace`, `baggage`, `traceparent` and `tracestate` are removed from the
+   request before it is sent, whoever added them.
+
+**Tests** (`safe-fetch-tracing.test.ts`):
+
+- **Layer 2:** a test diagnostics-channel subscriber adds all four headers to every request.
+  - A control `http.get` receives all four.
+  - The scanned request receives none.
+- **Real SDK:** a child `node` process runs @sentry/node 10.58 with tracing on and a no-op
+  transport. `tracePropagationTargets` names both the control origin and the scanned origin.
+  - The control request carries `sentry-trace`, `baggage` and `traceparent`, and gets a span.
+  - The scan carries none of the four headers and gets no span.
+- **Both were red before the fix.** The real SDK really did attach `sentry-trace`, `baggage` and
+  `traceparent` to the scan.
+
+**Shared bundle helper.** The child-process tests share `__tests__/bundle-safe-fetch.ts`. It
+keeps `@sentry/*` external, so the child and the bundle use one SDK instance.
+
+### Bug (4244458113) — raw deflate beginning `0x08` was decoded as zlib
+
+**Fix:**
+
+- `peekHead` gathers the first two bytes across chunk boundaries with `read(2)`. At the end of
+  the stream, a shorter body returns what is left, before `end` fires, so the bytes can still be
+  put back.
+- `isZlibHeader` needs CM = 8, CINFO ≤ 7 and a valid FCHECK, `(b0·256 + b1) mod 31 = 0`. Anything
+  else is raw, including a one-byte body. This replaces round 2's one-byte rule (nit 5).
+
+**Tests:**
+
+- `08 00 00 ff ff 01 01 00 fe ff 41` decodes to "A", both in one chunk and with a 1-byte first
+  chunk. Both were red before the fix.
+- Zlib and raw bodies with a 1-byte first chunk still decode.
+- A one-byte deflate body settles as `unreachable` instead of waiting for a second byte.
+- The bomb tests still pass.
+
+### Bug (4244458152) — the wire bytes were held to the decoded cap
+
+**Fix:**
+
+- `MAX_WIRE_OVERHEAD_BYTES = 64 * 1024`.
+- The wire counter and the declared Content-Length allow `maxBytes + MAX_WIRE_OVERHEAD_BYTES`
+  when a Content-Encoding is present.
+- An identity body keeps `maxBytes`. As the decision says, only a Content-Encoding earns the
+  allowance; a `.gz` sitemap file sent with no Content-Encoding keeps `maxBytes` on the wire.
+- Every decoder's counter stays at `maxBytes` (decoded).
+
+**Tests** (`safe-fetch.test.ts`, "the wire allowance of an encoded body"):
+
+- Devin's example: 2,097,140 random bytes gzip'd to more than 2 MiB. It is accepted with
+  Content-Length declared and also streamed chunked. Both were red before the fix.
+- A gzip body that decodes past 2 MiB is still `too_large`.
+- A declared encoded Content-Length over 2 MiB + 64 KB is refused before any body is read.
+- A declared identity Content-Length of 2 MiB + 1 is refused (the guard for "identity keeps
+  `maxBytes`").
+- The bombs are unchanged and still fast.
+
+### Bug (4244458064) — dropped findings gave no warning
+
+**Fix:**
+
+- `LensResult.findingsTruncated`: the typo lens sets it when it finds more distinct findings than
+  `boundFindings` keeps (40).
+- `runScan` passes it as the report's `truncated`. `serializeReport` still sets it when the 12 KB
+  trim drops findings.
+
+**Tests:**
+
+- `typo-lens.test.ts`:
+  - 41 distinct typos give "41 possible typos", a list of 40, and `findingsTruncated: true`;
+  - exactly 40 give `false`.
+- `run-scan.test.ts`: the same 41 typos on one page give a stored report with
+  `truncated: true` and 40 findings. A short report stays `truncated: false`.
+- `tool-report-page.test.tsx`: a report produced by `serializeReport` with `truncated: true` shows
+  "Only the first findings are shown"; an untruncated one does not.
+
+The lens and runScan tests were red before the fix. The page tests are guards: the page already
+read `truncated`.
+
+### Mutations (each applied alone, then restored)
+
+| Mutation | Result |
+|---|---|
+| 1a. `suppressTracing` removed | killed, 1 red (the scan gets a span) |
+| 1b. Header strip removed | killed, 1 red (the injector's headers arrive) |
+| 2a. One-byte zlib rule restored | killed, 2 red |
+| 2b. FCHECK dropped | killed, 2 red |
+| 2c. Peek takes one chunk instead of two bytes | killed, 1 red |
+| 3a. Wire allowance removed | killed, 2 red |
+| 3b. Allowance given to identity bodies too | killed, 1 red |
+| 3c. Per-decoder counters raised to the wire cap | killed, 2 red |
+| 4. The lens's truncation ignored by runScan | killed, 1 red |
+
+### Verification
+
+- **Jest** (`NEXT_PUBLIC_APP_URL` set): 484 suites passed, 2 skipped; 6,907 tests passed, 38
+  skipped.
+- **DB harness (PG17):** 121 passed, 1 skipped.
+- **Playwright `--list`:** 97 of 97 expected.
+- **`npm run build`:** passes.
+- **Embed check:** up to date, at the byte ceiling (45,818 B of 45,818).
+- **Type-check:** clean.
+- **`npm run lint`:** 0 errors and 34 warnings.
+  - 31 are in files this branch does not touch.
+  - 3 are "unused eslint-disable directive" warnings in s96 files (`r/[id]/page.tsx`,
+    `ToolCta.tsx`). They are older than this commit and are left as they are.
+- **Prettier and `eslint --max-warnings=0`** on the changed files: clean.
+
 Max severity: minor
 Ship allowed: yes

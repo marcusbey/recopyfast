@@ -444,6 +444,8 @@ export function analyzeTypos(
 
   const distinct = (kind: string) =>
     new Set(all.filter((finding) => finding.kind === kind).map(keyOf)).size;
+  // More distinct findings than the list keeps: the report must say so.
+  const findingsTruncated = new Set(all.map(keyOf)).size > findings.length;
   const typoCount = distinct("typo");
   const repeatedCount = distinct("repeated");
   const pagesWithFindings = new Set(all.map((finding) => finding.page)).size;
@@ -478,6 +480,7 @@ export function analyzeTypos(
       facts,
     },
     findings,
+    findingsTruncated,
     skippedPages: skipped,
   };
 }

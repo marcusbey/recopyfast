@@ -305,7 +305,78 @@ describe("pages that are not checked", () => {
   });
 });
 
+/** 41 misspellings this lens flags, each on its own (checked one by one). */
+const FORTY_ONE_TYPOS = [
+  "recieve",
+  "seperate",
+  "definately",
+  "occured",
+  "wierd",
+  "accomodate",
+  "acheive",
+  "adress",
+  "beleive",
+  "commited",
+  "concious",
+  "existance",
+  "foriegn",
+  "goverment",
+  "grammer",
+  "harrass",
+  "independant",
+  "knowlege",
+  "liason",
+  "millenium",
+  "neccessary",
+  "noticable",
+  "occassion",
+  "persistant",
+  "posession",
+  "prefered",
+  "refered",
+  "relevent",
+  "religous",
+  "rythm",
+  "sieze",
+  "suprise",
+  "truely",
+  "writting",
+  "begining",
+  "beautifull",
+  "buisness",
+  "collegue",
+  "comming",
+  "completly",
+  "embarass",
+];
+
+function typoPage(words: readonly string[]): ExtractedPage {
+  return page(
+    words.map((word) => `<p>${FILLER} We ${word} it daily.</p>`).join(""),
+  );
+}
+
 describe("bounds", () => {
+  /**
+   * Devin review of 0c5c5e4: `boundFindings` keeps 40 distinct findings, and
+   * the report said nothing about the rest — "41 possible typos" over a list
+   * of 40, with no limited-findings notice. The lens now says so.
+   */
+  it("says the findings were truncated when more than 40 distinct ones were found", () => {
+    const result = run([typoPage(FORTY_ONE_TYPOS)]);
+
+    expect(result.summary.headline).toBe("41 possible typos on 1 page of 1");
+    expect(result.findings).toHaveLength(40);
+    expect(result.findingsTruncated).toBe(true);
+  });
+
+  it("does not, at exactly 40", () => {
+    const result = run([typoPage(FORTY_ONE_TYPOS.slice(0, 40))]);
+
+    expect(result.findings).toHaveLength(40);
+    expect(result.findingsTruncated).toBe(false);
+  });
+
   it("collapses a typo repeated on two pages into the first, saying where else it is", () => {
     const result = run([
       page(

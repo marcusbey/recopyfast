@@ -22,14 +22,24 @@
  *   normalisation (scheme, default port, no user info), the denylist, the host
  *   authoriser (the per-target cap), the URL authoriser (robots.txt) and the
  *   address checks as the first hop.
- * - The 2 MB cap counts DECOMPRESSED bytes, while streaming. A 30 KB gzip that
- *   inflates to 20 MB stops at the cap; a declared Content-Length over it is
- *   refused before a byte is read.
+ * - The 2 MB cap counts DECOMPRESSED bytes, after every decoder, while
+ *   streaming. A 30 KB gzip that inflates to 20 MB stops at the cap. The wire
+ *   bytes are capped too: at 2 MB for an identity body, at 2 MB plus
+ *   `MAX_WIRE_OVERHEAD_BYTES` for an encoded one, and a declared
+ *   Content-Length over that is refused before a byte is read.
  * - One deadline per request (8 s) and the scan's own deadline, whichever comes
  *   first, cover connect, headers AND body — a server that trickles one byte at
  *   a time is still a timeout.
  * - No cookie, no Referer, an honest user agent that links to the page saying
  *   what the scanner is and how to opt out.
+ * - NO TRACING METADATA, whatever `tracePropagationTargets` says (Devin review
+ *   of 0c5c5e4). Sentry's HTTP instrumentation adds `sentry-trace`, `baggage`
+ *   and `traceparent` while `http.request()` runs (the
+ *   `http.client.request.created` diagnostics channel, @sentry/node-core
+ *   10.58). Each request is created inside `Sentry.suppressTracing` — no
+ *   header, no span, no breadcrumb naming the scanned URL — and any of
+ *   `TRACE_HEADERS` an instrumentation added anyway is removed before the
+ *   request is sent.
  *
  * Failures are reason codes, never exception text: an anonymous caller must not
  * learn what our resolver answered, and the route maps each code to fixed copy.
@@ -39,6 +49,7 @@
  * environment variable that could loosen them.
  */
 
+import { suppressTracing } from "@sentry/nextjs";
 import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
 import { isIP } from "node:net";
@@ -70,12 +81,28 @@ import {
 export { SCANNER_PRODUCT_TOKEN, SCANNER_USER_AGENT };
 
 export const DEFAULT_TIMEOUT_MS = 8_000;
+/** The cap on a body's DECODED bytes (every decoder's output is counted). */
 export const MAX_BODY_BYTES = 2 * 1024 * 1024;
+/**
+ * How far an ENCODED body's wire bytes may exceed the decoded cap (Devin
+ * review of 0c5c5e4). Compression frames its output, so a page that fits 2 MB
+ * decoded but barely compresses can be larger on the wire; held to the
+ * decoded cap there, it was `too_large`. An identity body gets no allowance.
+ */
+export const MAX_WIRE_OVERHEAD_BYTES = 64 * 1024;
 export const MAX_REDIRECTS = 3;
 /** Robots, homepage, ≤ 2 sitemap fetches, ≤ 9 pages, plus their redirects. */
 export const MAX_REQUESTS_PER_SCAN = 24;
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** Never sent by the scanner, whoever added them (see the header comment). */
+const TRACE_HEADERS = [
+  "sentry-trace",
+  "baggage",
+  "traceparent",
+  "tracestate",
+] as const;
 
 export type FetchKind = "html" | "sitemap" | "robots";
 
@@ -241,42 +268,50 @@ function decodingFor(encoding: string): ContentDecoding | null | "unsupported" {
 }
 
 /**
- * The decoder chain for a body whose first chunk is `first`.
+ * The decoder chain for a body that starts with `head` (`peekHead`).
  *
- * - An EMPTY body (`first` null) gets no decoder at all (s96 review round 2,
+ * - An EMPTY body (`head` null) gets no decoder at all (s96 review round 2,
  *   nit 6): a decoder fed zero bytes calls it a truncated stream, and an
  *   empty 200 sent with `Content-Encoding: gzip` read as `unreachable`.
  * - `deflate` is sent both zlib-wrapped (RFC 9110) and raw (old IIS); the
- *   first byte tells them apart (`isZlibHeader`).
+ *   two-byte zlib header tells them apart (`isZlibHeader`).
  * - A gzip FILE (a `.gz` sitemap) is decoded after any Content-Encoding.
  */
 function decodersFor(
   decoding: ContentDecoding | null,
   isGzipFileBody: boolean,
-  first: Buffer | null,
+  head: Buffer | null,
 ): Transform[] {
-  if (first === null) return [];
+  if (head === null) return [];
   const decoders: Transform[] = [];
   if (decoding === "gzip") decoders.push(zlib.createGunzip());
   if (decoding === "br") decoders.push(zlib.createBrotliDecompress());
   if (decoding === "deflate") {
     decoders.push(
-      isZlibHeader(first) ? zlib.createInflate() : zlib.createInflateRaw(),
+      isZlibHeader(head) ? zlib.createInflate() : zlib.createInflateRaw(),
     );
   }
   if (isGzipFileBody) decoders.push(zlib.createGunzip());
   return decoders;
 }
 
+/** A zlib header is two bytes: CMF and FLG (RFC 1950 §2.2). */
+const ZLIB_HEADER_BYTES = 2;
+
 /**
- * The first chunk of a body, put back for the pipeline to read, or null when
- * the body is empty or failed. Lets `deflate` pick zlib-wrapped or raw
- * inflate from its first bytes WITHOUT a wrapper stream. (Until the s96
+ * The body's first `ZLIB_HEADER_BYTES` bytes — gathered ACROSS chunk
+ * boundaries, fewer only when the whole body is shorter — put back for the
+ * pipeline to read; null when the body is empty or failed. Lets `deflate`
+ * pick zlib-wrapped or raw inflate WITHOUT a wrapper stream. (Until the s96
  * review the choice was a Transform wrapping an inner inflater whose output it
  * pushed without backpressure and never destroyed — a deflate bomb inflated
  * into memory long after the cap.)
+ *
+ * `read(n)` returns null until n bytes are buffered, except at the end of the
+ * stream, where it returns what is left; that read happens before `end` is
+ * emitted, so the bytes can still be put back.
  */
-function peekFirstChunk(stream: Readable): Promise<Buffer | null> {
+function peekHead(stream: Readable): Promise<Buffer | null> {
   return new Promise((resolve) => {
     const cleanup = () => {
       stream.off("readable", onReadable);
@@ -285,7 +320,7 @@ function peekFirstChunk(stream: Readable): Promise<Buffer | null> {
       stream.off("error", onDone);
     };
     const onReadable = () => {
-      const chunk = stream.read() as Buffer | null;
+      const chunk = stream.read(ZLIB_HEADER_BYTES) as Buffer | null;
       if (chunk === null) return;
       cleanup();
       stream.unshift(chunk);
@@ -303,13 +338,20 @@ function peekFirstChunk(stream: Readable): Promise<Buffer | null> {
 }
 
 /**
- * Whether a deflate body is zlib-wrapped, from its FIRST BYTE alone: CM = 8
- * (deflate) and CINFO ≤ 7 (s96 review round 2, nit 5). It used to need two
- * bytes for the FCHECK, so a one-byte first chunk picked raw inflate for a
- * zlib body — the answer depended on how the bytes were chunked.
+ * Whether a deflate body is zlib-wrapped: a full two-byte header with CM = 8
+ * (deflate), CINFO ≤ 7 and a valid FCHECK, (CMF·256 + FLG) mod 31 = 0.
+ * Anything else, a one-byte body included, is raw deflate.
+ *
+ * Deciding from the first byte alone (s96 review round 2, nit 5) read a raw
+ * stream beginning 0x08 — a stored block, valid raw deflate — as zlib, and
+ * inflate refused it (Devin review of 0c5c5e4). The two bytes now come from
+ * `peekHead`, across chunk boundaries, so the answer still cannot depend on
+ * how the network chunked the body.
  */
-function isZlibHeader(chunk: Buffer): boolean {
-  return chunk.length >= 1 && (chunk[0] & 0x0f) === 8 && chunk[0] >> 4 <= 7;
+function isZlibHeader(head: Buffer): boolean {
+  if (head.length < ZLIB_HEADER_BYTES) return false;
+  const [cmf, flg] = head;
+  return (cmf & 0x0f) === 8 && cmf >> 4 <= 7 && (cmf * 256 + flg) % 31 === 0;
 }
 
 /** Counts bytes through a point in the chain and fails past `max`. */
@@ -395,27 +437,30 @@ function request(
 
     let req: http.ClientRequest;
     try {
-      req = transport.request({
-        protocol: url.protocol,
-        hostname: host,
-        port: url.port || (url.protocol === "https:" ? 443 : 80),
-        path: `${url.pathname}`,
-        method: "GET",
-        agent: false,
-        lookup: isLiteral
-          ? undefined
-          : createValidatingLookup(policy.isAllowedAddress, resolver),
-        // TLS verifies the certificate against the name we asked for.
-        ...(url.protocol === "https:" && !isLiteral
-          ? { servername: host }
-          : {}),
-        signal,
-        headers: {
-          "User-Agent": SCANNER_USER_AGENT,
-          Accept: ACCEPT[kind],
-          "Accept-Encoding": "gzip, deflate, br",
-        },
-      });
+      req = suppressTracing(() =>
+        transport.request({
+          protocol: url.protocol,
+          hostname: host,
+          port: url.port || (url.protocol === "https:" ? 443 : 80),
+          path: `${url.pathname}`,
+          method: "GET",
+          agent: false,
+          lookup: isLiteral
+            ? undefined
+            : createValidatingLookup(policy.isAllowedAddress, resolver),
+          // TLS verifies the certificate against the name we asked for.
+          ...(url.protocol === "https:" && !isLiteral
+            ? { servername: host }
+            : {}),
+          signal,
+          headers: {
+            "User-Agent": SCANNER_USER_AGENT,
+            Accept: ACCEPT[kind],
+            "Accept-Encoding": "gzip, deflate, br",
+          },
+        }),
+      );
+      for (const name of TRACE_HEADERS) req.removeHeader(name);
     } catch (error) {
       settle({ failure: reasonForRequestError(error, signal) });
       return;
@@ -452,11 +497,14 @@ type BodyResult =
  * has two decoders; with a counter after the last only, an inner file of
  * empty gzip members (decoding to nothing) let the outer layer inflate
  * without limit — 0.86 GB in the review's measurement.
+ *
+ * The WIRE counter has its own cap, `wireMaxBytes`: the decoded cap for an
+ * identity body, plus `MAX_WIRE_OVERHEAD_BYTES` for an encoded one.
  */
 function readBody(
   response: IncomingMessage,
   decoders: Transform[],
-  maxBytes: number,
+  { maxBytes, wireMaxBytes }: { maxBytes: number; wireMaxBytes: number },
   signal: AbortSignal,
 ): Promise<BodyResult> {
   return new Promise((resolve) => {
@@ -475,7 +523,7 @@ function readBody(
       });
     const streams: (Readable | Transform | Writable)[] = [
       response,
-      createByteCounter(maxBytes, () => undefined),
+      createByteCounter(wireMaxBytes, () => undefined),
       ...decoders.flatMap((decoder) => [decoder, countDecoded()]),
       ...(decoders.length === 0 ? [countDecoded()] : []),
       sink,
@@ -596,12 +644,6 @@ export async function safeFetch(
       return fail("not_html");
     }
 
-    const declared = Number(response.headers["content-length"]);
-    if (Number.isFinite(declared) && declared > maxBytes) {
-      response.destroy();
-      return fail("too_large");
-    }
-
     const encoding = (response.headers["content-encoding"] ?? "")
       .toString()
       .trim()
@@ -611,13 +653,28 @@ export async function safeFetch(
       response.destroy();
       return fail("unreachable");
     }
+
+    // The declared length is WIRE bytes: an encoded body gets the same
+    // allowance as the wire counter below.
+    const wireMaxBytes =
+      decoding === null ? maxBytes : maxBytes + MAX_WIRE_OVERHEAD_BYTES;
+    const declared = Number(response.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > wireMaxBytes) {
+      response.destroy();
+      return fail("too_large");
+    }
     const isGzipFileBody = isGzipFile(options.kind, type, url);
     const decoders =
       decoding !== null || isGzipFileBody
-        ? decodersFor(decoding, isGzipFileBody, await peekFirstChunk(response))
+        ? decodersFor(decoding, isGzipFileBody, await peekHead(response))
         : [];
 
-    const body = await readBody(response, decoders, maxBytes, signal);
+    const body = await readBody(
+      response,
+      decoders,
+      { maxBytes, wireMaxBytes },
+      signal,
+    );
     if (!body.ok) return fail(body.reason, body.bytesRead);
 
     return {

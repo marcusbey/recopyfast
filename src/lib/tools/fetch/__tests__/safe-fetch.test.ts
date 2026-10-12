@@ -19,21 +19,19 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 import { createServer as createNetServer } from "node:net";
 import http, { type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
-import path from "node:path";
 import { promisify } from "node:util";
 import zlib from "node:zlib";
-import { buildSync } from "esbuild";
 
 import {
   createRequestBudget,
   DEFAULT_TIMEOUT_MS,
   MAX_BODY_BYTES,
   MAX_REQUESTS_PER_SCAN,
+  MAX_WIRE_OVERHEAD_BYTES,
   safeFetch,
   SCANNER_USER_AGENT,
   type FetchPolicy,
@@ -46,6 +44,7 @@ import {
   contentEncodingOf,
   type BombEncoding,
 } from "./bombs";
+import { bundleSafeFetch } from "./bundle-safe-fetch";
 import {
   createValidatingLookup,
   PUBLIC_ADDRESS_RULE,
@@ -503,6 +502,118 @@ describe("size: the 2 MB cap counts decompressed bytes", () => {
     expect(result).toMatchObject({ ok: false, reason: "too_large" });
   });
 
+  /**
+   * Devin review of 0c5c5e4. The wire counter and the declared
+   * Content-Length were held to the DECODED cap, so a page that fits 2 MB
+   * once decoded but that gzip made larger (an incompressible body plus
+   * gzip's framing) was `too_large`. The 2 MB cap is for decoded bytes; an
+   * ENCODED body may use 64 KB more on the wire (`MAX_WIRE_OVERHEAD_BYTES`).
+   * An identity body still has exactly 2 MB.
+   */
+  describe("the wire allowance of an encoded body", () => {
+    const page = randomBytes(2_097_140);
+    const encoded = zlib.gzipSync(page, { level: 9 });
+
+    it("is what Devin's example needs: 2,097,140 decoded bytes, more than 2 MB gzip'd", () => {
+      expect(page.length).toBeLessThanOrEqual(MAX_BODY_BYTES);
+      expect(encoded.length).toBeGreaterThan(MAX_BODY_BYTES);
+      expect(encoded.length).toBeLessThanOrEqual(
+        MAX_BODY_BYTES + MAX_WIRE_OVERHEAD_BYTES,
+      );
+      expect(MAX_WIRE_OVERHEAD_BYTES).toBe(64 * 1024);
+    });
+
+    it("accepts it with its Content-Length declared", async () => {
+      fixture.route("/incompressible", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-encoding": "gzip",
+          "content-length": String(encoded.length),
+        });
+        res.end(encoded);
+      });
+
+      const result = await safeFetch(fixture.url("/incompressible"), options());
+
+      expect(result.ok).toBe(true);
+    });
+
+    it("accepts it streamed in chunks, with no Content-Length", async () => {
+      fixture.route("/incompressible-chunked", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-encoding": "gzip",
+        });
+        for (let at = 0; at < encoded.length; at += 64 * 1024) {
+          res.write(encoded.subarray(at, at + 64 * 1024));
+        }
+        res.end();
+      });
+
+      const result = await safeFetch(
+        fixture.url("/incompressible-chunked"),
+        options(),
+      );
+
+      expect(result.ok).toBe(true);
+    });
+
+    it("still refuses an encoded body that DECODES past 2 MB", async () => {
+      const tooBig = zlib.gzipSync(randomBytes(MAX_BODY_BYTES + 1_024));
+      fixture.route("/decodes-too-big", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-encoding": "gzip",
+        });
+        res.end(tooBig);
+      });
+
+      const result = await safeFetch(
+        fixture.url("/decodes-too-big"),
+        options(),
+      );
+
+      expect(result).toMatchObject({ ok: false, reason: "too_large" });
+    });
+
+    it("refuses a declared encoded Content-Length over 2 MB + 64 KB before reading", async () => {
+      fixture.route("/declared-encoded", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-encoding": "gzip",
+          "content-length": String(
+            MAX_BODY_BYTES + MAX_WIRE_OVERHEAD_BYTES + 1,
+          ),
+        });
+        res.write(encoded.subarray(0, 1024));
+      });
+
+      const result = await safeFetch(
+        fixture.url("/declared-encoded"),
+        options(),
+      );
+
+      expect(result).toEqual({ ok: false, reason: "too_large", bytesRead: 0 });
+    });
+
+    it("gives an identity body no allowance: a declared 2 MB + 1 is refused", async () => {
+      fixture.route("/declared-identity", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-length": String(MAX_BODY_BYTES + 1),
+        });
+        res.write("x".repeat(1024));
+      });
+
+      const result = await safeFetch(
+        fixture.url("/declared-identity"),
+        options(),
+      );
+
+      expect(result).toEqual({ ok: false, reason: "too_large", bytesRead: 0 });
+    });
+  });
+
   it("exactly 2 MB is accepted", async () => {
     fixture.route("/edge", html("a".repeat(MAX_BODY_BYTES)));
 
@@ -656,9 +767,10 @@ describe("size: the 2 MB cap counts decompressed bytes", () => {
 
   /**
    * s96 review round 2, nit 5. `deflate` is zlib-wrapped or raw, told apart by
-   * the first byte. A first chunk of ONE byte used to fail the two-byte header
-   * check and pick raw inflate for a zlib body. The choice is now made from
-   * the first byte alone (CM = 8, CINFO ≤ 7), so it cannot depend on chunking.
+   * the header. A first chunk of ONE byte used to fail the two-byte header
+   * check and pick raw inflate for a zlib body. Since the Devin review of
+   * 0c5c5e4 the first TWO bytes are gathered across chunks before choosing,
+   * so the choice cannot depend on chunking.
    */
   it.each([
     ["zlib-wrapped", (body: Buffer) => zlib.deflateSync(body)],
@@ -681,6 +793,59 @@ describe("size: the 2 MB cap counts decompressed bytes", () => {
       expect(result.ok && result.value.body).toBe("<p>decoded</p>");
     },
   );
+
+  /**
+   * Devin review of 0c5c5e4. Deciding from the first byte alone read a raw
+   * stream beginning 0x08 — a stored block, valid raw deflate — as zlib, and
+   * inflate refused it. The choice now needs the two-byte zlib header WITH its
+   * checksum (CM = 8, CINFO ≤ 7, (b0·256 + b1) mod 31 = 0), gathered across
+   * chunk boundaries; anything else is raw.
+   */
+  const RAW_STARTING_0X08 = Buffer.from([
+    0x08, 0x00, 0x00, 0xff, 0xff, 0x01, 0x01, 0x00, 0xfe, 0xff, 0x41,
+  ]);
+
+  it.each([
+    ["in one chunk", [RAW_STARTING_0X08]],
+    [
+      "with a one-byte first chunk",
+      [RAW_STARTING_0X08.subarray(0, 1), RAW_STARTING_0X08.subarray(1)],
+    ],
+  ])(
+    "decodes raw deflate whose first byte is 0x08 (`08 00 00 ff ff 01 01 00 fe ff 41` → A), %s",
+    async (_label, chunks) => {
+      expect(zlib.inflateRawSync(RAW_STARTING_0X08).toString()).toBe("A");
+      fixture.route("/raw-08", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-encoding": "deflate",
+        });
+        res.write(chunks[0]);
+        setTimeout(() => res.end(chunks[1]), 50);
+      });
+
+      const result = await safeFetch(fixture.url("/raw-08"), options());
+
+      expect(result.ok && result.value.body).toBe("A");
+    },
+  );
+
+  it("settles a one-byte deflate body (raw inflate calls it truncated) instead of waiting for a second byte", async () => {
+    fixture.route("/one-byte-body", (_req, res) => {
+      res.writeHead(200, {
+        "content-type": "text/html",
+        "content-encoding": "deflate",
+      });
+      res.end(Buffer.from([0x78]));
+    });
+
+    const result = await safeFetch(
+      fixture.url("/one-byte-body"),
+      options({ deadline: Date.now() + 2_000 }),
+    );
+
+    expect(result).toMatchObject({ ok: false, reason: "unreachable" });
+  });
 
   /**
    * s96 review round 2, nit 6. An empty 200 with a Content-Encoding used to
@@ -916,18 +1081,7 @@ describe("an environment proxy never applies", () => {
         process.stdout.write(JSON.stringify({ defaultAgent, ok: result.ok, body: result.ok ? result.value.body : result.reason, calls }));
       });
     `;
-    const root = path.resolve(__dirname, "../../../../..");
-    const workDir = mkdtempSync(path.join(tmpdir(), "rcf-safe-fetch-"));
-    const bundle = path.join(workDir, "safe-fetch.cjs");
-    buildSync({
-      entryPoints: [path.join(root, "src/lib/tools/fetch/safe-fetch.ts")],
-      tsconfig: path.join(root, "tsconfig.json"),
-      bundle: true,
-      platform: "node",
-      format: "cjs",
-      outfile: bundle,
-      logLevel: "error",
-    });
+    const { bundle, workDir, nodePath, cleanup } = bundleSafeFetch();
     const { stdout } = await promisify(execFile)(
       process.execPath,
       ["-e", script, bundle],
@@ -935,6 +1089,7 @@ describe("an environment proxy never applies", () => {
         cwd: workDir,
         env: {
           ...process.env,
+          NODE_PATH: nodePath,
           NODE_USE_ENV_PROXY: "1",
           HTTP_PROXY: `http://127.0.0.1:${deadPort}`,
           HTTPS_PROXY: `http://127.0.0.1:${deadPort}`,
@@ -956,6 +1111,6 @@ describe("an environment proxy never applies", () => {
       body: "<p>direct</p>",
       calls: ["fixture.test"],
     });
-    rmSync(workDir, { recursive: true, force: true });
+    cleanup();
   }, 40_000);
 });

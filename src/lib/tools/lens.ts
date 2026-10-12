@@ -62,6 +62,12 @@ export interface LensResult {
   summary: LensSummary;
   findings: Finding[];
   skippedPages?: SkippedPage[];
+  /**
+   * True when `boundFindings` dropped findings past `MAX_FINDINGS`: the
+   * summary counts them, the list does not, and the report must say so
+   * (Devin review of 0c5c5e4).
+   */
+  findingsTruncated?: boolean;
 }
 
 export interface LensContext {

@@ -6,7 +6,10 @@
 import { render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createFinding } from "@/lib/tools/lens";
-import type { ToolReport } from "@/lib/tools/report/report-schema";
+import {
+  serializeReport,
+  type ToolReport,
+} from "@/lib/tools/report/report-schema";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { createClient as createCookieClient } from "@/lib/supabase/server";
 import { createAnonClient } from "@/lib/supabase/anon";
@@ -111,6 +114,55 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe("the report page", () => {
+  /**
+   * Devin review of 0c5c5e4: a report the lens bounded to 40 findings now
+   * reaches the page with `truncated` set (runScan carries the lens's flag
+   * into serializeReport), and the page says the list is limited.
+   */
+  it("shows the limited-findings notice for a report the lens truncated", async () => {
+    const findings = Array.from({ length: 40 }, (_, index) =>
+      createFinding({
+        page: "https://example.com/",
+        kind: "typo",
+        match: `wurd${index}`,
+        before: "We ",
+        after: " daily.",
+        suggestion: "word",
+      }),
+    );
+    serviceClient(
+      row(
+        serializeReport(
+          storedReport({
+            summary: {
+              headline: "41 possible typos on 1 page of 1",
+              verdict: "warn",
+              facts: [{ label: "Pages checked", value: "1" }],
+            },
+            findings,
+            truncated: true,
+          }),
+        ),
+      ),
+    );
+
+    await renderReport();
+
+    expect(
+      screen.getByText(/Only the first findings are shown/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no such notice when every finding is listed", async () => {
+    serviceClient(row());
+
+    await renderReport();
+
+    expect(
+      screen.queryByText(/Only the first findings are shown/),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders the findings in their sentences, and the CTA", async () => {
     const calls = serviceClient(row());
 

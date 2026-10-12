@@ -168,6 +168,79 @@ describe("runScan", () => {
     });
   });
 
+  /**
+   * Devin review of 0c5c5e4: a report the lens bounded to 40 findings was
+   * stored with `truncated: false` (only the 12 KB trim set it), so it said
+   * "41 possible typos", listed 40, and showed no limited-findings notice.
+   */
+  it("marks the report truncated when the lens kept only 40 of its findings", async () => {
+    const words = [
+      "recieve",
+      "seperate",
+      "definately",
+      "occured",
+      "wierd",
+      "accomodate",
+      "acheive",
+      "adress",
+      "beleive",
+      "commited",
+      "concious",
+      "existance",
+      "foriegn",
+      "goverment",
+      "grammer",
+      "harrass",
+      "independant",
+      "knowlege",
+      "liason",
+      "millenium",
+      "neccessary",
+      "noticable",
+      "occassion",
+      "persistant",
+      "posession",
+      "prefered",
+      "refered",
+      "relevent",
+      "religous",
+      "rythm",
+      "sieze",
+      "suprise",
+      "truely",
+      "writting",
+      "begining",
+      "beautifull",
+      "buisness",
+      "collegue",
+      "comming",
+      "completly",
+      "embarass",
+    ];
+    routes.set(
+      "/",
+      html(words.map((word) => `<p>${FILLER} We ${word} it.</p>`).join("")),
+    );
+
+    const result = await scan();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.report.summary.headline).toBe(
+      "41 possible typos on 1 page of 1",
+    );
+    expect(result.report.findings).toHaveLength(40);
+    expect(result.report.truncated).toBe(true);
+  });
+
+  it("leaves a report with every finding listed untruncated", async () => {
+    routes.set("/", html(`<p>${FILLER} We recieve orders daily.</p>`));
+
+    const result = await scan();
+
+    expect(result.ok && result.report.truncated).toBe(false);
+  });
+
   it("refuses the whole scan when robots.txt disallows the homepage", async () => {
     routes.set(
       "/robots.txt",

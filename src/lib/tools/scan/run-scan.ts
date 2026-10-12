@@ -272,7 +272,9 @@ export async function runScan(input: RunScanInput): Promise<RunScanResult> {
       summary: result.summary,
       findings: result.findings,
       pages,
-      truncated: false,
+      // The lens's own bound (40 findings); serializeReport adds the 12 KB
+      // trim's. Either one shows the limited-findings notice.
+      truncated: result.findingsTruncated ?? false,
     }),
   };
 }
