@@ -5,24 +5,31 @@
  * Page text is attacker-chosen. It is never markup here (React renders it as
  * text), but two kinds of character still do damage as plain text:
  *
- * - bidi controls (U+061C, U+200E–U+200F, U+202A–U+202E, U+2066–U+2069)
- *   reorder what a reader SEES without changing the bytes, so a report could
- *   display a sentence the page never said — the "Trojan Source" class;
- * - zero-width characters, soft hyphens (U+00AD) and the Mongolian vowel
- *   separator (U+180E, no longer whitespace to `\s`) split one word into two
- *   tokens invisibly, which turns "spell<U+00AD>ing" into a false typo.
+ * - bidi controls (Unicode's `Bidi_Control`: U+061C, U+200E–U+200F,
+ *   U+202A–U+202E, U+2066–U+2069) reorder what a reader SEES without changing
+ *   the bytes, so a report could display a sentence the page never said — the
+ *   "Trojan Source" class;
+ * - default-ignorable characters (Unicode's `Default_Ignorable_Code_Point`:
+ *   zero-width characters, the soft hyphen U+00AD, the Mongolian vowel
+ *   separator U+180E, the combining grapheme joiner U+034F, the Hangul fillers,
+ *   variation selectors, tag characters, …) render as nothing and split one
+ *   word into two tokens invisibly, which turns "spell<U+00AD>ing" into a
+ *   false typo.
  *
  * Both are stripped at extraction, and stripped again by the report schema on
  * read, so a row written by a buggy or older build cannot reintroduce them.
+ * They are matched by Unicode PROPERTY (s96 review round 2, nit 7): the
+ * hand-kept list this replaced missed U+034F, U+115F, U+3164, U+FE0F and the
+ * tag block. The property set covers every character that list had.
  */
 
 /** C0 and C1 control characters, as `src/lib/api/validation.ts` defines them. */
 export const TEXT_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
 const INVISIBLE_CHARACTERS =
-  /[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+  /[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}]/gu;
 
-/** Removes bidi controls, zero-width characters and soft hyphens. */
+/** Removes bidi controls and default-ignorable characters. */
 export function stripInvisibleCharacters(text: string): string {
   return text.replace(INVISIBLE_CHARACTERS, "");
 }

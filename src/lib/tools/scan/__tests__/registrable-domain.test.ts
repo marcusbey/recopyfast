@@ -34,6 +34,21 @@ describe("registrableDomain", () => {
     expect(registrableDomain(hostname)).toBe(expected);
   });
 
+  /**
+   * s96 review round 2, minor 2: `tldts` validates host names by default and
+   * answered null for these, so the key fell back to the full host — a fresh
+   * bucket per invented subdomain. Validation is off; the URL normaliser
+   * refuses such hosts on its own.
+   */
+  it.each([
+    "-a.victim.com",
+    "a-.victim.com",
+    "a!b.victim.com",
+    "a_b.victim.com",
+  ])("keys the non-LDH host %s on victim.com", (hostname) => {
+    expect(registrableDomain(hostname)).toBe("victim.com");
+  });
+
   it.each([
     ["127.0.0.1", "127.0.0.1"],
     ["[2606:4700:4700::1111]", "2606:4700:4700::1111"],

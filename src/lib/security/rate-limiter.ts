@@ -159,7 +159,17 @@ export class MemoryRateLimiter {
 const REDIS_CONNECT_TIMEOUT_MS = 2000;
 
 /** Max time to wait for a single rate-limit command round trip. */
-const REDIS_COMMAND_TIMEOUT_MS = 1500;
+export const REDIS_COMMAND_TIMEOUT_MS = 1500;
+
+/**
+ * How long a window's key outlives the window (s96 review round 2, minor 1).
+ * PEXPIREAT with a past timestamp DELETES the key, so an expiry of exactly
+ * `windowEnd` let a MULTI that reached Redis late — latency, or clock skew
+ * between this instance and Redis — wipe the count near every window's end.
+ * The key names its window, so the grace never merges two windows' counts.
+ * It must exceed the command timeout; 10 s also covers ordinary clock skew.
+ */
+export const EXPIRY_GRACE_MS = 10_000;
 
 /**
  * Reject a promise if it has not settled within `timeoutMs`.
@@ -339,12 +349,14 @@ export class RedisRateLimiter {
      * window's end outlived the window by almost a whole window. For the free
      * tools' daily buckets that kept a client address ~48 h while /privacy
      * says 24. The count is unchanged (the key was always window-scoped), and
-     * PEXPIREAT is Redis 2.6, so every store this runs on speaks it.
+     * PEXPIREAT is Redis 2.6, so every store this runs on speaks it. The
+     * timestamp is `windowEnd + EXPIRY_GRACE_MS`, never `windowEnd` itself: a
+     * past timestamp deletes the key (see EXPIRY_GRACE_MS).
      */
     const pipeline = this.client!.multi();
 
     pipeline.incr(key);
-    pipeline.pExpireAt(key, windowEnd);
+    pipeline.pExpireAt(key, windowEnd + EXPIRY_GRACE_MS);
 
     let results: unknown[] | null;
     try {

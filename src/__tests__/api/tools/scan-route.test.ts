@@ -360,9 +360,9 @@ describe("the per-target cap", () => {
     expect(targetIdentifiers()).toEqual(["example.com", "example.co.uk"]);
   });
 
-  it("charges the final host after redirects, and its refusal is a 429 with nothing stored", async () => {
+  it("charges another domain a homepage hop reaches; its refusal is a 429 with nothing stored", async () => {
     mockedRunScan.mockImplementationOnce(async (input) => {
-      const allowed = await input.authorizeFinalHost?.("victim.example");
+      const allowed = await input.authorizeTargetDomain?.("victim.example");
       return allowed
         ? { ok: true, report: REPORT }
         : { ok: false, reason: "target_limited" };
@@ -384,9 +384,9 @@ describe("the per-target cap", () => {
     expect(store.insertReport).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the store is down at the final-host check", async () => {
+  it("fails closed when the store is down at a hop's charge", async () => {
     mockedRunScan.mockImplementationOnce(async (input) => {
-      const allowed = await input.authorizeFinalHost?.("victim.example");
+      const allowed = await input.authorizeTargetDomain?.("victim.example");
       return allowed
         ? { ok: true, report: REPORT }
         : { ok: false, reason: "target_limited" };
@@ -403,9 +403,9 @@ describe("the per-target cap", () => {
     expect(store.insertReport).not.toHaveBeenCalled();
   });
 
-  it("stores the report when the final host's bucket allows it", async () => {
+  it("stores the report when the other domain's bucket allows it", async () => {
     mockedRunScan.mockImplementationOnce(async (input) => {
-      const allowed = await input.authorizeFinalHost?.("victim.example");
+      const allowed = await input.authorizeTargetDomain?.("victim.example");
       return allowed
         ? { ok: true, report: REPORT }
         : { ok: false, reason: "target_limited" };
@@ -415,6 +415,42 @@ describe("the per-target cap", () => {
 
     expect(response.status).toBe(200);
     expect(store.insertReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores the report when only a robots.txt, sitemap or page hop was refused", async () => {
+    mockedRunScan.mockImplementationOnce(async (input) => {
+      // A page redirected to the victim; the scan skipped it and went on.
+      await input.authorizeTargetDomain?.("victim.example");
+      return { ok: true, report: REPORT };
+    });
+    checkLimit.mockImplementation(async (config) => {
+      const { endpoint, identifier } = config as RateLimitConfig;
+      return endpoint === "tools/scan:target" && identifier === "victim.example"
+        ? REFUSED
+        : ALLOWED;
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(store.insertReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed with a 503 when the store dies at a page hop's charge, even if the scan finished", async () => {
+    mockedRunScan.mockImplementationOnce(async (input) => {
+      await input.authorizeTargetDomain?.("victim.example");
+      return { ok: true, report: REPORT };
+    });
+    checkLimit.mockImplementation(async (config) => {
+      const { identifier } = config as RateLimitConfig;
+      if (identifier === "victim.example") throw new Error("redis down");
+      return ALLOWED;
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(store.insertReport).not.toHaveBeenCalled();
   });
 });
 
@@ -467,6 +503,22 @@ describe("bad input gets fixed text", () => {
     expect(await response.json()).toEqual({ error });
     expect(mockedRunScan).not.toHaveBeenCalled();
   });
+
+  // s96 review round 2, minor 2: a non-LDH label would be a bucket of its own.
+  it.each(["-a.victim.com", "a-.victim.com", "a!b.victim.com"])(
+    "a non-LDH host (%s) → 400",
+    async (host) => {
+      const response = await POST(
+        request({ tool: "website-spell-checker", url: `https://${host}/` }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: SCAN_MESSAGES.invalidUrl,
+      });
+      expect(mockedRunScan).not.toHaveBeenCalled();
+    },
+  );
 
   it("a non-default port is 422 blocked_port", async () => {
     const response = await POST(

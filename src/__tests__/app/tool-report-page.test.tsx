@@ -33,6 +33,7 @@ jest.mock("@/contexts/AuthContext", () => ({
 }));
 
 import ReportPage, { generateMetadata } from "@/app/tools/[slug]/r/[id]/page";
+import ToolReportNotFound from "@/app/tools/[slug]/r/[id]/not-found";
 
 const ID = "6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c";
 const SLUG = "website-spell-checker";
@@ -226,5 +227,15 @@ describe("404s", () => {
     serviceClient(null, { code: "XX000" });
 
     await expect(renderReport()).rejects.toThrow("tool_reports read failed");
+  });
+});
+
+describe("the report's not-found page", () => {
+  // s96 review round 2, nit 8: the same "up to" as every other retention line.
+  it("says reports are kept for UP TO 30 days", () => {
+    render(<ToolReportNotFound />);
+
+    expect(screen.getByText(/kept for up to 30 days/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/kept for 30 days/);
   });
 });

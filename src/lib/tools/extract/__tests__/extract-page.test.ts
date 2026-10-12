@@ -115,6 +115,23 @@ describe("visible text, by block", () => {
     expect(texts(page)).toEqual(["spelling checked"]);
   });
 
+  /**
+   * s96 review round 2, nit 7: the hand-kept list missed default-ignorable
+   * characters. Every Default_Ignorable_Code_Point and Bidi_Control is now
+   * stripped, by Unicode property rather than by list.
+   */
+  it.each([
+    ["U+034F combining grapheme joiner", "\u034f"],
+    ["U+115F Hangul choseong filler", "\u115f"],
+    ["U+3164 Hangul filler", "\u3164"],
+    ["U+FE0F variation selector-16", "\ufe0f"],
+    ["U+E0041 tag latin capital A", "\u{e0041}"],
+  ])("strips %s", (_label, character) => {
+    const page = extract(`<p>spell${character}ing</p>`);
+
+    expect(texts(page)).toEqual(["spelling"]);
+  });
+
   it("caps blocks, block length and the page's text", () => {
     const many = extract("<p>w</p>".repeat(MAX_BLOCKS + 50));
     const long = extract(`<p>${"word ".repeat(1_000)}</p>`);

@@ -47,10 +47,11 @@ export const PAGE_CONCURRENCY = 3;
 export { PAGE_SKIP_REASONS };
 
 /** The reasons a scan as a whole can fail (the route's 422 `reason`). */
-export type ScanFailureReason =
-  | Exclude<FetchFailureReason, "invalid_url" | "request_limit">
-  /** The final host's per-target bucket refused it (the route answers 429). */
-  | "target_limited";
+/** `target_limited`: a homepage hop's domain is over its per-target cap (429). */
+export type ScanFailureReason = Exclude<
+  FetchFailureReason,
+  "invalid_url" | "request_limit"
+>;
 
 export interface RunScanInput {
   tool: string;
@@ -63,11 +64,13 @@ export interface RunScanInput {
   resolver?: Resolver;
   deadlineMs?: number;
   /**
-   * Charges the per-target hourly cap for the homepage's FINAL registrable
-   * domain when a redirect changed it (s96 review, minor 3). False stops the
-   * scan before any sitemap or page request.
+   * Charges the per-target hourly cap for a registrable domain (s96 review
+   * round 2, minor 3). Asked once per scan for every domain other than the
+   * submitted one, by any hop of any fetch, before that domain receives a
+   * request. False refuses those hops: the scan fails `target_limited` on the
+   * homepage's chain; a robots.txt, sitemap or page there is skipped.
    */
-  authorizeFinalHost?: (registrableDomain: string) => Promise<boolean>;
+  authorizeTargetDomain?: (registrableDomain: string) => Promise<boolean>;
 }
 
 export type RunScanResult =
@@ -115,6 +118,29 @@ type PageOutcome =
   | { status: "checked"; url: string; page: ExtractedPage }
   | { status: "skipped"; url: string; reason: string };
 
+/**
+ * The fetcher's `authorizeHost` for one scan: each registrable domain is
+ * charged at most once (concurrent hops share the pending verdict), and the
+ * submitted domain — charged by the route before the scan — never again.
+ */
+function createTargetAuthorizer(
+  submittedHostname: string,
+  authorize: (registrableDomain: string) => Promise<boolean>,
+): (hostname: string) => Promise<FetchFailureReason | null> {
+  const verdicts = new Map<string, Promise<boolean>>([
+    [registrableDomain(submittedHostname), Promise.resolve(true)],
+  ]);
+  return async (hostname) => {
+    const domain = registrableDomain(hostname);
+    let verdict = verdicts.get(domain);
+    if (!verdict) {
+      verdict = authorize(domain).catch(() => false);
+      verdicts.set(domain, verdict);
+    }
+    return (await verdict) ? null : "target_limited";
+  };
+}
+
 export async function runScan(input: RunScanInput): Promise<RunScanResult> {
   const deadline = input.now.getTime() + (input.deadlineMs ?? SCAN_DEADLINE_MS);
   const budget = createRequestBudget(MAX_REQUESTS_PER_SCAN);
@@ -125,6 +151,9 @@ export async function runScan(input: RunScanInput): Promise<RunScanResult> {
     policy: input.policy,
     resolver: input.resolver,
     isDenylistedHost: isDenied,
+    authorizeHost: input.authorizeTargetDomain
+      ? createTargetAuthorizer(input.url.hostname, input.authorizeTargetDomain)
+      : undefined,
     deadline,
   };
 
@@ -144,18 +173,6 @@ export async function runScan(input: RunScanInput): Promise<RunScanResult> {
   const homepage = await safeFetch(input.url.href, fetchOptions("html"));
   if (!homepage.ok)
     return { ok: false, reason: asScanFailure(homepage.reason) };
-
-  // A redirect may have moved the scan to another site. Its owner's hourly
-  // cap is charged before anything else is read or parsed from it; otherwise any host
-  // could redirect to a victim and spend the victim's scans from its own
-  // bucket.
-  const submittedDomain = registrableDomain(input.url.hostname);
-  const finalDomain = registrableDomain(new URL(homepage.value.url).hostname);
-  if (finalDomain !== submittedDomain && input.authorizeFinalHost) {
-    if (!(await input.authorizeFinalHost(finalDomain))) {
-      return { ok: false, reason: "target_limited" };
-    }
-  }
 
   const extracted = extractPage(homepage.value.body, {
     url: homepage.value.url,

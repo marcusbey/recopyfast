@@ -12,6 +12,12 @@
  *
  * An IP literal, a single label or a bare public suffix has no registrable
  * domain; the host itself is the key then.
+ *
+ * `validateHostname: false` (s96 review round 2, minor 2): with validation on,
+ * `tldts` answered null for `-a.victim.com`, `a-.victim.com` or
+ * `a!b.victim.com`, and the fallback keyed each such host on itself — a fresh
+ * bucket per invented subdomain. The normaliser refuses non-LDH hosts too;
+ * this keeps redirect hops and sitemap URLs on the right bucket regardless.
  */
 
 import { isIP } from "node:net";
@@ -24,5 +30,8 @@ export function registrableDomain(hostname: string): string {
     .replace(/^\[|\]$/g, "")
     .replace(/\.+$/, "");
   if (isIP(host) !== 0) return host;
-  return getDomain(host, { allowPrivateDomains: true }) ?? host;
+  return (
+    getDomain(host, { allowPrivateDomains: true, validateHostname: false }) ??
+    host
+  );
 }

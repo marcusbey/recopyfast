@@ -62,6 +62,11 @@ of Supabase Free's 500 MB, where going over makes the **whole database read-only
 `GET /api/cron/tool-reports-cleanup` (03:15 UTC) runs `prune_tool_reports(5000)`: expired rows
 first, then the oldest live rows past the ceiling.
 
+Cleanup lags expiry by up to about a day: a row past its `expires_at` stays in the table until the
+next 03:15 UTC run. It is never served in that time, because every read filters on
+`expires_at > now()` (`report-store.ts`). This is why the public copy says "up to 30 days" and why a
+row count taken just before the cron can include expired rows.
+
 ```sql
 -- Table size and row count
 SELECT pg_size_pretty(pg_total_relation_size('public.tool_reports')) AS table_size,

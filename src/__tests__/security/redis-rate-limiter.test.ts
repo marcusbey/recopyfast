@@ -25,7 +25,11 @@ const client = {
 
 jest.mock("redis", () => ({ createClient: jest.fn(() => client) }));
 
-import { RedisRateLimiter } from "@/lib/security/rate-limiter";
+import {
+  EXPIRY_GRACE_MS,
+  REDIS_COMMAND_TIMEOUT_MS,
+  RedisRateLimiter,
+} from "@/lib/security/rate-limiter";
 
 const config = {
   windowMs: 60_000,
@@ -88,7 +92,7 @@ describe("RedisRateLimiter", () => {
     );
     expect(pipeline.pExpireAt).toHaveBeenCalledWith(
       `rate_limit:user:user123:/api/test:${window}`,
-      (window + 1) * config.windowMs,
+      (window + 1) * config.windowMs + EXPIRY_GRACE_MS,
     );
   });
 
@@ -99,7 +103,7 @@ describe("RedisRateLimiter", () => {
    * /privacy says 24. The expiry is now the window's absolute end: the same
    * timestamp on every check in the window, never extended.
    */
-  it("expires the key at its window's end, the same instant on every check, never later", async () => {
+  it("expires the key at its window's end plus a fixed grace, the same instant on every check", async () => {
     const day = { ...config, windowMs: 24 * 60 * 60 * 1000 };
     const now = Date.now();
     const windowEnd = (Math.floor(now / day.windowMs) + 1) * day.windowMs;
@@ -108,8 +112,49 @@ describe("RedisRateLimiter", () => {
     await limiter.checkLimit(day);
 
     const expiries = pipeline.pExpireAt.mock.calls.map((call) => call[1]);
-    expect(expiries).toEqual([windowEnd, windowEnd]);
-    expect(windowEnd - now).toBeLessThanOrEqual(day.windowMs);
+    expect(expiries).toEqual([
+      windowEnd + EXPIRY_GRACE_MS,
+      windowEnd + EXPIRY_GRACE_MS,
+    ]);
+    expect(windowEnd + EXPIRY_GRACE_MS - now).toBeLessThanOrEqual(
+      day.windowMs + EXPIRY_GRACE_MS,
+    );
+  });
+
+  /**
+   * s96 review round 2, minor 1. PEXPIREAT with a timestamp already in the
+   * past DELETES the key. A MULTI built in a window's last milliseconds that
+   * reached Redis after `windowEnd` (latency, a slow pipeline, clock skew
+   * between this instance and Redis) wiped the counter: every later INCR in
+   * that window returned 1, and every limiter — the fail-closed editor-login
+   * ones included — let everything through near a window's end. The expiry now
+   * carries a grace longer than any command may take; the key names its
+   * window, so the grace never lets two windows share a count.
+   */
+  it("still sets a future expiry when the MULTI reaches Redis after the window's end", async () => {
+    const windowEnd =
+      (Math.floor(Date.now() / config.windowMs) + 1) * config.windowMs;
+    const clock = jest.spyOn(Date, "now").mockReturnValue(windowEnd - 1);
+    let redisNow = 0;
+    pipeline.exec.mockImplementation(async () => {
+      // The MULTI lands as late as the command timeout allows.
+      redisNow = windowEnd - 1 + REDIS_COMMAND_TIMEOUT_MS;
+      return [1, 1];
+    });
+
+    try {
+      await limiter.checkLimit(config);
+    } finally {
+      clock.mockRestore();
+    }
+
+    const [key, expiry] = pipeline.pExpireAt.mock.calls[0];
+    expect(key).toBe(
+      `rate_limit:user:user123:/api/test:${windowEnd / config.windowMs - 1}`,
+    );
+    expect(redisNow).toBeGreaterThan(windowEnd);
+    expect(expiry).toBeGreaterThan(redisNow);
+    expect(EXPIRY_GRACE_MS).toBeGreaterThan(REDIS_COMMAND_TIMEOUT_MS);
   });
 
   it("allows a request at the limit and denies the one past it", async () => {

@@ -234,6 +234,8 @@ shared with the webhook guard, whose suites stay green and whose refusal wording
 
 ### Minor 3 — the per-target cap was keyed on the submitted host only
 
+> Superseded in round 2 (minor 3 below): the final-host-only charge became a charge on every hop.
+
 **Finding.** A site could redirect to a victim and spend the victim's scans from its own bucket.
 Subdomains (`a.example.com`, `b.example.com`) also each had a bucket of their own.
 
@@ -278,7 +280,8 @@ re-armed `EXPIRE windowMs` each time, so a key in active use outlived its window
 for a daily window.
 
 **Fix 1.** The expiry is now absolute: `PEXPIREAT key windowEnd` (Redis ≥ 2.6). Every check in a
-window sets the same instant. This applies to every limiter.
+window sets the same instant. This applies to every limiter. *(Round 2, minor 1 below: this
+introduced a regression; the expiry is now `windowEnd + 10 s`.)*
 
 **Existing test changed (stated per AGENTS.md).** `src/__tests__/security/redis-rate-limiter.test.ts`:
 
@@ -304,6 +307,8 @@ The design doc and the ops runbook match. The new wording is pinned by `legal-pa
 `tools-pages` and `tool-report-page`; `legal-pages-truth` also forbids "deleted after 30 days".
 
 ### Minor 5 — two invisible characters were not stripped
+
+> Superseded in round 2 (nit 7 below): the list became the Unicode properties.
 
 **Fix.** `INVISIBLE_CHARACTERS` in `src/lib/tools/text.ts` gains:
 
@@ -334,6 +339,222 @@ The design doc and the ops runbook match. The new wording is pinned by `legal-pa
 - **Abort listener removed.** The request carries the same signal. On abort, Node destroys the
   response, which emits `error`, which settles the read. The listener is the second path for a
   stalled decoder.
+
+## Security review of `ae249ad`: findings and fixes
+
+Round 2 found 0 major, 4 minor and 4 nit findings. Minor 1 was a regression introduced by the
+round-1 fix. All eight are fixed in the commit after `ae249ad`, test-first: every new test was red
+before its fix, except the route rows marked "guard". The gate lines below stay `pending`.
+
+### Minor 1 — `PEXPIREAT windowEnd` could delete a live counter (regression)
+
+**Finding.** PEXPIREAT with a timestamp already in the past deletes the key. A MULTI built in a
+window's last milliseconds that reached Redis after `windowEnd` — latency, or clock skew between
+the instance and Redis — wiped the counter. Every later INCR in that window then returned 1. This
+held for every limiter, including the fail-closed editor-login ones. The reviewer proved it on
+Redis 7.2.7.
+
+**Fix** (`src/lib/security/rate-limiter.ts`). The expiry is `PEXPIREAT key (windowEnd +
+EXPIRY_GRACE_MS)`, with `EXPIRY_GRACE_MS = 10_000`, so it stays absolute. The key already ends in
+the window index (`rate_limit:<type>:<id>:<endpoint>:<floor(now / windowMs)>`), so the grace never
+lets two windows share a count. `REDIS_COMMAND_TIMEOUT_MS` (1,500 ms) is exported so the test can
+pin `grace > timeout`. The stale "INCR+EXPIRE" comment in `src/app/api/health/route.ts` now says
+"INCR+PEXPIREAT".
+
+**Tests** (`src/__tests__/security/redis-rate-limiter.test.ts`):
+
+- New: `Date.now()` is pinned to `windowEnd − 1`, and the MULTI "lands" at
+  `windowEnd − 1 + REDIS_COMMAND_TIMEOUT_MS`. The expiry sent must be later than that instant,
+  the key must name the ending window, and `EXPIRY_GRACE_MS > REDIS_COMMAND_TIMEOUT_MS`.
+- Changed (stated per AGENTS.md): "scopes the key" and "same instant on every check" now expect
+  `windowEnd + EXPIRY_GRACE_MS`.
+
+**Live check** against local Redis 7.4.11, three INCR + PEXPIREAT pipelines in a row:
+
+| Expiry sent | Third INCR | Key exists after |
+|---|---|---|
+| `windowEnd`, already past (round 1) | 1 | no |
+| `windowEnd + 10 s` | 3 | yes |
+
+### Minor 2 — non-LDH hosts escaped the registrable-domain key
+
+**Finding.** `tldts` validates host names by default and answered null for `-a.victim.com`,
+`a-.victim.com` and `a!b.victim.com`. The key then fell back to the full host, so wildcard DNS
+gave every invented subdomain a bucket of its own.
+
+**Fix:**
+
+- **`src/lib/tools/scan/registrable-domain.ts`.** `getDomain(host, { allowPrivateDomains: true,
+  validateHostname: false })`.
+- **`src/lib/tools/scan/normalize-url.ts`.** Every host-name label must match
+  `^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`, checked after WHATWG lower-cases the host and turns
+  IDN into punycode. IP literals are exempt: IPv4 digits are LDH anyway, and IPv6 is bracketed.
+  A refusal is the existing `invalid_url`. Every redirect hop and sitemap URL goes through the
+  same normaliser, so they are refused the same way.
+
+**Tests:**
+
+- `registrable-domain.test.ts`: `-a.`, `a-.`, `a!b.` and `a_b.victim.com` each map to
+  `victim.com`.
+- `normalize-url.test.ts` refuses:
+  - `-a.`, `a-.`, `a!b.` and `a_b.victim.com`;
+  - an empty label (`a..victim.com`);
+  - a 64-character label.
+- `normalize-url.test.ts` keeps:
+  - `a-b.` and `123.victim.com`;
+  - IDN as punycode;
+  - a 63-character label;
+  - IPv4 and IPv6 literals.
+- `scan-route.test.ts` (guard): the three listed hosts get a 400 with the invalid-URL text and
+  never reach the scan.
+
+### Minor 3 — other domains a scan reached were not charged
+
+**Finding.** Only the homepage's final domain was charged, and only after it had been fetched.
+Fetches of robots.txt, sitemaps and pages, and every intermediate redirect hop, reached other
+registrable domains without being charged.
+
+**Fix:**
+
+- **`src/lib/tools/fetch/safe-fetch.ts`.** A new `authorizeHost` option is asked on every hop,
+  after the denylist and before the URL authoriser, so before the hop's robots.txt fetch too. A
+  reason refuses the hop with the new failure reason `target_limited`.
+- **`src/lib/tools/scan/run-scan.ts`, `createTargetAuthorizer`.**
+  - It keeps a per-scan map of verdicts, seeded with the submitted domain, which the route has
+    already charged.
+  - Each new registrable domain is charged once. Concurrent hops share the pending verdict.
+  - A throwing charge counts as a refusal.
+  - The authorizer is in the base options of every fetch: robots.txt, the homepage, sitemaps and
+    pages.
+  - `authorizeFinalHost` is gone; `authorizeTargetDomain` replaces it.
+- **What a refusal does, by resource:**
+  - **The homepage's chain:** the scan fails `target_limited`. The route returns the limiter's
+    429, and nothing is stored.
+  - **A robots.txt:** treated as unavailable. RFC 9309 allows this when a redirect cannot be
+    followed (`robots.ts`).
+  - **A sitemap:** it is skipped, and the scan falls back to the homepage's links.
+  - **A page:** skipped as "We couldn't fetch this page."
+- **`src/app/api/tools/scan/route.ts`.** It records the first 429 and the first store failure. A
+  store failure at any charge returns the fail-closed 503 and discards the scan, even a finished
+  one.
+
+**Tests.** In `run-scan.test.ts` the loopback fixture now routes and logs by host. "Zero
+requests" means none to any `*victim.test` host, its robots.txt included.
+
+- A homepage redirect to a limited domain: the scan fails `target_limited`, the domain is charged
+  once, and the victim gets zero requests.
+- A robots.txt that redirects to a victim: the scan goes on, the victim is charged once, and it
+  gets zero requests.
+- A sitemap that redirects to a victim: the scan falls back to the homepage's links (both pages
+  checked), and the victim gets zero requests.
+- Two pages that redirect to `victim.test` and `www.victim.test`: the victim is charged once,
+  both pages are skipped, the other page is checked, and the victim gets zero requests.
+- The chain A → v1 → v2 → A, plus a page that redirects to v1 again: `["v1.test", "v2.test"]`,
+  each charged exactly once.
+- The chain A → v1 → victim (spent) → A: the scan fails `target_limited` and the victim gets zero
+  requests.
+- Unchanged: a domain the limiter allows lets the scan go on, and a `www.` redirect on the
+  submitted domain is never charged.
+
+In `scan-route.test.ts`:
+
+- a refused page hop still gives a 200 with the report stored;
+- a store failure at a page hop gives a 503 with nothing stored, even though the scan finished;
+- the three earlier final-host tests now use the new option.
+
+### Minor 4 — a nested decoder's output was not counted
+
+**Finding.** A `.xml.gz` sitemap sent with `Content-Encoding: gzip` goes through two decoders, and
+only the last one's output was counted. If the inner file is nothing but empty gzip members, it
+decodes to 0 bytes while the outer layer inflates without limit. The reviewer measured a 0.86 GB
+intermediate.
+
+**Fix** (`readBody`). A byte counter capped at `maxBytes` follows every decoder.
+`bytesRead` is the largest decoded count.
+
+**Test** (`safe-fetch.test.ts`). The bomb is built by `nestedEmptyMemberBomb()` in `bombs.ts`:
+511,273 B on the wire, whose outer layer holds 200 MiB of empty gzip members. It must resolve
+`too_large` inside a 4 s deadline. Measured over 3 runs on loopback with a prebuilt bomb:
+
+| Code | Run 1 | Run 2 | Run 3 | Result |
+|---|---|---|---|---|
+| Fixed | 22 ms | 10 ms | 10 ms | `too_large`, 2,113,536 bytes counted |
+| `ae249ad` | 830 ms | 799 ms | 765 ms | `ok` with an empty body, after inflating the whole 200 MiB |
+
+The Jest test takes 436, 445 and 478 ms, including ~437 ms to build the bomb.
+
+### Nit 5 — a one-byte first chunk picked raw inflate
+
+**Fix.** `isZlibHeader` decides from the first byte alone: `(b0 & 0x0f) === 8 && (b0 >> 4) <= 7`
+means zlib, anything else means raw. The answer no longer depends on chunking.
+
+**Test.** A zlib-wrapped deflate body and a raw one, each sent as a 1-byte first chunk and then
+the rest 50 ms later, both decode. The zlib one was red before the fix.
+
+### Nit 6 — an empty encoded body read as `unreachable`
+
+**Fix.** The decoders are created only after the first chunk is peeked (`decodingFor` and
+`decodersFor`). An empty body gets no decoder, for any Content-Encoding and for a gzip file.
+
+**Test.** An empty 200 sent with `Content-Encoding` gzip, deflate or br reads as `ok` with body
+`""`. All three were red, deflate included.
+
+### Nit 7 — the invisible-character list was hand-kept
+
+**Fix.** `INVISIBLE_CHARACTERS` is `/[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}]/gu`. Every
+character in the old list is covered; checked on Node 24.14, nothing was left over. Letters,
+digits and spaces are untouched.
+
+**Test.** `extract-page.test.ts` strips each of U+034F, U+115F, U+3164, U+FE0F and U+E0041 from
+`spell?ing`, leaving "spelling". The test source uses `\u` escapes, not literal characters.
+
+### Nit 8 — not-found copy and cleanup lag
+
+**Fix.**
+
+- `src/app/tools/[slug]/r/[id]/not-found.tsx` now says "kept for up to 30 days".
+- `docs/operations/free-tools.md` notes that the daily 03:15 UTC cleanup lags expiry by up to
+  about a day. An expired row is never served in that time, because every read filters on
+  `expires_at > now()`.
+
+**Test.** `tool-report-page.test.tsx` renders the not-found page and expects "kept for up to 30
+days", never "kept for 30 days".
+
+### Mutations for round 2 (each applied alone, then restored)
+
+**Killed:**
+
+- grace removed (3 red);
+- grace below the command timeout (1 red);
+- `tldts` validation back on (3 red);
+- LDH check removed (9 red);
+- hop charge removed (7 red);
+- hop charge on the first hop only (5 red);
+- per-scan verdict cache removed (8 red);
+- a robots refusal fails the scan (1 red);
+- the route ignores a store failure on a finished scan (1 red);
+- per-decoder counter removed (1 red);
+- two-byte zlib check restored (1 red);
+- empty-body skip removed (3 red);
+- hand-kept list restored (5 red).
+
+**Survived, and why:**
+
+- **The host charge moved after the URL authoriser.** The robots.txt fetch that the URL
+  authoriser makes carries the same `authorizeHost`. Even in that order, the victim's robots.txt
+  request is refused before it is sent, and the victim still gets zero requests. The guard holds
+  at two layers.
+
+### Verification for round 2
+
+- **Jest:** 483 suites passed, 2 skipped; 6865 tests passed, 38 skipped. This round added 39
+  tests.
+- **DB harness (PG17):** 16 suites, 121 passed, 1 skipped.
+- **Playwright `--list`:** 97 of 97 expected.
+- **`npm run build`:** passes.
+- **Embed check:** up to date, at the byte ceiling (45,818 B of 45,818).
+- **Type-check:** clean.
+- **Lint of the changed files:** clean. The commit hooks run the full lint and type-check again.
 
 Max severity: pending
 Ship allowed: pending

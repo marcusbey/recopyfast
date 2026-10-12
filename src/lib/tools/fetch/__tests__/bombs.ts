@@ -34,12 +34,12 @@ function compressor(
 async function build(
   encoding: BombEncoding,
   decodedBytes: number,
+  slice: Buffer = Buffer.alloc(1024 * 1024, 0x20),
 ): Promise<Buffer> {
   const stream = compressor(encoding);
   const chunks: Buffer[] = [];
   stream.on("data", (chunk: Buffer) => chunks.push(chunk));
   const done = once(stream, "end");
-  const slice = Buffer.alloc(1024 * 1024, 0x20);
   for (let written = 0; written < decodedBytes; written += slice.length) {
     if (!stream.write(slice)) await once(stream, "drain");
   }
@@ -64,4 +64,26 @@ export function compressedBomb(
 /** The Content-Encoding header a bomb is served with. */
 export function contentEncodingOf(encoding: BombEncoding): string {
   return encoding === "deflate-raw" ? "deflate" : encoding;
+}
+
+/**
+ * s96 review round 2, minor 4: a `.xml.gz` sitemap (a gzip FILE) sent with
+ * `Content-Encoding: gzip` on top. The inner file is nothing but EMPTY gzip
+ * members (20 bytes each, decoding to nothing), `innerBytes` of them; the
+ * outer layer squeezes that to a few hundred KB. Counting only the last
+ * decoder's output saw 0 bytes while the outer layer inflated it all.
+ */
+export function nestedEmptyMemberBomb(
+  innerBytes = BOMB_DECODED_BYTES,
+): Promise<Buffer> {
+  const key = `nested-empty-member:${innerBytes}`;
+  let bomb = cache.get(key);
+  if (!bomb) {
+    const member = zlib.gzipSync(Buffer.alloc(0));
+    const perSlice = Math.floor((1024 * 1024) / member.length);
+    const slice = Buffer.concat(Array.from({ length: perSlice }, () => member));
+    bomb = build("gzip", innerBytes, slice);
+    cache.set(key, bomb);
+  }
+  return bomb;
 }

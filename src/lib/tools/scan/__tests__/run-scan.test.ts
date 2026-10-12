@@ -23,8 +23,11 @@ const FILLER =
   "We bake fresh bread every morning with simple flour, water and salt. Our small team opens the shop at seven and closes when the last loaf is sold.";
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
+/** Keyed by pathname, or by `<host> <pathname>` for one host only. */
 const routes = new Map<string, Handler>();
 const requested: string[] = [];
+/** `<host><pathname>` of every request, to prove a host received nothing. */
+const requestedHosts: string[] = [];
 const sockets = new Set<Socket>();
 let server: http.Server;
 let port = 0;
@@ -32,8 +35,10 @@ let port = 0;
 beforeAll(async () => {
   server = http.createServer((req, res) => {
     const pathname = (req.url ?? "/").split("?")[0];
+    const host = (req.headers.host ?? "").split(":")[0];
     requested.push(pathname);
-    const handler = routes.get(pathname);
+    requestedHosts.push(`${host}${pathname}`);
+    const handler = routes.get(`${host} ${pathname}`) ?? routes.get(pathname);
     if (handler) return handler(req, res);
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("missing");
@@ -49,6 +54,7 @@ beforeAll(async () => {
 afterEach(() => {
   routes.clear();
   requested.length = 0;
+  requestedHosts.length = 0;
   for (const socket of sockets) socket.destroy();
 });
 
@@ -91,11 +97,11 @@ function scan(
   overrides: {
     deadlineMs?: number;
     denylist?: string[];
-    authorizeFinalHost?: (domain: string) => Promise<boolean>;
+    authorizeTargetDomain?: (domain: string) => Promise<boolean>;
   } = {},
 ) {
   return runScan({
-    authorizeFinalHost: overrides.authorizeFinalHost,
+    authorizeTargetDomain: overrides.authorizeTargetDomain,
     tool: "website-spell-checker",
     lens: typoLens,
     url: site(),
@@ -227,59 +233,174 @@ describe("runScan", () => {
    * scans from its own bucket. Checked right after the homepage, before any
    * sitemap or page request.
    */
-  describe("the final host after redirects", () => {
-    it("is charged when its registrable domain differs, and a refusal stops the scan", async () => {
-      routes.set("/", (_req, res) => {
-        res.writeHead(302, {
-          location: `http://www.elsewhere.test:${port}/home`,
-        });
+  /**
+   * s96 review round 2, minor 3. The per-target cap was charged once, for the
+   * homepage's FINAL domain, after it had been fetched: robots.txt, sitemap and
+   * page fetches, and every intermediate redirect hop, reached other domains
+   * uncharged. Now every hop of every fetch charges a registrable domain the
+   * scan has not charged yet, BEFORE its first request there (its robots.txt
+   * included), and once per scan.
+   */
+  describe("the per-target cap on every hop", () => {
+    function redirect(location: string, status = 302): Handler {
+      return (_req, res) => {
+        res.writeHead(status, { location });
         res.end();
-      });
-      routes.set("/home", html(`<p>${FILLER}</p>`));
+      };
+    }
+    function charger(verdict: (domain: string) => boolean) {
       const charged: string[] = [];
+      const authorizeTargetDomain = async (domain: string) => {
+        charged.push(domain);
+        return verdict(domain);
+      };
+      return { charged, authorizeTargetDomain };
+    }
+    const victimRequests = () =>
+      requestedHosts.filter((entry) => entry.includes("victim.test"));
 
-      const result = await scan({
-        authorizeFinalHost: async (domain) => {
-          charged.push(domain);
-          return false;
-        },
-      });
+    it("refuses a homepage redirect to a limited domain before the victim gets one request", async () => {
+      routes.set("/", redirect(`http://www.victim.test:${port}/home`));
+      routes.set("/home", html(`<p>${FILLER}</p>`));
+      const { charged, authorizeTargetDomain } = charger(() => false);
+
+      const result = await scan({ authorizeTargetDomain });
 
       expect(result).toEqual({ ok: false, reason: "target_limited" });
-      expect(charged).toEqual(["elsewhere.test"]);
+      expect(charged).toEqual(["victim.test"]);
+      expect(victimRequests()).toEqual([]);
       expect(requested).not.toContain("/sitemap.xml");
     });
 
-    it("lets the scan go on when the final host's bucket allows it", async () => {
-      routes.set("/", (_req, res) => {
-        res.writeHead(302, { location: `http://elsewhere.test:${port}/home` });
-        res.end();
-      });
+    it("lets the scan go on when the new domain's bucket allows it", async () => {
+      routes.set("/", redirect(`http://elsewhere.test:${port}/home`));
       routes.set("/home", html(`<p>${FILLER}</p>`));
+      const { charged, authorizeTargetDomain } = charger(() => true);
 
-      const result = await scan({ authorizeFinalHost: async () => true });
+      const result = await scan({ authorizeTargetDomain });
 
       expect(result.ok).toBe(true);
+      expect(charged).toEqual(["elsewhere.test"]);
     });
 
-    it("is not charged again for the same registrable domain (www.)", async () => {
-      routes.set("/", (_req, res) => {
-        res.writeHead(301, { location: `http://www.bakery.test:${port}/home` });
-        res.end();
-      });
-      const charged: string[] = [];
-      // www.bakery.test serves the same handler table.
+    it("does not charge the submitted domain again (www.)", async () => {
+      routes.set("/", redirect(`http://www.bakery.test:${port}/home`, 301));
       routes.set("/home", html(`<p>${FILLER}</p>`));
+      const { charged, authorizeTargetDomain } = charger(() => true);
 
-      const result = await scan({
-        authorizeFinalHost: async (domain) => {
-          charged.push(domain);
-          return true;
-        },
-      });
+      const result = await scan({ authorizeTargetDomain });
 
       expect(result.ok).toBe(true);
       expect(charged).toEqual([]);
+    });
+
+    it("treats a robots.txt that redirects to a limited domain as unavailable, and the victim gets nothing", async () => {
+      routes.set(
+        "bakery.test /robots.txt",
+        redirect(`http://victim.test:${port}/robots.txt`, 301),
+      );
+      routes.set("/", html(`<p>${FILLER}</p>`));
+      const { charged, authorizeTargetDomain } = charger(() => false);
+
+      const result = await scan({ authorizeTargetDomain });
+
+      expect(result.ok).toBe(true);
+      expect(charged).toEqual(["victim.test"]);
+      expect(victimRequests()).toEqual([]);
+    });
+
+    it("falls back to the homepage's links when the sitemap redirects to a limited domain", async () => {
+      routes.set("/", html(`<p>${FILLER}</p><a href="/menu">menu</a>`));
+      routes.set(
+        "bakery.test /sitemap.xml",
+        redirect(`http://victim.test:${port}/sitemap.xml`),
+      );
+      routes.set("/menu", html(`<p>${FILLER}</p>`));
+      const { charged, authorizeTargetDomain } = charger(() => false);
+
+      const result = await scan({ authorizeTargetDomain });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.report.pages.map((page) => page.status)).toEqual([
+          "checked",
+          "checked",
+        ]);
+      }
+      expect(charged).toEqual(["victim.test"]);
+      expect(victimRequests()).toEqual([]);
+    });
+
+    it("skips pages that redirect to a limited domain, charging it once for all of them", async () => {
+      routes.set(
+        "/",
+        html(
+          `<p>${FILLER}</p><a href="/one">one</a><a href="/two">two</a><a href="/menu">menu</a>`,
+        ),
+      );
+      routes.set("bakery.test /one", redirect(`http://victim.test:${port}/a`));
+      routes.set(
+        "bakery.test /two",
+        redirect(`http://www.victim.test:${port}/b`),
+      );
+      routes.set("/menu", html(`<p>${FILLER}</p>`));
+      const { charged, authorizeTargetDomain } = charger(() => false);
+
+      const result = await scan({ authorizeTargetDomain });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const byUrl = Object.fromEntries(
+          result.report.pages.map((page) => [
+            new URL(page.url).pathname,
+            page.status,
+          ]),
+        );
+        expect(byUrl).toEqual({
+          "/": "checked",
+          "/menu": "checked",
+          "/one": "skipped",
+          "/two": "skipped",
+        });
+      }
+      expect(charged).toEqual(["victim.test"]);
+      expect(victimRequests()).toEqual([]);
+    });
+
+    it("charges each domain of a 3-hop chain (A → v1 → v2 → A) exactly once", async () => {
+      routes.set("bakery.test /", redirect(`http://v1.test:${port}/hop`));
+      routes.set("v1.test /hop", redirect(`http://v2.test:${port}/hop`));
+      routes.set("v2.test /hop", redirect(`http://bakery.test:${port}/home`));
+      routes.set(
+        "bakery.test /home",
+        html(`<p>${FILLER}</p><a href="/menu">menu</a>`),
+      );
+      routes.set("bakery.test /menu", redirect(`http://v1.test:${port}/hop`));
+      const { charged, authorizeTargetDomain } = charger(() => true);
+
+      const result = await scan({ authorizeTargetDomain });
+
+      expect(result.ok).toBe(true);
+      expect(charged).toEqual(["v1.test", "v2.test"]);
+    });
+
+    it("sends nothing to the second domain of a chain when its bucket is spent", async () => {
+      routes.set("bakery.test /", redirect(`http://v1.test:${port}/hop`));
+      routes.set("v1.test /hop", redirect(`http://victim.test:${port}/hop`));
+      routes.set(
+        "victim.test /hop",
+        redirect(`http://bakery.test:${port}/home`),
+      );
+      routes.set("bakery.test /home", html(`<p>${FILLER}</p>`));
+      const { charged, authorizeTargetDomain } = charger(
+        (domain) => domain !== "victim.test",
+      );
+
+      const result = await scan({ authorizeTargetDomain });
+
+      expect(result).toEqual({ ok: false, reason: "target_limited" });
+      expect(charged).toEqual(["v1.test", "victim.test"]);
+      expect(victimRequests()).toEqual([]);
     });
   });
 

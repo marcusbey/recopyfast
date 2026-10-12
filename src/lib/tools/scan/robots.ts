@@ -13,6 +13,9 @@
  * - 4xx ("unavailable") → no rules, the scan proceeds;
  * - a non-text answer (a single-page app serving its HTML shell for every
  *   path) → treated as no robots.txt;
+ * - a redirect to a domain whose per-target cap is spent (`target_limited`)
+ *   → treated as no robots.txt, as RFC 9309 allows when redirects cannot be
+ *   followed; the other domain receives nothing (s96 review round 2, minor 3);
  * - anything else — 5xx, timeout, refused address, too large ("unreachable")
  *   → the scan is REFUSED with that same reason. RFC 9309 says to assume
  *   complete disallow; reporting the real reason (not "robots.txt says no")
@@ -181,7 +184,8 @@ export function createRobotsAuthorizer(
               result.status !== undefined &&
               result.status >= 400 &&
               result.status < 500) ||
-            result.reason === "not_html";
+            result.reason === "not_html" ||
+            result.reason === "target_limited";
           return isUnavailable
             ? { kind: "rules", rules: [] }
             : { kind: "refused", reason: result.reason };

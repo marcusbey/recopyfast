@@ -116,7 +116,7 @@ async function checkStorage(): Promise<ServiceCheck> {
  * limiters fail CLOSED on it — so the outage that refuses every editor showed
  * here as a green probe. Nothing paged and nothing was routed around.
  *
- * A real `checkLimit` rather than a PING: it exercises the exact INCR+EXPIRE
+ * A real `checkLimit` rather than a PING: it exercises the exact INCR+PEXPIREAT
  * pipeline login runs, through the same client, connect timeout and command
  * timeout. The key is fixed and its verdict ignored — this never limits
  * anyone, it only asks whether the store answers. Two Upstash commands.

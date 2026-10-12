@@ -42,6 +42,7 @@ import {
 import {
   BOMB_DECODED_BYTES,
   compressedBomb,
+  nestedEmptyMemberBomb,
   contentEncodingOf,
   type BombEncoding,
 } from "./bombs";
@@ -547,6 +548,36 @@ describe("size: the 2 MB cap counts decompressed bytes", () => {
     30_000,
   );
 
+  /**
+   * s96 review round 2, minor 4. Counting only after the LAST decoder let a
+   * gzip-file sitemap under `Content-Encoding: gzip` inflate its outer layer
+   * without limit: the inner file is empty gzip members that decode to
+   * nothing, so the one counter saw 0 bytes (0.86 GB intermediate, measured
+   * by the review). Every decoder's output is now counted and capped.
+   */
+  it("a nested empty-member gzip bomb (.xml.gz under Content-Encoding: gzip) resolves too_large", async () => {
+    const bomb = await nestedEmptyMemberBomb();
+    expect(bomb.length).toBeLessThan(BOMB_DECODED_BYTES / 200);
+    fixture.route("/sitemap.xml.gz", (_req, res) => {
+      res.writeHead(200, {
+        "content-type": "application/gzip",
+        "content-encoding": "gzip",
+      });
+      res.end(bomb);
+    });
+    const deadlineMs = 4_000;
+
+    const started = Date.now();
+    const result = await safeFetch(
+      fixture.url("/sitemap.xml.gz"),
+      options({ kind: "sitemap", deadline: Date.now() + deadlineMs }),
+    );
+    const elapsed = Date.now() - started;
+
+    expect(result).toMatchObject({ ok: false, reason: "too_large" });
+    expect(elapsed).toBeLessThan(deadlineMs);
+  }, 30_000);
+
   it("an endless compressed body is refused and its connection closed", async () => {
     let closed!: () => void;
     const serverSawClose = new Promise<void>((resolve) => (closed = resolve));
@@ -598,6 +629,56 @@ describe("size: the 2 MB cap counts decompressed bytes", () => {
 
     expect(result.ok && result.value.body).toBe("<p>decoded</p>");
   });
+
+  /**
+   * s96 review round 2, nit 5. `deflate` is zlib-wrapped or raw, told apart by
+   * the first byte. A first chunk of ONE byte used to fail the two-byte header
+   * check and pick raw inflate for a zlib body. The choice is now made from
+   * the first byte alone (CM = 8, CINFO ≤ 7), so it cannot depend on chunking.
+   */
+  it.each([
+    ["zlib-wrapped", (body: Buffer) => zlib.deflateSync(body)],
+    ["raw", (body: Buffer) => zlib.deflateRawSync(body)],
+  ])(
+    "decodes %s deflate whose first chunk is one byte",
+    async (_label, encode) => {
+      const encoded = encode(Buffer.from("<p>decoded</p>"));
+      fixture.route("/one-byte", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-encoding": "deflate",
+        });
+        res.write(encoded.subarray(0, 1));
+        setTimeout(() => res.end(encoded.subarray(1)), 50);
+      });
+
+      const result = await safeFetch(fixture.url("/one-byte"), options());
+
+      expect(result.ok && result.value.body).toBe("<p>decoded</p>");
+    },
+  );
+
+  /**
+   * s96 review round 2, nit 6. An empty 200 with a Content-Encoding used to
+   * be `unreachable`: the decoder called zero bytes a truncated stream. An
+   * empty body has nothing to decode.
+   */
+  it.each(["gzip", "deflate", "br"])(
+    "reads an empty body sent with Content-Encoding %s as empty",
+    async (encoding) => {
+      fixture.route("/empty", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-encoding": encoding,
+        });
+        res.end();
+      });
+
+      const result = await safeFetch(fixture.url("/empty"), options());
+
+      expect(result).toMatchObject({ ok: true, value: { body: "" } });
+    },
+  );
 
   it("decodes a gzipped sitemap under the same cap", async () => {
     const xml = "<urlset><url><loc>https://example.com/a</loc></url></urlset>";

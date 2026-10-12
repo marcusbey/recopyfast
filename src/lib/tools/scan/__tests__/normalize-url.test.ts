@@ -108,6 +108,38 @@ describe("normalizeScanUrl", () => {
     },
   );
 
+  /**
+   * s96 review round 2, minor 2. WHATWG accepts host labels like `-a`, `a-`
+   * and `a!b`; the Public Suffix List lookup then found no registrable domain
+   * and the per-target cap fell back to the whole host — one bucket per
+   * invented subdomain under wildcard DNS. Every label must be LDH (letters,
+   * digits, inner hyphens, at most 63), checked after IDN became punycode.
+   */
+  it.each([
+    "https://-a.victim.com/",
+    "https://a-.victim.com/",
+    "https://a!b.victim.com/",
+    "https://a_b.victim.com/",
+    "https://a..victim.com/",
+    `https://${"a".repeat(64)}.victim.com/`,
+  ])("refuses the non-LDH host label in %s", (raw) => {
+    expect(reason(raw)).toBe("invalid_url");
+  });
+
+  it.each([
+    ["https://a-b.victim.com/", "https://a-b.victim.com/"],
+    ["https://123.victim.com/", "https://123.victim.com/"],
+    ["https://bücher.example/", "https://xn--bcher-kva.example/"],
+    [
+      `https://${"a".repeat(63)}.victim.com/`,
+      `https://${"a".repeat(63)}.victim.com/`,
+    ],
+    ["http://93.184.216.34/", "http://93.184.216.34/"],
+    ["http://[2606:4700:4700::1111]/", "http://[2606:4700:4700::1111]/"],
+  ])("keeps the LDH host (or IP literal) in %s", (raw, expected) => {
+    expect(href(raw)).toBe(expected);
+  });
+
   it("refuses control characters and anything over 2,048 characters", () => {
     expect(reason("https://exa\u0000mple.com/")).toBe("invalid_url");
     expect(reason("https://example.com/\u0007")).toBe("invalid_url");

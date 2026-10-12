@@ -19,8 +19,9 @@
  *   starts a child process with that environment. Do not "reuse connections"
  *   with a shared agent.
  * - REDIRECTS ARE MANUAL, at most 3, and every `Location` goes through the same
- *   normalisation (scheme, default port, no user info), the denylist, the URL
- *   authoriser (robots.txt) and the address checks as the first hop.
+ *   normalisation (scheme, default port, no user info), the denylist, the host
+ *   authoriser (the per-target cap), the URL authoriser (robots.txt) and the
+ *   address checks as the first hop.
  * - The 2 MB cap counts DECOMPRESSED bytes, while streaming. A 30 KB gzip that
  *   inflates to 20 MB stops at the cap; a declared Content-Length over it is
  *   refused before a byte is read.
@@ -92,7 +93,9 @@ export type FetchFailureReason =
   | "unreachable"
   | "denylisted"
   | "robots_disallowed"
-  | "request_limit";
+  | "request_limit"
+  /** The host authoriser refused the hop (the per-target hourly cap). */
+  | "target_limited";
 
 export interface FetchPolicy {
   isAllowedAddress: AddressRule;
@@ -129,6 +132,12 @@ export interface SafeFetchOptions {
   resolver?: Resolver;
   /** The operator denylist, applied to every hop's host. */
   isDenylistedHost?: (hostname: string) => boolean;
+  /**
+   * Asked for every hop's host before anything else may reach it — the URL
+   * authoriser's robots.txt fetch included (the per-target cap in
+   * production). A reason refuses the hop.
+   */
+  authorizeHost?: (hostname: string) => Promise<FetchFailureReason | null>;
   /** Asked before every hop (robots.txt in production). A reason refuses it. */
   authorizeUrl?: (url: NormalizedScanUrl) => Promise<FetchFailureReason | null>;
   timeoutMs?: number;
@@ -198,28 +207,56 @@ function acceptsType(kind: FetchKind, type: string, url: URL): boolean {
   return SITEMAP_TYPES.has(type) || isGzipFile(kind, type, url);
 }
 
+type ContentDecoding = "gzip" | "br" | "deflate";
+
 /**
- * The decoder for a Content-Encoding, or null when it is one we do not speak.
- * `deflate` is sent both zlib-wrapped (RFC 9110) and raw (old IIS); the first
- * byte tells them apart, so the choice is deferred to it.
+ * The decoding a Content-Encoding asks for: null for none, "unsupported" for
+ * one we do not speak. The decoder itself is only created once the body is
+ * known not to be empty (`decodersFor`).
  */
-function decoderFor(
-  encoding: string,
-): Transform | null | "deflate" | "unsupported" {
+function decodingFor(encoding: string): ContentDecoding | null | "unsupported" {
   switch (encoding) {
     case "":
     case "identity":
       return null;
     case "gzip":
     case "x-gzip":
-      return zlib.createGunzip();
+      return "gzip";
     case "br":
-      return zlib.createBrotliDecompress();
+      return "br";
     case "deflate":
       return "deflate";
     default:
       return "unsupported";
   }
+}
+
+/**
+ * The decoder chain for a body whose first chunk is `first`.
+ *
+ * - An EMPTY body (`first` null) gets no decoder at all (s96 review round 2,
+ *   nit 6): a decoder fed zero bytes calls it a truncated stream, and an
+ *   empty 200 sent with `Content-Encoding: gzip` read as `unreachable`.
+ * - `deflate` is sent both zlib-wrapped (RFC 9110) and raw (old IIS); the
+ *   first byte tells them apart (`isZlibHeader`).
+ * - A gzip FILE (a `.gz` sitemap) is decoded after any Content-Encoding.
+ */
+function decodersFor(
+  decoding: ContentDecoding | null,
+  isGzipFileBody: boolean,
+  first: Buffer | null,
+): Transform[] {
+  if (first === null) return [];
+  const decoders: Transform[] = [];
+  if (decoding === "gzip") decoders.push(zlib.createGunzip());
+  if (decoding === "br") decoders.push(zlib.createBrotliDecompress());
+  if (decoding === "deflate") {
+    decoders.push(
+      isZlibHeader(first) ? zlib.createInflate() : zlib.createInflateRaw(),
+    );
+  }
+  if (isGzipFileBody) decoders.push(zlib.createGunzip());
+  return decoders;
 }
 
 /**
@@ -256,12 +293,14 @@ function peekFirstChunk(stream: Readable): Promise<Buffer | null> {
   });
 }
 
+/**
+ * Whether a deflate body is zlib-wrapped, from its FIRST BYTE alone: CM = 8
+ * (deflate) and CINFO ≤ 7 (s96 review round 2, nit 5). It used to need two
+ * bytes for the FCHECK, so a one-byte first chunk picked raw inflate for a
+ * zlib body — the answer depended on how the bytes were chunked.
+ */
 function isZlibHeader(chunk: Buffer): boolean {
-  return (
-    chunk.length >= 2 &&
-    (chunk[0] & 0x0f) === 8 &&
-    ((chunk[0] << 8) | chunk[1]) % 31 === 0
-  );
+  return chunk.length >= 1 && (chunk[0] & 0x0f) === 8 && chunk[0] >> 4 <= 7;
 }
 
 /** Counts bytes through a point in the chain and fails past `max`. */
@@ -398,6 +437,12 @@ type BodyResult =
  * a 3 s deadline. Now the first error from ANY stream, the abort signal, or
  * the pipeline's own end settles the promise once, and every stream is
  * destroyed on the way out. `pipeline` is kept for its backpressure.
+ *
+ * EVERY DECODER'S OUTPUT IS COUNTED AND CAPPED (s96 review round 2, minor 4),
+ * not only the last one's. A `.xml.gz` sitemap under `Content-Encoding: gzip`
+ * has two decoders; with a counter after the last only, an inner file of
+ * empty gzip members (decoding to nothing) let the outer layer inflate
+ * without limit — 0.86 GB in the review's measurement.
  */
 function readBody(
   response: IncomingMessage,
@@ -415,13 +460,15 @@ function readBody(
         callback();
       },
     });
+    const countDecoded = () =>
+      createByteCounter(maxBytes, (total) => {
+        decodedBytes = Math.max(decodedBytes, total);
+      });
     const streams: (Readable | Transform | Writable)[] = [
       response,
       createByteCounter(maxBytes, () => undefined),
-      ...decoders,
-      createByteCounter(maxBytes, (total) => {
-        decodedBytes = total;
-      }),
+      ...decoders.flatMap((decoder) => [decoder, countDecoded()]),
+      ...(decoders.length === 0 ? [countDecoded()] : []),
       sink,
     ];
 
@@ -492,6 +539,8 @@ export async function safeFetch(
     const target = normalized.value;
 
     if (options.isDenylistedHost?.(target.hostname)) return fail("denylisted");
+    const hostRefusal = await options.authorizeHost?.(target.hostname);
+    if (hostRefusal) return fail(hostRefusal);
     const refusal = await options.authorizeUrl?.(target);
     if (refusal) return fail(refusal);
     if (signal.aborted) return fail("timeout");
@@ -548,23 +597,16 @@ export async function safeFetch(
       .toString()
       .trim()
       .toLowerCase();
-    const decoder = decoderFor(encoding);
-    if (decoder === "unsupported") {
+    const decoding = decodingFor(encoding);
+    if (decoding === "unsupported") {
       response.destroy();
       return fail("unreachable");
     }
-    const decoders: Transform[] = [];
-    if (decoder === "deflate") {
-      const first = await peekFirstChunk(response);
-      decoders.push(
-        first !== null && !isZlibHeader(first)
-          ? zlib.createInflateRaw()
-          : zlib.createInflate(),
-      );
-    } else if (decoder) {
-      decoders.push(decoder);
-    }
-    if (isGzipFile(options.kind, type, url)) decoders.push(zlib.createGunzip());
+    const isGzipFileBody = isGzipFile(options.kind, type, url);
+    const decoders =
+      decoding !== null || isGzipFileBody
+        ? decodersFor(decoding, isGzipFileBody, await peekFirstChunk(response))
+        : [];
 
     const body = await readBody(response, decoders, maxBytes, signal);
     if (!body.ok) return fail(body.reason, body.bytesRead);

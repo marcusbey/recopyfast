@@ -15,6 +15,12 @@
  *   form tells the visitor so.
  * - The host is lower-cased (WHATWG does it), IDN becomes punycode (WHATWG),
  *   and a trailing dot is stripped so `example.com.` is `example.com`.
+ * - Every label of a host NAME must be LDH: letters, digits and inner
+ *   hyphens, 1–63 characters (s96 review round 2, minor 2). WHATWG accepts
+ *   `-a`, `a-`, `a!b` or `a_b`; the Public Suffix List lookup behind the
+ *   per-target cap does not, and its fallback to the whole host gave every
+ *   invented subdomain of a wildcard-DNS victim a bucket of its own. An IP
+ *   literal is exempt (IPv4 digits are LDH anyway; IPv6 is bracketed).
  * - Decimal, hex and octal IPv4 spellings (`2130706433`, `0x7f.1`) are
  *   rewritten to dotted quads by WHATWG; the fetcher then classifies the
  *   literal before any socket opens. Zone ids make WHATWG throw.
@@ -54,6 +60,14 @@ const BARE_SCHEME =
 
 const WEB_PROTOCOLS = new Set(["http:", "https:"]);
 
+const LDH_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** WHATWG has already lower-cased the host and turned IDN into punycode. */
+function isLdhHostname(hostname: string): boolean {
+  if (hostname.startsWith("[")) return true;
+  return hostname.split(".").every((label) => LDH_LABEL.test(label));
+}
+
 function refuse(reason: ScanUrlRefusal): NormalizeScanUrlResult {
   return { ok: false, reason };
 }
@@ -87,6 +101,7 @@ export function normalizeScanUrl(
 
   const hostname = url.hostname.replace(/\.+$/, "");
   if (!hostname) return refuse("invalid_url");
+  if (!isLdhHostname(hostname)) return refuse("invalid_url");
 
   const isAllowedPort = options.isAllowedPort ?? DEFAULT_PORT_RULE;
   if (!isAllowedPort(url.protocol as "http:" | "https:", url.port)) {

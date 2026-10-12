@@ -18,8 +18,8 @@ export default function ToolReportNotFound() {
           </h1>
           <p className="mt-5 text-lg leading-relaxed text-slate-600">
             The link may be mistyped, or the report may have expired. Reports
-            are kept for 30 days, and when many scans run at once older ones can
-            be removed sooner.
+            are kept for up to 30 days, and when many scans run at once older
+            ones can be removed sooner.
           </p>
           {/* A native anchor: leaving the nonce document for a static page
               loads that page's own policy. */}

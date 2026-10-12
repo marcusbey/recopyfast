@@ -16,7 +16,9 @@
  *      daily allowance.
  *   7. On a miss only: 5/day per /64 or IPv4, 20/day per IPv6 /48, 500/day for
  *      everyone together (env override), 20/hour per scanned site — its
- *      registrable domain, charged again for the final site after redirects. A limiter
+ *      registrable domain; every OTHER registrable domain a hop of the scan
+ *      reaches (redirect, robots.txt, sitemap, page) is charged once, before
+ *      its first request (`run-scan.ts`). A limiter
  *      counts when checked, so a call refused by a later one has spent the
  *      earlier ones — strict on purpose, and a call refused by the per-site
  *      limit still counts against the caller's day (architect decision 10).
@@ -239,25 +241,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const target = await chargeTarget(registrableDomain(url.hostname));
   if (target) return target;
 
-  // ...and charged again for the FINAL site when a redirect changed it, so a
-  // host that redirects to a victim cannot spend the victim's scans from its
-  // own bucket. Its refusal (429, or 503 when the store is down) is returned
-  // as is.
-  let finalHostRefusal: NextResponse | null = null;
+  // ...and every other registrable domain a hop of the scan reaches is
+  // charged once, before its first request (s96 review round 2, minor 3), so
+  // a host that redirects — its homepage, robots.txt, sitemap or a page — to
+  // a victim cannot spend the victim's scans from its own bucket. A 429 on
+  // the homepage's chain is returned as is; elsewhere that one resource is
+  // skipped. A store failure at ANY charge is the fail-closed 503, and the
+  // scan's result is discarded.
+  const charges: { refusal?: NextResponse; storeFailure?: NextResponse } = {};
   const result = await runScan({
     tool,
     lens,
     url,
     now,
     denylist,
-    authorizeFinalHost: async (domain) => {
-      finalHostRefusal = await chargeTarget(domain);
-      return finalHostRefusal === null;
+    authorizeTargetDomain: async (domain) => {
+      const refusal = await chargeTarget(domain);
+      if (refusal?.status === 429) charges.refusal ??= refusal;
+      else if (refusal) charges.storeFailure ??= refusal;
+      return refusal === null;
     },
   });
-  if (!result.ok && result.reason === "target_limited" && finalHostRefusal) {
+  if (charges.storeFailure) {
+    log("target_store_failure", { tool, host: url.hostname, startedAt });
+    return charges.storeFailure;
+  }
+  if (!result.ok && result.reason === "target_limited" && charges.refusal) {
     log("target_limited", { tool, host: url.hostname, startedAt });
-    return finalHostRefusal;
+    return charges.refusal;
   }
   if (!result.ok) {
     log(result.reason, { tool, host: url.hostname, startedAt });
