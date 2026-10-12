@@ -240,17 +240,34 @@ describe("decideInvoiceRefund: review of 67c6caf", () => {
 
   it("sends a covered invoice paid without money (credit balance, 100% coupon) to a person", () => {
     expect(
-      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, 0),
+      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, {
+        amountPaid: 0,
+        total: 1900,
+      }),
     ).toEqual({ kind: "manual", reason: "paid_by_credit" });
   });
 
   it("refunds a covered invoice paid with money, or not yet paid", () => {
     expect(
-      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, 1900),
+      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, {
+        amountPaid: 1900,
+        total: 1900,
+      }),
     ).toEqual({ kind: "refund" });
     expect(
       decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, null),
     ).toEqual({ kind: "refund" });
+  });
+
+  it("refunds the money of a covered invoice partly paid by credit, and says what credit is left to a person", () => {
+    // Re-review of 2928fcb (NIT): the refund returns 1,000 of money; the 900
+    // the customer balance paid is not refunded by it.
+    expect(
+      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, {
+        amountPaid: 1000,
+        total: 1900,
+      }),
+    ).toEqual({ kind: "refund", creditNotRefunded: 900 });
   });
 
   it("never turns a skip into a manual review because nothing was paid", () => {
@@ -259,7 +276,7 @@ describe("decideInvoiceRefund: review of 67c6caf", () => {
         [line("prod_agency", 4900)],
         LIFETIME_PRO,
         productIndex,
-        0,
+        { amountPaid: 0, total: 4900 },
       ),
     ).toEqual({ kind: "skip", reason: "uncovered" });
   });

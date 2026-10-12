@@ -272,63 +272,115 @@ function lifetimeStopMetadata(
  */
 export async function lifetimeStopOf(
   subscription: Stripe.Subscription,
-): Promise<{ paidAt: number } | null> {
+): Promise<LifetimeCover | null> {
   const metadata = subscription.metadata ?? {};
   if (metadata.cancelled_reason !== CANCELLED_REASON.lifetimePurchase) {
     return null;
   }
+  const paymentIntentId = metadata.paymentIntentId || null;
   const recorded = Number(metadata[LIFETIME_PAID_AT_KEY]);
-  if (Number.isFinite(recorded) && recorded > 0) return { paidAt: recorded };
-  return metadata.paymentIntentId
-    ? { paidAt: await lifetimePaymentTime(metadata.paymentIntentId) }
+  if (Number.isFinite(recorded) && recorded > 0) {
+    return { paidAt: recorded, paymentIntentId };
+  }
+  return paymentIntentId
+    ? { paidAt: await lifetimePaymentTime(paymentIntentId), paymentIntentId }
     : null;
 }
 
+/** What became of a stopped subscription's latest invoice. */
+export type LatestInvoiceHandling =
+  /** A draft or open invoice voided before anything was collected. */
+  | { handling: "voided"; invoiceId: string }
+  /** Already void: nothing was or will be collected. */
+  | { handling: "already_void"; invoiceId: string }
+  /** A draft its credit balance would pay: held, never advancing. */
+  | { handling: "held_draft"; invoiceId: string }
+  /** Open with a payment processing: decided when it settles. */
+  | { handling: "payment_in_flight"; invoiceId: string }
+  /** Uncollectible: nothing collected now, but it could still be paid. */
+  | { handling: "uncollectible"; invoiceId: string }
+  /** Paid at or after the lifetime: the per-invoice decision. */
+  | {
+      handling: "decided";
+      invoiceId: string;
+      decision: InvoiceRefundDecision["kind"];
+      refund: CoveredInvoiceRefund;
+    };
+
 /** What stopping a subscription bought before the lifetime did. */
 export type PredatingStop =
-  /** Its latest invoice was collected before the lifetime: it runs out. */
-  | { kind: "ends_at_period_end"; subscription: Stripe.Subscription }
-  /** Cancelled now; what became of its latest invoice. */
+  /**
+   * Set to end at period end: its latest invoice was collected before the
+   * lifetime (no `latestInvoice`), or it was neither refunded nor voided.
+   */
+  | {
+      kind: "ends_at_period_end";
+      subscription: Stripe.Subscription;
+      latestInvoice?: LatestInvoiceHandling;
+    }
+  /** Cancelled now: its latest invoice was refunded or voided. */
   | {
       kind: "cancelled_now";
       subscription: Stripe.Subscription;
-      latestInvoice:
-        | { handling: "voided"; invoiceId: string }
-        | { handling: "payment_in_flight"; invoiceId: string }
-        | { handling: "nothing_to_collect"; invoiceId: string | null }
-        | {
-            handling: "decided";
-            invoiceId: string;
-            refund: CoveredInvoiceRefund;
-          };
+      latestInvoice: LatestInvoiceHandling;
     };
+
+/**
+ * The stop failed after its marker was written (re-review of 2928fcb): says
+ * which subscription and which latest invoice, in which status, so the alert
+ * can tell ops exactly what to look at.
+ */
+export class PredatingStopFailed extends Error {
+  readonly subscriptionId: string;
+  readonly latestInvoiceId: string | null;
+  readonly latestStatus: string | null;
+  readonly cause: unknown;
+
+  constructor(
+    subscriptionId: string,
+    latest: { id: string | null; status: string | null },
+    cause: unknown,
+  ) {
+    super(
+      `subscription ${subscriptionId} could not be stopped (latest invoice ` +
+        `${latest.id ?? "none"} ${latest.status ?? "unread"}): ` +
+        (cause instanceof Error ? cause.message : String(cause)),
+    );
+    this.name = "PredatingStopFailed";
+    this.subscriptionId = subscriptionId;
+    this.latestInvoiceId = latest.id;
+    this.latestStatus = latest.status;
+    this.cause = cause;
+  }
+}
 
 /**
  * Stop a subscription bought BEFORE the lifetime that now covers it, without
  * ever keeping money collected at or after the lifetime's payment (review of
- * 67c6caf, MAJOR 2, layer a).
- *
- * Setting it to cancel at period end, as before, honours the period its latest
- * invoice paid for, but only if that invoice was collected before the lifetime.
- * A renewal drafted just before the grant is finalized and charged about an
- * hour later; a lifetime event processed late can find one already charged.
- * So the latest invoice decides:
- *  - collected before the lifetime (or none): cancel at period end, as before;
- *  - a draft: never collected. `auto_advance: false`, finalized with
- *    `auto_advance: false` (no payment attempted) and voided, since a
- *    subscription's draft cannot be deleted. Then cancelled now;
- *  - open: voided, unless a payment on it is already processing (Stripe will
- *    not void an invoice with an open payment); that one is decided when it
- *    settles (layer b). Then cancelled now;
- *  - paid at or after the lifetime: `decideInvoiceRefund` against the grants
- *    paid by then, refunded through `refundCoveredInvoice` (same keys) or left
- *    to a person. Then cancelled now;
- *  - void or uncollectible: nothing was collected. Cancelled now.
+ * 67c6caf, MAJOR 2, layer a; re-review of 2928fcb).
  *
  * The marker (`cancelled_reason`, the lifetime's payment intent and payment
- * time) is written first, so every later payment of the subscription is judged
- * at settlement even if a step after it fails (layer b). Throws on any
- * failure; each step is idempotent for the caller's retry.
+ * time) is written FIRST, before the latest invoice is read: a renewal
+ * finalized between the read and the marker is then still judged at its
+ * settlement (layer b). Then the latest invoice decides:
+ *  - collected before the lifetime (or none): cancel at period end, as before;
+ *  - a draft: `auto_advance: false` always. With something to collect, it is
+ *    finalized with `auto_advance: false` (no payment attempted) and voided,
+ *    since a subscription's draft cannot be deleted. One its credit balance
+ *    would pay (`amount_due` 0) is held as a draft that never advances:
+ *    finalized, it would be paid at once and could not be voided;
+ *  - open: voided, unless a payment on it is processing (Stripe will not void
+ *    an invoice with an open payment): decided when it settles;
+ *  - paid at or after the lifetime: `decideInvoiceRefund` against the grants
+ *    paid by then, refunded through `refundCoveredInvoice` (same keys) or left
+ *    to a person;
+ *  - void: nothing collected; uncollectible: nothing collected yet.
+ * Cancelled now ONLY when the latest invoice was refunded or voided: there is
+ * no paid-for period left. Otherwise set to end at period end, so a period the
+ * customer paid for an uncovered or mixed plan is not cut short.
+ *
+ * A failure after the marker throws `PredatingStopFailed`, naming the latest
+ * invoice; every step is idempotent for the caller's retry.
  */
 export async function stopPredatingSubscription(
   subscription: Stripe.Subscription,
@@ -336,39 +388,71 @@ export async function stopPredatingSubscription(
   readGrants: () => Promise<readonly DatedGrant[]>,
   productIndex?: PlanProductIndex,
 ): Promise<PredatingStop> {
-  const latestId = idOf(subscription.latest_invoice);
-  const latest = latestId ? await stripe.invoices.retrieve(latestId) : null;
-  const latestPaidAt = latest?.status_transitions?.paid_at ?? null;
-
-  if (
-    !latest ||
-    (latest.status === "paid" &&
-      (latestPaidAt === null || latestPaidAt < lifetime.paidAt))
-  ) {
-    return {
-      kind: "ends_at_period_end",
-      subscription: await endAtPeriodEndForLifetime(
-        subscription.id,
-        lifetime.paymentIntentId,
-        lifetime.paidAt,
-      ),
-    };
-  }
-
   await stripe.subscriptions.update(subscription.id, {
     metadata: lifetimeStopMetadata(lifetime.paymentIntentId, lifetime.paidAt),
   });
-  const latestInvoice = await settleLatestInvoice(
-    latest,
-    subscription.id,
-    readGrants,
-    productIndex,
-  );
-  const cancelled = await stripe.subscriptions.cancel(subscription.id, {
-    prorate: false,
-    invoice_now: false,
-  });
-  return { kind: "cancelled_now", subscription: cancelled, latestInvoice };
+
+  const latestId = idOf(subscription.latest_invoice);
+  let latest: Stripe.Invoice | null = null;
+  try {
+    latest = latestId ? await stripe.invoices.retrieve(latestId) : null;
+    const latestPaidAt = latest?.status_transitions?.paid_at ?? null;
+    const endAtPeriodEnd = () =>
+      endAtPeriodEndForLifetime(
+        subscription.id,
+        lifetime.paymentIntentId,
+        lifetime.paidAt,
+      );
+
+    if (
+      !latest ||
+      (latest.status === "paid" &&
+        (latestPaidAt === null || latestPaidAt < lifetime.paidAt))
+    ) {
+      return {
+        kind: "ends_at_period_end",
+        subscription: await endAtPeriodEnd(),
+      };
+    }
+
+    const latestInvoice = await settleLatestInvoice(
+      latest,
+      subscription.id,
+      readGrants,
+      productIndex,
+    );
+    if (!endsNow(latestInvoice)) {
+      return {
+        kind: "ends_at_period_end",
+        subscription: await endAtPeriodEnd(),
+        latestInvoice,
+      };
+    }
+    const cancelled = await stripe.subscriptions.cancel(subscription.id, {
+      prorate: false,
+      invoice_now: false,
+    });
+    return { kind: "cancelled_now", subscription: cancelled, latestInvoice };
+  } catch (error) {
+    throw new PredatingStopFailed(
+      subscription.id,
+      { id: latestId, status: latest?.status ?? null },
+      error,
+    );
+  }
+}
+
+/** Was the latest invoice refunded or voided: no paid-for period left? */
+function endsNow(latestInvoice: LatestInvoiceHandling): boolean {
+  switch (latestInvoice.handling) {
+    case "voided":
+    case "already_void":
+      return true;
+    case "decided":
+      return latestInvoice.decision === "refund";
+    default:
+      return false;
+  }
 }
 
 /** Make sure a stopped subscription's latest invoice keeps nothing it should not. */
@@ -377,14 +461,15 @@ async function settleLatestInvoice(
   subscriptionId: string,
   readGrants: () => Promise<readonly DatedGrant[]>,
   productIndex: PlanProductIndex | undefined,
-): Promise<Extract<PredatingStop, { kind: "cancelled_now" }>["latestInvoice"]> {
+): Promise<LatestInvoiceHandling> {
   const invoiceId = latest.id as string;
   switch (latest.status) {
     case "draft":
-      if (latest.amount_due <= 0) {
-        return { handling: "nothing_to_collect", invoiceId };
-      }
+      // Never advancing, whatever it would collect.
       await stripe.invoices.update(invoiceId, { auto_advance: false });
+      if (latest.amount_due <= 0) {
+        return { handling: "held_draft", invoiceId };
+      }
       await stripe.invoices.finalizeInvoice(invoiceId, { auto_advance: false });
       await stripe.invoices.voidInvoice(invoiceId);
       return { handling: "voided", invoiceId };
@@ -401,34 +486,49 @@ async function settleLatestInvoice(
         { grants: await readGrants(), judgedAt: paidAt ?? 0 },
         productIndex ?? (await loadPlanProductIndex()),
       );
-      if (decision.kind === "refund") {
-        return {
-          handling: "decided",
-          invoiceId,
-          refund: await refundCoveredInvoice(invoiceId, subscriptionId),
-        };
-      }
+      const manual = manualReviewFor(latest, decision);
+      const refund =
+        decision.kind === "refund"
+          ? await refundCoveredInvoice(
+              invoiceId,
+              subscriptionId,
+              latest.post_payment_credit_notes_amount ?? 0,
+            )
+          : NO_REFUNDS;
       return {
         handling: "decided",
         invoiceId,
+        decision: decision.kind,
         refund: {
-          ...NO_REFUNDS,
-          manualReviewInvoices:
-            decision.kind === "manual"
-              ? [
-                  {
-                    invoiceId,
-                    reason: decision.reason,
-                    invoiceStatus: latest.status,
-                  },
-                ]
-              : [],
+          ...refund,
+          manualReviewInvoices: [...refund.manualReviewInvoices, ...manual],
         },
       };
     }
+    case "void":
+      return { handling: "already_void", invoiceId };
     default:
-      return { handling: "nothing_to_collect", invoiceId };
+      return { handling: "uncollectible", invoiceId };
   }
+}
+
+/**
+ * The invoices a decision leaves to a person: a manual decision, or a refund
+ * that does not return what the customer balance paid (re-review of 2928fcb).
+ */
+export function manualReviewFor(
+  invoice: Stripe.Invoice,
+  decision: InvoiceRefundDecision,
+): ManualReviewInvoice[] {
+  const invoiceStatus = invoice.status ?? null;
+  const invoiceId = invoice.id as string;
+  if (decision.kind === "manual") {
+    return [{ invoiceId, reason: decision.reason, invoiceStatus }];
+  }
+  if (decision.kind === "refund" && decision.creditNotRefunded) {
+    return [{ invoiceId, reason: "partly_paid_by_credit", invoiceStatus }];
+  }
+  return [];
 }
 
 /** Is a payment on this invoice still processing (an `open` invoice payment)? */
@@ -622,10 +722,10 @@ export async function refuseSubscriptionCoveredByLifetime(
       ...NO_REFUNDS,
       manualReviewInvoices: manual,
     };
-    for (const invoiceId of refund) {
+    for (const { invoiceId, alreadyCredited } of refund) {
       refunds = mergeRefunds(
         refunds,
-        await refundCoveredInvoice(invoiceId, stopped.id),
+        await refundCoveredInvoice(invoiceId, stopped.id, alreadyCredited),
       );
     }
     return { subscription: stopped, endedBeforeRefusal, ...refunds };
@@ -650,6 +750,12 @@ export interface GrantsJudgedAt {
   readonly judgedAt: number;
 }
 
+/** An invoice to refund, and what credit notes already returned for it. */
+interface InvoiceToRefund {
+  invoiceId: string;
+  alreadyCredited: number;
+}
+
 /**
  * The invoices a refusal refunds, and those it leaves to a person.
  *
@@ -662,10 +768,14 @@ async function invoicesToRefund(
   subscription: Stripe.Subscription,
   endedBeforeRefusal: boolean,
   coverage: InvoicePlanCoverage | undefined,
-): Promise<{ refund: string[]; manual: ManualReviewInvoice[] }> {
+): Promise<{ refund: InvoiceToRefund[]; manual: ManualReviewInvoice[] }> {
   const latest = idOf(subscription.latest_invoice);
-  if (!endedBeforeRefusal)
-    return { refund: latest ? [latest] : [], manual: [] };
+  if (!endedBeforeRefusal) {
+    return {
+      refund: latest ? [{ invoiceId: latest, alreadyCredited: 0 }] : [],
+      manual: [],
+    };
+  }
   if (!coverage) {
     throw new Error(
       `the refusal of ended subscription ${subscription.id} was not told ` +
@@ -680,7 +790,7 @@ async function invoicesToRefund(
       ? [await stripe.invoices.retrieve(latest), ...paid]
       : paid;
 
-  const refund: string[] = [];
+  const refund: InvoiceToRefund[] = [];
   const manual: ManualReviewInvoice[] = [];
   const seen = new Set<string>();
   for (const invoice of candidates) {
@@ -691,14 +801,13 @@ async function invoicesToRefund(
       coverage,
       productIndex,
     );
-    if (decision.kind === "refund") refund.push(invoice.id);
-    if (decision.kind === "manual") {
-      manual.push({
+    if (decision.kind === "refund") {
+      refund.push({
         invoiceId: invoice.id,
-        reason: decision.reason,
-        invoiceStatus: invoice.status ?? null,
+        alreadyCredited: invoice.post_payment_credit_notes_amount ?? 0,
       });
     }
+    manual.push(...manualReviewFor(invoice, decision));
     if (decision.kind === "skip") {
       logger.info(
         `Invoice ${invoice.id} of subscription ${subscription.id}, refused as ` +
@@ -813,7 +922,12 @@ export async function decideEndedInvoiceRefund(
       invoice.status_transitions?.paid_at ?? null,
     ),
     productIndex,
-    invoice.status === "paid" ? invoice.amount_paid : null,
+    invoice.status === "paid"
+      ? {
+          amountPaid: invoice.amount_paid,
+          total: invoice.total ?? invoice.amount_paid,
+        }
+      : null,
   );
 }
 
@@ -973,7 +1087,14 @@ async function cancelCovered(
 export async function refundCoveredInvoice(
   invoiceId: string,
   subscriptionId: string,
+  /**
+   * What post-payment credit notes already returned for this invoice
+   * (`post_payment_credit_notes_amount`): never refunded a second time
+   * (re-review of 2928fcb).
+   */
+  alreadyCredited = 0,
 ): Promise<CoveredInvoiceRefund> {
+  let creditedLeft = alreadyCredited;
   const refundIds: string[] = [];
   const pendingPaymentIds: string[] = [];
   const inFlightPaymentIds: string[] = [];
@@ -1003,7 +1124,15 @@ export async function refundCoveredInvoice(
       }
       if (payment.status !== "paid") continue;
 
-      const outcome = await refundOnce(payment, subscriptionId);
+      // This invoice's share of the payment, less what credit notes already
+      // returned for the invoice (consumed payment by payment).
+      let share: number | null = payment.amount_paid ?? null;
+      if (share !== null) {
+        const credited = Math.min(creditedLeft, share);
+        creditedLeft -= credited;
+        share -= credited;
+      }
+      const outcome = await refundOnce(payment, subscriptionId, share);
       switch (outcome.kind) {
         case "refunded":
           refundIds.push(outcome.refundId);
@@ -1085,6 +1214,8 @@ const INVOICE_PAYMENT_LOOKUP_LIMIT = 10;
 async function refundOnce(
   invoicePayment: Stripe.InvoicePayment,
   subscriptionId: string,
+  /** This invoice's share of the payment still owed back; null if unknown. */
+  invoiceShare: number | null,
 ): Promise<RefundOutcome> {
   const payment = invoicePayment.payment;
   const target =
@@ -1116,7 +1247,6 @@ async function refundOnce(
   if (charge && (charge.refunded || (chargeLeft ?? 0) <= 0)) {
     return outsideUnlessOurs(target, subscriptionId, chargeId);
   }
-  const invoiceShare = invoicePayment.amount_paid ?? null;
   if (invoiceShare !== null && invoiceShare <= 0) {
     return { kind: "nothing_collected" };
   }

@@ -843,6 +843,91 @@ found as "already refunded". That is an under-refund, never a double refund
 or an uncovered refund. This app pays each invoice with its own PaymentIntent,
 so it does not arise today.
 
+## Re-review of `2928fcb`
+
+The re-review verified every earlier finding fixed. It found one new MAJOR,
+four MINOR and two NIT; ship allowed: no. Stripe behaviour was checked
+against the `2025-07-30.basil` docs (context7, docs.stripe.com) and the
+pinned SDK types:
+- Stripe applies a customer's credit balance before computing what an
+  invoice charges, so a paid invoice with `0 < amount_paid < total` was
+  partly paid by credit.
+- `post_payment_credit_notes_amount` is what post-payment credit notes
+  already returned for an invoice.
+- A subscription's draft takes `auto_advance: false` and cannot be deleted.
+- A canceled subscription's `metadata` can still be updated.
+
+| Finding | Fix | Tests |
+|---|---|---|
+| **MAJOR (a)**: the live-subscriptions read dropped its `error`, so nothing was stopped and nothing said. | `stopBillingForLifetimeOwner` checks `error`, alerts, and throws: 5xx and retry. | "(a) a failed read of the account's live subscriptions answers 5xx, and the retry stops them". |
+| **MAJOR (b)**: a redelivery re-ran only the ended-subscription step, never the stop. | `runLifetimeFollowUp` runs both retryable steps (stop, then ended subscriptions), on the first delivery and on every redelivery (the grant's duplicate path). It tries each and throws the first failure. On a redelivery it runs only while this payment's grant is still live (`readLifetimeGrants`, matched by payment intent; Founding Agency grants are written with theirs too). A lifetime since refunded or revoked stops nothing. | "(b) the lifetime's second event stops a subscription the first one did not see"; "(b) a late duplicate event of a lifetime since revoked never stops a subscription". |
+| **MAJOR (c)**: a failed stop was swallowed, with a misleading "may have been bought after it" alert. | Every per-subscription failure is alerted and the first is thrown after the loop: 5xx. `stopPredatingSubscription` throws `PredatingStopFailed` carrying the latest invoice and its status. `predatingStopFailureSentence` says which subscription, which latest invoice in which status, and what to do by hand. Every step is idempotent for the retry. | "(c) a finalize / void / refund failure inside the stop answers 5xx with an alert naming the subscription and its draft / paid latest invoice; the retry completes it" (3 cases). |
+| **MAJOR (d)**: layer (b) worked only if the stop's marker was written. | Settlement no longer needs the marker. For any subscription invoice payment, the lifetime is the stop's marker if present, else the earliest live grant covering the subscription's plan (`liveCoverOfSubscription`: the account's grants, its plan by product). A payment at or after that lifetime's payment gets the per-invoice decision, judged at the payment, so an uncovered plan is never refunded. Refunds use the same keys and the metadata lookup, so never twice. | "(d) a payment after the lifetime is refunded once without any stop marker …"; "(d) never refunds a plan the lifetime does not cover, marker or not". |
+| Minor: the latest invoice was read before the marker was written. | The marker is written first, then the latest invoice is read. | "writes the stop's marker before it reads the latest invoice" (call order). |
+| Minor: a credit-covered draft (`amount_due` 0) was left advancing, and could not be voided once finalized. | `auto_advance: false` on every draft. One its credit balance would pay is held as a draft that never advances: not finalized, not voided, and an alert asks a person to void or finalize it. | "holds a credit-covered draft renewal: never advancing, never finalized or voided, set to end, ops told". |
+| Minor: the stop cancelled now even when the period was paid for an uncovered or mixed plan. | Cancelled now only when the latest invoice was refunded or voided (`endsNow`: voided, already void, or a refund decision). Otherwise it is set to end at period end: skip, manual, payment processing, uncollectible, or a held draft. | "does not end early a period whose renewal billed only a plan the lifetime does not cover", and the declared changes to (a5) and (b1) below. |
+| Minor: a layer-(b) refund on a subscription still renewing would repeat every period. | After such a refund, a live subscription not set to end is set to `cancel_at_period_end` (with the stop's marker), and ops are alerted ("was still renewing … check why the lifetime's stop did not reach it"). | Part of the first (d) case: one period-end update, one alert across two settlements. |
+| NIT: the refund cap ignored credit notes. | The cap is the lesser of what is left on the charge and the invoice's `amount_paid` less what its post-payment credit notes already returned (`refundCoveredInvoice(…, alreadyCredited)`, consumed payment by payment). | "caps the refund at what the invoice collected less what a credit note already returned for it". |
+| NIT: an invoice partly paid by credit was refunded for its money only, silently. | The decision returns `refund` with `creditNotRefunded`. The money is refunded and the invoice goes to a person, once, as `partly_paid_by_credit`, to restore the credit. | Pure: "refunds the money of a covered invoice partly paid by credit …". Webhook: "refunds the money of an invoice partly paid by credit and tells a person, once, about the credit". |
+| NIT: no test for the report's level when the only outcome is a manual-review invoice. | (Already error level since the review of `67c6caf`.) | "reports at error level when the only outcome is an invoice left to a person". |
+
+**Red first:** pure suite 2 failed / 21 passed (23). Lifetime-covered and
+one-time-purchases suites 17 failed / 169 passed (186): the new cases and the
+declared changes. The revoked-duplicate, uncovered-plan, report-level and
+reshaped m-2 cases passed before; they are guards. After: 23/23 and 186/186.
+
+**Existing assertions changed, declared:**
+- (c) "keeps the grant and reports it when the refusal fails" now expects 500,
+  the grant kept, and the redelivery finishing the refusal.
+- (c) "m-3: cancelled but not refunded" now expects 500, and an alert
+  carrying "Returning 5xx".
+- (c) `one-time-purchases.test.ts`, "keeps cancelling after one subscription
+  fails to cancel", expects 500, both subscriptions still tried.
+- (d) Three m-2 cases had fixtures a lifetime does cover, which is exactly
+  what (d) now refunds. Their fixtures were made genuinely not owed:
+  - "…never refunds an uncovered subscription with no local row" is now an
+    Agency subscription;
+  - "…never refunds a live subscription's invoice" now has no lifetime grant;
+  - "…ended for another reason" was bought and paid before the lifetime.
+- (marker first) finding 6 (e) expects two subscription updates (marker,
+  then period end).
+- (cancel now) MAJOR-2 (a5) mixed renewal and (b1) renewal race are now set
+  to end at period end, not cancelled now.
+- (pure) The decision's paid input is `{ amountPaid, total }`.
+
+**Fixtures changed, declared:**
+- `one-time-purchases.test.ts`'s chainable fake gained `is`, `neq` and `or`,
+  answered by the same `returns`.
+- `stripe-webhook-invoice-customer.test.ts`'s fake gained `neq` and an
+  `or` arm parser.
+- Both because the duplicate path and settlement now read the account's
+  grants through the shared reader. No assertion changed there.
+
+**Mutations,** each restored afterwards (files byte-identical; baseline
+186/186):
+
+| Mutation | Red |
+|---|---:|
+| Ma the live-subscriptions read error ignored | 1 |
+| Mb a redelivery does not re-run the stop | 6 |
+| Mb2 the live-grant guard removed | 1 |
+| Mc the stop's failures swallowed | 6 |
+| Mc2 the failure alert names no latest invoice | 3 |
+| Md settlement depends on the marker | 1 |
+| Mmarker the latest invoice read before the marker | 1 |
+| Mcancel cancel now whatever the latest invoice | 4 |
+| Mstop layer (b) leaves a renewing subscription renewing | 1 |
+| Mheld a credit-covered draft finalized and voided | 1 |
+| Mcap credit notes not deducted from the cap | 1 |
+| Mflag a partly-credit invoice not flagged | 1 |
+
+Total: 27 red. All 12 mutations were caught.
+
+**Cost, recorded:** every `invoice.payment_succeeded` for a subscription
+that is neither refused nor marked now reads the account's grants once.
+Only an account that holds a grant also loads the catalogue's products. A
+grant-read failure answers 5xx, and Stripe redelivers.
+
 ### Current implementation verification
 
 Node `24.14.0`, npm `11.9.0`; dependencies installed with `npm ci`. No provider
@@ -973,6 +1058,27 @@ The review of `67c6caf` blocked ship at MAJOR. Its findings are fixed and
 tested above, but the fixes have not been reviewed yet. So the gate lines are
 `pending` until the architect's re-review. s82b remains the recorded
 follow-up.
+
+### Re-review of `2928fcb` verification
+
+Same environment and rules: no Stripe, Supabase or production calls, no
+`next dev`.
+
+- `npm run lint`: passed, 0 errors / 31 existing warnings.
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath` over the lifetime-covered,
+  covered-refund-decision, one-time-purchases, stripe-webhook-invoice-customer,
+  plans, lifetime-grant-plan and ops-alert suites: 7 suites, 296/296 passed.
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/|src/__tests__/lib/monitoring/'`:
+  55 suites / 992 tests passed, 0 failures.
+- `npm test`: 438 suites passed, 2 skipped; 6,190 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added.
+
+The re-review of `2928fcb` found a MAJOR (ship: no). Its findings are fixed
+and tested above but not yet reviewed, so the gate lines stay `pending`.
+s82b remains the recorded follow-up.
 
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.

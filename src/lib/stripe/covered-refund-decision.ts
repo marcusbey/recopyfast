@@ -60,7 +60,13 @@ export type ManualReviewReason =
   /** A charge covered only by a grant paid after the subscription was bought. */
   | "covered_later"
   /** Every charge covered, but paid without money (credit balance, coupon). */
-  | "paid_by_credit";
+  | "paid_by_credit"
+  /**
+   * Every charge covered and the money refunded, but part was paid by the
+   * customer's credit balance, which the refund does not return (re-review of
+   * 2928fcb).
+   */
+  | "partly_paid_by_credit";
 
 /** Why an invoice is left alone. */
 export type SkipReason =
@@ -70,8 +76,12 @@ export type SkipReason =
   | "nothing_charged";
 
 export type InvoiceRefundDecision =
-  /** Every charge bills a covered plan: refund the invoice's payments in full. */
-  | { kind: "refund" }
+  /**
+   * Every charge bills a covered plan: refund the invoice's payments in full.
+   * `creditNotRefunded`, when set, is what its customer balance paid, which
+   * the refund does not return: a person restores it.
+   */
+  | { kind: "refund"; creditNotRefunded?: number }
   /** No charge bills a covered plan, or nothing was charged: leave it. */
   | { kind: "skip"; reason: SkipReason }
   /** A person must decide. */
@@ -89,11 +99,12 @@ export function decideInvoiceRefund(
   coverage: InvoiceCoverage,
   productIndex: ProductPlanLookup,
   /**
-   * What the invoice collected, for a paid invoice; null while it is not
-   * paid. A covered invoice paid with no money (a credit balance, a 100%
-   * coupon) has no payment to refund: a person restores the credit.
+   * For a paid invoice, what it collected in money and its total; null while
+   * it is not paid. A covered invoice paid with no money (a credit balance, a
+   * 100% coupon) has no payment to refund: a person restores the credit. One
+   * paid partly by credit is refunded for its money, and the credit named.
    */
-  amountPaid: number | null = null,
+  paid: { amountPaid: number; total: number } | null = null,
 ): InvoiceRefundDecision {
   let billable = 0;
   let covered = 0;
@@ -131,7 +142,12 @@ export function decideInvoiceRefund(
   if (billable === 0) return { kind: "skip", reason: "nothing_charged" };
   if (covered === 0) return { kind: "skip", reason: "uncovered" };
   if (uncovered > 0) return { kind: "manual", reason: "mixed" };
-  if (amountPaid === 0) return { kind: "manual", reason: "paid_by_credit" };
+  if (paid?.amountPaid === 0) {
+    return { kind: "manual", reason: "paid_by_credit" };
+  }
+  if (paid && paid.amountPaid < paid.total) {
+    return { kind: "refund", creditNotRefunded: paid.total - paid.amountPaid };
+  }
   return { kind: "refund" };
 }
 

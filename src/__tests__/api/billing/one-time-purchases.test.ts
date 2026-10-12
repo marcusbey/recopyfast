@@ -31,6 +31,9 @@ interface QueryBuilder {
   select: jest.Mock;
   eq: jest.Mock;
   in: jest.Mock;
+  is: jest.Mock;
+  neq: jest.Mock;
+  or: jest.Mock;
   returns: jest.Mock;
   maybeSingle: jest.Mock;
   insert: jest.Mock;
@@ -73,6 +76,13 @@ const queryBuilder: QueryBuilder = {
   select: jest.fn((): QueryBuilder => queryBuilder),
   eq: jest.fn((): QueryBuilder => queryBuilder),
   in: jest.fn((): QueryBuilder => queryBuilder),
+  // HARNESS ONLY (s82 re-review of 2928fcb): a redelivered lifetime purchase
+  // asks whether its grant is still live through the shared grant reader,
+  // which filters with `is`, `neq` and `or`. Its rows come from the same
+  // `returns` answer as the live subscriptions (none, unless a test says).
+  is: jest.fn((): QueryBuilder => queryBuilder),
+  neq: jest.fn((): QueryBuilder => queryBuilder),
+  or: jest.fn((): QueryBuilder => queryBuilder),
   returns: jest.fn(() => liveSubscriptionsMock()),
   maybeSingle: maybeSingleMock,
   insert: insertMock,
@@ -251,8 +261,10 @@ describe("payment_intent.succeeded", () => {
       );
 
       // The grant still stands — cancellation trouble must never cost the
-      // customer the thing they paid $199 for.
-      expect(response.status).toBe(200);
+      // customer the thing they paid $199 for. Re-review of 2928fcb (c): the
+      // failed stop answers 5xx after every subscription was tried, so
+      // Stripe's redelivery stops the one that failed.
+      expect(response.status).toBe(500);
       expect(mockSubscriptionUpdate).toHaveBeenCalledTimes(2);
       expect(mockSubscriptionUpdate).toHaveBeenLastCalledWith(
         "sub_second",

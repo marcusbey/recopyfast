@@ -122,6 +122,29 @@ function createFakeClient() {
         predicates.push((row) => (row[column] ?? null) === value);
         return builder;
       },
+      // HARNESS ONLY (s82 re-review of 2928fcb): a settled invoice now asks
+      // whether the account holds a lifetime grant covering the subscription,
+      // through the shared grant reader, which filters with `neq` and an `or`
+      // of `expires_at` arms. These accounts hold none.
+      neq: (column: string, value: unknown) => {
+        predicates.push((row) => row[column] !== value);
+        return builder;
+      },
+      or: (expression: string) => {
+        const arms = expression.split(",").map((arm) => {
+          const [column, operator, ...rest] = arm.split(".");
+          const value = rest.join(".");
+          if (operator === "is" && value === "null") {
+            return (row: Row) => (row[column] ?? null) === null;
+          }
+          if (operator === "gt") {
+            return (row: Row) => String(row[column] ?? "") > value;
+          }
+          throw new Error(`Unsupported or() arm in test stub: ${arm}`);
+        });
+        predicates.push((row) => arms.some((arm) => arm(row)));
+        return builder;
+      },
       returns: () => builder,
       insert: (payload: Row) => {
         operation = "insert";
