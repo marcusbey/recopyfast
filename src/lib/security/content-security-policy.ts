@@ -72,7 +72,31 @@ export interface ContentSecurityPolicyOptions {
   nonce?: string;
   isDev: boolean;
   env?: CspEnvironment;
+  /**
+   * Google Analytics may run on this page (s107, ADR 063). The middleware sets
+   * it only for an allowlisted marketing path with a configured measurement
+   * id (`isAnalyticsRoute`). Ignored under a nonce: the app surface never
+   * names Google's hosts.
+   */
+  analytics?: boolean;
 }
+
+/**
+ * Exactly what gtag.js needs, nothing broader (s107, ADR 063): the script
+ * itself from www.googletagmanager.com, and its collection hits (fetch /
+ * sendBeacon, and the image fallback) to Google Analytics' regional hosts.
+ * `img-src` already allows `https:`; the hosts are named anyway so that
+ * tightening `img-src` later cannot silently break collection.
+ */
+const GOOGLE_ANALYTICS_SOURCES = {
+  script: ["https://www.googletagmanager.com"],
+  connect: [
+    "https://*.google-analytics.com",
+    "https://*.analytics.google.com",
+    "https://*.googletagmanager.com",
+  ],
+  img: ["https://*.google-analytics.com", "https://*.googletagmanager.com"],
+} as const;
 
 /**
  * connect-src must allowlist every origin the client opens XHR/fetch/WebSocket
@@ -149,8 +173,12 @@ export function buildContentSecurityPolicy({
   nonce,
   isDev,
   env = {},
+  analytics = false,
 }: ContentSecurityPolicyOptions): string {
-  const scripts = scriptSources(nonce, isDev);
+  const ga = analytics && !nonce ? GOOGLE_ANALYTICS_SOURCES : null;
+  const scripts = [scriptSources(nonce, isDev), ...(ga?.script ?? [])].join(
+    " ",
+  );
   return [
     "default-src 'self'",
     `script-src ${scripts}`,
@@ -159,9 +187,9 @@ export function buildContentSecurityPolicy({
     // makes the "which directive blocked me" console message unambiguous.
     `script-src-elem ${scripts}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https:",
+    ["img-src 'self' data: https:", ...(ga?.img ?? [])].join(" "),
     "font-src 'self' https:",
-    `connect-src ${connectSources(env, isDev).join(" ")}`,
+    `connect-src ${[...connectSources(env, isDev), ...(ga?.connect ?? [])].join(" ")}`,
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",

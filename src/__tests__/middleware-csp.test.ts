@@ -214,6 +214,73 @@ describe("the marketing surface keeps today's policy", () => {
   );
 });
 
+/**
+ * s107 (ADR 063) — Google's hosts are on the static policy of an allowlisted
+ * marketing page with a configured measurement id, and nowhere else: not on
+ * the app surface, not on account or auth pages, not on the API, not on the
+ * widget or the /try runtime that run on third-party pages.
+ */
+describe("Google Analytics in the policy", () => {
+  const savedId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+  const GTM = "https://www.googletagmanager.com";
+
+  afterEach(() => {
+    if (savedId === undefined) delete process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+    else process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID = savedId;
+  });
+
+  it.each([
+    "/",
+    "/compare/webflow-editor",
+    "/blog/some-post",
+    "/try",
+    "/privacy",
+  ])("%s names Google's hosts when GA is configured", async (pathname) => {
+    process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID = "G-TEST123456";
+
+    const policy = responsePolicy(await run(pathname));
+
+    expect(policy).toContain(`script-src 'self' 'unsafe-inline' ${GTM};`);
+    expect(policy).toContain("https://*.google-analytics.com");
+    expect(getScriptNonceFromHeader(policy)).toBeUndefined();
+  });
+
+  it.each([
+    ["/dashboard", true],
+    ["/dashboard/sites", true],
+    ["/settings", true],
+    ["/login", false],
+    ["/signup", false],
+    ["/edit", false],
+    ["/auth/error", false],
+    ["/api/pricing", false],
+    ["/embed/recopyfast.js", false],
+    ["/try/rcf-try.js", false],
+    ["/analytics/gtag-init.js", false],
+  ] as const)("%s never names Google's hosts", async (pathname, isSignedIn) => {
+    process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID = "G-TEST123456";
+    getUser.mockResolvedValue({
+      data: { user: isSignedIn ? { id: "user-1" } : null },
+    });
+
+    const policy = responsePolicy(await run(pathname));
+
+    expect(policy).not.toContain("google");
+  });
+
+  it("a marketing page is unchanged when GA is not configured (every preview)", async () => {
+    delete process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+
+    expect(responsePolicy(await run("/"))).not.toContain("google");
+  });
+
+  it("a malformed id counts as not configured", async () => {
+    process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID = "UA-1234-1";
+
+    expect(responsePolicy(await run("/"))).not.toContain("google");
+  });
+});
+
 describe("legacy headers", () => {
   // Signed in where the page needs it, signed out on /login — a signed-in
   // visit to /login is a redirect, which carries no headers by design.

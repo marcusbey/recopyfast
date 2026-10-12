@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { MousePointerClick, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { track } from "@/lib/analytics/google-analytics/gtag";
 
 export const TRY_RUNTIME_URL =
   "https://www.recopyfa.st/try/rcf-try.js" as const;
@@ -82,9 +83,11 @@ export function TryExperience() {
       if (pendingScriptRef.current !== script) return;
       script.remove();
       pendingScriptRef.current = null;
-      setSampleState(
-        (window as PreviewWindow).__rcfTryPreview ? "active" : "failed",
-      );
+      const isActive = Boolean((window as PreviewWindow).__rcfTryPreview);
+      setSampleState(isActive ? "active" : "failed");
+      // s107: our page, our sample. The bookmarklet runs on third-party pages
+      // and never reports anywhere. A no-op unless analytics runs here.
+      if (isActive) track("try_started", {});
     };
     script.onerror = () => {
       if (pendingScriptRef.current !== script) return;

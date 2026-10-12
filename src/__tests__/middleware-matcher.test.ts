@@ -169,6 +169,13 @@ const TUNNEL_PATHS = [SENTRY_TUNNEL_ROUTE];
 const PUBLISHED_SNAPSHOT_PATH =
   "/api/published/6f1c2b9e-3d4a-4b5c-8d6e-7f8091a2b3c4";
 
+/**
+ * s107's Google Analytics init script. Its answer depends on the visitor's
+ * country hint only, never on a session, and it is fetched on every marketing
+ * page view — a GoTrue round trip each time would buy nothing.
+ */
+const ANALYTICS_INIT_SCRIPT = "/analytics/gtag-init.js";
+
 const SESSIONLESS_PATHS = [
   ...EMBED_ASSETS,
   ...CRAWLER_ASSETS,
@@ -176,6 +183,7 @@ const SESSIONLESS_PATHS = [
   ...INSTALLATION_DOCS,
   ...TUNNEL_PATHS,
   PUBLISHED_SNAPSHOT_PATH,
+  ANALYTICS_INIT_SCRIPT,
 ];
 
 beforeEach(() => {
@@ -233,6 +241,18 @@ describe("a request whose response does not depend on a session", () => {
 
   it("does not broaden the try bypass to sibling paths", async () => {
     await run("/try/not-the-runtime.js");
+
+    expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
+    expect(getUser).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "/analytics",
+    "/analytics/other.js",
+    "/analytics/gtag-init.js/extra",
+    "/api/analytics/track",
+  ])("does not broaden the analytics bypass to %s", async (pathname) => {
+    await run(pathname);
 
     expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
     expect(getUser).toHaveBeenCalledTimes(1);

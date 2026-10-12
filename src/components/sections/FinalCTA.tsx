@@ -74,6 +74,7 @@ export default function FinalCTA({ offer }: { offer: FoundingOfferView }) {
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/signup"
+            data-cta-location="final_cta"
             className="pressable group inline-flex items-center gap-2 rounded-full bg-slate-900 px-10 py-5 text-lg font-semibold text-white transition-colors hover:bg-slate-800"
           >
             <span>Get started</span>

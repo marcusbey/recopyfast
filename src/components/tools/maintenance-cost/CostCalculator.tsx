@@ -21,11 +21,13 @@ import {
   EMPTY_RESULT,
   HONESTY_LINE,
   RESULT_LABEL,
+  TOOL_SLUG,
 } from "@/lib/tools/maintenance-cost/copy";
 import {
   parseParams,
   serializeParams,
 } from "@/lib/tools/maintenance-cost/params";
+import { track } from "@/lib/analytics/google-analytics/gtag";
 import { CostResultCard } from "./CostResultCard";
 import { EmbedSnippet } from "./EmbedSnippet";
 
@@ -120,11 +122,20 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
   }, [headline]);
 
   const syncedQuery = React.useRef(serializeParams(initial));
+  // s107: one `tool_scan_completed` per page view, the first time the
+  // visitor's own inputs settle into a result (the moment the URL follows
+  // them). `track` is a no-op unless analytics runs on this page; it sends the
+  // slug only, never the figures, which stay in the query string GA never sees.
+  const hasTrackedResult = React.useRef(false);
   React.useEffect(() => {
     if (!isComplete || query === syncedQuery.current) return;
     const timer = setTimeout(() => {
       syncedQuery.current = query;
       router.replace(`${pathname}?${query}`, { scroll: false });
+      if (!hasTrackedResult.current) {
+        hasTrackedResult.current = true;
+        track("tool_scan_completed", { tool_slug: TOOL_SLUG });
+      }
     }, URL_SYNC_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [isComplete, query, pathname, router]);

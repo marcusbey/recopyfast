@@ -80,6 +80,7 @@ export default function FoundingOfferCard({
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/signup"
+            data-cta-location="founding_offer"
             className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 text-center font-semibold text-white hover:bg-teal-800"
           >
             Claim your spot

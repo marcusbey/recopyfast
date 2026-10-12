@@ -128,8 +128,14 @@ test.describe("s79 content security policy", () => {
 
     const response = await page.goto("/", { waitUntil: "load" });
     const headers = response?.headers() ?? {};
+    // s107 (ADR 063): with a measurement id in the build (the CI e2e job sets
+    // a fake one), an allowlisted marketing page also allows gtag.js's host.
+    // Still `'self' 'unsafe-inline'` first, and still no nonce.
+    const analyticsScriptSource = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID
+      ? " https://www.googletagmanager.com"
+      : "";
     expect(headers["content-security-policy"]).toContain(
-      "script-src 'self' 'unsafe-inline';",
+      `script-src 'self' 'unsafe-inline'${analyticsScriptSource};`,
     );
     expect(nonceOf(headers["content-security-policy"])).toBeUndefined();
     expect(headers["strict-transport-security"]).toBe(

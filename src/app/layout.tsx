@@ -6,6 +6,7 @@ import {
 } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { GoogleAnalytics } from "@/components/analytics/GoogleAnalytics";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -137,6 +138,13 @@ export default function RootLayout({
       </head>
       <body className="font-sans">
         <AuthProvider>{children}</AuthProvider>
+        {/*
+          s107 (ADR 063). Renders nothing unless a measurement id is configured
+          (Production only) and the path is on the marketing allowlist; never
+          on the dashboard, auth, account or API paths. Here, not in each page,
+          so it follows client navigations and can switch itself off.
+        */}
+        <GoogleAnalytics />
       </body>
     </html>
   );

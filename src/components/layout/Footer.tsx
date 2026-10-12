@@ -3,6 +3,8 @@
 import { Zap, Github, Mail, Rocket, Shield } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { openCookieSettings } from "@/lib/analytics/google-analytics/gtag";
+import { getMeasurementId } from "@/lib/analytics/google-analytics/measurement-id";
 
 const footerLinks = {
   Product: [
@@ -62,6 +64,9 @@ const quickFeatures = [
 
 export default function Footer() {
   const [year, setYear] = useState<number | null>(null);
+  // s107: the analytics consent banner can be reopened from every page that
+  // carries this footer. No analytics configured, nothing to set.
+  const hasAnalytics = getMeasurementId() !== null;
 
   useEffect(() => {
     setYear(new Date().getFullYear());
@@ -144,6 +149,17 @@ export default function Footer() {
                     )}
                   </li>
                 ))}
+                {category === "Legal" && hasAnalytics ? (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={openCookieSettings}
+                      className="text-slate-600 hover:text-slate-900 transition-colors duration-200 text-sm"
+                    >
+                      Cookie settings
+                    </button>
+                  </li>
+                ) : null}
               </ul>
             </div>
           ))}

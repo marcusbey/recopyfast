@@ -144,6 +144,7 @@ export default function WebsiteMaintenanceCostPage() {
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
                 href="/signup?utm_source=tools&utm_medium=free_tool&utm_campaign=website-maintenance-cost"
+                data-cta-location="tool_page"
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 {SIGNUP_CTA_LABEL}

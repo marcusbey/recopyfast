@@ -271,6 +271,7 @@ export function CompareIndexContent({ comparisons }: CompareIndexContentProps) {
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
                 href="/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_index"
+                data-cta-location="compare_index"
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast
