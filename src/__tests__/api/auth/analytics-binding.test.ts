@@ -6,6 +6,10 @@ const getUser = jest.fn(),
   verifyOtp = jest.fn(),
   exchangeCodeForSession = jest.fn(),
   bindAnalyticsContext = jest.fn();
+const freezeVerifiedSignup = jest.fn();
+jest.mock("@/lib/analytics/google-analytics/conversions", () => ({
+  freezeVerifiedSignup: (...args: unknown[]) => freezeVerifiedSignup(...args),
+}));
 jest.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getUser, verifyOtp, exchangeCodeForSession },
@@ -38,18 +42,19 @@ it.each([
       new NextRequest(`https://www.recopyfa.st/auth/confirm?${query}`),
     );
     expect(response.status).toBe(307);
-    expect(bindAnalyticsContext).toHaveBeenCalledWith(
+    expect(freezeVerifiedSignup).toHaveBeenCalledWith(
       expect.anything(),
       "verified",
+      _name === "confirm" ? "magiclink" : "pkce",
     );
     getUser.mockResolvedValue({
       data: { user: { id: "untrusted" } },
       error: new Error("rejected"),
     });
-    bindAnalyticsContext.mockClear();
+    freezeVerifiedSignup.mockClear();
     await handler(
       new NextRequest(`https://www.recopyfa.st/auth/confirm?${query}`),
     );
-    expect(bindAnalyticsContext).not.toHaveBeenCalled();
+    expect(freezeVerifiedSignup).not.toHaveBeenCalled();
   },
 );

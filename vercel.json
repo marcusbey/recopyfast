@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/analytics-context-cleanup",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/analytics-dispatch",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

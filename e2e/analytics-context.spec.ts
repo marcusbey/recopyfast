@@ -48,6 +48,11 @@ test("context capture follows consent; withdrawal retries without private Google
     .click();
   await expect.poll(() => actions.includes("capture")).toBe(true);
   expect(actions.indexOf("grant")).toBeLessThan(actions.indexOf("capture"));
+  // A network capture can precede React committing the banner dismissal.
+  // Finish that user-visible transition before asking to reopen the banner.
+  await expect(
+    page.getByRole("region", { name: "Analytics cookies" }),
+  ).toBeHidden();
   await page
     .getByRole("button", { name: "Cookie settings", exact: true })
     .click();
