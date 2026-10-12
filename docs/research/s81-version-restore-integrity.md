@@ -38,3 +38,20 @@ Reserved migration for s81:20261012122000_staging_content_compare_and_set.sql; r
 Approved dependency: s65b revision-trigger retirement first. Keep the story branch based on main
 so its PR contains only s81. Verify combined migrations in a disposable integration schema using
 s65b's reviewed forward migration; do not duplicate that migration in the s81 commit.
+
+## Post-review evidence — nullable versions at the RPC boundary
+
+Devin PR #98 thread `PRRT_kwDOPc_I2s6reyUs` (discussion `4248623371`) identified a premise the
+HTTP-only null test did not settle: `content_elements.updated_at` is nullable, and
+`save_staging_content_compare_and_set` is directly executable by `service_role`. PostgreSQL
+`NULL IS NOT DISTINCT FROM NULL` is true, so the original prepared CTE admitted a nullable legacy
+row when a direct caller also supplied NULL. Merely tightening `prepared` would be incomplete:
+the existing conflict branch also used `IS DISTINCT FROM`, false for NULL/NULL, and the RPC would
+return no typed outcome.
+
+The real PostgreSQL regression now covers all three invalid combinations (NULL/NULL, NULL/value,
+value/NULL) and compares the full row before/after plus history count. Red evidence on Node 24 /
+PostgreSQL 17 was one failing NULL/NULL case (132 passed, one unrelated skip). The repaired
+predicate requires two non-null equal timestamps to save; its conflict branch covers either null
+or inequality. The replay then passed 133 tests with one unrelated skip, while the HTTP route's
+explicit-null 400 behavior remained pinned separately.

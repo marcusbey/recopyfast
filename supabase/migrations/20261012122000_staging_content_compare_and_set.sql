@@ -226,7 +226,13 @@ BEGIN
         locked.current_updated_at + INTERVAL '1 microsecond'
       ) AS next_updated_at
     FROM locked
-    WHERE locked.current_updated_at IS NOT DISTINCT FROM p_expected_updated_at
+    -- A NULL token does not version a row. The HTTP route already refuses an
+    -- explicit NULL, but this SECURITY DEFINER function is also a direct
+    -- service-role contract: a legacy nullable row plus NULL must never turn
+    -- into an unversioned write. Both sides must be present and equal.
+    WHERE locked.current_updated_at IS NOT NULL
+      AND p_expected_updated_at IS NOT NULL
+      AND locked.current_updated_at = p_expected_updated_at
   ),
   updated AS (
     UPDATE public.content_elements ce
@@ -290,7 +296,12 @@ BEGIN
     locked.id,
     locked.current_updated_at
   FROM locked
-  WHERE locked.current_updated_at IS DISTINCT FROM p_expected_updated_at
+  -- Keep this the exact complement of `prepared`. Changing only the save
+  -- predicate would make NULL/NULL return zero rows instead of the typed
+  -- conflict the route and direct callers require.
+  WHERE locked.current_updated_at IS NULL
+    OR p_expected_updated_at IS NULL
+    OR locked.current_updated_at <> p_expected_updated_at
 
   UNION ALL
 

@@ -81,6 +81,22 @@ resolution. Do not add a route preflight query and call it fixed.
    - Run staging PUT, concurrent write, Changes hook/page, attributes, history, permissions,
      PostgreSQL replay and normal gates. Add a two-client real-Postgres CAS test.
 
+### Post-review fix — nullable direct-RPC versions ✅
+
+Devin PR #98 thread `PRRT_kwDOPc_I2s6reyUs` (discussion `4248623371`) found that the RPC's
+`IS NOT DISTINCT FROM` comparison treated a legacy row with `updated_at = NULL` and a direct
+service caller's `p_expected_updated_at = NULL` as a matching version. The HTTP route's explicit
+null refusal did not protect that separate service-role contract.
+
+- Red first on Node 24 / PostgreSQL 17: the real-DB nullable-version matrix failed only NULL/NULL
+  (1 failed, 132 passed, 1 unrelated skip); the RPC returned `saved` and mutated draft/history.
+- The save predicate now requires both timestamps non-null and equal. The conflict predicate is
+  its explicit complement (either null or unequal), so every locked row still returns exactly one
+  of saved/conflict rather than falling into a zero-row result.
+- Green: NULL/NULL, NULL/value and value/NULL all return conflict with the complete row snapshot
+  unchanged and zero `staging_history` rows. The replay passed 17 suites / 133 tests, with one
+  unrelated skip. The route's explicit-null 400 regression remains unchanged.
+
 ### Expected files
 
 - New `supabase/migrations/<timestamp>_staging_content_compare_and_set.sql`

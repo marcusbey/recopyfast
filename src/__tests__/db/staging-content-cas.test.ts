@@ -11,6 +11,8 @@
  * conflict, and the loser appends no staging_history row. The version is the
  * row-wide content_elements.updated_at, not staging_updated_at: publish and
  * attribute writers can change the reviewed row without moving the latter.
+ * A nullable legacy row is never an unversioned escape hatch: both the stored
+ * token and the expected token must be non-null before equality can save.
  */
 
 import { describeDb } from "./db-harness";
@@ -60,7 +62,7 @@ const legacySaveSql = `
 describeDb(
   "s81 staging content compare-and-set",
   ({ query, withClient, createSite }) => {
-    async function seed(label: string) {
+    async function seed(label: string, updatedAt: string | null = EXPECTED) {
       const siteId = await createSite(`s81-${label}`);
       const elementId = `s81-${label}`;
       const { rows } = await query<{ id: string }>(
@@ -71,9 +73,9 @@ describeDb(
          VALUES ($1, $2, '#s81', 'en', 'default',
                  'Original', 'Live', 'Live', 'Draft A', $3,
                  '{"type":"a","href":"/live","staging_attributes":{"href":"/draft"}}'::jsonb,
-                 $3)
+                 $4)
          RETURNING id`,
-        [siteId, elementId, EXPECTED],
+        [siteId, elementId, EXPECTED, updatedAt],
       );
       return { siteId, elementId, rowId: rows[0].id };
     }
@@ -332,27 +334,71 @@ describeDb(
       expect(conditional.rows[0].save_status).toBe("saved");
     });
 
-    test("a direct RPC call with a null precondition conflicts instead of becoming unconditional", async () => {
-      const seeded = await seed("null-version");
+    test.each([
+      {
+        label: "a NULL row and NULL expected version",
+        seedLabel: "null-null",
+        rowVersion: null,
+        expectedVersion: null,
+      },
+      {
+        label: "a NULL row and non-NULL expected version",
+        seedLabel: "null-value",
+        rowVersion: null,
+        expectedVersion: EXPECTED,
+      },
+      {
+        label: "a non-NULL row and NULL expected version",
+        seedLabel: "value-null",
+        rowVersion: EXPECTED,
+        expectedVersion: null,
+      },
+    ])(
+      "$label conflicts without updating the row or history",
+      async ({ seedLabel, rowVersion, expectedVersion }) => {
+        const seeded = await seed(seedLabel, rowVersion);
+        const readHeld = () =>
+          query<{
+            staging_content: string;
+            metadata: Record<string, unknown>;
+            version: string | null;
+            history_count: string;
+          }>(
+            `SELECT ce.staging_content,
+                    ce.metadata,
+                    ce.updated_at::text AS version,
+                    (SELECT count(*)::text FROM staging_history sh
+                     WHERE sh.content_element_id = ce.id) AS history_count
+             FROM content_elements ce WHERE ce.id = $1`,
+            [seeded.rowId],
+          );
+        const { rows: before } = await readHeld();
 
-      const { rows } = await query<SaveRow>(saveSql, [
-        seeded.siteId,
-        seeded.elementId,
-        "Version B",
-        null,
-        JSON.stringify({ href: "/live" }),
-        "owner@example.com",
-      ]);
-      const { rows: history } = await query<{ count: string }>(
-        "SELECT count(*)::text AS count FROM staging_history WHERE content_element_id = $1",
-        [seeded.rowId],
-      );
+        const { rows } = await query<SaveRow>(saveSql, [
+          seeded.siteId,
+          seeded.elementId,
+          "Version B",
+          expectedVersion,
+          JSON.stringify({ href: "/live" }),
+          "owner@example.com",
+        ]);
+        const { rows: after } = await readHeld();
 
-      expect(rows).toEqual([
-        { save_status: "conflict", content_element_id: seeded.rowId },
-      ]);
-      expect(history[0].count).toBe("0");
-    });
+        expect(rows).toEqual([
+          { save_status: "conflict", content_element_id: seeded.rowId },
+        ]);
+        expect(before[0]).toMatchObject({
+          staging_content: "Draft A",
+          metadata: {
+            type: "a",
+            href: "/live",
+            staging_attributes: { href: "/draft" },
+          },
+          history_count: "0",
+        });
+        expect(after[0]).toEqual(before[0]);
+      },
+    );
 
     test("returns missing distinctly from a version conflict", async () => {
       const siteId = await createSite("s81-missing");
