@@ -67,6 +67,7 @@ import {
   stopPredatingSubscription,
   wasBoughtWithPlanAlreadyOwned,
   wasRefusedAsCoveredByLifetime,
+  withCreditReview,
   type CoveredSubscriptionRefusal,
   type DatedGrant,
   type InvoicePlanCoverage,
@@ -1157,9 +1158,10 @@ async function alertManualReviewInvoicesOnce(
   userId: string,
   supabase: ServiceClient,
 ): Promise<void> {
-  for (const { invoiceId, reason, invoiceStatus } of invoices) {
-    if (!isActionableReview({ invoiceId, reason, invoiceStatus })) {
-      // Still processing: its settlement decides again, and alerts then.
+  for (const invoice of invoices) {
+    const { invoiceId, reason, invoiceStatus } = invoice;
+    if (!isActionableReview(invoice)) {
+      // Nothing collected yet: its settlement decides again, and alerts then.
       logger.info(
         `Invoice ${invoiceId} of subscription ${subscriptionId} needs a ` +
           `person (${reason}) but is ${invoiceStatus ?? "not paid"}: decided ` +
@@ -1187,10 +1189,15 @@ async function alertManualReviewInvoicesOnce(
       continue;
     }
     alertOps(
-      `Subscription ${subscriptionId} is covered by a lifetime grant, but ` +
-        `${manualReviewSentence(invoiceId, reason)} (invoice ` +
-        `${invoiceStatus}), so nothing on it was refunded automatically; ` +
-        `refund the covered lines by hand.`,
+      reason === "partly_paid_by_credit"
+        ? // Sent once its refund was made (Devin 4245730010).
+          `Subscription ${subscriptionId} is covered by a lifetime grant: ` +
+            `${manualReviewSentence(invoiceId, reason)} ` +
+            `(${collectedSoFar(invoice)}).`
+        : `Subscription ${subscriptionId} is covered by a lifetime grant, ` +
+            `but ${manualReviewSentence(invoiceId, reason)} ` +
+            `(${collectedSoFar(invoice)}), so nothing on it was refunded ` +
+            `automatically; refund the covered lines by hand.`,
       undefined,
       { userId },
       {
@@ -1200,14 +1207,35 @@ async function alertManualReviewInvoicesOnce(
         invoiceId,
         reason,
         invoiceStatus,
+        amountPaid: invoice.amountPaid,
+        amountDue: invoice.amountDue,
       },
     );
   }
 }
 
-/** An invoice a person can act on now: it was paid. */
+/**
+ * An invoice a person can act on now: it was paid, or (Devin 4245730166) a
+ * payment already collected part of it — an `open` invoice is one with a
+ * balance left, not one that took no money, and its remainder may never be
+ * paid. One that collected nothing waits for its settlement.
+ */
 function isActionableReview(invoice: ManualReviewInvoice): boolean {
-  return invoice.invoiceStatus === "paid";
+  return invoice.invoiceStatus === "paid" || invoice.amountPaid > 0;
+}
+
+/** What an invoice left to a person collected, in words (smallest unit). */
+function collectedSoFar({
+  invoiceStatus,
+  amountPaid,
+  amountDue,
+}: ManualReviewInvoice): string {
+  const status = invoiceStatus ? `invoice ${invoiceStatus}, ` : "";
+  if (amountDue === null) return `${status}${amountPaid} collected`;
+  return (
+    `${status}${amountPaid} of ${amountDue} collected` +
+    (amountDue > amountPaid ? `, ${amountDue - amountPaid} still due` : "")
+  );
 }
 
 /** Why an invoice needs a person, in words. */
@@ -1240,6 +1268,16 @@ function manualReviewSentence(
         `invoice ${invoiceId} was refunded for its money, but part of it was ` +
         `paid by the customer's credit balance, which the refund does not ` +
         `return; restore that credit`
+      );
+    case "several_payments":
+      return (
+        `invoice ${invoiceId} was paid by more than one payment, so which ` +
+        `of them to refund, and by how much, is not told automatically`
+      );
+    case "shared_payment":
+      return (
+        `invoice ${invoiceId} was paid by a payment that also paid another ` +
+        `invoice`
       );
   }
 }
@@ -1526,24 +1564,47 @@ async function refundIfRefusedAsCovered(
         },
       );
     } else {
-      warnOps(
+      const sentence =
         `Invoice ${invoiceId} of subscription ${subscriptionId}: could not ` +
-          `tell whether this payment is covered by a lifetime grant, so ` +
-          `nothing was refunded yet. Returning 5xx; Stripe will retry.`,
-        { userId },
-        {
-          component: "webhooks/stripe",
-          action: "refund_covered_invoice",
-          subscriptionId,
-          invoiceId,
-          cause: error instanceof Error ? error.message : String(error),
-        },
-      );
+        `tell whether this payment is covered by a lifetime grant, so ` +
+        `nothing was refunded yet. Returning 5xx; Stripe will retry.`;
+      const metadata = {
+        component: "webhooks/stripe",
+        action: "refund_covered_invoice",
+        subscriptionId,
+        invoiceId,
+      };
+      // Final check of 7f8e8b5 (MINOR): a passing Stripe outage on an
+      // account without a lifetime is a warning. Anything else — a product
+      // configured for two plans, a grant's payment Stripe cannot find, an
+      // unreadable table — will not pass by retrying, and for a lifetime
+      // owner the payment may be owed back: an alert.
+      if (
+        isPassingStripeOutage(error) &&
+        !(await mayHoldLifetimeGrant(userId, supabase))
+      ) {
+        warnOps(
+          sentence,
+          { userId },
+          {
+            ...metadata,
+            cause: error instanceof Error ? error.message : String(error),
+          },
+        );
+      } else {
+        alertOps(
+          `${sentence} If it repeats, check by hand whether a lifetime ` +
+            `covers it.`,
+          error,
+          { userId },
+          metadata,
+        );
+      }
     }
     throw error;
   }
   if (!settlement) return;
-  const { settledInvoice, stillRenewing } = settlement;
+  const { settledInvoice, stillRenewing, creditReview } = settlement;
 
   try {
     const {
@@ -1551,13 +1612,26 @@ async function refundIfRefusedAsCovered(
       pendingPaymentIds,
       refundedOutsideChargeIds,
       disputedChargeIds,
-    } = await refundCoveredInvoice(
-      invoiceId,
-      subscriptionId,
-      settledInvoice?.post_payment_credit_notes_amount ?? 0,
+      manualReviewInvoices,
+    } = withCreditReview(
+      await refundCoveredInvoice(
+        invoiceId,
+        subscriptionId,
+        settledInvoice?.post_payment_credit_notes_amount ?? 0,
+      ),
+      creditReview,
     );
     await warnDisputedChargesOnce(
       disputedChargeIds,
+      subscriptionId,
+      userId,
+      supabase,
+    );
+    // Devin 4245730010: the credit its refund does not return is named only
+    // once the refund was made or found (`withCreditReview`). Its claim is
+    // spent by this alert, so a retry after a failed refund still sends it.
+    await alertManualReviewInvoicesOnce(
+      manualReviewInvoices,
       subscriptionId,
       userId,
       supabase,
@@ -1596,8 +1670,12 @@ async function refundIfRefusedAsCovered(
       alertOps(
         `Subscription ${subscriptionId} was still renewing for a plan a ` +
           `lifetime grant covers: invoice ${invoiceId}, paid after the ` +
-          `lifetime, was refunded, and the subscription is now set to cancel ` +
-          `at period end. Check why the lifetime's stop did not reach it.`,
+          `lifetime, ` +
+          (refundIds.length > 0
+            ? `was refunded`
+            : `was not refunded automatically (see the invoice alert)`) +
+          `, and the subscription is now set to cancel at period end. ` +
+          `Check why the lifetime's stop did not reach it.`,
         undefined,
         { userId },
         {
@@ -1642,6 +1720,11 @@ interface SettlementRefund {
   settledInvoice: Stripe.Invoice | null;
   /** A lifetime a subscription bought before it was still renewing against. */
   stillRenewing: LifetimeCover | null;
+  /**
+   * The credit balance its refund does not return, for a person — alerted
+   * only once the refund was made (Devin 4245730010).
+   */
+  creditReview: ManualReviewInvoice[];
 }
 
 /**
@@ -1668,6 +1751,7 @@ async function decideSettlement(
   // was still renewing against.
   let settledInvoice: Stripe.Invoice | null = null;
   let stillRenewing: LifetimeCover | null = null;
+  let creditReview: ManualReviewInvoice[] = [];
   if (byMarker || (await wasRefusedAsCoveredByLifetime(supabase, current))) {
     // Devin 4244837497: a refusal by its record (a subscription the customer
     // had ended) decides every invoice; a refusal by our cancellation (the
@@ -1688,6 +1772,7 @@ async function decideSettlement(
         supabase,
       );
       if (!refundable) return null;
+      creditReview = refundable.creditReview;
     }
   } else {
     // Review of 67c6caf, MAJOR 2 (layer b), and re-review of 2928fcb (d):
@@ -1727,6 +1812,7 @@ async function decideSettlement(
       supabase,
     );
     if (!refundable) return null;
+    creditReview = refundable.creditReview;
     // Re-review of 2928fcb: refunding every period of a subscription still
     // renewing would loop; it is set to end, and ops told why it was not.
     // Re-review of de86a2d: one bought at or after the lifetime is not a
@@ -1755,7 +1841,7 @@ async function decideSettlement(
       }
     }
   }
-  return { settledInvoice, stillRenewing };
+  return { settledInvoice, stillRenewing, creditReview };
 }
 
 /**
@@ -1804,8 +1890,10 @@ async function liveCoverOfSubscription(
 
 /**
  * The per-invoice decision at settlement (Devin 4244837497; review of
- * 67c6caf): true to refund. A person's invoice is alerted once; a skip is
- * logged with its reason.
+ * 67c6caf): what goes with a refund, or null for none. A person's invoice is
+ * alerted once; a skip is logged with its reason. A refund's credit balance
+ * is returned, not alerted: it is named once the refund is made (Devin
+ * 4245730010).
  */
 async function settlementAllowsRefund(
   invoice: Stripe.Invoice,
@@ -1813,7 +1901,7 @@ async function settlementAllowsRefund(
   subscriptionId: string,
   userId: string,
   supabase: ServiceClient,
-): Promise<boolean> {
+): Promise<{ creditReview: ManualReviewInvoice[] } | null> {
   const invoiceId = invoice.id as string;
   const decision = await decideEndedInvoiceRefund(
     invoice,
@@ -1822,28 +1910,16 @@ async function settlementAllowsRefund(
   );
   if (decision.kind === "refund") {
     // Re-review of 2928fcb: money refunded, credit balance named.
+    return { creditReview: manualReviewFor(invoice, decision) };
+  }
+  if (decision.kind === "manual") {
     await alertManualReviewInvoicesOnce(
       manualReviewFor(invoice, decision),
       subscriptionId,
       userId,
       supabase,
     );
-    return true;
-  }
-  if (decision.kind === "manual") {
-    await alertManualReviewInvoicesOnce(
-      [
-        {
-          invoiceId,
-          reason: decision.reason,
-          invoiceStatus: invoice.status ?? null,
-        },
-      ],
-      subscriptionId,
-      userId,
-      supabase,
-    );
-    return false;
+    return null;
   }
   logger.info(
     `Invoice ${invoiceId} of subscription ${subscriptionId} was paid, but ` +
@@ -1860,7 +1936,45 @@ async function settlementAllowsRefund(
       reason: decision.reason,
     },
   );
-  return false;
+  return null;
+}
+
+/**
+ * A Stripe failure that passes on its own (final check of 7f8e8b5): the
+ * connection, a rate limit, or Stripe's own 5xx. Read off the error's `type`
+ * and `statusCode`, as the SDK's errors carry them.
+ */
+function isPassingStripeOutage(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { type, statusCode } = error as {
+    type?: unknown;
+    statusCode?: unknown;
+  };
+  if (
+    type === "StripeConnectionError" ||
+    type === "StripeRateLimitError" ||
+    type === "StripeAPIError"
+  ) {
+    return true;
+  }
+  return (
+    typeof statusCode === "number" && (statusCode === 429 || statusCode >= 500)
+  );
+}
+
+/**
+ * Does the account hold a lifetime grant? Our own table only, no Stripe read;
+ * one that cannot be read may (final check of 7f8e8b5).
+ */
+async function mayHoldLifetimeGrant(
+  userId: string,
+  supabase: ServiceClient,
+): Promise<boolean> {
+  try {
+    return (await readLifetimeGrants(supabase, userId)).length > 0;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -2179,6 +2293,13 @@ async function runLifetimeFollowUp(
  * and its charge in Stripe neither refunded in full nor disputed? Re-review of
  * de86a2d (MINOR 2): a refund or dispute reaches Stripe before its own event
  * revokes the grant here, and a redelivery in between must stop nothing.
+ *
+ * Final check of 7f8e8b5 (NITs): "refunded in full" is `isFullyRefunded`, the
+ * refund and dispute handlers' own rule (a full refund still pending reads
+ * `refunded: false`). And `disputed` stays true after a dispute is won, so a
+ * disputed charge stands only when Stripe lists its disputes and every one
+ * closed in our favour (`isDisputeClosedInOurFavour`, the rule that restores
+ * a grant when its dispute closes).
  */
 async function isLifetimeGrantLive(
   userId: string,
@@ -2196,7 +2317,9 @@ async function isLifetimeGrantLive(
       typeof lifetime.latest_charge === "string"
         ? await stripe.charges.retrieve(lifetime.latest_charge)
         : lifetime.latest_charge;
-    return !(charge?.refunded || charge?.disputed);
+    if (!charge) return true;
+    if (isFullyRefunded(charge)) return false;
+    return !charge.disputed || (await allDisputesClosedInOurFavour(charge.id));
   } catch (error) {
     alertOps(
       `Lifetime purchase ${paymentIntentId}: whether its grant is still live ` +
@@ -3187,6 +3310,28 @@ async function handleMoneyReturned(
   console.log(
     `${reason} on ${paymentIntentId}: entitlement revoked=${entitlement.revoked}, ` +
       `credits revoked=${credits.revoked}`,
+  );
+}
+
+/** Disputes read per charge: a charge is disputed once, rarely twice. */
+const DISPUTE_LOOKUP_LIMIT = 10;
+
+/**
+ * Did every dispute filed against this charge close with the money staying
+ * with us (final check of 7f8e8b5)? False when Stripe lists none, or more than
+ * one page: a disputed charge is not cleared by what cannot be seen.
+ */
+async function allDisputesClosedInOurFavour(
+  chargeId: string,
+): Promise<boolean> {
+  const disputes = await stripe.disputes.list({
+    charge: chargeId,
+    limit: DISPUTE_LOOKUP_LIMIT,
+  });
+  return (
+    !disputes.has_more &&
+    disputes.data.length > 0 &&
+    disputes.data.every((dispute) => isDisputeClosedInOurFavour(dispute.status))
   );
 }
 

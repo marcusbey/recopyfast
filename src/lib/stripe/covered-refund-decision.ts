@@ -66,7 +66,14 @@ export type ManualReviewReason =
    * customer's credit balance, which the refund does not return (re-review of
    * 2928fcb).
    */
-  | "partly_paid_by_credit";
+  | "partly_paid_by_credit"
+  /**
+   * Paid by more than one payment (final check of 7f8e8b5): which of them a
+   * refund returns, and how much, is not told automatically.
+   */
+  | "several_payments"
+  /** Paid by a payment that also paid another invoice (final check of 7f8e8b5). */
+  | "shared_payment";
 
 /** Why an invoice is left alone. */
 export type SkipReason =

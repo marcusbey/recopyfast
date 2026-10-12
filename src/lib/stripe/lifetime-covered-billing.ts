@@ -486,23 +486,25 @@ async function settleLatestInvoice(
         { grants: await readGrants(), judgedAt: paidAt ?? 0 },
         productIndex ?? (await loadPlanProductIndex()),
       );
-      const manual = manualReviewFor(latest, decision);
       const refund =
         decision.kind === "refund"
-          ? await refundCoveredInvoice(
-              invoiceId,
-              subscriptionId,
-              latest.post_payment_credit_notes_amount ?? 0,
+          ? withCreditReview(
+              await refundCoveredInvoice(
+                invoiceId,
+                subscriptionId,
+                latest.post_payment_credit_notes_amount ?? 0,
+              ),
+              manualReviewFor(latest, decision),
             )
-          : NO_REFUNDS;
+          : {
+              ...NO_REFUNDS,
+              manualReviewInvoices: manualReviewFor(latest, decision),
+            };
       return {
         handling: "decided",
         invoiceId,
         decision: decision.kind,
-        refund: {
-          ...refund,
-          manualReviewInvoices: [...refund.manualReviewInvoices, ...manual],
-        },
+        refund,
       };
     }
     case "void":
@@ -520,15 +522,37 @@ export function manualReviewFor(
   invoice: Stripe.Invoice,
   decision: InvoiceRefundDecision,
 ): ManualReviewInvoice[] {
-  const invoiceStatus = invoice.status ?? null;
-  const invoiceId = invoice.id as string;
+  const reviewed = {
+    invoiceId: invoice.id as string,
+    invoiceStatus: invoice.status ?? null,
+    amountPaid: invoice.amount_paid ?? 0,
+    amountDue: invoice.amount_due ?? null,
+  };
   if (decision.kind === "manual") {
-    return [{ invoiceId, reason: decision.reason, invoiceStatus }];
+    return [{ ...reviewed, reason: decision.reason }];
   }
   if (decision.kind === "refund" && decision.creditNotRefunded) {
-    return [{ invoiceId, reason: "partly_paid_by_credit", invoiceStatus }];
+    return [{ ...reviewed, reason: "partly_paid_by_credit" }];
   }
   return [];
+}
+
+/**
+ * A refund's result, with the credit balance its decision left to a person
+ * (`partly_paid_by_credit`) named only when money was refunded or found
+ * refunded (Devin 4245730010): the alert says the invoice "was refunded for
+ * its money". A refund that failed threw before this; a disputed or
+ * still-processing payment refunded nothing.
+ */
+export function withCreditReview(
+  refund: CoveredInvoiceRefund,
+  creditReview: readonly ManualReviewInvoice[],
+): CoveredInvoiceRefund {
+  if (refund.refundIds.length === 0) return refund;
+  return {
+    ...refund,
+    manualReviewInvoices: [...refund.manualReviewInvoices, ...creditReview],
+  };
 }
 
 /** Is a payment on this invoice still processing (an `open` invoice payment)? */
@@ -593,7 +617,9 @@ export interface CoveredInvoiceRefund {
   /**
    * Invoices of an ended subscription refunded by nobody automatically, because
    * they mix covered and uncovered charges or one cannot be told (Devin round on
-   * 8744bed). Ops are warned once per invoice to refund the covered lines.
+   * 8744bed), or were paid by more than one payment or a shared one (final
+   * check of 7f8e8b5). Ops are warned once per invoice to refund the covered
+   * lines. Also the credit a refund did not return, once it was refunded.
    */
   manualReviewInvoices: ManualReviewInvoice[];
 }
@@ -608,6 +634,14 @@ export interface ManualReviewInvoice {
    * 67c6caf): one alert, when it is actionable.
    */
   invoiceStatus: string | null;
+  /**
+   * What it collected so far, in the smallest currency unit (Devin
+   * 4245730166): an `open` invoice a partial payment paid has money to
+   * return, and is actionable now.
+   */
+  amountPaid: number;
+  /** What it bills in all, when the invoice was read; null when it was not. */
+  amountDue: number | null;
 }
 
 /** What a refusal took back, for the ops report. */
@@ -722,10 +756,13 @@ export async function refuseSubscriptionCoveredByLifetime(
       ...NO_REFUNDS,
       manualReviewInvoices: manual,
     };
-    for (const { invoiceId, alreadyCredited } of refund) {
+    for (const { invoiceId, alreadyCredited, creditReview } of refund) {
       refunds = mergeRefunds(
         refunds,
-        await refundCoveredInvoice(invoiceId, stopped.id, alreadyCredited),
+        withCreditReview(
+          await refundCoveredInvoice(invoiceId, stopped.id, alreadyCredited),
+          creditReview,
+        ),
       );
     }
     return { subscription: stopped, endedBeforeRefusal, ...refunds };
@@ -754,6 +791,8 @@ export interface GrantsJudgedAt {
 interface InvoiceToRefund {
   invoiceId: string;
   alreadyCredited: number;
+  /** The credit balance its refund does not return, named once refunded. */
+  creditReview: ManualReviewInvoice[];
 }
 
 /**
@@ -772,7 +811,9 @@ async function invoicesToRefund(
   const latest = idOf(subscription.latest_invoice);
   if (!endedBeforeRefusal) {
     return {
-      refund: latest ? [{ invoiceId: latest, alreadyCredited: 0 }] : [],
+      refund: latest
+        ? [{ invoiceId: latest, alreadyCredited: 0, creditReview: [] }]
+        : [],
       manual: [],
     };
   }
@@ -805,9 +846,11 @@ async function invoicesToRefund(
       refund.push({
         invoiceId: invoice.id,
         alreadyCredited: invoice.post_payment_credit_notes_amount ?? 0,
+        creditReview: manualReviewFor(invoice, decision),
       });
+    } else {
+      manual.push(...manualReviewFor(invoice, decision));
     }
-    manual.push(...manualReviewFor(invoice, decision));
     if (decision.kind === "skip") {
       logger.info(
         `Invoice ${invoice.id} of subscription ${subscription.id}, refused as ` +
@@ -1086,8 +1129,10 @@ async function cancelCovered(
 }
 
 /**
- * Refund, in full, every payment an invoice of a refused subscription
- * collected, once; report the ones still in flight.
+ * Refund, in full, the payment an invoice of a refused subscription
+ * collected, once; report one still in flight. An invoice more than one
+ * payment paid, or paid by a payment shared with another invoice, is left to
+ * a person instead (`paymentReviewOf`, final check of 7f8e8b5).
  *
  * Run by the refusal for the subscription's latest invoice, and again by
  * `invoice.payment_succeeded` when a payment that was in flight at the refusal
@@ -1106,65 +1151,49 @@ export async function refundCoveredInvoice(
    */
   alreadyCredited = 0,
 ): Promise<CoveredInvoiceRefund> {
+  const payments = await listInvoicePayments(invoiceId);
+  const review = await paymentReviewOf(invoiceId, payments);
+  if (review) return { ...NO_REFUNDS, manualReviewInvoices: [review] };
+
   let creditedLeft = alreadyCredited;
   const refundIds: string[] = [];
   const pendingPaymentIds: string[] = [];
   const inFlightPaymentIds: string[] = [];
   const refundedOutsideChargeIds: string[] = [];
   const disputedChargeIds: string[] = [];
-  let startingAfter: string | undefined;
-  const seenCursors = new Set<string>();
 
-  for (;;) {
-    const payments = await stripe.invoicePayments.list({
-      invoice: invoiceId,
-      limit: INVOICE_PAYMENT_LOOKUP_LIMIT,
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    });
-    const nextCursor = nextStripePageCursor(
-      payments.data,
-      payments.has_more,
-      startingAfter,
-      seenCursors,
-      `invoice-payment lookup for invoice ${invoiceId}`,
-    );
-
-    for (const payment of payments.data) {
-      if (payment.status === "open") {
-        pendingPaymentIds.push(payment.id);
-        continue;
-      }
-      if (payment.status !== "paid") continue;
-
-      // This invoice's share of the payment, less what credit notes already
-      // returned for the invoice (consumed payment by payment).
-      let share: number | null = payment.amount_paid ?? null;
-      if (share !== null) {
-        const credited = Math.min(creditedLeft, share);
-        creditedLeft -= credited;
-        share -= credited;
-      }
-      const outcome = await refundOnce(payment, subscriptionId, share);
-      switch (outcome.kind) {
-        case "refunded":
-          refundIds.push(outcome.refundId);
-          break;
-        case "in_flight":
-          inFlightPaymentIds.push(payment.id);
-          break;
-        case "refunded_outside":
-          refundedOutsideChargeIds.push(outcome.chargeId);
-          break;
-        case "disputed":
-          disputedChargeIds.push(outcome.chargeId);
-          break;
-        case "nothing_collected":
-          break;
-      }
+  for (const payment of payments) {
+    if (payment.status === "open") {
+      pendingPaymentIds.push(payment.id);
+      continue;
     }
+    if (payment.status !== "paid") continue;
 
-    if (!nextCursor) break;
-    startingAfter = nextCursor;
+    // This invoice's share of the payment, less what credit notes already
+    // returned for the invoice.
+    let share: number | null = payment.amount_paid ?? null;
+    if (share !== null) {
+      const credited = Math.min(creditedLeft, share);
+      creditedLeft -= credited;
+      share -= credited;
+    }
+    const outcome = await refundOnce(payment, subscriptionId, share);
+    switch (outcome.kind) {
+      case "refunded":
+        refundIds.push(outcome.refundId);
+        break;
+      case "in_flight":
+        inFlightPaymentIds.push(payment.id);
+        break;
+      case "refunded_outside":
+        refundedOutsideChargeIds.push(outcome.chargeId);
+        break;
+      case "disputed":
+        disputedChargeIds.push(outcome.chargeId);
+        break;
+      case "nothing_collected":
+        break;
+    }
   }
 
   return {
@@ -1173,9 +1202,94 @@ export async function refundCoveredInvoice(
     inFlightPaymentIds,
     refundedOutsideChargeIds,
     disputedChargeIds,
-    // Decided per invoice by the caller, never here.
+    // Coverage is decided per invoice by the caller, never here.
     manualReviewInvoices: [],
   };
+}
+
+/** Every payment of an invoice, every page, before anything is refunded. */
+async function listInvoicePayments(
+  invoiceId: string,
+): Promise<Stripe.InvoicePayment[]> {
+  const payments: Stripe.InvoicePayment[] = [];
+  let startingAfter: string | undefined;
+  const seenCursors = new Set<string>();
+  for (;;) {
+    const page = await stripe.invoicePayments.list({
+      invoice: invoiceId,
+      limit: INVOICE_PAYMENT_LOOKUP_LIMIT,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    payments.push(...page.data);
+    const nextCursor = nextStripePageCursor(
+      page.data,
+      page.has_more,
+      startingAfter,
+      seenCursors,
+      `invoice-payment lookup for invoice ${invoiceId}`,
+    );
+    if (!nextCursor) return payments;
+    startingAfter = nextCursor;
+  }
+}
+
+/**
+ * The one-payment-per-invoice assumption, verified (final check of 7f8e8b5):
+ * a refund returns what ONE payment collected for THIS invoice. An invoice
+ * more than one payment paid (or is paying: one still processing counts, so
+ * its settlement cannot refund half of it), or a payment that also paid
+ * another invoice, goes to a person instead. A cancelled attempt collected
+ * nothing and is not counted. Null when the invoice can be refunded.
+ */
+async function paymentReviewOf(
+  invoiceId: string,
+  payments: readonly Stripe.InvoicePayment[],
+): Promise<ManualReviewInvoice | null> {
+  const counted = payments.filter((payment) => payment.status !== "canceled");
+  const review = (reason: ManualReviewReason): ManualReviewInvoice => ({
+    invoiceId,
+    reason,
+    // Not read here: what the payments say is what was collected.
+    invoiceStatus: null,
+    amountPaid: counted.reduce(
+      (sum, payment) =>
+        sum + (payment.status === "paid" ? (payment.amount_paid ?? 0) : 0),
+      0,
+    ),
+    amountDue: null,
+  });
+  if (counted.length > 1) return review("several_payments");
+  const [only] = counted;
+  if (only?.status === "paid" && (await paidAnotherInvoice(only, invoiceId))) {
+    return review("shared_payment");
+  }
+  return null;
+}
+
+/**
+ * Did this payment also pay another invoice? Stripe lists invoice payments by
+ * payment intent (API 2025-07-30.basil, `invoicePayments.list` `payment`
+ * filter); a `charge` payment, which cannot be listed so, pays the one invoice
+ * it was made for. More than one page of invoices is shared by definition.
+ */
+async function paidAnotherInvoice(
+  payment: Stripe.InvoicePayment,
+  invoiceId: string,
+): Promise<boolean> {
+  if (payment.payment.type !== "payment_intent") return false;
+  const paymentIntentId = idOf(payment.payment.payment_intent);
+  if (!paymentIntentId) return false;
+  const page = await stripe.invoicePayments.list({
+    payment: { type: "payment_intent", payment_intent: paymentIntentId },
+    limit: INVOICE_PAYMENT_LOOKUP_LIMIT,
+  });
+  return (
+    page.has_more ||
+    page.data.some(
+      (other) =>
+        other.status !== "canceled" && idOf(other.invoice) !== invoiceId,
+    )
+  );
 }
 
 /** What became of one paid payment. */

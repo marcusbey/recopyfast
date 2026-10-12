@@ -978,6 +978,94 @@ cases passed before; they are guards. After: 212/212.
 
 Total: 11 red. All 7 mutations were caught.
 
+## Devin + final check of `7f8e8b5`
+
+CI was green on `7f8e8b5` and the independent check approved it at MINOR. Two
+Devin comments, one flag and three items from that check were fixed before
+merge. Stripe behaviour was checked against the `2025-07-30.basil` docs and
+the pinned SDK types (`stripe` 18.4.0):
+- `InvoicePayment.amount_paid` "can be less than the `amount_requested` if
+  the PaymentIntent's `amount_received` is not sufficient to pay all of the
+  invoices that it is attached to", so one payment intent can pay several
+  invoices.
+- `invoicePayments.list` filters by `payment: { type: "payment_intent",
+  payment_intent }`. A payment's type is `charge` or `payment_intent`.
+- `Invoice.amount_remaining` is `amount_due − amount_paid`. An `open` invoice
+  can therefore have `amount_paid > 0`.
+- `Charge.disputed` is "whether the charge has been disputed", and stays true
+  after the dispute closes. `disputes.list` filters by `charge`. A dispute's
+  status includes `won`, `lost` and `warning_closed`.
+- The SDK's errors carry `type` (`StripeConnectionError`,
+  `StripeRateLimitError`, `StripeAPIError`, …) and `statusCode`.
+
+| Finding | Fix | Tests |
+|---|---|---|
+| **Devin 4245730010** (yellow): at settlement, the `partly_paid_by_credit` alert was claimed before the refund ran. A refund that failed left the alert published (it says the money was refunded), and the write-once claim kept the successful retry silent. | `settlementAllowsRefund` stays read-only. On a refund decision it returns the credit review instead of alerting. `refundIfRefusedAsCovered` adds it to the refund's result through `withCreditReview` only after `refundCoveredInvoice` returned, and only when a refund was made or found (`refundIds.length > 0`). A failed refund throws first. A disputed or still-processing payment refunds nothing and sends no credit alert. The same rule now applies to the two other paths that can name credit: the refusal of an ended subscription (`invoicesToRefund` hands the credit to its refund) and the lifetime's stop of a predating subscription (`settleLatestInvoice`). Same claim (`claimManualInvoiceWarning`), so it is still sent once. The credit alert no longer ends with "nothing on it was refunded automatically". | "a refund Stripe rejects sends no restore-credit alert; the retry that refunds sends it, once"; "a disputed payment, refunded by nobody, sends no restore-credit alert"; "the same rule when the lifetime's event stops the subscription after the renewal was paid: refunded / disputed" (2); "the same rule when a subscription the customer ended is refused: refunded / disputed" (2). |
+| **Devin 4245730166** (yellow): `isActionableReview` gated on `status === "paid"`. A mixed invoice with a partial payment collected but still `open` was never alerted if the rest was never paid. | `ManualReviewInvoice` carries `amountPaid` and `amountDue`. An invoice is actionable when it is paid **or** has collected money (`amountPaid > 0`). The alert names both, e.g. "1900 of 6800 collected, 4900 still due". An open invoice that collected nothing is still deferred to its settlement, and its claim is not spent. A partial payment is never refunded unless the per-invoice decision says refund; the refund is then capped at what the payment collected for this invoice. | Devin's scenario: "a mixed Pro/Agency invoice with a 1,900 partial payment, still open with 4,900 due, is alerted once, naming what was collected, and nothing is refunded"; "an open invoice that has collected nothing is not alerted, and is alerted once it is paid". |
+| **Flag: one payment per invoice** (`lifetime-covered-billing.ts`, `refundCoveredInvoice`): the per-payment cap assumed one payment per invoice. | `refundCoveredInvoice` now reads every page of the invoice's payments before refunding anything. A payment still processing also counts, so its later settlement cannot refund half an invoice; a cancelled attempt does not count. The invoice goes to a person instead of being refunded when it has more than one counted payment (`several_payments`), or when its one paid payment intent also paid another invoice (`shared_payment`). Sharing is read with `invoicePayments.list({ payment: { type: "payment_intent", payment_intent } })`. A non-cancelled invoice payment for another invoice, or more than one page, counts as shared. A `charge` payment cannot be listed that way; it pays the one invoice it was made for. The result is one alert per invoice, through the existing claim. At settlement, a still-renewing subscription's alert says "was not refunded automatically" rather than "was refunded". | "an invoice with two paid payments / a paid payment and one still processing is sent to a person, once, and nothing is refunded" (2); "a declined attempt beside the paying payment is not a second payment: refunded"; "a payment that also paid another invoice is sent to a person, once, and nothing is refunded"; "a payment Stripe lists against only this invoice / this invoice, and another whose payment was canceled is refunded" (2); "a payment with more invoice payments than one page holds is shared"; "the refusal of a subscription whose invoice two payments paid refunds nothing and says it needs a person". |
+| **MINOR** (`route.ts` decide-phase catch): every decision failure was a warning. That included ones a retry never clears, and accounts where money may be owed. | The "could not tell whether this payment is covered … Stripe will retry" warning stays only for a passing Stripe outage on an account without a lifetime. A passing outage is `isPassingStripeOutage`: a connection error, rate limit, `StripeAPIError`, 429 or 5xx. Grant ownership comes from `mayHoldLifetimeGrant`, which reads our grants table only; an unreadable table counts as "may hold". Everything else raises `alertOps` (error level, cause attached) and still answers 5xx. That covers a product configured for two plans (`planOfProducts`), an object Stripe cannot find, an unreadable table, and any failure for an account holding a grant. | "a connection error / a rate limit / Stripe's own 5xx for an account holding no grant is a warning, and 5xx" (3); "a failure that is not an outage (Stripe cannot find the object) is an alert, even without a grant"; "a passing outage for an account holding a grant is an alert"; "a passing outage when the account's grants cannot be read either is an alert"; "a misconfigured product (one product for two plans) is an alert, and 5xx". |
+| NIT (`isLifetimeGrantLive`): "refunded in full" was `charge.refunded` only. | `isFullyRefunded(charge)`, the refund and dispute handlers' rule. It also counts `amount_refunded >= amount`, for a full refund still pending. | "a charge whose full refund is still pending … stops nothing"; guard: "a charge refunded in part still stands: the subscription is stopped". |
+| NIT (`isLifetimeGrantLive`): a won dispute still read as disputed. | A disputed charge stands only if Stripe lists its disputes and every one closed in our favour (`isDisputeClosedInOurFavour`, the rule that restores a grant when its dispute closes). It does not stand when none or more than a page are listed. A charge never disputed costs no read. | "a dispute closed as won / warning_closed leaves the lifetime standing" (2); "a disputed charge whose dispute is still open / lost / won once, then disputed again / not listed by Stripe stops nothing" (4); "… more disputes than one page holds stops nothing"; "a charge never disputed asks Stripe for no dispute". |
+
+**Red first:** the lifetime-covered suite, 16 failed / 199 passed (215). That
+counts the two re-worded de86a2d MINOR 1 cases. "a charge refunded in part",
+the four "stops nothing" dispute cases and "never disputed" passed before;
+they are guards. Six tests came later:
+- "a passing outage when the account's grants cannot be read either" would
+  have been red on `7f8e8b5`.
+- "more disputes than one page holds" is a guard.
+- Item 1 was carried to the refusal and predating-stop paths with four more
+  cases. Red first: the two "disputed" cases failed; the two "refunded" cases
+  are guards.
+
+After: 222/222.
+
+**Existing assertions changed, declared:**
+- (MINOR) de86a2d's "MINOR 1: the account's grants / the lifetime's payment
+  cannot be read at a renewal" and finding 5's "…when the refusal record
+  cannot be read at settlement" now expect the "could not tell" sentence as an
+  alert, not a warning. Both concern lifetime owners or non-Stripe failures.
+- (flag) M13/M14 is split in two:
+  - The in-flight payment alone is reported and not refunded, and the
+    cancelled one is ignored.
+  - A paid payment beside one in flight goes to a person, and nothing is
+    refunded.
+- (flag) mi-4 shows the retry's single report on one paid payment. The
+  in-flight report is pinned by M13/M14.
+- (harness) The fake's `invoicePayments.list` routes a `payment`-filtered
+  call to its own mock, so existing by-invoice call counts are unchanged.
+  `disputes.list` is faked from a per-charge table. `manualReviewAlerts()`
+  selects by the alert's action rather than its wording.
+
+**Mutations,** each restored afterwards (files byte-identical; baseline
+222/222):
+
+| Mutation | Red |
+|---|---:|
+| M1a credit named with no refund made (`withCreditReview`, all paths) | 3 |
+| M1b credit alert sent before the refund (settlement) | 2 |
+| M1c settlement adds the credit without `withCreditReview` | 1 |
+| M1d the refusal lists the credit before refunding | 1 |
+| M1e the predating stop adds the credit unconditionally | 1 |
+| M2a actionable only when paid | 7 |
+| M2b actionable with nothing collected | 2 |
+| M3a two payments on an invoice allowed | 4 |
+| M3b cancelled attempts counted | 3 |
+| M3c sharing never checked | 2 |
+| M3d sharing's `has_more` ignored | 1 |
+| M3e another invoice's cancelled payment counted as sharing | 1 |
+| M4a every failure treated as a passing outage | 1 |
+| M4b grant holders not considered | 2 |
+| M4c a connection error not an outage | 1 |
+| M4d unreadable grants assumed none | 1 |
+| M5 `refunded` flag only | 1 |
+| M6a every disputed charge disputed | 2 |
+| M6b no dispute listed clears the charge | 2 |
+| M6c disputes' `has_more` ignored | 1 |
+| M6d `some` instead of `every` won | 1 |
+
+Total: 40 red. All 21 mutations were caught.
+
 ### Current implementation verification
 
 Node `24.14.0`, npm `11.9.0`; dependencies installed with `npm ci`. No provider
@@ -1149,6 +1237,27 @@ Same environment and rules: no Stripe, Supabase or production calls, no
 The re-review of `de86a2d` gave `Max severity: minor`, ship allowed. Its
 minors and NITs are fixed above, and nothing above MINOR remains. s82b remains
 the recorded follow-up.
+
+### Devin + final check of `7f8e8b5` verification
+
+Same environment and rules: no Stripe, Supabase or production calls, no
+`next dev`. Test commands used `NEXT_PUBLIC_APP_URL=http://localhost:3000`.
+
+- `npm run lint`: passed, 0 errors / 31 existing warnings.
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath` over the lifetime-covered,
+  covered-refund-decision, one-time-purchases, stripe-webhook-invoice-customer,
+  plans, lifetime-grant-plan and ops-alert suites: 7 suites, 342/342 passed.
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/|src/__tests__/lib/monitoring/'`:
+  55 suites / 1,038 tests passed, 0 failures.
+- `npm test`: 438 suites passed, 2 skipped; 6,236 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added.
+
+The CI run and independent check on `7f8e8b5` approved at MINOR. Both Devin
+comments, the flag, the MINOR and both NITs are fixed above. Nothing above
+MINOR remains.
 
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.

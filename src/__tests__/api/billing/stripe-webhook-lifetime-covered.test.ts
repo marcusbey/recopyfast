@@ -31,6 +31,9 @@ const mockSessionsList = jest.fn();
 const mockSessionsExpire = jest.fn();
 const mockSessionsRetrieve = jest.fn();
 const mockInvoicePaymentsList = jest.fn();
+/** Final check of 7f8e8b5: invoice payments listed by their payment intent. */
+const mockInvoicePaymentsOfPayment = jest.fn();
+const mockDisputesList = jest.fn();
 const mockRefundsList = jest.fn();
 const mockRefundsCreate = jest.fn();
 const mockPaymentIntentsRetrieve = jest.fn();
@@ -60,7 +63,15 @@ jest.mock("stripe", () =>
         retrieve: mockSessionsRetrieve,
       },
     },
-    invoicePayments: { list: mockInvoicePaymentsList },
+    // An invoice's payments, or (final check of 7f8e8b5) the invoice
+    // payments of one payment intent: two questions, two fakes.
+    invoicePayments: {
+      list: (params?: { payment?: unknown }) =>
+        params?.payment
+          ? mockInvoicePaymentsOfPayment(params)
+          : mockInvoicePaymentsList(params),
+    },
+    disputes: { list: mockDisputesList },
     refunds: { list: mockRefundsList, create: mockRefundsCreate },
     paymentIntents: { retrieve: mockPaymentIntentsRetrieve },
     charges: { retrieve: mockChargesRetrieve },
@@ -429,6 +440,9 @@ let stripeRefunds: Row[] = [];
  */
 let stripeCharges: Record<string, Row> = {};
 
+/** Disputes Stripe holds, by charge id (final check of 7f8e8b5). */
+let stripeDisputes: Record<string, Row[]> = {};
+
 function chargeOf(paymentIntentId: string): Row {
   return {
     id: `ch_${paymentIntentId}`,
@@ -544,6 +558,12 @@ function armStripe() {
       return { ...refund };
     },
   );
+  // Final check of 7f8e8b5: by default a payment intent paid no other invoice.
+  mockInvoicePaymentsOfPayment.mockResolvedValue({ data: [], has_more: false });
+  mockDisputesList.mockImplementation(async (params: Row) => ({
+    data: stripeDisputes[String(params.charge)] ?? [],
+    has_more: false,
+  }));
   mockPaymentIntentsRetrieve.mockImplementation(retrievePaymentIntent);
   mockChargesRetrieve.mockImplementation(async (id: string) => ({
     ...chargeOf(id.replace(/^ch_/, "")),
@@ -763,6 +783,7 @@ beforeEach(() => {
   stripeSubscriptions = {};
   stripeRefunds = [];
   stripeCharges = {};
+  stripeDisputes = {};
   refundsByIdempotencyKey = {};
   db = {
     billing_customers: [
@@ -1387,11 +1408,21 @@ function refusalReports() {
 
 /**
  * Alerts that an invoice needs a person (Devin round on 8744bed; review of
- * 67c6caf, MAJOR 1: an alert, `alertOps`, since money may be owed).
+ * 67c6caf, MAJOR 1: an alert, `alertOps`, since money may be owed). By the
+ * alert's action: the restore-credit alert is worded apart (Devin
+ * 4245730010).
  */
 function manualReviewAlerts() {
+  return mockLoggerError.mock.calls.filter(
+    (call) =>
+      (call[3] as Row | undefined)?.action === "covered_invoice_manual_review",
+  );
+}
+
+/** Coverage that could not be told, at error level (final check of 7f8e8b5). */
+function coverageUnknownAlerts() {
   return mockLoggerError.mock.calls.filter(([message]) =>
-    String(message).includes("refund the covered lines by hand"),
+    String(message).includes("could not tell whether this payment is covered"),
   );
 }
 
@@ -1756,10 +1787,12 @@ describe("M-2: the refusal's money guards, recorded after the grant", () => {
     ).toHaveLength(1);
   });
 
-  it("M13/M14: refunds only the paid payment, reports the one in flight, ignores the cancelled one", async () => {
+  // Final check of 7f8e8b5: one invoice, one payment. A paid payment beside
+  // one in flight is an invoice paid twice, and goes to a person (below); the
+  // payment in flight alone is reported, and the cancelled one ignored.
+  it("M13/M14: reports the payment in flight, refunds nothing for it, ignores the cancelled one", async () => {
     mockInvoicePaymentsList.mockResolvedValue({
       data: [
-        invoicePayment("inpay_paid", "paid", SUBSCRIPTION_PAYMENT_INTENT),
         invoicePayment("inpay_open", "open", "pi_debit_pending"),
         invoicePayment("inpay_canceled", "canceled", "pi_declined"),
       ],
@@ -1768,10 +1801,7 @@ describe("M-2: the refusal's money guards, recorded after the grant", () => {
 
     await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
 
-    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
-    expect(mockRefundsCreate.mock.calls[0][0]).toMatchObject({
-      payment_intent: SUBSCRIPTION_PAYMENT_INTENT,
-    });
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
     expect(mockRefundsList).not.toHaveBeenCalledWith(
       expect.objectContaining({ payment_intent: "pi_debit_pending" }),
     );
@@ -1784,8 +1814,31 @@ describe("M-2: the refusal's money guards, recorded after the grant", () => {
     );
     expect(report[3]).toEqual(
       expect.objectContaining({
-        refundIds: ["re_1"],
+        refundIds: [],
         pendingPaymentIds: ["inpay_open"],
+      }),
+    );
+  });
+
+  it("M13/M14 (final check of 7f8e8b5): a paid payment beside one in flight goes to a person, nothing refunded, the cancelled one ignored", async () => {
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [
+        invoicePayment("inpay_paid", "paid", SUBSCRIPTION_PAYMENT_INTENT, 1900),
+        invoicePayment("inpay_open", "open", "pi_debit_pending"),
+        invoicePayment("inpay_canceled", "canceled", "pi_declined"),
+      ],
+      has_more: false,
+    });
+
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const [alert] = manualReviewAlerts();
+    expect(alert[0]).toContain("1900 collected");
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        invoiceId: INVOICE_ID,
+        reason: "several_payments",
       }),
     );
   });
@@ -2641,15 +2694,20 @@ describe("finding 5: a refused subscription already cancelled by the customer, w
     expect(mockRefundsCreate).not.toHaveBeenCalled();
     // Re-review of de86a2d (MINOR 1): a read failure is not money owed.
     expect(alertsSaying("could not be refunded")).toEqual([]);
-    const [warning] = coverageUnknownWarnings();
-    expect(warning[0]).toContain(INVOICE_ID);
-    expect(warning[0]).toContain("Stripe will retry");
-    expect(warning[2]).toEqual(
+    // Final check of 7f8e8b5 (MINOR): a table that cannot be read, for a
+    // lifetime owner, is an alert, not a passing-outage warning.
+    expect(coverageUnknownWarnings()).toEqual([]);
+    const [alert] = coverageUnknownAlerts();
+    expect(alert[0]).toContain(INVOICE_ID);
+    expect(alert[0]).toContain("Stripe will retry");
+    expect(alert[3]).toEqual(
       expect.objectContaining({
         action: "refund_covered_invoice",
         subscriptionId: SUBSCRIPTION_ID,
         invoiceId: INVOICE_ID,
-        cause: expect.stringContaining("connection reset"),
+        cause: expect.objectContaining({
+          message: expect.stringContaining("connection reset"),
+        }),
       }),
     );
 
@@ -4813,7 +4871,7 @@ describe("re-review of de86a2d", () => {
       },
     ],
   ] as const)(
-    "MINOR 1: %s cannot be read at a renewal: a warning that it could not tell, 5xx, and no money-owed alert",
+    "MINOR 1: %s cannot be read at a renewal of a lifetime owner: 'could not tell' (an alert since the final check of 7f8e8b5), 5xx, and no money-owed alert",
     async (_case, fail) => {
       fail();
 
@@ -4824,9 +4882,10 @@ describe("re-review of de86a2d", () => {
       expect(response.status).toBe(500);
       expect(mockRefundsCreate).not.toHaveBeenCalled();
       expect(alertsSaying("could not be refunded")).toEqual([]);
-      const [warning] = coverageUnknownWarnings();
-      expect(warning[0]).toContain("in_late");
-      expect(warning[0]).toContain("Stripe will retry");
+      expect(coverageUnknownWarnings()).toEqual([]);
+      const [alert] = coverageUnknownAlerts();
+      expect(alert[0]).toContain("in_late");
+      expect(alert[0]).toContain("Stripe will retry");
     },
   );
 
@@ -4994,6 +5053,643 @@ describe("re-review of de86a2d", () => {
     ).toBe(200);
     expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
     expect(refundedPayments()).toEqual(["pi_late"]);
+  });
+});
+
+/*
+ * Devin + final check of 7f8e8b5: the restore-credit alert follows its
+ * refund, a partly paid invoice is reported, one payment per invoice is
+ * verified rather than assumed, a coverage failure that is not a passing
+ * outage is an alert, and a lifetime's charge is judged by its refunded amount
+ * and its dispute's outcome.
+ */
+describe("Devin + final check of 7f8e8b5", () => {
+  function refundedPayments(): string[] {
+    return stripeRefunds.map((refund) => String(refund.payment_intent)).sort();
+  }
+
+  function liveRow(plan = "pro"): Row {
+    return {
+      user_id: USER_ID,
+      customer_id: "bc_1",
+      stripe_subscription_id: SUBSCRIPTION_ID,
+      plan,
+      status: "active",
+    };
+  }
+
+  /** The renewal under test, paid after the lifetime. */
+  function lateInvoice(overrides: Row = {}): Row {
+    return {
+      ...invoiceFor("in_late", "price_pro"),
+      status_transitions: { paid_at: LIFETIME_PAID_AT + 3600 },
+      ...overrides,
+    };
+  }
+
+  /** Devin 4245730166: Pro 1,900 and Agency 4,900 on one invoice. */
+  function mixedOpenInvoice(amountPaid: number): Row {
+    return lateInvoice({
+      status: "open",
+      total: 6800,
+      amount_due: 6800,
+      amount_paid: amountPaid,
+      amount_remaining: 6800 - amountPaid,
+      status_transitions: { paid_at: null },
+      lines: {
+        object: "list",
+        data: [
+          invoiceLine("in_late", "price_pro", 0, 1900),
+          invoiceLine("in_late", "price_agency", 1, 4900),
+        ],
+        has_more: false,
+      },
+    });
+  }
+
+  function creditAlerts() {
+    return manualReviewAlerts().filter(
+      (call) => (call[3] as Row).reason === "partly_paid_by_credit",
+    );
+  }
+
+  const settle = (eventId: string) =>
+    deliver(invoicePaid(eventId, "basil", "in_late"));
+
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+    db.billing_subscriptions = [liveRow()];
+    // Bought before the lifetime and never stopped: an ordinary renewal.
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT - 86400 * 30, latest_invoice: "in_late" },
+    );
+    mockInvoicesRetrieve.mockImplementation(async () => lateInvoice());
+    mockInvoicePaymentsList.mockImplementation(async (params: Row) => {
+      const suffix = String(params.invoice).replace(/^in_/, "");
+      return {
+        data: [
+          {
+            ...invoicePayment(`inpay_${suffix}`, "paid", `pi_${suffix}`, 1900),
+            invoice: params.invoice,
+          },
+        ],
+        has_more: false,
+      };
+    });
+  });
+
+  describe("Devin 4245730010: the restore-credit alert only after the refund", () => {
+    beforeEach(() => {
+      // 1,900 billed: 900 paid by the customer's credit, 1,000 by card.
+      mockInvoicesRetrieve.mockImplementation(async () =>
+        lateInvoice({ total: 1900, amount_paid: 1000 }),
+      );
+      mockInvoicePaymentsList.mockResolvedValue({
+        data: [invoicePayment("inpay_late", "paid", "pi_late", 1000)],
+        has_more: false,
+      });
+      stripeCharges.pi_late = { amount: 1000, amount_captured: 1000 };
+    });
+
+    it("a refund Stripe rejects sends no restore-credit alert; the retry that refunds sends it, once", async () => {
+      mockRefundsCreate.mockRejectedValueOnce(new Error("Stripe is down"));
+
+      expect((await settle("evt_late_paid")).status).toBe(500);
+      expect(alertsSaying("could not be refunded")).toHaveLength(1);
+      expect(creditAlerts()).toEqual([]);
+
+      // Stripe redelivers: the refund lands, and only now is the credit named.
+      expect((await settle("evt_late_paid")).status).toBe(200);
+      expect(refundedPayments()).toEqual(["pi_late"]);
+      expect((await settle("evt_late_paid_again")).status).toBe(200);
+
+      const alerts = creditAlerts();
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0][0]).toContain("restore that credit");
+      expect(alerts[0][0]).not.toContain("nothing on it was refunded");
+      expect(alerts[0][3]).toEqual(
+        expect.objectContaining({ invoiceId: "in_late" }),
+      );
+    });
+
+    it.each([
+      ["refunded: the credit is named", false, 1],
+      ["disputed, refunded by nobody: no credit alert", true, 0],
+    ])(
+      "the same rule when the lifetime's event stops the subscription after the renewal was paid: %s",
+      async (_case, disputed, expected) => {
+        stripeCharges.pi_late = {
+          amount: 1000,
+          amount_captured: 1000,
+          disputed,
+        };
+
+        expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+        expect(refundedPayments()).toEqual(disputed ? [] : ["pi_late"]);
+        expect(creditAlerts()).toHaveLength(expected);
+      },
+    );
+
+    it.each([
+      ["refunded: the credit is named", false, 1],
+      ["disputed, refunded by nobody: no credit alert", true, 0],
+    ])(
+      "the same rule when a subscription the customer ended is refused: %s",
+      async (_case, disputed, expected) => {
+        db.billing_subscriptions = [];
+        stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+          SUBSCRIPTION_ID,
+          "pro",
+          {
+            status: "canceled",
+            canceled_at: PERIOD_START + 30,
+            latest_invoice: "in_late",
+            cancellation_details: {
+              comment: "Cancelled by the customer",
+              feedback: null,
+              reason: "cancellation_requested",
+            },
+          },
+        );
+        mockInvoicesList.mockResolvedValue({
+          data: [
+            {
+              ...invoiceFor("in_late", "price_pro"),
+              total: 1900,
+              amount_paid: 1000,
+            },
+          ],
+          has_more: false,
+        });
+        stripeCharges.pi_late = {
+          amount: 1000,
+          amount_captured: 1000,
+          disputed,
+        };
+
+        expect(
+          (
+            await deliver(
+              subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+            )
+          ).status,
+        ).toBe(200);
+
+        expect(refundedPayments()).toEqual(disputed ? [] : ["pi_late"]);
+        expect(creditAlerts()).toHaveLength(expected);
+      },
+    );
+
+    it("a disputed payment, refunded by nobody, sends no restore-credit alert", async () => {
+      stripeCharges.pi_late = {
+        amount: 1000,
+        amount_captured: 1000,
+        disputed: true,
+      };
+
+      expect((await settle("evt_late_paid")).status).toBe(200);
+
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      expect(creditAlerts()).toEqual([]);
+    });
+  });
+
+  describe("Devin 4245730166: a partly paid invoice is reported", () => {
+    it("a mixed Pro/Agency invoice with a 1,900 partial payment, still open with 4,900 due, is alerted once, naming what was collected, and nothing is refunded", async () => {
+      mockInvoicesRetrieve.mockImplementation(async () =>
+        mixedOpenInvoice(1900),
+      );
+
+      expect((await settle("evt_late_paid")).status).toBe(200);
+      expect((await settle("evt_late_paid_again")).status).toBe(200);
+
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      const alerts = manualReviewAlerts();
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0][0]).toContain("in_late");
+      expect(alerts[0][0]).toContain("1900 of 6800 collected");
+      expect(alerts[0][0]).toContain("4900 still due");
+      expect(alerts[0][3]).toEqual(
+        expect.objectContaining({
+          invoiceId: "in_late",
+          reason: "mixed",
+          invoiceStatus: "open",
+          amountPaid: 1900,
+          amountDue: 6800,
+        }),
+      );
+    });
+
+    it("an open invoice that has collected nothing is not alerted, and is alerted once it is paid", async () => {
+      let invoice = mixedOpenInvoice(0);
+      mockInvoicesRetrieve.mockImplementation(async () => invoice);
+
+      expect((await settle("evt_late_open")).status).toBe(200);
+      expect(manualReviewAlerts()).toEqual([]);
+      expect(
+        mockLoggerInfo.mock.calls.filter(([message]) =>
+          String(message).includes("decided again when it settles"),
+        ),
+      ).toHaveLength(1);
+
+      invoice = {
+        ...invoice,
+        status: "paid",
+        amount_paid: 6800,
+        amount_remaining: 0,
+        status_transitions: { paid_at: LIFETIME_PAID_AT + 7200 },
+      };
+      expect((await settle("evt_late_paid")).status).toBe(200);
+
+      expect(manualReviewAlerts()).toHaveLength(1);
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("flag: one payment per invoice is verified, not assumed", () => {
+    it.each([
+      [
+        "two paid payments",
+        [
+          invoicePayment("inpay_a", "paid", "pi_a", 1000),
+          invoicePayment("inpay_b", "paid", "pi_b", 900),
+        ],
+        "1900 collected",
+      ],
+      [
+        "a paid payment and one still processing",
+        [
+          invoicePayment("inpay_a", "paid", "pi_a", 1000),
+          invoicePayment("inpay_b", "open", "pi_b"),
+        ],
+        "1000 collected",
+      ],
+    ])(
+      "an invoice with %s is sent to a person, once, and nothing is refunded",
+      async (_case, payments, collected) => {
+        mockInvoicePaymentsList.mockResolvedValue({
+          data: payments,
+          has_more: false,
+        });
+
+        expect((await settle("evt_late_paid")).status).toBe(200);
+        expect((await settle("evt_late_paid_again")).status).toBe(200);
+
+        expect(mockRefundsCreate).not.toHaveBeenCalled();
+        const alerts = manualReviewAlerts();
+        expect(alerts).toHaveLength(1);
+        expect(alerts[0][0]).toContain("more than one payment");
+        expect(alerts[0][0]).toContain(collected);
+        // Still renewing: set to end, and not called refunded.
+        expect(alertsSaying("was still renewing")[0][0]).toContain(
+          "was not refunded automatically",
+        );
+        expect(alerts[0][3]).toEqual(
+          expect.objectContaining({
+            invoiceId: "in_late",
+            reason: "several_payments",
+          }),
+        );
+      },
+    );
+
+    it("a declined attempt beside the paying payment is not a second payment: refunded", async () => {
+      mockInvoicePaymentsList.mockResolvedValue({
+        data: [
+          invoicePayment("inpay_declined", "canceled", "pi_declined"),
+          invoicePayment("inpay_late", "paid", "pi_late", 1900),
+        ],
+        has_more: false,
+      });
+
+      expect((await settle("evt_late_paid")).status).toBe(200);
+
+      expect(refundedPayments()).toEqual(["pi_late"]);
+      expect(manualReviewAlerts()).toEqual([]);
+    });
+
+    it("a payment that also paid another invoice is sent to a person, once, and nothing is refunded", async () => {
+      mockInvoicePaymentsOfPayment.mockResolvedValue({
+        data: [
+          { id: "inpay_late", invoice: "in_late", status: "paid" },
+          { id: "inpay_other", invoice: "in_other", status: "paid" },
+        ],
+        has_more: false,
+      });
+
+      expect((await settle("evt_late_paid")).status).toBe(200);
+      expect((await settle("evt_late_paid_again")).status).toBe(200);
+
+      expect(mockInvoicePaymentsOfPayment).toHaveBeenCalledWith({
+        payment: { type: "payment_intent", payment_intent: "pi_late" },
+        limit: 10,
+      });
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      const alerts = manualReviewAlerts();
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0][0]).toContain("also paid another invoice");
+      expect(alerts[0][3]).toEqual(
+        expect.objectContaining({
+          invoiceId: "in_late",
+          reason: "shared_payment",
+        }),
+      );
+    });
+
+    it.each([
+      [
+        "only this invoice",
+        { data: [{ id: "inpay_late", invoice: "in_late", status: "paid" }] },
+      ],
+      [
+        "this invoice, and another whose payment was canceled",
+        {
+          data: [
+            { id: "inpay_late", invoice: "in_late", status: "paid" },
+            { id: "inpay_other", invoice: "in_other", status: "canceled" },
+          ],
+        },
+      ],
+    ])("a payment Stripe lists against %s is refunded", async (_case, page) => {
+      mockInvoicePaymentsOfPayment.mockResolvedValue({
+        ...page,
+        has_more: false,
+      });
+
+      expect((await settle("evt_late_paid")).status).toBe(200);
+
+      expect(refundedPayments()).toEqual(["pi_late"]);
+      expect(manualReviewAlerts()).toEqual([]);
+    });
+
+    it("a payment with more invoice payments than one page holds is shared: a person, no refund", async () => {
+      mockInvoicePaymentsOfPayment.mockResolvedValue({
+        data: [{ id: "inpay_late", invoice: "in_late", status: "paid" }],
+        has_more: true,
+      });
+
+      expect((await settle("evt_late_paid")).status).toBe(200);
+
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      expect(manualReviewAlerts()).toHaveLength(1);
+    });
+
+    it("the refusal of a subscription whose invoice two payments paid refunds nothing and says it needs a person", async () => {
+      db.billing_subscriptions = [];
+      stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+        SUBSCRIPTION_ID,
+        "pro",
+      );
+      mockInvoicePaymentsList.mockResolvedValue({
+        data: [
+          invoicePayment("inpay_a", "paid", "pi_a", 1000),
+          invoicePayment("inpay_b", "paid", "pi_b", 900),
+        ],
+        has_more: false,
+      });
+
+      expect(
+        (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+          .status,
+      ).toBe(200);
+
+      expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      const [alert] = manualReviewAlerts();
+      expect(alert[3]).toEqual(
+        expect.objectContaining({
+          invoiceId: INVOICE_ID,
+          reason: "several_payments",
+        }),
+      );
+      expect(alertsSaying("was bought while a lifetime grant")[0][0]).toContain(
+        "need a person",
+      );
+    });
+  });
+
+  describe("MINOR: a coverage failure that is not a passing outage is an alert", () => {
+    function failure(shape: Row): Error {
+      return Object.assign(new Error("Stripe could not answer"), shape);
+    }
+
+    it.each([
+      ["a connection error", { type: "StripeConnectionError" }],
+      ["a rate limit", { type: "StripeRateLimitError", statusCode: 429 }],
+      ["Stripe's own 5xx", { type: "StripeAPIError", statusCode: 500 }],
+    ])(
+      "%s for an account holding no grant is a warning, and 5xx",
+      async (_case, shape) => {
+        db.plan_entitlements = [];
+        mockSubscriptionRetrieve.mockRejectedValue(failure(shape));
+
+        expect((await settle("evt_late_paid")).status).toBe(500);
+
+        expect(coverageUnknownWarnings()).toHaveLength(1);
+        expect(coverageUnknownAlerts()).toEqual([]);
+      },
+    );
+
+    it("a failure that is not an outage (Stripe cannot find the object) is an alert, even without a grant", async () => {
+      db.plan_entitlements = [];
+      mockSubscriptionRetrieve.mockRejectedValue(
+        failure({
+          type: "StripeInvalidRequestError",
+          statusCode: 404,
+          code: "resource_missing",
+        }),
+      );
+
+      expect((await settle("evt_late_paid")).status).toBe(500);
+
+      expect(coverageUnknownWarnings()).toEqual([]);
+      const [alert] = coverageUnknownAlerts();
+      expect(alert[0]).toContain("in_late");
+      expect(alert[3]).toEqual(
+        expect.objectContaining({
+          cause: expect.objectContaining({
+            message: "Stripe could not answer",
+          }),
+        }),
+      );
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+    });
+
+    it("a passing outage for an account holding a grant is an alert", async () => {
+      mockSubscriptionRetrieve.mockRejectedValue(
+        failure({ type: "StripeConnectionError" }),
+      );
+
+      expect((await settle("evt_late_paid")).status).toBe(500);
+
+      expect(coverageUnknownWarnings()).toEqual([]);
+      expect(coverageUnknownAlerts()).toHaveLength(1);
+    });
+
+    it("a passing outage when the account's grants cannot be read either is an alert", async () => {
+      db.plan_entitlements = [];
+      grantReadFails = true;
+      mockSubscriptionRetrieve.mockRejectedValue(
+        failure({ type: "StripeConnectionError" }),
+      );
+
+      expect((await settle("evt_late_paid")).status).toBe(500);
+
+      expect(coverageUnknownWarnings()).toEqual([]);
+      expect(coverageUnknownAlerts()).toHaveLength(1);
+    });
+
+    it("a misconfigured product (one product for two plans) is an alert, and 5xx", async () => {
+      stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+        SUBSCRIPTION_ID,
+        "pro",
+        {
+          created: LIFETIME_PAID_AT - 86400 * 30,
+          latest_invoice: "in_late",
+          items: {
+            data: [
+              {
+                id: "si_shared",
+                price: { id: "price_shared" },
+                current_period_start: PERIOD_START,
+                current_period_end: PERIOD_END,
+              },
+            ],
+          },
+        },
+      );
+
+      expect((await settle("evt_late_paid")).status).toBe(500);
+
+      const [alert] = coverageUnknownAlerts();
+      expect(alert[3]).toEqual(
+        expect.objectContaining({
+          cause: expect.objectContaining({
+            message: expect.stringContaining(
+              "configured for more than one plan",
+            ),
+          }),
+        }),
+      );
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("NITs: whether a lifetime still stands", () => {
+    function grantedByThisPayment(): void {
+      db.plan_entitlements = [
+        grantRow("pro", { stripe_payment_intent_id: LIFETIME_PAYMENT_INTENT }),
+      ];
+      mockInvoicesRetrieve.mockImplementation(async (id: string) => ({
+        ...invoiceFor(id, "price_pro"),
+        status_transitions: { paid_at: LIFETIME_PAID_AT - 3600 },
+      }));
+    }
+
+    const LIFETIME_CHARGE = `ch_${LIFETIME_PAYMENT_INTENT}`;
+
+    it("a charge whose full refund is still pending (refunded: false, amount_refunded = amount) stops nothing", async () => {
+      grantedByThisPayment();
+      stripeCharges[LIFETIME_PAYMENT_INTENT] = {
+        refunded: false,
+        amount: 19900,
+        amount_refunded: 19900,
+      };
+
+      expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+      expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+      expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    });
+
+    it("a charge refunded in part still stands: the subscription is stopped", async () => {
+      grantedByThisPayment();
+      stripeCharges[LIFETIME_PAYMENT_INTENT] = {
+        refunded: false,
+        amount: 19900,
+        amount_refunded: 5000,
+      };
+
+      expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+      expect(mockSubscriptionUpdate).toHaveBeenLastCalledWith(
+        SUBSCRIPTION_ID,
+        expect.objectContaining({ cancel_at_period_end: true }),
+      );
+    });
+
+    it.each(["won", "warning_closed"])(
+      "a dispute closed as %s leaves the lifetime standing: the subscription is stopped",
+      async (status) => {
+        grantedByThisPayment();
+        stripeCharges[LIFETIME_PAYMENT_INTENT] = { disputed: true };
+        stripeDisputes[LIFETIME_CHARGE] = [{ id: "dp_1", status }];
+
+        expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+        expect(mockDisputesList).toHaveBeenCalledWith(
+          expect.objectContaining({ charge: LIFETIME_CHARGE }),
+        );
+        expect(mockSubscriptionUpdate).toHaveBeenLastCalledWith(
+          SUBSCRIPTION_ID,
+          expect.objectContaining({ cancel_at_period_end: true }),
+        );
+      },
+    );
+
+    it.each([
+      ["still open", [{ id: "dp_1", status: "needs_response" }]],
+      ["lost", [{ id: "dp_1", status: "lost" }]],
+      [
+        "won once, then disputed again",
+        [
+          { id: "dp_1", status: "won" },
+          { id: "dp_2", status: "under_review" },
+        ],
+      ],
+      ["not listed by Stripe", []],
+    ])(
+      "a disputed charge whose dispute is %s stops nothing",
+      async (_case, disputes) => {
+        grantedByThisPayment();
+        stripeCharges[LIFETIME_PAYMENT_INTENT] = { disputed: true };
+        stripeDisputes[LIFETIME_CHARGE] = disputes;
+
+        expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+        expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+        expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+      },
+    );
+
+    it("a disputed charge with more disputes than one page holds stops nothing, even if those listed were won", async () => {
+      grantedByThisPayment();
+      stripeCharges[LIFETIME_PAYMENT_INTENT] = { disputed: true };
+      mockDisputesList.mockResolvedValue({
+        data: [{ id: "dp_1", status: "won" }],
+        has_more: true,
+      });
+
+      expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+      expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+      expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    });
+
+    it("a charge never disputed asks Stripe for no dispute", async () => {
+      grantedByThisPayment();
+
+      expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+      expect(mockDisputesList).not.toHaveBeenCalled();
+      expect(mockSubscriptionUpdate).toHaveBeenLastCalledWith(
+        SUBSCRIPTION_ID,
+        expect.objectContaining({ cancel_at_period_end: true }),
+      );
+    });
   });
 });
 
@@ -5909,17 +6605,18 @@ describe("mi-3: a refund another delivery is making right now", () => {
 });
 
 describe("mi-4: a refusal finished by a retry is still reported", () => {
-  it("reports it once, with the payments still in flight, when the retry completes the refund", async () => {
+  // Final check of 7f8e8b5: an invoice with a payment in flight beside a
+  // paid one now goes to a person (one payment per invoice), so the retry's
+  // report is shown on the paid payment alone; the in-flight report is
+  // pinned by M13/M14.
+  it("reports it once when the retry completes the refund", async () => {
     db.plan_entitlements = [grantRow("pro")];
     stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
       SUBSCRIPTION_ID,
       "pro",
     );
     mockInvoicePaymentsList.mockResolvedValue({
-      data: [
-        invoicePayment("inpay_paid", "paid", SUBSCRIPTION_PAYMENT_INTENT),
-        invoicePayment("inpay_open", "open", "pi_debit_pending"),
-      ],
+      data: [invoicePayment("inpay_paid", "paid", SUBSCRIPTION_PAYMENT_INTENT)],
       has_more: false,
     });
     mockRefundsCreate.mockRejectedValueOnce(new Error("Stripe is down"));
@@ -5932,13 +6629,10 @@ describe("mi-4: a refusal finished by a retry is still reported", () => {
 
     const reports = refusalReports();
     expect(reports).toHaveLength(1);
-    expect(reports[0][0]).toContain(
-      "1 payment(s) on its invoice are still processing",
-    );
     expect(reports[0][3]).toEqual(
       expect.objectContaining({
         refundIds: ["re_1"],
-        pendingPaymentIds: ["inpay_open"],
+        pendingPaymentIds: [],
       }),
     );
   });
