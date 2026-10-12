@@ -120,6 +120,59 @@ recorded, not fixed. The doc ends with the gate lines `Max severity: pending` an
 
 - [x] Task 6
 
+## Task 7 — fix pass after the review of d513552
+
+The fix mode came from the coordinator's decisions on the independent review and on Devin's
+comment 4246234939.
+
+1. **Table-mode segments (Devin 🟡).** React cannot put a `<div>` inside a table, so there it
+   writes `<table hidden><tbody id="S:n">` for rows and `<table hidden><tr id="S:n">` for cells.
+   For a colgroup it writes `<table hidden><colgroup id="S:n">`. Source: Next's compiled
+   `react-dom-server.node.production.js:2440-2453`.
+   - A `hidden` table whose first element child carries a segment id is now read. Only `hidden`
+     is waived.
+   - For a `<tr>` written straight into a table, parse5 adds an implied, attribute-less
+     `<tbody>`, so the row form is looked for one level down.
+   - The colgroup form is not matched, because a colgroup holds only `<col>`, nothing a lens
+     reads.
+   - Red first: the tbody and tr forms, and a fallback skipped inside a `<tbody>` with its rows
+     streamed in a table segment.
+   - Guards: an ordinary hidden table; a body with another id; a segment body that is not the
+     first child; a row inside an authored `<tbody>`; a hidden `<div>` around a segment-id
+     child; an `aria-hidden` segment table; and `<table hidden id="S:n">`, which was already
+     read.
+2. **The reviewer's three untested clauses.** Guards were added for:
+   - every boundary kind nested in a fallback (`$!`, `$?`, `$~`, `&` with `/&`);
+   - `<!--$?-->` before a template that is not a `B:` template;
+   - a comment other than `<!--$?-->` before a `B:` template.
+3. **Skipped fallbacks hide more than text.** This is noted in the extractor's tombstone comment
+   and in `docs/operations/free-tools.md` ("What the extractor skips"): scripts, stylesheets,
+   meta tags, images and links inside a skipped fallback are not recorded. The CSP checker (s97)
+   and the Alt Text Checker (s101) depend on this.
+
+Mutations: each was applied alone to `extract-page.ts`, then the extract, typo-lens and
+run-scan suites were run (239 tests). The file was restored after each run. Every mutation was
+killed:
+
+| Mutation | Red |
+|---|---|
+| Segment waiver dropped | 11 |
+| The fallback skip never starts | 12 |
+| Reviewer M7: no `B:<hex>` id check | 2 |
+| Reviewer M8: only `$`/`$?` open and only `/$` closes | 2 |
+| Dropping `$!` from the openers | 1 |
+| Dropping `$~` | 1 |
+| Dropping `&` | 1 |
+| Dropping `/&` from the closers | 1 |
+| Reviewer M9: no `$?` check | 3 |
+| No table wrapper | 3 |
+| No implied-`<tbody>` hop | 1 |
+| Any child, not the first | 1 |
+| Authored `<tbody>` hopped too | 3 |
+| Any tag wraps, not only `<table>` | 1 |
+
+- [x] Task 7
+
 ## Execution notes (implementer)
 
 - Task 4, item 5 (a `<!--$!-->` boundary, a lone `B:` template, a `<!--$?-->` with no template)

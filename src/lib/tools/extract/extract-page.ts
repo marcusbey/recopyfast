@@ -19,9 +19,9 @@
  * excluded, as is anything `hidden`, `aria-hidden="true"` or styled
  * `display:none` / `visibility:hidden` inline. Bidi controls, zero-width
  * characters and soft hyphens are stripped (`@/lib/tools/text`). One `hidden`
- * is read: a React streaming segment, `<div hidden id="S:0">`. The Suspense
- * fallback that segment replaces is skipped instead (s96c, see
- * `STREAMED_SEGMENT_ID`).
+ * is read: a React streaming segment, `<div hidden id="S:0">` or one of its
+ * table forms. The Suspense fallback that segment replaces is skipped
+ * instead (s96c, see `STREAMED_SEGMENT_ID`).
  *
  * BOUNDED AND ITERATIVE. Every list is capped, and the tree is walked with an
  * explicit stack: 50,000 nested `<div>`s would overflow a recursive walk.
@@ -202,9 +202,9 @@ const HIDDEN_STYLE =
  * left one word, "Loading…", on every such page — and many of the sites our
  * users build are App Router sites.
  *
- * So a hidden element whose id is a segment id is read where it sits. Its
- * place in the page does not matter for what a lens looks for; leaving it out
- * does. Only the `hidden` attribute is waived: `aria-hidden` and an inline
+ * So a hidden element whose id is a segment id, or a hidden table wrapping
+ * one (`wrapsTableSegment`), is read where it sits. Its place in the page does
+ * not matter for what a lens looks for; leaving it out does. Only the `hidden` attribute is waived: `aria-hidden` and an inline
  * `display:none` still hide it. The fallback it replaces is skipped by the
  * walk (`PENDING_BOUNDARY_START`).
  *
@@ -226,6 +226,14 @@ const STREAMED_SEGMENT_ID = /^S:[0-9a-f]+$/;
  *
  * A `<!--$!-->` boundary (rendered on the client after a server error) is not
  * pending. Its content stays on screen, so it is read as before.
+ *
+ * THE WHOLE FALLBACK IS SKIPPED, NOT ONLY ITS TEXT, like a `hidden` subtree.
+ * Scripts, stylesheets, meta tags, images and links inside it are not
+ * recorded (`scriptSrcs`, `stylesheetHrefs`, `metaCsp`, `images`,
+ * `sameHostLinks`). Neither is anything after a `<!--$?-->` that never
+ * closes, up to the end of its parent. The CSP checker (s97) and the Alt Text
+ * Checker (s101) read those fields: on a streamed page they see what the
+ * segments hold, not the loading UI. See `docs/operations/free-tools.md`.
  */
 const PENDING_BOUNDARY_START = "$?";
 const PENDING_BOUNDARY_TEMPLATE_ID = /^B:[0-9a-f]+$/;
@@ -243,8 +251,39 @@ function attr(element: Element, name: string): string | null {
   return found ? found.value : null;
 }
 
-function isStreamedSegment(element: Element): boolean {
+function hasSegmentId(element: Element): boolean {
   return STREAMED_SEGMENT_ID.test(attr(element, "id") ?? "");
+}
+
+function firstElementChild(element: Element): Element | null {
+  return element.childNodes.find(isElement) ?? null;
+}
+
+/**
+ * Devin review of d513552: a table cannot hold a `<div>`, so inside one React
+ * writes the segment as `<table hidden><tbody id="S:n">` (rows) or `<table
+ * hidden><tr id="S:n">` (cells). `hidden` sits on a table WITHOUT an id, and
+ * rows streamed into a table stayed unread. The parser puts an implied,
+ * attribute-less `<tbody>` around a `<tr>` written straight into a table, so
+ * the row form is looked for one level down. React's `<colgroup id="S:n">`
+ * form is not matched: a colgroup holds only `<col>`, nothing a lens reads.
+ */
+function wrapsTableSegment(table: Element): boolean {
+  let child = firstElementChild(table);
+  if (child?.tagName === "tbody" && child.attrs.length === 0) {
+    const row = firstElementChild(child);
+    if (row?.tagName === "tr") child = row;
+  }
+  return (
+    child !== null &&
+    (child.tagName === "tbody" || child.tagName === "tr") &&
+    hasSegmentId(child)
+  );
+}
+
+function isStreamedSegment(element: Element): boolean {
+  if (hasSegmentId(element)) return true;
+  return element.tagName === "table" && wrapsTableSegment(element);
 }
 
 /**

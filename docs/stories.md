@@ -4725,6 +4725,8 @@ behind a loading screen.
 Acceptance criteria:
 - [ ] A React streaming segment is read as visible content, in document order. A segment is an
   element with a `hidden` attribute and an `id` of `S:<hex>`.
+  - A table counts too: React's `<table hidden><tbody id="S:<hex>">` and
+    `<table hidden><tr id="S:<hex>">` (review of d513552).
   - Ordinary `hidden` elements stay excluded, and so do `<template>`, `<script>`, `<style>` and
     `<noscript>`.
   - Only `hidden` is waived: `aria-hidden` or an inline `display:none` still hide a segment.
