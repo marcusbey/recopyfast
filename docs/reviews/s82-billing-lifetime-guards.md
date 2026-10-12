@@ -928,6 +928,56 @@ that is neither refused nor marked now reads the account's grants once.
 Only an account that holds a grant also loads the catalogue's products. A
 grant-read failure answers 5xx, and Stripe redelivers.
 
+## Re-review of `de86a2d`
+
+The re-review verified every prior finding fixed: `Max severity: minor`, ship
+allowed. These cheap ones were fixed before merge. Stripe behaviour was
+checked against the `2025-07-30.basil` docs and the pinned SDK types:
+- A credit note first reduces an invoice's amount due as a pre-payment
+  amount; the total is unchanged.
+- `pre_payment_credit_notes_amount`, `starting_balance` and `ending_balance`
+  all exist on the basil `Invoice`.
+- A PaymentIntent's `latest_charge` expands to a Charge with `refunded` and
+  `disputed`.
+
+| Finding | Fix | Tests |
+|---|---|---|
+| **MINOR 1**: a read failure on an ordinary renewal raised the money-owed alert ("…could not be refunded"). | Settlement is split. `decideSettlement` only reads: the subscription, the refusal's record, the grants, the lifetime's payment, the catalogue and the invoice. A failure there is a warning, "could not tell whether this payment is covered … Stripe will retry", and 5xx. A customer mismatch is its own alert ("name different customers … check both in Stripe by hand"). Only a failure of the refund itself keeps the money-owed alert. | "MINOR 1: the account's grants / the lifetime's payment cannot be read at a renewal: a warning that it could not tell, 5xx, and no money-owed alert" (2 cases); "MINOR 1: a real refund failure at a renewal is still the money-owed alert"; and the two declared changes below. |
+| **MINOR 2**: redelivery liveness was database-only. | `isLifetimeGrantLive` also reads the lifetime's payment intent, with its latest charge expanded. A charge refunded in full or disputed in Stripe means not live, even before its own event revokes the grant here. Our grants are checked first, so Stripe is asked only when the database says live. | "MINOR 2: a redelivered lifetime event stops nothing when Stripe says its charge was refunded in full / disputed" (2); "MINOR 2: … whose charge stands still stops the subscription". |
+| **MINOR 3**: a pre-payment credit note was counted as spent customer credit. | `customerCreditSpentOn(invoice)` = `total − amount_paid − pre_payment_credit_notes_amount`, never negative. The decision's paid input is `{ amountPaid, customerCreditSpent }`. | "MINOR 3: a pre-payment credit note is not customer credit: no credit flag"; pure cases updated. |
+| **MINOR 4**: an account with grants, renewing a subscription whose plan resolved to nothing, was a silent 200. | `liveCoverOfSubscription` warns once, through the same `claimUnknownPriceWarning` claim as the ended subscriptions, and refunds nothing. | "MINOR 4: a lifetime owner's renewal on a price no plan sells is said once". |
+| NIT: the held-draft alert repeated on every redelivery. | Claimed once per invoice (`claimManualInvoiceWarning`). | "NIT: a held credit-covered draft is alerted once across redeliveries". |
+| NIT: `paid_by_credit` was raised for an invoice a 100% coupon made free. | Nothing collected and no credit spent: skipped as `nothing_charged`. | Pure: "skips a covered invoice a 100% coupon made free". Webhook: "NIT: a covered invoice a 100% coupon made free is neither refunded nor sent to a person". |
+| NIT: "still renewing … stop did not reach it" was alerted for a subscription bought after the lifetime whose own creation event had not been processed yet. | Such a subscription is refunded and left to its own refusal (logged at info; no period-end marker, which would have blocked the refusal's immediate cancel). The alert stays for one bought before the lifetime. | "NIT: a subscription bought after the lifetime whose own event has not been processed is refunded, left to its refusal …": refunded once, then its event cancels it and finds the refund. |
+
+**Red first:** the lifetime-covered and covered-refund-decision suites, 13
+failed / 199 passed (212). The "real refund failure" and "charge stands"
+cases passed before; they are guards. After: 212/212.
+
+**Existing assertions changed, declared:**
+- (MINOR 1) finding 5's "…when the refusal record cannot be read at
+  settlement" expects the "could not tell" warning, not the money-owed alert.
+- (MINOR 1) m-2's "fails closed when the invoice and Stripe subscription name
+  different customers" expects the "name different customers" alert.
+- (MINOR 3) The pure paid input changed shape.
+- (fixture) The 67c6caf "paid by credit balance" invoice gained `total: 1900`,
+  which a credit-paid invoice has.
+
+**Mutations,** each restored afterwards (files byte-identical; baseline
+212/212):
+
+| Mutation | Red |
+|---|---:|
+| M1 a read failure raises the money-owed alert | 3 |
+| M2 the lifetime's charge not checked in Stripe | 2 |
+| M4 an unknown plan at settlement passed over in silence | 1 |
+| N1 a 100% coupon sent to a person | 2 |
+| N2 pre-payment credit notes counted as customer credit | 1 |
+| N3 the held draft alerted on every redelivery | 1 |
+| N4 a subscription bought after the lifetime called a missed stop | 1 |
+
+Total: 11 red. All 7 mutations were caught.
+
 ### Current implementation verification
 
 Node `24.14.0`, npm `11.9.0`; dependencies installed with `npm ci`. No provider
@@ -1076,12 +1126,32 @@ Same environment and rules: no Stripe, Supabase or production calls, no
   0 failures.
 - DB harness: not run. No migration was added.
 
-The re-review of `2928fcb` found a MAJOR (ship: no). Its findings are fixed
-and tested above but not yet reviewed, so the gate lines stay `pending`.
-s82b remains the recorded follow-up.
+The re-review of `2928fcb` found a MAJOR (ship: no). Its findings were fixed
+and tested above, then verified by the re-review of `de86a2d`.
+
+### Re-review of `de86a2d` verification
+
+Same environment and rules: no Stripe, Supabase or production calls, no
+`next dev`.
+
+- `npm run lint`: passed, 0 errors / 31 existing warnings.
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath` over the lifetime-covered,
+  covered-refund-decision, one-time-purchases, stripe-webhook-invoice-customer,
+  plans, lifetime-grant-plan and ops-alert suites: 7 suites, 308/308 passed.
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/|src/__tests__/lib/monitoring/'`:
+  55 suites / 1,004 tests passed, 0 failures.
+- `npm test`: 438 suites passed, 2 skipped; 6,202 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added.
+
+The re-review of `de86a2d` gave `Max severity: minor`, ship allowed. Its
+minors and NITs are fixed above, and nothing above MINOR remains. s82b remains
+the recorded follow-up.
 
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.
 
-Max severity: pending
-Ship allowed: pending
+Max severity: minor
+Ship allowed: yes

@@ -99,12 +99,14 @@ export function decideInvoiceRefund(
   coverage: InvoiceCoverage,
   productIndex: ProductPlanLookup,
   /**
-   * For a paid invoice, what it collected in money and its total; null while
-   * it is not paid. A covered invoice paid with no money (a credit balance, a
-   * 100% coupon) has no payment to refund: a person restores the credit. One
-   * paid partly by credit is refunded for its money, and the credit named.
+   * For a paid invoice, what it collected in money and what the customer's
+   * credit balance paid of it (not pre-payment credit notes, which only
+   * lowered what was due); null while it is not paid. A covered invoice paid
+   * by credit alone has no payment to refund: a person restores the credit.
+   * One paid partly by credit is refunded for its money, and the credit
+   * named. One that collected nothing at all (a 100% coupon) owes nothing.
    */
-  paid: { amountPaid: number; total: number } | null = null,
+  paid: { amountPaid: number; customerCreditSpent: number } | null = null,
 ): InvoiceRefundDecision {
   let billable = 0;
   let covered = 0;
@@ -142,11 +144,15 @@ export function decideInvoiceRefund(
   if (billable === 0) return { kind: "skip", reason: "nothing_charged" };
   if (covered === 0) return { kind: "skip", reason: "uncovered" };
   if (uncovered > 0) return { kind: "manual", reason: "mixed" };
-  if (paid?.amountPaid === 0) {
-    return { kind: "manual", reason: "paid_by_credit" };
+  if (paid && paid.amountPaid === 0) {
+    // Re-review of de86a2d: nothing collected and no credit spent (a 100%
+    // coupon) owes nothing; credit alone goes to a person.
+    return paid.customerCreditSpent > 0
+      ? { kind: "manual", reason: "paid_by_credit" }
+      : { kind: "skip", reason: "nothing_charged" };
   }
-  if (paid && paid.amountPaid < paid.total) {
-    return { kind: "refund", creditNotRefunded: paid.total - paid.amountPaid };
+  if (paid && paid.customerCreditSpent > 0) {
+    return { kind: "refund", creditNotRefunded: paid.customerCreditSpent };
   }
   return { kind: "refund" };
 }

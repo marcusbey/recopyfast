@@ -1395,6 +1395,13 @@ function manualReviewAlerts() {
   );
 }
 
+/** Warnings that a settled payment's coverage could not be told (re-review of de86a2d). */
+function coverageUnknownWarnings() {
+  return mockLoggerWarn.mock.calls.filter(([message]) =>
+    String(message).includes("could not tell whether this payment is covered"),
+  );
+}
+
 /** Alerts whose sentence contains `text`. */
 function alertsSaying(text: string) {
   return mockLoggerError.mock.calls.filter(([message]) =>
@@ -2316,7 +2323,10 @@ describe("m-2: a refused subscription's payment that settles later", () => {
     expect(response.status).toBe(500);
     expect(mockRefundsList).not.toHaveBeenCalled();
     expect(mockRefundsCreate).not.toHaveBeenCalled();
-    const [alert] = alertsSaying("could not be refunded");
+    // Re-review of de86a2d (MINOR 1): said for what it is, not "could not be
+    // refunded".
+    expect(alertsSaying("could not be refunded")).toEqual([]);
+    const [alert] = alertsSaying("name different customers");
     expect(alert[3]).toEqual(
       expect.objectContaining({
         subscriptionId: SUBSCRIPTION_ID,
@@ -2629,17 +2639,17 @@ describe("finding 5: a refused subscription already cancelled by the customer, w
 
     expect(response.status).toBe(500);
     expect(mockRefundsCreate).not.toHaveBeenCalled();
-    const [alert] = alertsSaying("could not be refunded");
-    expect(alert[0]).toContain(INVOICE_ID);
-    expect(alert[0]).toContain("Returning 5xx so Stripe redelivers");
-    expect(alert[3]).toEqual(
+    // Re-review of de86a2d (MINOR 1): a read failure is not money owed.
+    expect(alertsSaying("could not be refunded")).toEqual([]);
+    const [warning] = coverageUnknownWarnings();
+    expect(warning[0]).toContain(INVOICE_ID);
+    expect(warning[0]).toContain("Stripe will retry");
+    expect(warning[2]).toEqual(
       expect.objectContaining({
         action: "refund_covered_invoice",
         subscriptionId: SUBSCRIPTION_ID,
         invoiceId: INVOICE_ID,
-        cause: expect.objectContaining({
-          message: expect.stringContaining("connection reset"),
-        }),
+        cause: expect.stringContaining("connection reset"),
       }),
     );
 
@@ -4747,6 +4757,247 @@ describe("re-review of 2928fcb: what a refund may return", () => {
 });
 
 /*
+ * Re-review of de86a2d: settlement says what it cannot tell, a redelivery asks
+ * Stripe whether the lifetime still stands, and credit is counted right.
+ */
+describe("re-review of de86a2d", () => {
+  function refundedPayments(): string[] {
+    return stripeRefunds.map((refund) => String(refund.payment_intent)).sort();
+  }
+
+  function liveRow(plan = "pro"): Row {
+    return {
+      user_id: USER_ID,
+      customer_id: "bc_1",
+      stripe_subscription_id: SUBSCRIPTION_ID,
+      plan,
+      status: "active",
+    };
+  }
+
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+    db.billing_subscriptions = [liveRow()];
+    // Bought before the lifetime and never stopped: an ordinary renewal.
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT - 86400 * 30, latest_invoice: "in_late" },
+    );
+    mockInvoicesRetrieve.mockImplementation(async (id: string) => ({
+      ...invoiceFor(id, "price_pro"),
+      status_transitions: { paid_at: LIFETIME_PAID_AT + 3600 },
+    }));
+    mockInvoicePaymentsList.mockImplementation(async (params: Row) => {
+      const suffix = String(params.invoice).replace(/^in_/, "");
+      return {
+        data: [invoicePayment(`inpay_${suffix}`, "paid", `pi_${suffix}`)],
+        has_more: false,
+      };
+    });
+  });
+
+  it.each([
+    [
+      "the account's grants",
+      (): void => {
+        grantReadFails = true;
+      },
+    ],
+    [
+      "the lifetime's payment",
+      (): void => {
+        mockPaymentIntentsRetrieve.mockRejectedValue(
+          new Error("Stripe is down"),
+        );
+      },
+    ],
+  ] as const)(
+    "MINOR 1: %s cannot be read at a renewal: a warning that it could not tell, 5xx, and no money-owed alert",
+    async (_case, fail) => {
+      fail();
+
+      const response = await deliver(
+        invoicePaid("evt_late_paid", "basil", "in_late"),
+      );
+
+      expect(response.status).toBe(500);
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      expect(alertsSaying("could not be refunded")).toEqual([]);
+      const [warning] = coverageUnknownWarnings();
+      expect(warning[0]).toContain("in_late");
+      expect(warning[0]).toContain("Stripe will retry");
+    },
+  );
+
+  it("MINOR 1: a real refund failure at a renewal is still the money-owed alert", async () => {
+    mockRefundsCreate.mockRejectedValueOnce(new Error("Stripe is down"));
+
+    const response = await deliver(
+      invoicePaid("evt_late_paid", "basil", "in_late"),
+    );
+
+    expect(response.status).toBe(500);
+    expect(coverageUnknownWarnings()).toEqual([]);
+    const [alert] = alertsSaying("could not be refunded");
+    expect(alert[0]).toContain("in_late");
+  });
+
+  it.each([
+    ["refunded in full", { refunded: true, amount_refunded: 1900 }],
+    ["disputed", { disputed: true }],
+  ])(
+    "MINOR 2: a redelivered lifetime event stops nothing when Stripe says its charge was %s, even before our grant row knows",
+    async (_case, charge) => {
+      db.plan_entitlements = [
+        grantRow("pro", { stripe_payment_intent_id: LIFETIME_PAYMENT_INTENT }),
+      ];
+      stripeCharges[LIFETIME_PAYMENT_INTENT] = charge;
+
+      expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+      expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+      expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+      expect(mockSubscriptionsList).not.toHaveBeenCalled();
+    },
+  );
+
+  it("MINOR 2: a redelivered lifetime event whose charge stands still stops the subscription", async () => {
+    db.plan_entitlements = [
+      grantRow("pro", { stripe_payment_intent_id: LIFETIME_PAYMENT_INTENT }),
+    ];
+    mockInvoicesRetrieve.mockImplementation(async (id: string) => ({
+      ...invoiceFor(id, "price_pro"),
+      status_transitions: { paid_at: LIFETIME_PAID_AT - 3600 },
+    }));
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+    expect(mockSubscriptionUpdate).toHaveBeenLastCalledWith(
+      SUBSCRIPTION_ID,
+      expect.objectContaining({ cancel_at_period_end: true }),
+    );
+  });
+
+  it("MINOR 3: a pre-payment credit note is not customer credit: no credit flag", async () => {
+    mockInvoicesRetrieve.mockImplementation(async (id: string) => ({
+      ...invoiceFor(id, "price_pro"),
+      status_transitions: { paid_at: LIFETIME_PAID_AT + 3600 },
+      total: 1900,
+      amount_paid: 1400,
+      pre_payment_credit_notes_amount: 500,
+    }));
+    stripeCharges.pi_late = { amount: 1400, amount_captured: 1400 };
+
+    expect(
+      (await deliver(invoicePaid("evt_late_paid", "basil", "in_late"))).status,
+    ).toBe(200);
+
+    expect(refundedPayments()).toEqual(["pi_late"]);
+    expect(manualReviewAlerts()).toEqual([]);
+  });
+
+  it("NIT: a covered invoice a 100% coupon made free is neither refunded nor sent to a person", async () => {
+    mockInvoicesRetrieve.mockImplementation(async (id: string) => ({
+      ...invoiceFor(id, "price_pro"),
+      status_transitions: { paid_at: LIFETIME_PAID_AT + 3600 },
+      total: 0,
+      amount_paid: 0,
+    }));
+
+    expect(
+      (await deliver(invoicePaid("evt_late_paid", "basil", "in_late"))).status,
+    ).toBe(200);
+
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(manualReviewAlerts()).toEqual([]);
+  });
+
+  it("MINOR 4: a lifetime owner's renewal on a price no plan sells is said once, not passed over in silence", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      {
+        created: LIFETIME_PAID_AT - 86400 * 30,
+        latest_invoice: "in_late",
+        items: {
+          data: [
+            {
+              id: "si_unknown",
+              price: { id: "price_unknown" },
+              current_period_start: PERIOD_START,
+              current_period_end: PERIOD_END,
+            },
+          ],
+        },
+      },
+    );
+
+    expect(
+      (await deliver(invoicePaid("evt_late_paid", "basil", "in_late"))).status,
+    ).toBe(200);
+    expect(
+      (await deliver(invoicePaid("evt_late_paid_again", "basil", "in_late")))
+        .status,
+    ).toBe(200);
+
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const warnings = mockLoggerWarn.mock.calls.filter(
+      ([message]) =>
+        String(message).includes(SUBSCRIPTION_ID) &&
+        String(message).includes("no product the plan catalogue sells"),
+    );
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("NIT: a held credit-covered draft is alerted once across redeliveries", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT - 86400 * 30, latest_invoice: "in_draft" },
+    );
+    mockInvoicesRetrieve.mockImplementation(async (id: string) => ({
+      ...invoiceFor(id, "price_pro"),
+      status: "draft",
+      amount_due: 0,
+      amount_paid: 0,
+      status_transitions: { paid_at: null },
+    }));
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+    expect((await deliver(lifetimePaid("evt_lifetime_again"))).status).toBe(
+      200,
+    );
+
+    expect(alertsSaying("held as a draft")).toHaveLength(1);
+  });
+
+  it("NIT: a subscription bought after the lifetime whose own event has not been processed is refunded, left to its refusal, and not called a missed stop", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT + 120, latest_invoice: "in_late" },
+    );
+    db.billing_subscriptions = [];
+
+    expect(
+      (await deliver(invoicePaid("evt_late_paid", "basil", "in_late"))).status,
+    ).toBe(200);
+    expect(refundedPayments()).toEqual(["pi_late"]);
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(alertsSaying("was still renewing")).toEqual([]);
+
+    // Its own event arrives: refused, cancelled now, the refund found.
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+    expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+    expect(refundedPayments()).toEqual(["pi_late"]);
+  });
+});
+
+/*
  * Review of 67c6caf, minors.
  */
 describe("review of 67c6caf, minors", () => {
@@ -4908,7 +5159,11 @@ describe("review of 67c6caf, minors", () => {
 
   it("alerts once, refunding nothing, for a covered invoice paid by credit balance", async () => {
     mockInvoicesList.mockResolvedValue({
-      data: [{ ...invoiceFor("in_pro", "price_pro"), amount_paid: 0 }],
+      // Re-review of de86a2d: a credit-paid invoice has a total; credit paid
+      // it (`amount_paid` 0), no credit note did.
+      data: [
+        { ...invoiceFor("in_pro", "price_pro"), total: 1900, amount_paid: 0 },
+      ],
       has_more: false,
     });
 

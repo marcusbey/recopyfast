@@ -910,7 +910,18 @@ async function reportPredatingStop(
   if (latestInvoice.handling === "held_draft") {
     // Re-review of 2928fcb: a draft its credit balance would pay is held, not
     // finalized (it would be paid at once and could not be voided). A person
-    // decides it.
+    // decides it, told once (re-review of de86a2d): a redelivery holds it
+    // again, silently.
+    if (
+      !(await claimManualInvoiceWarning(
+        supabase,
+        latestInvoice.invoiceId,
+        subscriptionId,
+        userId,
+      ))
+    ) {
+      return;
+    }
     alertOps(
       `Subscription ${subscriptionId} (${planId}) predates the lifetime grant ` +
         `that covers it: ${ending}. Its renewal ${latestInvoice.invoiceId}, ` +
@@ -1485,89 +1496,56 @@ async function refundIfRefusedAsCovered(
   userId: string,
   supabase: ServiceClient,
 ): Promise<void> {
+  // Re-review of de86a2d (MINOR 1): deciding reads the subscription, the
+  // refusal's record, the account's grants, the lifetime's payment, the
+  // catalogue and the invoice. A read failing there leaves this payment's
+  // coverage unknown, which is not money owed: a warning, and 5xx so Stripe
+  // retries. Only a failure of the refund itself is the money-owed alert.
+  let settlement: SettlementRefund | null;
   try {
-    const current = await retrieveCurrentSubscription(subscriptionId);
-    const currentCustomerId = idOf(current.customer);
-    if (currentCustomerId !== expectedStripeCustomerId) {
-      throw new Error(
-        `subscription ${subscriptionId} customer does not match invoice ` +
-          `${invoiceId}`,
-      );
-    }
-    const byMarker = isRefusedAsCoveredByLifetime(current);
-    // The settled invoice, when it was read, and a lifetime the subscription
-    // was still renewing against.
-    let settledInvoice: Stripe.Invoice | null = null;
-    let stillRenewing: LifetimeCover | null = null;
-    if (byMarker || (await wasRefusedAsCoveredByLifetime(supabase, current))) {
-      // Devin 4244837497: a refusal by its record (a subscription the customer
-      // had ended) decides every invoice; a refusal by our cancellation (the
-      // marker) decides every invoice but its own latest, which it refunded
-      // (review of 67c6caf). Judged at the subscription's purchase.
-      const ownInvoice =
-        typeof current.latest_invoice === "string"
-          ? current.latest_invoice
-          : current.latest_invoice?.id;
-      if (!byMarker || invoiceId !== ownInvoice) {
-        const invoice = await stripe.invoices.retrieve(invoiceId);
-        settledInvoice = invoice;
-        const refundable = await settlementAllowsRefund(
-          invoice,
-          current.created,
+    settlement = await decideSettlement(
+      invoiceId,
+      subscriptionId,
+      expectedStripeCustomerId,
+      userId,
+      supabase,
+    );
+  } catch (error) {
+    if (error instanceof SettlementCustomerMismatch) {
+      alertOps(
+        `Invoice ${invoiceId} and subscription ${subscriptionId} name ` +
+          `different customers, so nothing was refunded. Returning 5xx so ` +
+          `Stripe redelivers; check both in Stripe by hand.`,
+        error,
+        { userId },
+        {
+          component: "webhooks/stripe",
+          action: "refund_covered_invoice",
           subscriptionId,
-          userId,
-          supabase,
-        );
-        if (!refundable) return;
-      }
-    } else {
-      // Review of 67c6caf, MAJOR 2 (layer b), and re-review of 2928fcb (d):
-      // a lifetime owner never keeps paying for a covered plan with money
-      // collected at or after the lifetime's payment, whether or not the stop
-      // ran or wrote its marker. The marker only saves the grant read.
-      const lifetime =
-        (await lifetimeStopOf(current)) ??
-        (await liveCoverOfSubscription(current, userId, supabase));
-      // No lifetime covers its plan: never refunded by this rule.
-      if (!lifetime) return;
-      const invoice = await stripe.invoices.retrieve(invoiceId);
-      settledInvoice = invoice;
-      const paidAt =
-        invoice.status_transitions?.paid_at ?? Math.floor(Date.now() / 1000);
-      if (paidAt < lifetime.paidAt) {
-        logger.info(
-          `Invoice ${invoiceId} of subscription ${subscriptionId}, stopped ` +
-            `for a lifetime grant, was collected before the lifetime was ` +
-            `paid: not refunded.`,
-          { userId },
-          {
-            component: "webhooks/stripe",
-            action: "refund_after_lifetime_stop",
-            subscriptionId,
-            invoiceId,
-            reason: "collected_before_lifetime",
-          },
-        );
-        return;
-      }
-      const refundable = await settlementAllowsRefund(
-        invoice,
-        paidAt,
-        subscriptionId,
-        userId,
-        supabase,
+          invoiceId,
+        },
       );
-      if (!refundable) return;
-      // Re-review of 2928fcb: refunding every period of a subscription still
-      // renewing would loop; it is set to end, and ops told why it was not.
-      if (
-        !isTerminalSubscriptionStatus(current.status) &&
-        !current.cancel_at_period_end
-      ) {
-        stillRenewing = lifetime;
-      }
+    } else {
+      warnOps(
+        `Invoice ${invoiceId} of subscription ${subscriptionId}: could not ` +
+          `tell whether this payment is covered by a lifetime grant, so ` +
+          `nothing was refunded yet. Returning 5xx; Stripe will retry.`,
+        { userId },
+        {
+          component: "webhooks/stripe",
+          action: "refund_covered_invoice",
+          subscriptionId,
+          invoiceId,
+          cause: error instanceof Error ? error.message : String(error),
+        },
+      );
     }
+    throw error;
+  }
+  if (!settlement) return;
+  const { settledInvoice, stillRenewing } = settlement;
 
+  try {
     const {
       refundIds,
       pendingPaymentIds,
@@ -1650,6 +1628,136 @@ async function refundIfRefusedAsCovered(
   }
 }
 
+/** A settled payment's subscription names another customer than its invoice. */
+class SettlementCustomerMismatch extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SettlementCustomerMismatch";
+  }
+}
+
+/** What settlement decided to refund, and a subscription still renewing. */
+interface SettlementRefund {
+  /** The settled invoice, when it was read for the decision. */
+  settledInvoice: Stripe.Invoice | null;
+  /** A lifetime a subscription bought before it was still renewing against. */
+  stillRenewing: LifetimeCover | null;
+}
+
+/**
+ * Whether this settled payment is refunded, and what goes with it; null when
+ * it is not. Reads only: every failure here leaves the coverage unknown.
+ */
+async function decideSettlement(
+  invoiceId: string,
+  subscriptionId: string,
+  expectedStripeCustomerId: string,
+  userId: string,
+  supabase: ServiceClient,
+): Promise<SettlementRefund | null> {
+  const current = await retrieveCurrentSubscription(subscriptionId);
+  const currentCustomerId = idOf(current.customer);
+  if (currentCustomerId !== expectedStripeCustomerId) {
+    throw new SettlementCustomerMismatch(
+      `subscription ${subscriptionId} customer does not match invoice ` +
+        `${invoiceId}`,
+    );
+  }
+  const byMarker = isRefusedAsCoveredByLifetime(current);
+  // The settled invoice, when it was read, and a lifetime the subscription
+  // was still renewing against.
+  let settledInvoice: Stripe.Invoice | null = null;
+  let stillRenewing: LifetimeCover | null = null;
+  if (byMarker || (await wasRefusedAsCoveredByLifetime(supabase, current))) {
+    // Devin 4244837497: a refusal by its record (a subscription the customer
+    // had ended) decides every invoice; a refusal by our cancellation (the
+    // marker) decides every invoice but its own latest, which it refunded
+    // (review of 67c6caf). Judged at the subscription's purchase.
+    const ownInvoice =
+      typeof current.latest_invoice === "string"
+        ? current.latest_invoice
+        : current.latest_invoice?.id;
+    if (!byMarker || invoiceId !== ownInvoice) {
+      const invoice = await stripe.invoices.retrieve(invoiceId);
+      settledInvoice = invoice;
+      const refundable = await settlementAllowsRefund(
+        invoice,
+        current.created,
+        subscriptionId,
+        userId,
+        supabase,
+      );
+      if (!refundable) return null;
+    }
+  } else {
+    // Review of 67c6caf, MAJOR 2 (layer b), and re-review of 2928fcb (d):
+    // a lifetime owner never keeps paying for a covered plan with money
+    // collected at or after the lifetime's payment, whether or not the stop
+    // ran or wrote its marker. The marker only saves the grant read.
+    const lifetime =
+      (await lifetimeStopOf(current)) ??
+      (await liveCoverOfSubscription(current, userId, supabase));
+    // No lifetime covers its plan: never refunded by this rule.
+    if (!lifetime) return null;
+    const invoice = await stripe.invoices.retrieve(invoiceId);
+    settledInvoice = invoice;
+    const paidAt =
+      invoice.status_transitions?.paid_at ?? Math.floor(Date.now() / 1000);
+    if (paidAt < lifetime.paidAt) {
+      logger.info(
+        `Invoice ${invoiceId} of subscription ${subscriptionId}, stopped ` +
+          `for a lifetime grant, was collected before the lifetime was ` +
+          `paid: not refunded.`,
+        { userId },
+        {
+          component: "webhooks/stripe",
+          action: "refund_after_lifetime_stop",
+          subscriptionId,
+          invoiceId,
+          reason: "collected_before_lifetime",
+        },
+      );
+      return null;
+    }
+    const refundable = await settlementAllowsRefund(
+      invoice,
+      paidAt,
+      subscriptionId,
+      userId,
+      supabase,
+    );
+    if (!refundable) return null;
+    // Re-review of 2928fcb: refunding every period of a subscription still
+    // renewing would loop; it is set to end, and ops told why it was not.
+    // Re-review of de86a2d: one bought at or after the lifetime is not a
+    // missed stop; its own refusal (its creation event, not processed yet)
+    // cancels it now and finds this refund.
+    if (
+      !isTerminalSubscriptionStatus(current.status) &&
+      !current.cancel_at_period_end
+    ) {
+      if (wasBoughtWithPlanAlreadyOwned(current.created, lifetime.paidAt)) {
+        logger.info(
+          `Subscription ${subscriptionId} was bought after the lifetime ` +
+            `that covers it and is still live: invoice ${invoiceId} is ` +
+            `refunded, and its own refusal cancels it.`,
+          { userId },
+          {
+            component: "webhooks/stripe",
+            action: "refund_after_lifetime_stop",
+            subscriptionId,
+            invoiceId,
+            reason: "bought_after_lifetime",
+          },
+        );
+      } else {
+        stillRenewing = lifetime;
+      }
+    }
+  }
+  return { settledInvoice, stillRenewing };
+}
+
 /**
  * The earliest live lifetime grant covering a subscription's plan, read from
  * the account's grants (re-review of 2928fcb, d): the settlement catch-all
@@ -1669,7 +1777,29 @@ async function liveCoverOfSubscription(
     productIndex,
     subscription.metadata?.plan_id,
   );
-  return planId ? coverFrom(grants, planId) : null;
+  if (!planId) {
+    // Re-review of de86a2d (MINOR 4): an account holding a lifetime renews
+    // a subscription on no product the catalogue sells. Whether the lifetime
+    // covers it cannot be told: said once (the same claim as the ended
+    // subscriptions' unknown price), never passed over in silence.
+    if (await claimUnknownPriceWarning(supabase, subscription.id, userId)) {
+      warnOps(
+        `Subscription ${subscription.id} of an account holding a lifetime ` +
+          `grant bills no product the plan catalogue sells, so whether the ` +
+          `lifetime covers its payments cannot be told and none was ` +
+          `refunded. If it bills a plan the lifetime covers, refund its ` +
+          `payments after the lifetime and cancel it by hand.`,
+        { userId },
+        {
+          component: "webhooks/stripe",
+          action: "refund_after_lifetime_stop",
+          subscriptionId: subscription.id,
+        },
+      );
+    }
+    return null;
+  }
+  return coverFrom(grants, planId);
 }
 
 /**
@@ -2044,14 +2174,29 @@ async function runLifetimeFollowUp(
   if (failures.length > 0) throw failures[0];
 }
 
-/** Is the grant this payment bought still live (not refunded, not revoked)? */
+/**
+ * Is the grant this payment bought still live: in our grants (not revoked),
+ * and its charge in Stripe neither refunded in full nor disputed? Re-review of
+ * de86a2d (MINOR 2): a refund or dispute reaches Stripe before its own event
+ * revokes the grant here, and a redelivery in between must stop nothing.
+ */
 async function isLifetimeGrantLive(
   userId: string,
   paymentIntentId: string,
 ): Promise<boolean> {
   try {
     const grants = await readLifetimeGrants(createServiceRoleClient(), userId);
-    return grants.some((grant) => grant.paymentIntentId === paymentIntentId);
+    if (!grants.some((grant) => grant.paymentIntentId === paymentIntentId)) {
+      return false;
+    }
+    const lifetime = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["latest_charge"],
+    });
+    const charge =
+      typeof lifetime.latest_charge === "string"
+        ? await stripe.charges.retrieve(lifetime.latest_charge)
+        : lifetime.latest_charge;
+    return !(charge?.refunded || charge?.disputed);
   } catch (error) {
     alertOps(
       `Lifetime purchase ${paymentIntentId}: whether its grant is still live ` +

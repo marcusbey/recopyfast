@@ -925,10 +925,22 @@ export async function decideEndedInvoiceRefund(
     invoice.status === "paid"
       ? {
           amountPaid: invoice.amount_paid,
-          total: invoice.total ?? invoice.amount_paid,
+          customerCreditSpent: customerCreditSpentOn(invoice),
         }
       : null,
   );
+}
+
+/**
+ * What the customer's credit balance paid of an invoice (re-review of
+ * de86a2d): its total, less what was paid in money, less what pre-payment
+ * credit notes took off what was due (a credit note first lowers the amount
+ * due; it is not the customer's credit). Never negative.
+ */
+function customerCreditSpentOn(invoice: Stripe.Invoice): number {
+  const total = invoice.total ?? invoice.amount_paid;
+  const creditNoted = invoice.pre_payment_credit_notes_amount ?? 0;
+  return Math.max(0, total - invoice.amount_paid - creditNoted);
 }
 
 /** Line-item page size: Stripe's maximum. */

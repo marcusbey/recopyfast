@@ -242,7 +242,7 @@ describe("decideInvoiceRefund: review of 67c6caf", () => {
     expect(
       decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, {
         amountPaid: 0,
-        total: 1900,
+        customerCreditSpent: 1900,
       }),
     ).toEqual({ kind: "manual", reason: "paid_by_credit" });
   });
@@ -251,7 +251,7 @@ describe("decideInvoiceRefund: review of 67c6caf", () => {
     expect(
       decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, {
         amountPaid: 1900,
-        total: 1900,
+        customerCreditSpent: 0,
       }),
     ).toEqual({ kind: "refund" });
     expect(
@@ -265,7 +265,7 @@ describe("decideInvoiceRefund: review of 67c6caf", () => {
     expect(
       decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, {
         amountPaid: 1000,
-        total: 1900,
+        customerCreditSpent: 900,
       }),
     ).toEqual({ kind: "refund", creditNotRefunded: 900 });
   });
@@ -276,9 +276,20 @@ describe("decideInvoiceRefund: review of 67c6caf", () => {
         [line("prod_agency", 4900)],
         LIFETIME_PRO,
         productIndex,
-        { amountPaid: 0, total: 4900 },
+        { amountPaid: 0, customerCreditSpent: 4900 },
       ),
     ).toEqual({ kind: "skip", reason: "uncovered" });
+  });
+});
+
+describe("decideInvoiceRefund: re-review of de86a2d", () => {
+  it("skips a covered invoice a 100% coupon made free: nothing collected, no credit spent", () => {
+    expect(
+      decideInvoiceRefund([line("prod_pro")], LIFETIME_PRO, productIndex, {
+        amountPaid: 0,
+        customerCreditSpent: 0,
+      }),
+    ).toEqual({ kind: "skip", reason: "nothing_charged" });
   });
 });
 
