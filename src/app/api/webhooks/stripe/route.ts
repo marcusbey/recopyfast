@@ -6,10 +6,8 @@ import {
   findPaidPlanIdByStripePriceId,
   getLifetimeGrantPlanId,
   isPaidPlanId,
-  loadPaidPlanPriceIndex,
   resolveStripePriceId,
   type PaidPlanId,
-  type PaidPlanPriceIndex,
 } from "@/lib/stripe/plans";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
@@ -39,18 +37,24 @@ import {
   finishSubscriptionCheckoutIntent,
 } from "@/lib/billing/checkout-reservation";
 import { isPlanCoveredByGrants } from "@/lib/stripe/plan-types";
+import { planOfProducts } from "@/lib/stripe/covered-refund-decision";
 import {
   CoveredRefundFailed,
   claimDisputeWarning,
+  claimManualInvoiceWarning,
   claimRefusalReport,
   claimUnknownPriceWarning,
+  coverFrom,
+  coverageAt,
+  decideEndedInvoiceRefund,
   endAtPeriodEndForLifetime,
   expireCheckoutsCoveredByGrant,
   isRefusedAsCoveredByLifetime,
   lifetimePaymentTime,
   listEndedSubscriptionsSince,
-  planOfPrices,
+  loadPlanProductIndex,
   readCustomerCredit,
+  readDatedLifetimeGrants,
   readLifetimeCover,
   recordTerminalRefusal,
   refundCoveredInvoice,
@@ -58,8 +62,11 @@ import {
   wasBoughtWithPlanAlreadyOwned,
   wasRefusedAsCoveredByLifetime,
   type CoveredSubscriptionRefusal,
+  type DatedGrant,
   type InvoicePlanCoverage,
   type LifetimeCover,
+  type ManualReviewInvoice,
+  type PlanProductIndex,
 } from "@/lib/stripe/lifetime-covered-billing";
 import {
   CANCELLED_REASON,
@@ -618,8 +625,10 @@ async function refuseIfLifetimeCovers(
     when?: string;
     /** The cover already read by the caller, once for many subscriptions. */
     cover?: LifetimeCover;
-    /** The catalogue snapshot already loaded by the caller (s82 review, N2). */
-    priceIndex?: PaidPlanPriceIndex;
+    /** The account's dated grants, already read by the caller. */
+    grants?: readonly DatedGrant[];
+    /** The catalogue's products, already loaded by the caller. */
+    productIndex?: PlanProductIndex;
   } = {},
 ): Promise<StripeSubscriptionWithPeriod> {
   const isTerminal = isTerminalSubscriptionStatus(subscription.status);
@@ -633,9 +642,6 @@ async function refuseIfLifetimeCovers(
     return subscription;
   }
 
-  // Which of an ended subscription's invoices may be refunded: those billing a
-  // plan the covering grant covers (s82 review, N2).
-  let coverage: InvoicePlanCoverage | undefined;
   if (!isRefusedAsCoveredByLifetime(subscription)) {
     // s82, Devin Review on PR #81 (finding 4): a customer can pay an old
     // Checkout after buying lifetime, then cancel before this webhook arrives.
@@ -653,7 +659,6 @@ async function refuseIfLifetimeCovers(
       if (isTerminal) return subscription;
       return endPredatingSubscription(subscription, planId, userId, cover);
     }
-    coverage = { grantPlanId: cover.planId, priceIndex: options.priceIndex };
   }
 
   // s82, Devin Review on PR #81 (finding 5): refused without a cancellation of
@@ -665,6 +670,19 @@ async function refuseIfLifetimeCovers(
   }
 
   try {
+    // Devin round on 8744bed: a subscription the customer ended has each of
+    // its invoices decided against every grant paid before it was bought.
+    const coverage: InvoicePlanCoverage | undefined =
+      isTerminal && !isRefusedAsCoveredByLifetime(subscription)
+        ? {
+            ...coverageAt(
+              options.grants ??
+                (await readDatedLifetimeGrants(supabase, userId)),
+              subscription.created,
+            ),
+            productIndex: options.productIndex,
+          }
+        : undefined;
     const refusal = await refuseSubscriptionCoveredByLifetime(
       subscription,
       coverage,
@@ -844,6 +862,7 @@ async function reportCoveredSubscriptionRefused(
     inFlightPaymentIds,
     refundedOutsideChargeIds,
     disputedChargeIds,
+    manualReviewInvoices,
   } = refusal;
   const metadata = {
     component: "webhooks/stripe",
@@ -855,10 +874,19 @@ async function reportCoveredSubscriptionRefused(
     inFlightPaymentIds,
     refundedOutsideChargeIds,
     disputedChargeIds,
+    manualReviewInvoiceIds: manualReviewInvoices.map(
+      (invoice) => invoice.invoiceId,
+    ),
   };
 
   await warnDisputedChargesOnce(
     disputedChargeIds,
+    subscription.id,
+    userId,
+    supabase,
+  );
+  await warnManualReviewInvoicesOnce(
+    manualReviewInvoices,
     subscription.id,
     userId,
     supabase,
@@ -905,6 +933,10 @@ async function reportCoveredSubscriptionRefused(
     (disputedChargeIds.length > 0
       ? ` ${disputedChargeIds.length} payment(s) are disputed and were not ` +
         `refunded: see the dispute warning.`
+      : "") +
+    (manualReviewInvoices.length > 0
+      ? ` ${manualReviewInvoices.length} invoice(s) were not refunded ` +
+        `automatically and need a person: see the invoice warning.`
       : "");
 
   // s82 review (minor 4): an error is an alarm. A refusal that refunded
@@ -952,6 +984,51 @@ async function warnDisputedChargesOnce(
         action: "covered_charge_disputed",
         subscriptionId,
         chargeId,
+      },
+    );
+  }
+}
+
+/**
+ * Warn ops, once per invoice, that an invoice of a refused subscription was
+ * not refunded automatically (Devin round on 8744bed): it mixes covered and
+ * uncovered charges, or one whose plan cannot be told. Never throws.
+ */
+async function warnManualReviewInvoicesOnce(
+  invoices: readonly ManualReviewInvoice[],
+  subscriptionId: string,
+  userId: string,
+  supabase: ServiceClient,
+): Promise<void> {
+  for (const { invoiceId, reason } of invoices) {
+    if (
+      !(await claimManualInvoiceWarning(
+        supabase,
+        invoiceId,
+        subscriptionId,
+        userId,
+      ))
+    ) {
+      continue;
+    }
+    const what =
+      reason === "mixed"
+        ? `invoice ${invoiceId} mixes covered and uncovered charges`
+        : reason === "ambiguous"
+          ? `invoice ${invoiceId} has a charge whose product is configured ` +
+            `for more than one plan`
+          : `invoice ${invoiceId} has a charge whose product no plan sells`;
+    warnOps(
+      `Subscription ${subscriptionId} was refused as covered by a lifetime ` +
+        `grant, but ${what}, so nothing on it was refunded automatically; ` +
+        `refund the covered lines by hand.`,
+      { userId },
+      {
+        component: "webhooks/stripe",
+        action: "covered_invoice_manual_review",
+        subscriptionId,
+        invoiceId,
+        reason,
       },
     );
   }
@@ -1220,6 +1297,47 @@ async function refundIfRefusedAsCovered(
     }
     // Live, or over for another reason — never refunded by this rule.
     if (!(await wasRefusedAsCoveredByLifetime(supabase, current))) return;
+
+    // Devin 4244837497: a subscription the customer had ended was refused by
+    // its record, invoice by invoice. A payment settling later on an invoice
+    // that refusal excluded (an uncovered plan, a mixed invoice) must not be
+    // refunded here either: the same per-invoice decision. A subscription our
+    // own cancellation refused (the marker) is unchanged.
+    if (!isRefusedAsCoveredByLifetime(current)) {
+      const decision = await decideEndedInvoiceRefund(
+        await stripe.invoices.retrieve(invoiceId),
+        coverageAt(
+          await readDatedLifetimeGrants(supabase, userId),
+          current.created,
+        ),
+        await loadPlanProductIndex(),
+      );
+      if (decision.kind === "manual") {
+        await warnManualReviewInvoicesOnce(
+          [{ invoiceId, reason: decision.reason }],
+          subscriptionId,
+          userId,
+          supabase,
+        );
+        return;
+      }
+      if (decision.kind === "skip") {
+        logger.info(
+          `Invoice ${invoiceId} of subscription ${subscriptionId}, refused as ` +
+            `covered by a lifetime grant, was paid, but it bills no plan the ` +
+            `customer's grants covered when the subscription was bought: not ` +
+            `refunded.`,
+          { userId },
+          {
+            component: "webhooks/stripe",
+            action: "refund_covered_invoice",
+            subscriptionId,
+            invoiceId,
+          },
+        );
+        return;
+      }
+    }
 
     const {
       refundIds,
@@ -1824,9 +1942,10 @@ async function refuseEndedSubscriptionsCoveredByGrant(
 ): Promise<void> {
   const supabase = createServiceRoleClient();
 
+  let grants: DatedGrant[];
   let cover: LifetimeCover | null;
   let ended: Stripe.Subscription[];
-  let priceIndex: PaidPlanPriceIndex;
+  let productIndex: PlanProductIndex;
   try {
     const { data: customer, error } = await supabase
       .from("billing_customers")
@@ -1839,10 +1958,12 @@ async function refuseEndedSubscriptionsCoveredByGrant(
     // No Stripe customer, no subscription.
     if (!customer?.stripe_customer_id) return;
 
-    // s82 review (minor 3): read once for the whole run. No live cover (the
-    // lifetime refunded or revoked before a late duplicate event) means there
-    // is nothing to refuse, and nothing to list.
-    cover = await readLifetimeCover(supabase, userId, grantsPlanId);
+    // s82 review (minor 3): read once for the whole run, every grant with its
+    // payment time (the invoice coverage needs them all, Devin 4244837673). No
+    // live cover (the lifetime refunded or revoked before a late duplicate
+    // event) means there is nothing to refuse, and nothing to list.
+    grants = await readDatedLifetimeGrants(supabase, userId);
+    cover = coverFrom(grants, grantsPlanId);
     if (!cover) return;
 
     ended = await listEndedSubscriptionsSince(
@@ -1851,9 +1972,10 @@ async function refuseEndedSubscriptionsCoveredByGrant(
     );
     if (ended.length === 0) return;
 
-    // s82 review (N1): one catalogue load for the run, failing loudly. A read
-    // failure answers 5xx and is retried; it never reads as an unknown price.
-    priceIndex = await loadPaidPlanPriceIndex();
+    // s82 review (N1): one catalogue load for the run, failing loudly, and its
+    // prices' products (Devin 4244837615). A read failure answers 5xx and is
+    // retried; it never reads as an unknown price.
+    productIndex = await loadPlanProductIndex();
   } catch (error) {
     alertOps(
       `Lifetime purchase ${paymentIntentId} granted, but the lifetime's cover ` +
@@ -1878,19 +2000,18 @@ async function refuseEndedSubscriptionsCoveredByGrant(
 
     let planId: PaidPlanId | null;
     try {
-      planId = planOfPrices(
-        (subscription.items?.data ?? []).flatMap((item) =>
-          item.price?.id ? [item.price.id] : [],
-        ),
-        priceIndex,
+      planId = planOfProducts(
+        await productsOfSubscription(subscription, productIndex),
+        productIndex,
         subscription.metadata?.plan_id,
       );
     } catch (error) {
-      // Misconfigured prices are not an unknown price: alerted, retried.
+      // Misconfigured prices, or a price whose product could not be read, are
+      // not an unknown price: alerted, retried.
       alertOps(
         `Lifetime purchase ${paymentIntentId} granted, but which plan ended ` +
           `subscription ${subscription.id} bills cannot be decided. ` +
-          `Returning 5xx so Stripe redelivers; fix the catalogue's price ids, ` +
+          `Returning 5xx so Stripe redelivers; fix the catalogue's prices, ` +
           `or refund it by hand if it was bought after the lifetime on a ` +
           `plan the lifetime covers.`,
         error,
@@ -1906,13 +2027,13 @@ async function refuseEndedSubscriptionsCoveredByGrant(
       continue;
     }
     if (!planId) {
-      // s82 review (N1, minor 3): no price a loaded catalogue sells. Retrying
-      // would never resolve it, so it is skipped, and ops hear of it once
-      // across every duplicate event of this lifetime.
+      // s82 review (N1, minor 3): no product a loaded catalogue sells.
+      // Retrying would never resolve it, so it is skipped, and ops hear of it
+      // once across every duplicate event of this lifetime.
       if (await claimUnknownPriceWarning(supabase, subscription.id, userId)) {
         warnOps(
           `Lifetime purchase ${paymentIntentId} granted, but ended ` +
-            `subscription ${subscription.id} bills no price the plan ` +
+            `subscription ${subscription.id} bills no product the plan ` +
             `catalogue sells, so it was skipped. If it was bought after the ` +
             `lifetime on a plan the lifetime covers, refund it by hand.`,
           { userId },
@@ -1934,7 +2055,8 @@ async function refuseEndedSubscriptionsCoveredByGrant(
       await refuseIfLifetimeCovers(subscription, planId, userId, supabase, {
         when: `ended before lifetime purchase ${paymentIntentId} was processed`,
         cover,
-        priceIndex,
+        grants,
+        productIndex,
       });
     } catch (error) {
       failures.push(error);
@@ -1942,6 +2064,26 @@ async function refuseEndedSubscriptionsCoveredByGrant(
   }
 
   if (failures.length > 0) throw failures[0];
+}
+
+/**
+ * The Stripe products a subscription's items bill: each item price's product,
+ * or, when the payload does not carry it, read once per run.
+ */
+async function productsOfSubscription(
+  subscription: Stripe.Subscription,
+  productIndex: PlanProductIndex,
+): Promise<string[]> {
+  const products: string[] = [];
+  for (const item of subscription.items?.data ?? []) {
+    const price = item.price;
+    if (!price) continue;
+    const productId =
+      idOf(price.product) ??
+      (price.id ? await productIndex.productOfPrice(price.id) : null);
+    if (productId) products.push(productId);
+  }
+  return products;
 }
 
 /**

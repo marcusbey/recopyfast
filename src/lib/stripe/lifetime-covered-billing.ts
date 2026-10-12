@@ -11,11 +11,15 @@ import {
   readLifetimeGrants,
   type LifetimeGrant,
 } from "@/lib/billing/effective-plan";
+import { loadPaidPlanPriceIndex, type PaidPlanId } from "./plans";
 import {
-  loadPaidPlanPriceIndex,
-  type PaidPlanId,
-  type PaidPlanPriceIndex,
-} from "./plans";
+  decideInvoiceRefund,
+  type InvoiceCoverage,
+  type InvoiceLineCharge,
+  type InvoiceRefundDecision,
+  type ManualReviewReason,
+  type ProductPlanLookup,
+} from "./covered-refund-decision";
 
 /**
  * s82, Devin Review on PR #81 (finding 1): a lifetime owner is never billed by
@@ -52,8 +56,6 @@ export interface LifetimeCover {
   readonly paidAt: number;
   /** That grant's payment intent; null for a comp nobody paid for. */
   readonly paymentIntentId: string | null;
-  /** That grant's plan: which plans it covers (s82 review, N2). */
-  readonly planId: string;
 }
 
 /**
@@ -85,14 +87,74 @@ export async function readLifetimeCover(
   for (const grant of covering) {
     const paidAt = await paidAtOf(grant);
     if (!earliest || paidAt < earliest.paidAt) {
+      earliest = { paidAt, paymentIntentId: grant.paymentIntentId };
+    }
+  }
+  return earliest;
+}
+
+/** A live, undated grant and when it was paid for. */
+export interface DatedGrant {
+  readonly planId: string;
+  /** Unix seconds (`paidAtOf`). */
+  readonly paidAt: number;
+  readonly paymentIntentId: string | null;
+}
+
+/**
+ * Every live, undated grant of the account with when it was paid for, read
+ * once for a run that needs both a cover and an invoice coverage. Same grants
+ * and dating as `readLifetimeCover`. Throws on a read failure.
+ */
+export async function readDatedLifetimeGrants(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<DatedGrant[]> {
+  const dated: DatedGrant[] = [];
+  for (const grant of await readLifetimeGrants(supabase, userId)) {
+    dated.push({
+      planId: grant.planId,
+      paidAt: await paidAtOf(grant),
+      paymentIntentId: grant.paymentIntentId,
+    });
+  }
+  return dated;
+}
+
+/** `readLifetimeCover`'s rule over grants already read: the earliest covering. */
+export function coverFrom(
+  grants: readonly DatedGrant[],
+  planId: string,
+): LifetimeCover | null {
+  let earliest: LifetimeCover | null = null;
+  for (const grant of grants) {
+    if (!isPlanCoveredByGrants(planId, [grant.planId])) continue;
+    if (!earliest || grant.paidAt < earliest.paidAt) {
       earliest = {
-        paidAt,
+        paidAt: grant.paidAt,
         paymentIntentId: grant.paymentIntentId,
-        planId: grant.planId,
       };
     }
   }
   return earliest;
+}
+
+/**
+ * The plans an ended subscription's invoices are judged against (Devin
+ * 4244837673): every grant paid at or before it was bought, by the same
+ * payment-order rule, not only the earliest grant covering its last plan.
+ */
+export function coverageAt(
+  grants: readonly DatedGrant[],
+  subscriptionCreated: number,
+): InvoiceCoverage {
+  return {
+    grantPlanIds: grants
+      .filter((grant) =>
+        wasBoughtWithPlanAlreadyOwned(subscriptionCreated, grant.paidAt),
+      )
+      .map((grant) => grant.planId),
+  };
 }
 
 /** When a lifetime purchase was paid: its payment intent's `created`. */
@@ -206,6 +268,18 @@ export interface CoveredInvoiceRefund {
    * resolve it in Stripe (s82 review, MAJOR 1).
    */
   disputedChargeIds: string[];
+  /**
+   * Invoices of an ended subscription refunded by nobody automatically, because
+   * they mix covered and uncovered charges or one cannot be told (Devin round on
+   * 8744bed). Ops are warned once per invoice to refund the covered lines.
+   */
+  manualReviewInvoices: ManualReviewInvoice[];
+}
+
+/** An invoice that needs a person, and why. */
+export interface ManualReviewInvoice {
+  invoiceId: string;
+  reason: ManualReviewReason;
 }
 
 /** What a refusal took back, for the ops report. */
@@ -226,6 +300,7 @@ const NO_REFUNDS: CoveredInvoiceRefund = {
   inFlightPaymentIds: [],
   refundedOutsideChargeIds: [],
   disputedChargeIds: [],
+  manualReviewInvoices: [],
 };
 
 function mergeRefunds(
@@ -241,6 +316,10 @@ function mergeRefunds(
       ...b.refundedOutsideChargeIds,
     ],
     disputedChargeIds: [...a.disputedChargeIds, ...b.disputedChargeIds],
+    manualReviewInvoices: [
+      ...a.manualReviewInvoices,
+      ...b.manualReviewInvoices,
+    ],
   };
 }
 
@@ -285,10 +364,11 @@ export class CoveredRefundFailed extends Error {
  * the metadata does not) is not made again.
  *
  * A subscription the customer had already ended (s82 review, minor 2) has
- * every paid invoice refunded, not only its latest: a cancellation with
+ * every paid invoice considered, not only its latest: a cancellation with
  * proration can leave a final credit invoice as the latest, after the one that
- * collected the money. A live subscription keeps the latest invoice: this
- * refusal cancels it without a final invoice.
+ * collected the money. Each is decided by `decideInvoiceRefund` (Devin round
+ * on 8744bed). A live subscription keeps the latest invoice: this refusal
+ * cancels it without a final invoice.
  *
  * Throws on any Stripe failure — `CoveredRefundFailed` when the subscription
  * is stopped and only the refund failed. Callers decide: the subscription
@@ -305,12 +385,16 @@ export async function refuseSubscriptionCoveredByLifetime(
   const stopped = await cancelCovered(subscription);
 
   try {
-    let refunds = NO_REFUNDS;
-    for (const invoiceId of await invoicesToRefund(
+    const { refund, manual } = await invoicesToRefund(
       stopped,
       endedBeforeRefusal,
       coverage,
-    )) {
+    );
+    let refunds: CoveredInvoiceRefund = {
+      ...NO_REFUNDS,
+      manualReviewInvoices: manual,
+    };
+    for (const invoiceId of refund) {
       refunds = mergeRefunds(
         refunds,
         await refundCoveredInvoice(invoiceId, stopped.id),
@@ -323,96 +407,146 @@ export async function refuseSubscriptionCoveredByLifetime(
 }
 
 /**
- * Which invoices of an ended subscription a refusal may refund (s82 review,
- * N2): those billing a plan the covering grant covers.
+ * What an ended subscription's invoices are judged against (Devin round on
+ * 8744bed): the plans its customer's grants covered when it was bought
+ * (`coverageAt`), and the catalogue's products.
  */
-export interface InvoicePlanCoverage {
-  /** The covering grant's plan (`LifetimeCover.planId`). */
-  readonly grantPlanId: string;
-  /** The catalogue snapshot to resolve line prices with; loaded when absent. */
-  readonly priceIndex?: PaidPlanPriceIndex;
+export interface InvoicePlanCoverage extends InvoiceCoverage {
+  /** Loaded when absent: one catalogue load and one price read per price. */
+  readonly productIndex?: PlanProductIndex;
 }
 
 /**
- * The invoices a refusal scans: the latest, and for a subscription the
- * customer ended, every paid one too, each once.
+ * The invoices a refusal refunds, and those it leaves to a person.
  *
- * s82 review (N2): a subscription the customer ended may have changed plans
- * along the way. Refunding every paid invoice for the plan it ended on would
- * refund an Agency month beside Lifetime Pro. So each of its invoices, the
- * latest included, is refunded only when one of its lines bills a plan the
- * covering grant covers, resolved through one catalogue load. A live
- * subscription keeps its latest invoice, which bills the covered plan the
- * refusal was decided on.
+ * A live subscription: its latest invoice, which bills the covered plan the
+ * refusal was decided on. A subscription the customer ended: its latest and
+ * every paid invoice, each decided by `decideInvoiceRefund` over all its lines
+ * (s82 review N2, Devin round on 8744bed).
  */
 async function invoicesToRefund(
   subscription: Stripe.Subscription,
   endedBeforeRefusal: boolean,
   coverage: InvoicePlanCoverage | undefined,
-): Promise<string[]> {
+): Promise<{ refund: string[]; manual: ManualReviewInvoice[] }> {
   const latest = idOf(subscription.latest_invoice);
-  if (!endedBeforeRefusal) return latest ? [latest] : [];
+  if (!endedBeforeRefusal)
+    return { refund: latest ? [latest] : [], manual: [] };
   if (!coverage) {
     throw new Error(
       `the refusal of ended subscription ${subscription.id} was not told ` +
-        `which plans its grant covers`,
+        `which plans its customer's grants covered`,
     );
   }
 
-  const priceIndex = coverage.priceIndex ?? (await loadPaidPlanPriceIndex());
+  const productIndex = coverage.productIndex ?? (await loadPlanProductIndex());
   const paid = await listPaidInvoices(subscription.id);
   const candidates =
     latest && !paid.some((invoice) => invoice.id === latest)
       ? [await stripe.invoices.retrieve(latest), ...paid]
       : paid;
 
-  const covered: string[] = [];
+  const refund: string[] = [];
+  const manual: ManualReviewInvoice[] = [];
+  const seen = new Set<string>();
   for (const invoice of candidates) {
-    if (!invoice.id || covered.includes(invoice.id)) continue;
-    const priceIds = await invoiceLinePriceIds(invoice);
-    if (billsCoveredPlan(priceIds, priceIndex, coverage.grantPlanId)) {
-      covered.push(invoice.id);
+    if (!invoice.id || seen.has(invoice.id)) continue;
+    seen.add(invoice.id);
+    const decision = await decideEndedInvoiceRefund(
+      invoice,
+      coverage,
+      productIndex,
+    );
+    if (decision.kind === "refund") refund.push(invoice.id);
+    if (decision.kind === "manual") {
+      manual.push({ invoiceId: invoice.id, reason: decision.reason });
     }
   }
-  return covered;
+  return { refund, manual };
+}
+
+/** The catalogue's products, and a per-run price-to-product lookup. */
+export interface PlanProductIndex extends ProductPlanLookup {
+  /** The Stripe product of a price, read once per run. */
+  productOfPrice(priceId: string): Promise<string | null>;
 }
 
 /**
- * Does one of these line prices bill a plan the grant covers? A price the
- * catalogue does not sell (a one-off invoice item) bills no plan. A price
- * configured for two plans throws: never refund on a guess.
+ * Which plans each Stripe product sells, from the catalogue's configured
+ * prices (Devin 4244837615): the catalogue stores price ids only, and a price
+ * change keeps the product, so an invoice line on a retired price still maps
+ * to its plan. One catalogue load, failing loudly (s82 review, N1); one Stripe
+ * read per configured price, cached for the run.
  */
-function billsCoveredPlan(
-  priceIds: readonly string[],
-  priceIndex: PaidPlanPriceIndex,
-  grantPlanId: string,
-): boolean {
-  return priceIds.some((priceId) => {
-    const plans = priceIndex.plansOf(priceId);
-    if (plans.length > 1) {
-      throw new Error(
-        `price ${priceId} is configured for more than one plan ` +
-          `(${plans.join(", ")}), so whether its invoice is covered is unknown`,
-      );
-    }
-    return plans.length === 1 && isPlanCoveredByGrants(plans[0], [grantPlanId]);
-  });
+export async function loadPlanProductIndex(): Promise<PlanProductIndex> {
+  const priceIndex = await loadPaidPlanPriceIndex();
+  const products = new Map<string, Promise<string | null>>();
+  const productOfPrice = (priceId: string): Promise<string | null> => {
+    const known = products.get(priceId);
+    if (known) return known;
+    const read = stripe.prices
+      .retrieve(priceId)
+      .then((price) => idOf(price.product));
+    products.set(priceId, read);
+    return read;
+  };
+
+  const plansByProduct = new Map<string, Set<PaidPlanId>>();
+  for (const priceId of priceIndex.priceIds) {
+    const productId = await productOfPrice(priceId);
+    if (!productId) continue;
+    plansByProduct.set(
+      productId,
+      new Set([
+        ...(plansByProduct.get(productId) ?? []),
+        ...priceIndex.plansOf(priceId),
+      ]),
+    );
+  }
+
+  return {
+    plansOfProduct: (productId) => [...(plansByProduct.get(productId) ?? [])],
+    productOfPrice,
+  };
+}
+
+/**
+ * Decide one invoice of an ended subscription from every line it has: the
+ * refusal and the late-settlement path both ask this (Devin 4244837497).
+ */
+export async function decideEndedInvoiceRefund(
+  invoice: Stripe.Invoice,
+  coverage: InvoiceCoverage,
+  productIndex: PlanProductIndex,
+): Promise<InvoiceRefundDecision> {
+  const lines = await allInvoiceLines(invoice);
+  const charges: InvoiceLineCharge[] = [];
+  for (const line of lines) {
+    charges.push({
+      lineId: line.id,
+      amount: line.amount,
+      // Not a charge, never read: no product lookup for it.
+      productId:
+        line.amount > 0 ? await lineProductId(line, productIndex) : null,
+    });
+  }
+  return decideInvoiceRefund(charges, coverage, productIndex);
 }
 
 /** Line-item page size: Stripe's maximum. */
 const INVOICE_LINE_PAGE_SIZE = 100;
 
 /**
- * The price of every line of an invoice: from the lines the invoice carries,
- * or, when Stripe says there are more, every page of them.
+ * Every line of an invoice: the lines it carries, or, when Stripe says there
+ * are more, every page of them.
  */
-async function invoiceLinePriceIds(invoice: Stripe.Invoice): Promise<string[]> {
-  if (!invoice.lines?.has_more) {
-    return (invoice.lines?.data ?? []).flatMap(linePriceId);
-  }
+async function allInvoiceLines(
+  invoice: Stripe.Invoice,
+): Promise<Stripe.InvoiceLineItem[]> {
+  if (!invoice.lines?.has_more) return invoice.lines?.data ?? [];
 
   const invoiceId = invoice.id as string;
-  const priceIds: string[] = [];
+  const lines: Stripe.InvoiceLineItem[] = [];
   let startingAfter: string | undefined;
   const seenCursors = new Set<string>();
   for (;;) {
@@ -427,55 +561,41 @@ async function invoiceLinePriceIds(invoice: Stripe.Invoice): Promise<string[]> {
       seenCursors,
       `line-item lookup for invoice ${invoiceId}`,
     );
-    priceIds.push(...page.data.flatMap(linePriceId));
+    lines.push(...page.data);
 
     if (!nextCursor) break;
     startingAfter = nextCursor;
   }
-  return priceIds;
+  return lines;
 }
 
 /**
- * A line's price: basil's `pricing.price_details.price`, or the top-level
- * `price` an endpoint on an older API version still sends.
+ * A line's product: basil's `pricing.price_details.product`; on an endpoint of
+ * an older API version, its `price.product`, or its price's product read from
+ * Stripe. Null when the line names no price at all.
  */
-function linePriceId(line: Stripe.InvoiceLineItem): string[] {
-  const legacy = (line as { price?: string | { id?: string } | null }).price;
+async function lineProductId(
+  line: Stripe.InvoiceLineItem,
+  productIndex: PlanProductIndex,
+): Promise<string | null> {
+  const fromPricing = line.pricing?.price_details?.product;
+  if (fromPricing) return fromPricing;
+
+  const legacy = (
+    line as {
+      price?:
+        | string
+        | { id?: string; product?: string | { id?: string } }
+        | null;
+    }
+  ).price;
+  if (legacy && typeof legacy === "object" && legacy.product) {
+    return idOf(legacy.product);
+  }
   const priceId =
     line.pricing?.price_details?.price ??
     (typeof legacy === "string" ? legacy : legacy?.id);
-  return priceId ? [priceId] : [];
-}
-
-/**
- * The one paid plan a subscription's prices bill, resolved through a
- * catalogue snapshot (s82 review, N1): null only when the loaded catalogue
- * sells none of them, so a skip is never decided on a read failure. Throws
- * when they cannot be decided: a price configured for two plans, or prices of
- * two plans that `declared` (its `metadata.plan_id`) does not settle.
- */
-export function planOfPrices(
-  priceIds: readonly string[],
-  priceIndex: PaidPlanPriceIndex,
-  declared?: string,
-): PaidPlanId | null {
-  const claimants = priceIds.map((priceId) => priceIndex.plansOf(priceId));
-  const ambiguous = priceIds.filter((_, index) => claimants[index].length > 1);
-  if (ambiguous.length > 0) {
-    throw new Error(
-      `price(s) [${ambiguous.join(", ")}] are configured for more than one plan`,
-    );
-  }
-
-  const plans = [...new Set(claimants.flat())];
-  if (plans.length === 0) return null;
-  if (plans.length === 1) return plans[0];
-  const settled = plans.find((plan) => plan === declared);
-  if (settled) return settled;
-  throw new Error(
-    `prices [${priceIds.join(", ")}] bill ${plans.length} plans ` +
-      `(${plans.join(", ")})`,
-  );
+  return priceId ? productIndex.productOfPrice(priceId) : null;
 }
 
 /** Paid-invoice page size: Stripe's maximum. */
@@ -626,6 +746,8 @@ export async function refundCoveredInvoice(
     inFlightPaymentIds,
     refundedOutsideChargeIds,
     disputedChargeIds,
+    // Decided per invoice by the caller, never here.
+    manualReviewInvoices: [],
   };
 }
 
@@ -921,6 +1043,9 @@ export async function claimRefusalReport(
       in_flight_payment_ids: refusal.inFlightPaymentIds,
       refunded_outside_charge_ids: refusal.refundedOutsideChargeIds,
       disputed_charge_ids: refusal.disputedChargeIds,
+      manual_review_invoice_ids: refusal.manualReviewInvoices.map(
+        (invoice) => invoice.invoiceId,
+      ),
     },
     processed: true,
   });
@@ -955,6 +1080,30 @@ export async function claimDisputeWarning(
     eventId: `${COVERED_BY_LIFETIME}_disputed:${chargeId}`,
     data: { charge_id: chargeId, subscription_id: subscriptionId },
     subject: `charge ${chargeId}`,
+  });
+}
+
+/** `billing_events.event_type` of the once-only manual-review warning. */
+const MANUAL_INVOICE_WARNING_EVENT_TYPE =
+  "internal.covered_invoice_manual_review";
+
+/**
+ * Claim the one warning that an invoice of a refused subscription needs a
+ * person (Devin round on 8744bed): the refusal and every settlement of the
+ * invoice ask, ops hear once.
+ */
+export async function claimManualInvoiceWarning(
+  supabase: SupabaseClient,
+  invoiceId: string,
+  subscriptionId: string,
+  userId: string,
+): Promise<boolean> {
+  return claimWarningOnce(supabase, {
+    userId,
+    eventType: MANUAL_INVOICE_WARNING_EVENT_TYPE,
+    eventId: `${COVERED_BY_LIFETIME}_manual_invoice:${invoiceId}`,
+    data: { invoice_id: invoiceId, subscription_id: subscriptionId },
+    subject: `invoice ${invoiceId}`,
   });
 }
 

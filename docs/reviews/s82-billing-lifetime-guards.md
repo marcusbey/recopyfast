@@ -540,7 +540,9 @@ fixed before accepting that verdict. Each was fixed test-first.
      - Six index unit tests in `plans.test.ts`, including "throws when the
        catalogue cannot be read, where the single lookup answers null".
 2. **N2 (minor): every paid invoice was refunded for the plan the
-   subscription ended on.**
+   subscription ended on.** (Superseded by the Devin round on `8744bed`
+   below: invoices are now decided per invoice, over every line, by product,
+   against every grant paid before the subscription.)
 
    **Fix.** For a subscription the customer ended, each candidate invoice
    (every paid one, plus the latest, retrieved when it is not among them) is
@@ -603,6 +605,150 @@ behaviour. After: `plans.test.ts` 55/55, the lifetime-covered suite 134/134.
 | N3b backstop: ours reported outside | 1 |
 
 Total: 10 red. All 10 mutations were caught.
+
+## Devin round on `8744bed`
+
+Devin re-ran on `8744bed` and raised four 🔴 and one 🟡, all against N2's
+invoice coverage. The architect mandated one design rather than five patches.
+It covers the refunds of ENDED subscriptions bought after a grant; live
+subscriptions are unchanged.
+
+| Comment | Finding | Fixed by |
+|---|---|---|
+| 4244837497 🔴 | A payment settling later on an invoice the refusal excluded was refunded: settlement trusted the subscription-wide record. | Settlement runs the same per-invoice decision for a refusal known by its record. |
+| 4244837575 🔴 | A Pro + Agency invoice on one payment was refunded in full once a Pro line was found. | Every billable line must be covered; a mixed invoice goes to a person. |
+| 4244837615 🔴 | A paid invoice on a retired Pro price mapped to no plan and was left charged. | Lines map to plans by Stripe product, which a price change keeps. |
+| 4244837673 🔴 | Only the earliest grant counted, so an Agency invoice beside Lifetime Pro then Founding Agency was excluded. | Coverage is every live grant paid at or before the subscription was bought. |
+| 4244837719 🟡 | `some` stopped at the first covered line, so a later ambiguous line escaped. | Every line is read before deciding. |
+
+**Design.**
+- **Pure decision.** `decideInvoiceRefund(lines, coverage, productIndex)` lives
+  in the new `src/lib/stripe/covered-refund-decision.ts`, with no I/O. It reads
+  every line. Zero-amount and negative lines (proration credits) never decide
+  anything. Each billable line maps to plans through its product:
+  - **refund**: every billable line bills a covered plan;
+  - **skip**: no line bills a covered plan, or nothing was charged;
+  - **manual**: covered and uncovered lines together, an ambiguous product
+    (several plans), or an unresolvable line (no product, or a product no plan
+    sells).
+
+  One deliberate tightening: a billable line whose product maps to no plan is
+  *unresolvable*, not "uncovered". An old price moved to a new product must
+  reach a person rather than be skipped silently, which is Devin's own advice
+  on 4244837615. The same module holds `planOfProducts`, the product-based
+  successor of N1's `planOfPrices`, for a subscription's own plan.
+- **Coverage.** `readDatedLifetimeGrants` reads every live undated grant with
+  its payment time, once per run. `coverageAt` keeps the grants paid at or
+  before the subscription was bought (`wasBoughtWithPlanAlreadyOwned`).
+  `coverFrom` derives the earliest cover from the same read, so minor 3's
+  "once per run" holds.
+- **Product index.** The catalogue stores price ids only, no products.
+  `loadPlanProductIndex` loads the catalogue once (`loadPaidPlanPriceIndex`,
+  failing loudly, as in N1). It reads each configured price's product from
+  Stripe once per run, cached, and maps product to plans.
+  - Basil lines carry `pricing.price_details.product` directly. An older
+    endpoint's `price.product`, or the price's product read through the same
+    cache, is the fallback.
+  - A subscription's own plan is resolved by its items' products too, so a
+    subscription still on a retired price is not skipped as "unknown".
+- **Refusal path.** For an ended subscription, the latest invoice and every
+  paid invoice are decided over all their lines. Refund goes through the
+  existing idempotent path. Skip is silent. Manual is reported in the refusal
+  (`manualReviewInvoices`) and warned once per invoice: a write-once
+  `billing_events` row (`covered_by_lifetime_manual_invoice:<invoice>`), as a
+  Sentry warning: "invoice <id> mixes covered and uncovered charges … refund
+  the covered lines by hand".
+- **Settlement path.** When a refusal is known by its terminal record rather
+  than our marker, `refundIfRefusedAsCovered` makes the same decision on the
+  settled invoice before refunding. It never refunds an uncovered or mixed
+  invoice; a mixed one is warned once. Marker refusals are unchanged.
+
+**Tests, red first.**
+- `covered-refund-decision.test.ts` (new, 17): could not run before the module
+  existed. It covers:
+  - all covered;
+  - Starter beside Lifetime Pro;
+  - none covered;
+  - mixed;
+  - ambiguous after covered;
+  - an unmapped product after covered;
+  - no product;
+  - a retired price on a covered product;
+  - two grants (Pro then Agency) covering an Agency invoice;
+  - zero and credit lines (including an ambiguous credit);
+  - only credits;
+  - no grant;
+  - reason precedence;
+  - four `planOfProducts` cases.
+- Lifetime-covered suite: **8 failed, 136 passed** before the change, then
+  **144/144**. The new "Devin round on 8744bed" describe:
+  - 4244837497 ×3: an excluded Agency invoice settling later is not refunded;
+    a covered invoice settling later still is; a mixed one settling later is
+    warned once.
+  - 4244837575: a Pro + Agency invoice is not refunded, with one warning
+    across two events.
+  - 4244837615: a retired Pro price is refunded through its product.
+  - 4244837673 ×2: Lifetime Pro then Founding Agency covers the Agency
+    invoice; an Agency grant paid after the subscription does not.
+  - 4244837719: an ambiguous line after a covered one is not refunded.
+  - A proration credit does not make a Pro invoice mixed.
+  - A live subscription's refusal is unchanged: no invoice listing, retrieval
+    or price read.
+  - The covered-settlement, later-grant, credit and live cases are guards that
+    passed before.
+
+**Existing assertions changed, declared:** two N2 cases.
+- "fails closed when an invoice line's price is configured for two plans"
+  (500) became "sends an invoice whose line product is configured for two
+  plans to a person, never refunding it" (200 and one warning). The design
+  sends ambiguity to a person, not into a retry loop.
+- "reads an invoice's lines past the first page before deciding" now proves
+  paging by an Agency line on page two that makes the invoice mixed. Before,
+  its first-page Agency line plus a second-page Pro line was refunded; that
+  is mixed under this design.
+
+**Fixtures changed, declared:**
+- The Stripe fake gained `prices.retrieve`.
+- Lines carry `amount` and their product (`productOf`, where the retired
+  `price_pro_v1` belongs to Pro's product).
+- The `plans` mock's index gained `priceIds`.
+- `invoicePaid` takes an invoice id.
+- `plans.test.ts` asserts the index's `priceIds`.
+
+**Mutations,** each restored afterwards (files byte-identical; baselines
+17/17 and 144/144):
+
+| Mutation | Suite | Red |
+|---|---|---:|
+| P1 zero-amount lines decide | pure | 2 |
+| P2 credit lines decide | pure | 2 |
+| P3 a line with no product is ignored | pure | 2 |
+| P4 ambiguous product counted as covered | pure | 2 |
+| P5 unmapped product counted as uncovered | pure | 1 |
+| P6 stops at the first covered line | pure | 3 |
+| P7 only the first grant covers | pure | 1 |
+| P8 ambiguity not reported | pure | 2 |
+| P9 unresolvable not reported | pure | 3 |
+| P10 ambiguity named after a missing product | pure | 1 |
+| P11 nothing covered is not skipped | pure | 3 |
+| P12 a mixed invoice is refunded | pure | 1 |
+| P13 `planOfProducts` ignores ambiguity | pure | 1 |
+| P14 `planOfProducts` ignores the declared plan | pure | 1 |
+| I1 settlement skips the per-invoice decision | webhook | 2 |
+| I2 coverage ignores payment order | webhook | 1 |
+| I3 coverage from the earliest grant only | webhook | 1 |
+| I4 manual-review warning not once | webhook | 2 |
+
+Total: 31 red. All 18 mutations were caught.
+
+**Scope note on 4244837673.** The architect's rule judges an ended
+subscription's invoices against the grants paid before *the subscription* was
+bought, not before each invoice. Suppose a subscription was bought between a
+Lifetime Pro and a later Lifetime Agency. Its Agency-period invoices are not
+refunded here; that subscription predates the Agency grant. The later grant's
+own event treats a live subscription it covers in the usual way (set to end
+at period end). This is recorded so the architect can confirm it is the
+intended boundary.
 
 ### Current implementation verification
 
@@ -693,8 +839,25 @@ Same environment and rules: no Stripe, Supabase or production calls.
 - DB harness: not run. No migration was added; the unknown-price claim reuses
   `billing_events`.
 
+### Devin round on `8744bed` verification
+
+Same environment and rules: no Stripe, Supabase or production calls.
+
+- `npm run lint`: passed, 0 errors / 31 existing warnings.
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath src/__tests__/api/billing/stripe-webhook-lifetime-covered.test.ts src/__tests__/lib/stripe/covered-refund-decision.test.ts src/__tests__/lib/stripe/plans.test.ts src/__tests__/api/billing/lifetime-grant-plan.test.ts src/__tests__/lib/monitoring/ops-alert.test.ts`:
+  5 suites, 239/239 passed (144 + 17 + 55 + 18 + 5).
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/|src/__tests__/lib/monitoring/'`:
+  55 suites / 953 tests passed, 0 failures.
+- `npm test`: 438 suites passed, 2 skipped; 6,151 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added; the manual-review claim
+  reuses `billing_events`.
+
 The gate lines below were `pending` until the architect's re-review. The
-re-review's verdict (minor, ship allowed) stands with N1–N3 fixed.
+re-review's verdict (minor, ship allowed) stood with N1–N3 fixed and stands
+with the Devin round on `8744bed` fixed. s82b remains the recorded follow-up.
 
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.

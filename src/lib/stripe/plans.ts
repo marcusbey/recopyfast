@@ -797,6 +797,8 @@ export async function findPaidPlanIdByStripePriceId(
 
 /** Which paid plans each configured Stripe price bills, from one catalogue load. */
 export interface PaidPlanPriceIndex {
+  /** Every configured price of every sold paid plan. */
+  readonly priceIds: readonly string[];
   /**
    * The paid plans configured with this price: none when the loaded catalogue
    * sells no such price, one normally, several when the price is configured
@@ -835,6 +837,7 @@ export async function loadPaidPlanPriceIndex(): Promise<PaidPlanPriceIndex> {
   }
 
   return {
+    priceIds: [...plansByPrice.keys()],
     plansOf: (priceId) => [...(plansByPrice.get(priceId) ?? [])],
   };
 }

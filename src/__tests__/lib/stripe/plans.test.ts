@@ -609,6 +609,14 @@ describe("plan catalogue loader", () => {
       expect(index.plansOf("price_pro_yearly")).toEqual(["pro"]);
       expect(index.plansOf("price_starter_yearly")).toEqual(["starter"]);
       expect(index.plansOf("price_agency_monthly")).toEqual(["agency"]);
+      expect([...index.priceIds].sort()).toEqual([
+        "price_agency_monthly",
+        "price_agency_yearly",
+        "price_pro_monthly",
+        "price_pro_yearly",
+        "price_starter_monthly",
+        "price_starter_yearly",
+      ]);
     });
 
     it("follows a populated column override", async () => {

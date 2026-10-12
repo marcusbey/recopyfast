@@ -39,6 +39,7 @@ const mockInvoicesList = jest.fn();
 const mockInvoicesRetrieve = jest.fn();
 const mockInvoicesListLineItems = jest.fn();
 const mockCustomersRetrieve = jest.fn();
+const mockPricesRetrieve = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
@@ -66,6 +67,7 @@ jest.mock("stripe", () =>
       listLineItems: mockInvoicesListLineItems,
     },
     customers: { retrieve: mockCustomersRetrieve },
+    prices: { retrieve: mockPricesRetrieve },
   })),
 );
 
@@ -100,7 +102,10 @@ jest.mock("@/lib/stripe/plans", () => ({
       price_agency: ["agency"],
       price_shared: ["starter", "pro"],
     };
-    return { plansOf: (priceId: string) => plansByPrice[priceId] ?? [] };
+    return {
+      priceIds: Object.keys(plansByPrice),
+      plansOf: (priceId: string) => plansByPrice[priceId] ?? [],
+    };
   }),
 }));
 
@@ -557,6 +562,11 @@ function armStripe() {
       ),
     ),
   );
+  mockPricesRetrieve.mockImplementation(async (id: string) => ({
+    id,
+    object: "price",
+    product: productOf(id),
+  }));
   mockCustomersRetrieve.mockImplementation(async (id: string) => ({
     id,
     object: "customer",
@@ -627,16 +637,38 @@ function invoiceFor(id: string, ...priceIds: string[]): Row {
   };
 }
 
-function invoiceLine(invoiceId: string, priceId: string, index = 0): Row {
+function invoiceLine(
+  invoiceId: string,
+  priceId: string,
+  index = 0,
+  amount = 1900,
+): Row {
   return {
     id: `il_${invoiceId}_${index}`,
     object: "line_item",
+    amount,
     pricing: {
       type: "price_details",
-      price_details: { price: priceId, product: "prod_recopyfast" },
+      price_details: { price: priceId, product: productOf(priceId) },
       unit_amount_decimal: null,
     },
   };
+}
+
+/**
+ * The Stripe product of a price (Devin round on 8744bed: lines map to plans by
+ * product). `price_pro_v1` is a retired Pro price: same product.
+ */
+function productOf(priceId: string): string {
+  return (
+    {
+      price_starter: "prod_starter",
+      price_pro: "prod_pro",
+      price_pro_v1: "prod_pro",
+      price_agency: "prod_agency",
+      price_shared: "prod_shared",
+    }[priceId] ?? `prod_of_${priceId}`
+  );
 }
 
 /** `paymentIntents.retrieve`: paid at the lifetime's time, with its charge. */
@@ -1322,6 +1354,13 @@ function refusalReports() {
   );
 }
 
+/** Warnings that an invoice needs a person (Devin round on 8744bed). */
+function manualReviewWarnings() {
+  return mockLoggerWarn.mock.calls.filter(([message]) =>
+    String(message).includes("refund the covered lines by hand"),
+  );
+}
+
 /** Alerts whose sentence contains `text`. */
 function alertsSaying(text: string) {
   return mockLoggerError.mock.calls.filter(([message]) =>
@@ -1361,13 +1400,14 @@ function subscriptionCheckoutCompleted(eventId: string) {
 function invoicePaid(
   eventId: string,
   shape: "basil" | "basil-expanded" | "legacy" = "basil",
+  invoiceId = INVOICE_ID,
 ) {
   return {
     id: eventId,
     type: "invoice.payment_succeeded",
     data: {
       object: {
-        id: INVOICE_ID,
+        id: invoiceId,
         object: "invoice",
         customer: STRIPE_CUSTOMER_ID,
         ...(shape !== "legacy"
@@ -3519,14 +3559,14 @@ describe("review N2: only invoices billing a plan the grant covers are refunded"
     );
   });
 
-  it("reads an invoice's lines past the first page before deciding", async () => {
+  it("reads every line, past the first page, before deciding: an Agency line on page two makes it mixed", async () => {
     mockInvoicesList.mockResolvedValue({
       data: [
         {
-          ...invoiceFor("in_pro", "price_agency"),
+          ...invoiceFor("in_pro", "price_pro"),
           lines: {
             object: "list",
-            data: [invoiceLine("in_pro", "price_agency")],
+            data: [invoiceLine("in_pro", "price_pro")],
             has_more: true,
           },
         },
@@ -3535,8 +3575,8 @@ describe("review N2: only invoices billing a plan the grant covers are refunded"
     });
     mockInvoicesListLineItems.mockResolvedValue({
       data: [
-        invoiceLine("in_pro", "price_agency", 0),
-        invoiceLine("in_pro", "price_pro", 1),
+        invoiceLine("in_pro", "price_pro", 0),
+        invoiceLine("in_pro", "price_agency", 1, 4900),
       ],
       has_more: false,
     });
@@ -3549,13 +3589,11 @@ describe("review N2: only invoices billing a plan the grant covers are refunded"
     expect(mockInvoicesListLineItems).toHaveBeenCalledWith("in_pro", {
       limit: 100,
     });
-    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
-    expect(mockRefundsCreate.mock.calls[0][0]).toMatchObject({
-      payment_intent: "pi_pro",
-    });
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(manualReviewWarnings()).toHaveLength(1);
   });
 
-  it("fails closed when an invoice line's price is configured for two plans", async () => {
+  it("sends an invoice whose line product is configured for two plans to a person, never refunding it", async () => {
     mockInvoicesList.mockResolvedValue({
       data: [invoiceFor("in_pro", "price_shared")],
       has_more: false,
@@ -3565,9 +3603,10 @@ describe("review N2: only invoices billing a plan the grant covers are refunded"
       subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
     );
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(200);
     expect(mockRefundsCreate).not.toHaveBeenCalled();
-    expect(alertsSaying("could not be refunded")).toHaveLength(1);
+    expect(manualReviewWarnings()).toHaveLength(1);
+    expect(alertsSaying("could not be refunded")).toEqual([]);
   });
 });
 
@@ -3648,6 +3687,294 @@ describe("review N3: our own refund, landed by a concurrent delivery, is never r
 
     expect(response.status).toBe(200);
     expectReportedAsOurs();
+  });
+});
+
+/*
+ * Devin round on 8744bed (comments 4244837497, 4244837575, 4244837615,
+ * 4244837673, 4244837719): the refunds of an ENDED subscription bought after a
+ * grant are decided per invoice, over every line, by product, against every
+ * grant that predates the subscription; the settlement path decides the same
+ * way. Live subscriptions are unchanged.
+ */
+describe("Devin round on 8744bed: per-invoice refund decisions for ended subscriptions", () => {
+  const CUSTOMER_REASON = {
+    comment: "Cancelled by the customer",
+    feedback: null,
+    reason: "cancellation_requested",
+  };
+
+  /** A Pro subscription bought after the grant and ended by the customer. */
+  function endedPro(overrides: Row = {}): Row {
+    return stripeSubscription(SUBSCRIPTION_ID, "pro", {
+      status: "canceled",
+      canceled_at: PERIOD_START + 30,
+      latest_invoice: "in_pro",
+      cancellation_details: CUSTOMER_REASON,
+      ...overrides,
+    });
+  }
+
+  /** Each invoice's one payment, by invoice: `in_x` is paid by `pi_x`. */
+  function paymentsByInvoice(open: string[] = []) {
+    mockInvoicePaymentsList.mockImplementation(async (params: Row) => {
+      const invoice = String(params.invoice);
+      const suffix = invoice.replace(/^in_/, "");
+      return {
+        data: [
+          invoicePayment(
+            `inpay_${suffix}`,
+            open.includes(invoice) ? "open" : "paid",
+            `pi_${suffix}`,
+          ),
+        ],
+        has_more: false,
+      };
+    });
+  }
+
+  function refundedPayments(): string[] {
+    return stripeRefunds.map((refund) => String(refund.payment_intent)).sort();
+  }
+
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = endedPro();
+    paymentsByInvoice();
+  });
+
+  it("4244837497: an excluded Agency invoice whose payment settles after the refusal is never refunded", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [invoiceFor("in_pro", "price_pro")],
+      has_more: false,
+    });
+    mockInvoicesRetrieve.mockImplementation(async (id: string) =>
+      id === "in_agency"
+        ? invoiceFor("in_agency", "price_agency")
+        : invoiceFor(id, "price_pro"),
+    );
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+    expect(refundedPayments()).toEqual(["pi_pro"]);
+
+    // The Agency invoice's bank debit settles days later.
+    const response = await deliver(
+      invoicePaid("evt_agency_paid", "basil", "in_agency"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(refundedPayments()).toEqual(["pi_pro"]);
+    expect(manualReviewWarnings()).toEqual([]);
+  });
+
+  it("4244837497: a settled payment on a covered invoice of the same subscription is still refunded", async () => {
+    mockInvoicesList.mockResolvedValue({ data: [], has_more: false });
+    paymentsByInvoice(["in_pro"]);
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+    expect(refundedPayments()).toEqual([]);
+
+    paymentsByInvoice();
+    const response = await deliver(
+      invoicePaid("evt_pro_paid", "basil", "in_pro"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(refundedPayments()).toEqual(["pi_pro"]);
+  });
+
+  it("4244837497: a mixed invoice settling after the refusal goes to a person, once", async () => {
+    mockInvoicesList.mockResolvedValue({ data: [], has_more: false });
+    mockInvoicesRetrieve.mockImplementation(async (id: string) =>
+      id === "in_mixed"
+        ? invoiceFor("in_mixed", "price_pro", "price_agency")
+        : invoiceFor(id, "price_pro"),
+    );
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(
+      (await deliver(invoicePaid("evt_mixed_paid", "basil", "in_mixed")))
+        .status,
+    ).toBe(200);
+    expect(
+      (await deliver(invoicePaid("evt_mixed_paid_again", "basil", "in_mixed")))
+        .status,
+    ).toBe(200);
+
+    expect(refundedPayments()).not.toContain("pi_mixed");
+    const warnings = manualReviewWarnings();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][0]).toContain("in_mixed");
+  });
+
+  it("4244837575: a Pro + Agency invoice on one payment is not refunded; a person is told once", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        {
+          ...invoiceFor("in_pro", "price_pro"),
+          lines: {
+            object: "list",
+            data: [
+              invoiceLine("in_pro", "price_pro", 0, 1900),
+              invoiceLine("in_pro", "price_agency", 1, 4900),
+            ],
+            has_more: false,
+          },
+        },
+      ],
+      has_more: false,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_resend", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const warnings = manualReviewWarnings();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][0]).toContain(
+      "invoice in_pro mixes covered and uncovered charges",
+    );
+    expect(warnings[0][2]).toEqual(
+      expect.objectContaining({ invoiceId: "in_pro", reason: "mixed" }),
+    );
+  });
+
+  it("4244837615: an invoice on a retired Pro price is refunded through its product", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [invoiceFor("in_pro", "price_pro_v1")],
+      has_more: false,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(refundedPayments()).toEqual(["pi_pro"]);
+  });
+
+  it("4244837673: with Lifetime Pro and then Founding Agency before the subscription, its Agency-period invoice is refunded too", async () => {
+    db.plan_entitlements = [
+      grantRow("pro"),
+      grantRow("agency", { stripe_payment_intent_id: "pi_existing_agency" }),
+    ];
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        invoiceFor("in_pro", "price_pro"),
+        invoiceFor("in_agency", "price_agency"),
+      ],
+      has_more: false,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(refundedPayments()).toEqual(["pi_agency", "pi_pro"]);
+  });
+
+  it("4244837673: an Agency grant paid after the subscription was bought does not cover its invoices", async () => {
+    db.plan_entitlements = [
+      grantRow("pro"),
+      grantRow("agency", { stripe_payment_intent_id: "pi_later_agency" }),
+    ];
+    const retrieve = mockPaymentIntentsRetrieve.getMockImplementation();
+    mockPaymentIntentsRetrieve.mockImplementation(
+      async (id: string, params?: { expand?: string[] }) =>
+        id === "pi_later_agency"
+          ? { id, created: PERIOD_START + 3600 }
+          : retrieve?.(id, params),
+    );
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        invoiceFor("in_pro", "price_pro"),
+        invoiceFor("in_agency", "price_agency"),
+      ],
+      has_more: false,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(refundedPayments()).toEqual(["pi_pro"]);
+  });
+
+  it("4244837719: an ambiguous line after a covered one sends the invoice to a person, never refunding it", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [invoiceFor("in_pro", "price_pro", "price_shared")],
+      has_more: false,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const [warning] = manualReviewWarnings();
+    expect(warning[2]).toEqual(
+      expect.objectContaining({ invoiceId: "in_pro", reason: "ambiguous" }),
+    );
+  });
+
+  it("ignores a proration credit for the Agency time when deciding a Pro invoice", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        {
+          ...invoiceFor("in_pro", "price_pro"),
+          lines: {
+            object: "list",
+            data: [
+              invoiceLine("in_pro", "price_pro", 0, 1900),
+              invoiceLine("in_pro", "price_agency", 1, -3000),
+            ],
+            has_more: false,
+          },
+        },
+      ],
+      has_more: false,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(refundedPayments()).toEqual(["pi_pro"]);
+    expect(manualReviewWarnings()).toEqual([]);
+  });
+
+  it("leaves a live subscription's refusal unchanged: its latest invoice is refunded without the line decision", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+    );
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_1", "paid", SUBSCRIPTION_PAYMENT_INTENT)],
+      has_more: false,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+    expect(refundedPayments()).toEqual([SUBSCRIPTION_PAYMENT_INTENT]);
+    expect(mockInvoicesList).not.toHaveBeenCalled();
+    expect(mockInvoicesRetrieve).not.toHaveBeenCalled();
+    expect(mockPricesRetrieve).not.toHaveBeenCalled();
   });
 });
 
