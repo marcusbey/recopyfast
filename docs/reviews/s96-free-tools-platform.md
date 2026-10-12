@@ -875,5 +875,230 @@ hours". Both were red before the fix.
 - **Type-check:** clean.
 - **Prettier and `eslint --max-warnings=0`** on every changed source file: clean.
 
-Max severity: major
+## Verification review of b6ad9ff
+
+A fresh-context review of `b6ad9ff`, PR #93's head. The reviewer did not change any code. Every
+probe and mutation below was temporary: each was restored, and `git diff --exit-code` was clean
+before this section was written.
+
+### What was run
+
+`NEXT_PUBLIC_APP_URL=http://localhost:3000` was set for every Jest run.
+
+| Check | Result |
+|---|---|
+| `npx jest src/lib/tools src/lib/security --silent` | 21 suites, 547 tests, all passed |
+| `npx jest redis-rate-limiter scan-route tool-report legal-pages tools-pages --silent` | 7 suites, 186 tests, all passed |
+| Every test file that touches the limiter (74 files, `--runTestsByPath`) | 74 suites, 1,196 tests, all passed |
+| Full `npx jest --silent` | 483 suites passed, 2 skipped; 6,871 tests passed, 38 skipped |
+| `npx tsc --noEmit -p .`, which includes the tests | exit 0 |
+| `eslint --max-warnings=0` on the changed source files | exit 0 |
+| `gh pr checks 93`, head `b6ad9ff` | all green except "Comparison Lighthouse", still pending at review time |
+
+`git diff e7bdd09..b6ad9ff --stat` shows 16 files. Nothing unexpected:
+
+- 13 source and test files that map to F1–F4;
+- the copy in `pages-copy.ts` and `client-key.ts`, for F4;
+- the review doc.
+
+Outside its new section, the doc's other changes are strike-throughs of the round-2 text this review
+disproved, and one note under round 2's nit 7.
+
+### F1 — verified fixed
+
+**`robots.ts:187-195`.** Only a 4xx or `not_html` now means "no robots.txt". Every other failure is
+a refused verdict, `target_limited` included. Other paths that could read a refused charge as
+"allowed":
+
+- `createTargetAuthorizer` turns a thrown charge into `false` (`run-scan.ts:139`);
+- the route turns a store failure into `false` (`route.ts:261-262`);
+- `safeFetch` fails the hop on any refusal (`safe-fetch.ts:545`).
+
+None of them leads to "allowed".
+
+**Loopback probes**, appended to `run-scan.test.ts` and then removed. S's robots.txt either
+redirects to T or answers directly:
+
+| Probe | Result | Requests made |
+|---|---|---|
+| S → T (`Disallow: /`), T's bucket spent | `target_limited` | `bakery.test/robots.txt` only. S's homepage is never fetched, and T gets nothing. |
+| The same, with T's charge throwing (store down) | `target_limited` | `bakery.test/robots.txt` only |
+| The same, with T allowed (control) | `robots_disallowed` | S's and T's robots.txt |
+| S's robots.txt answers 503 | `http_status`, refused | robots.txt only |
+| S → T, and T answers 503 | refused | both robots.txt |
+| S's robots.txt answers 404 | `ok` | robots.txt, homepage, sitemap |
+| S → T, and T answers 404 | `ok` | both robots.txt, then the scan |
+| S → a blocked port | `blocked_port`, refused | robots.txt only |
+| 4 redirects (the cap is 3) | `redirect_limit`, refused | robots.txt and 3 hops |
+| S's robots.txt never answers | `timeout`, refused | robots.txt only |
+
+This matches ADR 062 §5 (a 4xx allows; an unreachable robots.txt refuses), RFC 9309 §2.3.1.2 and
+RFC 9309 §2.3.1.4.
+
+**Mutations:**
+
+| Mutation | Red |
+|---|---|
+| `target_limited` read as "no robots.txt" again | 3 |
+| 5xx read as "no robots.txt" | 1 |
+| 4xx refused | 14 |
+| `not_html` refused | 1 |
+
+### F2 — verified fixed, but the fix reopens part of round-2 nit 7 (N1)
+
+- The kept characters display intact: ❤️, the keycap 1️⃣, the England flag and an ideographic
+  variation sequence.
+- In Node: 3,822 code points are stripped. None of the original 23-character list is missed, and
+  no `Bidi_Control` character is missed, so the Trojan Source protection is unchanged.
+- U+E0001, ZWJ and RLO are still stripped.
+- Mutation "exclusion removed": 4 red.
+
+### F3 — verified fixed
+
+`SafeFetchOptions.authorizeHost` and `RunScanInput.authorizeTargetDomain` are required.
+
+- A temporary file that calls `safeFetch` without `authorizeHost`, and `runScan` without
+  `authorizeTargetDomain`, fails `tsc` with TS2345 on both calls.
+- `safeFetch` has only four production calls, all in `run-scan.ts`, and every test caller passes
+  an explicit stub.
+
+### F4 — verified fixed
+
+- **`rate-limiter.ts`:** the comments now say `windowEnd + EXPIRY_GRACE_MS`.
+- **"about 24 hours"** replaces "at most 24 hours" in `/privacy` (`page.tsx:174`), `pages-copy.ts:47`
+  and `client-key.ts:14`.
+- **`legal-pages-truth` and `tools-pages`** forbid "at most 24 hours". The only remaining
+  matches in `src` and `docs` are those negative assertions, plus an unrelated edit-session ADR
+  and research note.
+
+### New findings
+
+**N1 — nit — a tag character inside a word is now kept, and splits the word into a false typo.**
+
+Where: `src/lib/tools/text.ts:37`.
+
+The exclusion keeps U+E0020–E007F anywhere, not only inside a flag's tag sequence.
+
+- The tokenizer `[\p{L}\p{M}]+` splits on a tag character (category Cf).
+- A probe page with "fre<U+E0041>sh" reports the finding "fre".
+- At `e7bdd09` that character was stripped. `b6ad9ff` removed the round-2 test that pinned it
+  ("strips U+E0041").
+- VS16 inside a word does not split, because it is category Mn: "mor<U+FE0F>ning" gives no
+  finding. This matches the implementer's probe, which tried only VS16.
+- Invisible tag text, which can carry "ASCII smuggling" payloads, now also survives into stored
+  excerpts.
+
+Fix: keep tag characters only inside a well-formed flag sequence, U+1F3F4, then U+E0020–E007E,
+then U+E007F, and strip every other one.
+
+**N2 — minor — a robots.txt served with any type other than `text/plain` (or no type) is read as "no
+robots.txt".**
+
+Where: `src/lib/tools/fetch/safe-fetch.ts:208`, with `robots.ts:192`.
+
+This predates the review rounds (it came in with `ca4719f`) but is part of this PR.
+
+- `acceptsType` takes only `text/plain` or an empty type for robots.txt. Anything else becomes
+  `not_html`, which `robots.ts` reads as "no rules".
+- Probe: S's robots.txt `User-agent: * / Disallow: /`, served as `application/octet-stream` (the
+  default for an S3 object uploaded without a type), gives `ok`, and S's homepage and sitemap are
+  fetched.
+- No attacker can cause this. It needs the site's own server, or the host its robots.txt
+  redirects to, to send the wrong type. The opt-out is still lost.
+- ADR 062 §5 names only a 4xx as allowing. RFC 9309 §2.3 says the file is `text/plain`, but nowhere
+  says to ignore it otherwise.
+- The only test pinning this branch is the HTML single-page-app fallback (mutation "`not_html`
+  refused": 1 red).
+
+Fix: for robots.txt, read only an HTML answer (`text/html`, or a body starting with `<`) as "no
+robots.txt", and parse any other 2xx body.
+
+### Not verified, and what a human should do instead
+
+| Not verified | Why | What a human should do |
+|---|---|---|
+| Real DNS and the real network | Every fetch ran on loopback with an injected resolver | On a preview, scan a site whose robots.txt 301s to another domain with `Disallow: /`. Expect a 422, and no report. |
+| The grace against a real Redis | Only the mocked pipeline was run | On Upstash, `PTTL` a fresh `rate_limit:*` key. Expect the window's remaining time plus about 10 s. |
+| A store outage in the middle of a scan | Only a throwing mock was run | Rely on the route test and the probe above. |
+| Emoji and flags in a rendered report | No page was rendered | On a preview, scan a page with ❤️ and a flag next to a misspelt word, and look at the excerpt. |
+| Comparison Lighthouse | The CI job was still pending | Wait for it to go green before merging. |
+
+The overall state across all four rounds:
+
+- Every critical and major finding is fixed: round 1's major 1, and F1 from the `e7bdd09` review.
+- The highest open finding is N2, a minor.
+- The open nits are N1, and this review's observation on charging before DNS.
+
+## Fixes after the verification review of `b6ad9ff`
+
+These are the commit after `b6ad9ff`, test-first. The gate lines below are the verification
+reviewer's verdict on `b6ad9ff`, left exactly as the reviewer wrote them.
+
+### N2 (minor) — `Disallow: /` served with a non-text type was ignored
+
+**Fix:**
+
+- **`safe-fetch.ts`.** `acceptsType` reads a robots.txt whatever its type. The robots byte cap
+  (512 KB) still holds.
+- **`robots.ts`.** Any 2xx body is parsed as rules, except an HTML answer, which counts as no
+  robots.txt (a single-page app's shell). An HTML answer is either of:
+  - typed `text/html` or `application/xhtml+xml`;
+  - a body that starts with `<!doctype html` or `<html` after whitespace.
+- **"unavailable" is now only a 4xx.** The fetcher can no longer return `not_html` for a
+  robots.txt, so that case is gone from the list.
+
+**Tests:**
+
+- `run-scan.test.ts`: `Disallow: /` is obeyed when served as `application/octet-stream`, with no
+  content type at all, or as `text/plain`. Each case refuses the scan, and only `/robots.txt` is
+  requested.
+- `run-scan.test.ts`: an HTML shell lets the scan proceed when typed `text/html`, when sniffed
+  under `text/plain`, and when sniffed with no doctype. The sniffed bodies carry rule-shaped lines
+  that must not be read as rules.
+- `robots.test.ts`: four HTML-answer cases read as no robots.txt. `Disallow: /` is obeyed under
+  octet-stream, no type, `text/plain` and `image/png`.
+- `safe-fetch.test.ts`: a robots.txt fetch is `ok` under octet-stream, `text/html` and
+  `image/png`. All three were red at `b6ad9ff`.
+
+**Mutations:**
+
+- Old type check restored: killed, 6 red.
+- HTML sniff removed: killed, 3 red.
+- HTML answer parsed as rules: killed, 3 red.
+
+### N1 (nit) — a lone tag character split a word into a false typo
+
+**Fix** (`text.ts`). The regex now has two branches:
+
+1. a whole emoji tag sequence, U+1F3F4 then U+E0020–E007E then U+E007F, kept as is;
+2. any other invisible character, stripped.
+
+At each position the sequence is tried first. A tag character anywhere else is stripped again,
+including tags after a black flag with no cancel tag. A lens probe on "We recieve fre<U+E0041>sh
+orders" finds `["recieve"]`; at `b6ad9ff` it found `["recieve", "fre"]`.
+
+**Tests** (`extract-page.test.ts`):
+
+- Stripped: a lone U+E0041 inside a word, and a tag run with no black flag before it.
+- Black flag plus tags with no cancel tag: the tags are stripped and the flag is kept.
+- The England-flag test still passes.
+- The first three were red at `b6ad9ff`.
+
+**Mutations:**
+
+- Tags kept everywhere again: killed, 3 red.
+- Flag-sequence branch removed: killed, 1 red.
+
+### Verification
+
+- **Jest** (`NEXT_PUBLIC_APP_URL` set): 483 suites passed, 2 skipped; 6,890 tests passed, 38
+  skipped.
+- **DB harness (PG17):** 121 passed, 1 skipped.
+- **Playwright `--list`:** 97 of 97 expected.
+- **`npm run build`:** passes.
+- **Embed check:** up to date (45,818 B of 45,818).
+- **Type-check:** clean.
+- **Prettier and `eslint --max-warnings=0`** on the changed files: clean.
+
+Max severity: minor
 Ship allowed: yes

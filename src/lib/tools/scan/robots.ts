@@ -9,10 +9,14 @@
  * and `/robots.txt` itself is always allowed.
  *
  * Fetch outcomes, per RFC 9309 §2.3.1:
- * - 2xx text → parsed;
+ * - 2xx → parsed, except an HTML answer (below);
  * - 4xx ("unavailable") → no rules, the scan proceeds;
- * - a non-text answer (a single-page app serving its HTML shell for every
- *   path) → treated as no robots.txt;
+ * - an HTML answer — `text/html` or `application/xhtml+xml`, or a body that
+ *   starts with `<!doctype html` or `<html` — is a single-page app serving its
+ *   shell for every path → treated as no robots.txt;
+ * - ANY OTHER 2xx body is parsed as rules, whatever its content type
+ *   (verification review of b6ad9ff, N2): `Disallow: /` served as
+ *   application/octet-stream, S3's default, used to count as no robots.txt;
  * - anything else — 5xx, timeout, refused address, too large ("unreachable")
  *   → the scan is REFUSED with that same reason. RFC 9309 says to assume
  *   complete disallow; reporting the real reason (not "robots.txt says no")
@@ -156,6 +160,14 @@ export function isAllowedByRobots(
   return best ? best.allow : true;
 }
 
+const HTML_ANSWER_TYPES = new Set(["text/html", "application/xhtml+xml"]);
+const HTML_DOCUMENT_START = /^\s*<(?:!doctype\s+html|html)[\s>]/i;
+
+/** A single-page app's HTML shell, by its declared type or its first tag. */
+function isHtmlAnswer(contentType: string, body: string): boolean {
+  return HTML_ANSWER_TYPES.has(contentType) || HTML_DOCUMENT_START.test(body);
+}
+
 /** Fetches `<origin>/robots.txt` through the guarded fetcher. */
 export type RobotsFetcher = (robotsUrl: string) => Promise<SafeFetchResult>;
 
@@ -179,17 +191,18 @@ export function createRobotsAuthorizer(
       verdict = fetchRobots(`${origin}/robots.txt`).then(
         (result): RobotsVerdict => {
           if (result.ok) {
-            return {
-              kind: "rules",
-              rules: parseRobots(result.value.body, productToken),
-            };
+            return isHtmlAnswer(result.value.contentType, result.value.body)
+              ? { kind: "rules", rules: [] }
+              : {
+                  kind: "rules",
+                  rules: parseRobots(result.value.body, productToken),
+                };
           }
           const isUnavailable =
-            (result.reason === "http_status" &&
-              result.status !== undefined &&
-              result.status >= 400 &&
-              result.status < 500) ||
-            result.reason === "not_html";
+            result.reason === "http_status" &&
+            result.status !== undefined &&
+            result.status >= 400 &&
+            result.status < 500;
           return isUnavailable
             ? { kind: "rules", rules: [] }
             : { kind: "refused", reason: result.reason };

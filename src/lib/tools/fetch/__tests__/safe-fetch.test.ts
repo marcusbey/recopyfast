@@ -390,6 +390,28 @@ describe("redirects", () => {
     expect(fixture.connections).toHaveLength(1);
   });
 
+  // Verification review of b6ad9ff, N2: robots.txt is read whatever its type;
+  // the robots parser alone decides an HTML answer is no robots.txt.
+  it.each(["application/octet-stream", "text/html", "image/png"])(
+    "reads a robots.txt served as %s",
+    async (type) => {
+      fixture.route("/robots.txt", (_req, res) => {
+        res.writeHead(200, { "content-type": type });
+        res.end("User-agent: *\nDisallow: /");
+      });
+
+      const result = await safeFetch(
+        fixture.url("/robots.txt"),
+        options({ kind: "robots" }),
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { contentType: type, body: "User-agent: *\nDisallow: /" },
+      });
+    },
+  );
+
   it("re-asks the URL authoriser (robots.txt, in production) on every hop", async () => {
     fixture.route("/", redirect("/private"));
     const seen: string[] = [];

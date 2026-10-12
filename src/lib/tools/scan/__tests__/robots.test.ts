@@ -168,15 +168,42 @@ describe("createRobotsAuthorizer", () => {
     expect(await authorize(url("https://example.com/"))).toBeNull();
   });
 
-  it("a robots.txt served as HTML (a single-page app's fallback) is no robots.txt", async () => {
-    const authorize = createRobotsAuthorizer(async () => ({
-      ok: false,
-      reason: "not_html",
-      bytesRead: 0,
-    }));
+  it.each([
+    ["typed text/html", "<p>App</p>\nDisallow: /", "text/html"],
+    ["typed application/xhtml+xml", "Disallow: /", "application/xhtml+xml"],
+    [
+      "sniffed: a doctype",
+      "  <!DOCTYPE html>\nUser-agent: *\nDisallow: /",
+      "text/plain",
+    ],
+    ["sniffed: an <html> tag", '<html lang="en">\nDisallow: /', ""],
+  ])(
+    "a robots.txt that is an HTML answer (%s, a single-page app's shell) is no robots.txt",
+    async (_label, body, type) => {
+      const authorize = createRobotsAuthorizer(async () =>
+        document(body, type),
+      );
 
-    expect(await authorize(url("https://example.com/"))).toBeNull();
-  });
+      expect(await authorize(url("https://example.com/"))).toBeNull();
+    },
+  );
+
+  /**
+   * Verification review of b6ad9ff, N2: any other 2xx body is rules, whatever
+   * its type — S3 serves an untyped upload as application/octet-stream.
+   */
+  it.each(["application/octet-stream", "", "text/plain", "image/png"])(
+    "obeys `Disallow: /` whatever the type (%p)",
+    async (type) => {
+      const authorize = createRobotsAuthorizer(async () =>
+        document("User-agent: *\nDisallow: /", type),
+      );
+
+      expect(await authorize(url("https://example.com/"))).toBe(
+        "robots_disallowed",
+      );
+    },
+  );
 
   it.each([
     [{ reason: "http_status", status: 503 }, "http_status"],

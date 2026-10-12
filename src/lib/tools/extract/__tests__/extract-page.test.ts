@@ -125,6 +125,13 @@ describe("visible text, by block", () => {
     ["U+115F Hangul choseong filler", "\u115f"],
     ["U+3164 Hangul filler", "\u3164"],
     ["U+200D zero-width joiner (as before this PR)", "\u200d"],
+    // Verification review of b6ad9ff, N1: a tag character outside a flag's
+    // tag sequence is invisible and split "fresh" into the false typo "fre".
+    ["a lone U+E0041 tag latin capital A", "\u{e0041}"],
+    [
+      "a tag sequence with no black flag before it",
+      "\u{e0067}\u{e0062}\u{e007f}",
+    ],
   ])("strips %s", (_label, character) => {
     const page = extract(`<p>spell${character}ing</p>`);
 
@@ -135,7 +142,8 @@ describe("visible text, by block", () => {
    * Verification review of e7bdd09, F2: the stripped text is what a report
    * SHOWS, and variation selectors and tag characters are part of how an
    * emoji or a flag renders — ❤️ became ❤ and the England flag a black flag.
-   * U+FE00–FE0F, U+E0020–E007F and U+E0100–E01EF are kept.
+   * U+FE00–FE0F and U+E0100–E01EF are kept, and tag characters inside a
+   * flag's tag sequence (U+1F3F4, tags, U+E007F).
    */
   it.each([
     ["a red heart with VS16 (U+2764 U+FE0F)", "\u2764\ufe0f"],
@@ -149,6 +157,14 @@ describe("visible text, by block", () => {
     const page = extract(`<p>We love bread ${sequence} every day</p>`);
 
     expect(texts(page)).toEqual([`We love bread ${sequence} every day`]);
+  });
+
+  it("strips the tags after a black flag that no cancel tag ends, keeping the flag", () => {
+    const page = extract(
+      "<p>We love bread \u{1f3f4}\u{e0067}\u{e0062} every day</p>",
+    );
+
+    expect(texts(page)).toEqual(["We love bread \u{1f3f4} every day"]);
   });
 
   it("caps blocks, block length and the page's text", () => {

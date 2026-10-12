@@ -203,9 +203,16 @@ function isGzipFile(kind: FetchKind, type: string, url: URL): boolean {
   return type === "application/octet-stream" && url.pathname.endsWith(".gz");
 }
 
+/**
+ * A robots.txt is read WHATEVER its type (verification review of b6ad9ff,
+ * N2): RFC 9309 parses any successful answer, and `Disallow: /` served as
+ * application/octet-stream (S3's default) used to be "no robots.txt". The
+ * one exception, an HTML answer, is the robots parser's to judge (it sniffs
+ * the body too), so it is not refused here. The robots byte cap still holds.
+ */
 function acceptsType(kind: FetchKind, type: string, url: URL): boolean {
   if (kind === "html") return HTML_TYPES.has(type);
-  if (kind === "robots") return type === "text/plain" || type === "";
+  if (kind === "robots") return true;
   return SITEMAP_TYPES.has(type) || isGzipFile(kind, type, url);
 }
 

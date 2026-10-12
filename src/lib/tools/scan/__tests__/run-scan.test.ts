@@ -179,6 +179,65 @@ describe("runScan", () => {
     expect(requested).toEqual(["/robots.txt"]);
   });
 
+  /**
+   * Verification review of b6ad9ff, N2. Only `text/plain` (or no type) was
+   * read as robots.txt; any other type counted as "no robots.txt", so
+   * `Disallow: /` served as application/octet-stream — S3's default for an
+   * object uploaded without a type — was ignored and the site scanned. Every
+   * 2xx body is now parsed as rules (RFC 9309), except an HTML answer: a
+   * single-page app serving its shell for every path has no robots.txt.
+   */
+  describe("a robots.txt's content type", () => {
+    function robots(body: string, type?: string): Handler {
+      return (_req, res) => {
+        res.writeHead(200, type ? { "content-type": type } : {});
+        res.end(body);
+      };
+    }
+
+    it.each([
+      ["application/octet-stream", "application/octet-stream"],
+      ["no content type at all", undefined],
+      ["text/plain", "text/plain; charset=utf-8"],
+    ])("obeys `Disallow: /` served as %s", async (_label, type) => {
+      routes.set("/robots.txt", robots("User-agent: *\nDisallow: /", type));
+      routes.set("/", html(`<p>${FILLER}</p>`));
+
+      expect(await scan()).toEqual({ ok: false, reason: "robots_disallowed" });
+      expect(requested).toEqual(["/robots.txt"]);
+    });
+
+    it.each([
+      [
+        "text/html",
+        "text/html; charset=utf-8",
+        "<!doctype html><html><body><p>App</p></body></html>",
+      ],
+      [
+        "an HTML body sent as text/plain",
+        "text/plain",
+        // Rule-shaped lines inside the shell must not be read as rules.
+        "\n  <!DOCTYPE html>\nUser-agent: *\nDisallow: /\n</html>",
+      ],
+      [
+        "an HTML body with no doctype",
+        "application/octet-stream",
+        "<html>\nUser-agent: *\nDisallow: /\n</html>",
+      ],
+    ])(
+      "reads a single-page app's HTML shell (%s) as no robots.txt",
+      async (_label, type, body) => {
+        routes.set("/robots.txt", robots(body, type));
+        routes.set("/", html(`<p>${FILLER}</p>`));
+
+        const result = await scan();
+
+        expect(result.ok).toBe(true);
+        expect(requested).toContain("/");
+      },
+    );
+  });
+
   it("refuses the scan when robots.txt answers a server error (RFC 9309: assume disallow)", async () => {
     routes.set("/robots.txt", (_req, res) => {
       res.writeHead(503);

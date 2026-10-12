@@ -26,19 +26,30 @@
  * (verification review of e7bdd09, F2). The stripped text is what a report
  * SHOWS, and dropping them turned ❤️ into ❤ and the England flag into a
  * black flag: variation selectors U+FE00–FE0F and U+E0100–E01EF, and the
- * tag characters U+E0020–E007F that spell a subdivision flag. The joiners
- * (ZWJ, ZWNJ) are still stripped, as they were before the property set.
+ * tag characters of a flag's tag sequence (U+1F3F4, tags U+E0020–E007E,
+ * U+E007F). A tag character ANYWHERE ELSE is invisible and is stripped
+ * (verification review of b6ad9ff, N1): kept everywhere, "fre<U+E0041>sh"
+ * read as the false typo "fre". The joiners (ZWJ, ZWNJ) are still stripped,
+ * as they were before the property set.
  */
 
 /** C0 and C1 control characters, as `src/lib/api/validation.ts` defines them. */
 export const TEXT_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
+/**
+ * Either a whole emoji tag sequence (group 1, kept as is) or one invisible
+ * character (stripped). At each position the sequence is tried first, so its
+ * tag characters are never matched one by one.
+ */
 const INVISIBLE_CHARACTERS =
-  /(?![\ufe00-\ufe0f\u{e0020}-\u{e007f}\u{e0100}-\u{e01ef}])[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}]/gu;
+  /(\u{1f3f4}[\u{e0020}-\u{e007e}]+\u{e007f})|(?![\ufe00-\ufe0f\u{e0100}-\u{e01ef}])[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}]/gu;
 
 /** Removes bidi controls and default-ignorable characters. */
 export function stripInvisibleCharacters(text: string): string {
-  return text.replace(INVISIBLE_CHARACTERS, "");
+  return text.replace(
+    INVISIBLE_CHARACTERS,
+    (_match, tagSequence: string | undefined) => tagSequence ?? "",
+  );
 }
 
 /** Collapses every run of whitespace (and controls) to one space, trimmed. */
