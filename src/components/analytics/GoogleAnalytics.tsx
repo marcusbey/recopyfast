@@ -1,36 +1,57 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import * as React from "react";
 import { usePathname } from "next/navigation";
 import { getMeasurementId } from "@/lib/analytics/google-analytics/measurement-id";
 import { isAnalyticsRoute } from "@/lib/analytics/google-analytics/routes";
+import { loadGoogleAnalyticsRuntime } from "./load-runtime";
+import type { GoogleAnalyticsRuntime } from "./GoogleAnalyticsRuntime";
 
-/**
- * Its own chunk, fetched after hydration: the banner, the consent logic and
- * the gtag runtime stay out of the critical bundle every page hydrates with.
- * s17's comparison gate (ADR 061) measured TBT at 172–185 ms against a 200 ms
- * limit before this story; this keeps that headroom for the pages themselves.
- */
-const GoogleAnalyticsRuntime = dynamic(
-  () =>
-    import("./GoogleAnalyticsRuntime").then(
-      (module) => module.GoogleAnalyticsRuntime,
-    ),
-  { ssr: false },
-);
+type Runtime = typeof GoogleAnalyticsRuntime;
 
 /**
  * Google Analytics 4 on the public marketing pages (s107, ADR 063).
  *
  * Mounted once, in the root layout, so it follows client navigations. Renders
- * nothing — and loads nothing — unless a measurement id is configured
+ * nothing — and fetches nothing — unless a measurement id is configured
  * (Production only) AND the current path is on the allowlist
  * (`isAnalyticsRoute`): the dashboard, auth and account pages, the API and the
- * widget never get the runtime, let alone gtag.js.
+ * widget never get the runtime, let alone gtag.js. Leaving the allowlist by a
+ * client navigation unmounts the runtime, which switches GA off on the way out.
+ *
+ * TBT, measured (PR #94, Comparison Lighthouse run 38217319595): the gate's
+ * median TBT went from 172–185 ms on `main` to 187–210 ms, over its 200 ms
+ * limit. Two causes in the traces: the gtag runtime copied into every page
+ * chunk through the footer (now `cookie-settings.ts`, import-free), and the
+ * runtime's first render as one 63 ms task once its chunk arrived. The loader
+ * is a plain `import()` after hydration, and the runtime is mounted inside
+ * `startTransition`, so React renders it in slices that yield to the browser.
  */
 export function GoogleAnalytics() {
   const measurementId = getMeasurementId();
   const pathname = usePathname();
-  if (!measurementId || !isAnalyticsRoute(pathname)) return null;
-  return <GoogleAnalyticsRuntime measurementId={measurementId} />;
+  const isEnabled = measurementId !== null && isAnalyticsRoute(pathname);
+  const [Runtime, setRuntime] = React.useState<Runtime | null>(null);
+
+  React.useEffect(() => {
+    if (!isEnabled || Runtime) return;
+    let isCancelled = false;
+    loadGoogleAnalyticsRuntime().then(
+      (loaded) => {
+        if (isCancelled) return;
+        React.startTransition(() => setRuntime(() => loaded));
+      },
+      (error: unknown) => {
+        // A failed chunk (a deploy that replaced it mid-visit) means no
+        // analytics on this page view, never a broken page. Nothing to retry.
+        console.warn("[analytics] runtime chunk failed to load", error);
+      },
+    );
+    return () => {
+      isCancelled = true;
+    };
+  }, [isEnabled, Runtime]);
+
+  if (!isEnabled || !measurementId || !Runtime) return null;
+  return <Runtime measurementId={measurementId} />;
 }

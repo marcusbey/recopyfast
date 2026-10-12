@@ -55,9 +55,6 @@ const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  */
 export const GA_COOKIE_EXPIRES_SECONDS = 395 * 24 * 60 * 60;
 
-/** Dispatched by the footer's "Cookie settings"; the banner listens. */
-export const OPEN_COOKIE_SETTINGS_EVENT = "rcf:open-cookie-settings";
-
 type Gtag = (...args: unknown[]) => void;
 
 let activeMeasurementId: string | null = null;
@@ -161,13 +158,18 @@ function sanitizeEventParams(
   return safe;
 }
 
-/** Sends one event, if analytics is active. Never throws. */
+/**
+ * Sends one event, if analytics is active. Never throws. Returns whether the
+ * event was handed to gtag: a caller that sends something once per page view
+ * marks it sent only on `true`, so a call made before consent or before the
+ * init script ran does not use it up (PR #94 review).
+ */
 export function track<E extends AnalyticsEventName>(
   event: E,
   params: AnalyticsEvents[E],
-): void {
+): boolean {
   const fn = gtag();
-  if (!activeMeasurementId || !fn) return;
+  if (!activeMeasurementId || !fn) return false;
   const pageLocation =
     lastPageLocation ??
     sanitizePageLocation(window.location.href, { keepCampaign: false });
@@ -175,6 +177,7 @@ export function track<E extends AnalyticsEventName>(
     ...sanitizeEventParams(event, params as Record<string, unknown>),
     ...(pageLocation ? { page_location: pageLocation } : {}),
   });
+  return true;
 }
 
 /**
@@ -261,9 +264,4 @@ export function analyticsEventForClick(
   if (path === "/signup") return { event: "generate_lead", params };
   if (path === "/dashboard/billing") return { event: "begin_checkout", params };
   return null;
-}
-
-/** The footer's "Cookie settings": reopen the banner wherever it is mounted. */
-export function openCookieSettings(): void {
-  window.dispatchEvent(new CustomEvent(OPEN_COOKIE_SETTINGS_EVENT));
 }

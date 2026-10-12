@@ -18,7 +18,8 @@ setting with its value, so a later change is a diff against something written do
 
 ## Admin settings, as applied
 
-Each was re-read after saving (page reloaded, value read back).
+Each was re-read after saving (page reloaded, value read back), and every row was read back again
+later the same day, in a fresh session, unchanged.
 
 | Setting | Where in GA | Value | Why |
 |---|---|---|---|
@@ -71,7 +72,9 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
   `/pricing`, `/privacy`, `/terms`, `/demo`, and `/compare`, `/tools`, `/blog`, `/docs` with
   everything below them. Never `/dashboard`, `/settings`, `/edit`, `/login`, `/signup`, `/auth/*`,
   the API, `/embed/*` or `/try/rcf-try.js`.
-- **Loading:** after mount, the first-party `/analytics/gtag-init.js` (route handler: Consent Mode
+- **Loading:** the shell in the root layout fetches the runtime chunk (`import()`) after
+  hydration on allowlisted pages only and mounts it in `startTransition`. Then the first-party
+  `/analytics/gtag-init.js` (route handler: Consent Mode
   defaults, `url_passthrough: false`, `ads_data_redaction: true`, and the country hint as one
   boolean; `private, no-store`, 404 without an id). On its `onReady`, gtag.js
   (`https://www.googletagmanager.com/gtag/js?id=…`, `afterInteractive`) is requested only when no
@@ -101,7 +104,7 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
 | `generate_lead` | click on a same-origin link to `/signup` | `cta_location` | yes |
 | `begin_checkout` | click on a same-origin link to `/dashboard/billing` (Pricing's "Buy Lifetime Pro", "Buy founding access") | `cta_location` | yes |
 | `try_started` | the `/try` sample preview becomes active | — | no |
-| `tool_scan_completed` | a free tool produced the visitor's own result: the calculator, once per page view, when the inputs first settle | `tool_slug` | yes |
+| `tool_scan_completed` | a free tool produced the visitor's own result: the calculator, once per page view, the first time the inputs settle while analytics is active (`track` returns whether it sent; a result before consent does not use the event up) | `tool_slug` | yes |
 | `sign_up` | **not sent yet** — see below | — | yes |
 
 `cta_location` values: `hero`, `header`, `final_cta`, `founding_offer`, `pricing_plan`,
@@ -119,7 +122,8 @@ import { track } from "@/lib/analytics/google-analytics/gtag";
 track("tool_scan_completed", { tool_slug: TOOL_SLUG });
 ```
 
-It is a no-op unless analytics runs on that page. The allowlist already covers `/tools/**`, and
+It is a no-op unless analytics runs on that page, and returns whether it sent: if the event
+should go once per page view, mark it sent only on `true`. The allowlist already covers `/tools/**`, and
 UUID report ids are replaced by `[id]` before anything is sent (a report URL is a capability).
 **Rebase note:** s96's ADR 062 puts `/tools/<slug>/r/<id>` under the nonce policy. The CSP builder
 ignores `analytics` under a nonce (this story's brief: nothing on the app policy), so on report

@@ -55,6 +55,7 @@ jest.mock("@/lib/analytics/google-analytics/gtag", () => {
 });
 
 import * as runtime from "@/lib/analytics/google-analytics/gtag";
+import { openCookieSettings } from "@/lib/analytics/google-analytics/cookie-settings";
 import { GoogleAnalyticsRuntime } from "@/components/analytics/GoogleAnalyticsRuntime";
 
 const ID = "G-TEST123456";
@@ -306,7 +307,7 @@ describe("Cookie settings", () => {
     setCookie("granted");
     render(
       <>
-        <button type="button" onClick={() => runtime.openCookieSettings()}>
+        <button type="button" onClick={() => openCookieSettings()}>
           Cookie settings
         </button>
         <GoogleAnalytics />
@@ -341,7 +342,7 @@ describe("Cookie settings", () => {
     setCookie("denied");
     render(<GoogleAnalytics />);
     initScriptRuns({ consentRequired: true });
-    act(() => runtime.openCookieSettings());
+    act(() => openCookieSettings());
 
     await user.click(
       screen.getByRole("button", { name: "Close cookie settings" }),
@@ -358,7 +359,7 @@ describe("Cookie settings", () => {
     initScriptRuns({ consentRequired: false });
     expect(screen.queryByTestId("rcf-ga-gtag")).toBeNull();
 
-    act(() => runtime.openCookieSettings());
+    act(() => openCookieSettings());
     await user.click(screen.getByRole("button", { name: "Allow analytics" }));
 
     expect(mocked.applyConsentChoice).toHaveBeenCalledWith(ID, "granted");

@@ -55,7 +55,8 @@ async function replaceField(
 beforeEach(() => {
   jest.useFakeTimers();
   mockReplace.mockClear();
-  mockTrack.mockClear();
+  mockTrack.mockReset();
+  mockTrack.mockReturnValue(true);
   mockSearch = "";
 });
 
@@ -290,6 +291,29 @@ describe("CostCalculator", () => {
     expect(mockTrack).toHaveBeenCalledWith("tool_scan_completed", {
       tool_slug: "website-maintenance-cost",
     });
+  });
+
+  // PR #94 review (Devin): a result that settles before analytics is active
+  // (consent pending, init script still loading) must not use up the page's
+  // one event. The first settled result AFTER activation sends it.
+  it("keeps the event for later when analytics was not active yet", async () => {
+    mockTrack.mockReturnValueOnce(false).mockReturnValue(true);
+    const user = setup();
+
+    await replaceField(user, "Sites you maintain", "12");
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    await replaceField(user, "Hourly rate", "80");
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    await replaceField(user, "Minutes per change", "25");
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+
+    expect(mockTrack).toHaveBeenCalledTimes(2);
   });
 
   it("sends no event while a field is empty", async () => {

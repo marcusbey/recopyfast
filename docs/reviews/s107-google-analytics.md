@@ -14,7 +14,8 @@ reviewer, not the gate.
 - `src/app/analytics/gtag-init.js/route.ts`: the first-party init script (country hint → one
   boolean, `private, no-store`, 404 without an id). Sessionless in the middleware.
 - `src/components/analytics/`: `GoogleAnalytics` (shell in the root layout, route + id gate),
-  `GoogleAnalyticsRuntime` (own chunk via `next/dynamic`, `ssr: false`), `ConsentBanner`.
+  `GoogleAnalyticsRuntime` (own chunk: plain `import()` in `load-runtime.ts`, mounted in
+  `startTransition`), `ConsentBanner`. `cookie-settings.ts` (import-free) for the footer.
 - CSP: `buildContentSecurityPolicy({ analytics })`, set by the middleware for allowlisted paths
   with an id; ignored under a nonce.
 - Events: `data-cta-location` on 13 CTAs; `try_started` in `TryExperience`;
@@ -59,9 +60,9 @@ reviewer, not the gate.
    allowlist. Reverting needs the GA checkbox AND the code changed together.
 2. **Basic consent mode where consent is required.** gtag.js is not requested at all before
    "Allow analytics" (no cookieless pings). The `region` defaults still ship.
-3. **The runtime is its own chunk** (`next/dynamic`, `ssr: false`). s17's gate measured TBT at
-   172–185 ms against a 200 ms limit on `main`; the banner and gtag runtime stay out of the
-   hydration bundle.
+3. **The runtime is its own chunk**, fetched by a plain `import()` after hydration and mounted in
+   `startTransition`. s17's gate measured TBT at 172–185 ms against a 200 ms limit on `main`; see
+   "Lighthouse" below for the run that went over and the fix.
 4. **Additions beyond the brief, all privacy-tightening:** `_ga` cookie lifetime 13 months
    (`cookie_expires`); GA's "Allow user-provided data capabilities" (on by default, auto-detecting
    emails/phones/addresses on the page) turned off; GA URL-query redaction for `rcf_edit_token`,
@@ -90,9 +91,33 @@ reviewer, not the gate.
   and the Supabase-backed landing pricing tests need the PG17 Supabase stack, which the local CLI
   (2.20.5) cannot start; CI runs them.
 - `CI=true npx playwright test --list`: 99 total (expected 99).
-- Lighthouse: before = `main` CI run 38194772674 (perf 96–97, LCP 1,673–1,691 ms, CLS ≤ 0.015,
-  TBT 172–185 ms). After = this PR's Comparison Lighthouse run. Local runs were discarded: the
-  machine's load average was 100–400 from other agents' work.
+- Lighthouse: see below. Local runs were discarded: the machine's load average was 100–400 from
+  other agents' work.
+
+## Lighthouse (comparison gate, ADR 061: mobile, 8 routes, 5 runs, medians)
+
+| Run | Perf | LCP (ms) | CLS | TBT (ms) | Gate |
+|---|---|---|---|---|---|
+| Before — `main` 9541589, run 38194772674 | 96–97 | 1,673–1,691 | ≤ 0.0150 | 172–185 | pass |
+| First PR run (8bb0173), run 38217319595 | 95–96 | 1,684–1,706 | ≤ 0.0150 | 187–210 | **fail** (TBT on 4 routes) |
+| After the fix | see the PR's latest Comparison Lighthouse run | | | | |
+
+Diagnosis from the failing run's reports (`/compare/tinacms`): a new 63 ms long task at ~4.3 s,
+when the runtime chunk arrived and React rendered it in one go; the gtag runtime (`gtag.ts` with
+`consent.ts` and `page-location.ts`) copied into nine page chunks because the footer imported
+`openCookieSettings` from it; `next/script` (~6 KB) placed in a shared chunk on the critical path.
+Fix: the footer's event moved to the import-free `cookie-settings.ts` (the gtag runtime is now only
+in the runtime chunk and the `/tools` and `/try` page chunks); the runtime is fetched by a plain
+`import()` and mounted, and its init-ready update applied, in `startTransition`. `next/script` is
+kept, as briefed. If the gate still fails on TBT, the next lever is replacing `next/script` with
+two `document.createElement('script')` calls inside the runtime chunk (same external, first-party
+init + gtag.js order, still no inline script), which moves those ~6 KB off the critical path.
+
+## Bot review findings
+
+| Source | Finding | Fix |
+|---|---|---|
+| Devin (PR #94) | 🟡 "Early calculator completions go uncounted": a result settling before analytics was active set the once-per-page-view flag although nothing was sent | `track()` returns whether it handed the event to gtag; the calculator marks the event sent only on `true`. Tests: `gtag.test.ts` (returns false inactive / true sent), `CostCalculator.test.tsx` ("keeps the event for later when analytics was not active yet") |
 
 ## Mutations the reviewer should try
 

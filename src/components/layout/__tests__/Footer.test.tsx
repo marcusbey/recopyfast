@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Footer from "../Footer";
-import { OPEN_COOKIE_SETTINGS_EVENT } from "@/lib/analytics/google-analytics/gtag";
+import { OPEN_COOKIE_SETTINGS_EVENT } from "@/lib/analytics/google-analytics/cookie-settings";
 
 describe("Footer", () => {
   it("links the public installation guide", () => {

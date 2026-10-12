@@ -63,8 +63,10 @@ afterAll(() => {
 });
 
 describe("track", () => {
-  it("is a no-op until analytics is active", () => {
-    runtime.track("generate_lead", { cta_location: "hero" });
+  it("is a no-op until analytics is active, and says so", () => {
+    expect(runtime.track("generate_lead", { cta_location: "hero" })).toBe(
+      false,
+    );
 
     expect(calls()).toEqual([]);
   });
@@ -73,7 +75,15 @@ describe("track", () => {
     delete win().gtag;
     runtime.setAnalyticsActive(ID, true);
 
-    expect(() => runtime.track("try_started", {})).not.toThrow();
+    expect(runtime.track("try_started", {})).toBe(false);
+  });
+
+  // PR #94 review (Devin): a caller that sends once per page view must know
+  // whether the event left, or an early call made before consent burns it.
+  it("returns true once the event is handed to gtag", () => {
+    runtime.setAnalyticsActive(ID, true);
+
+    expect(runtime.track("try_started", {})).toBe(true);
   });
 
   it("sends the event with its slug params and the sanitised page_location", () => {
@@ -338,17 +348,5 @@ describe("analyticsEventForClick", () => {
   it("is null for a non-element target", () => {
     expect(runtime.analyticsEventForClick(null, ORIGIN)).toBeNull();
     expect(runtime.analyticsEventForClick(window, ORIGIN)).toBeNull();
-  });
-});
-
-describe("openCookieSettings", () => {
-  it("dispatches the event the component listens for", () => {
-    const listener = jest.fn();
-    window.addEventListener(runtime.OPEN_COOKIE_SETTINGS_EVENT, listener);
-
-    runtime.openCookieSettings();
-
-    expect(listener).toHaveBeenCalledTimes(1);
-    window.removeEventListener(runtime.OPEN_COOKIE_SETTINGS_EVENT, listener);
   });
 });

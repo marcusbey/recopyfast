@@ -7,8 +7,8 @@ import {
   readConsentChoice,
   type ConsentChoice,
 } from "@/lib/analytics/google-analytics/consent";
+import { OPEN_COOKIE_SETTINGS_EVENT } from "@/lib/analytics/google-analytics/cookie-settings";
 import {
-  OPEN_COOKIE_SETTINGS_EVENT,
   analyticsEventForClick,
   applyConsentChoice,
   setAnalyticsActive,
@@ -72,9 +72,15 @@ export function GoogleAnalyticsRuntime({
     (choice === "granted" || (choice === null && !hint.consentRequired));
   const isActive = isGranted && isAllowedRoute;
 
+  // Non-urgent, like every update below that the visitor did not cause: in a
+  // transition React renders in slices that yield to the browser, so loading
+  // analytics never shows up as a long task (the s17 gate's TBT, PR #94).
   React.useEffect(() => {
-    setChoice(readConsentChoice(document.cookie));
-    setIsMounted(true);
+    const choiceInCookie = readConsentChoice(document.cookie);
+    React.startTransition(() => {
+      setChoice(choiceInCookie);
+      setIsMounted(true);
+    });
   }, []);
 
   React.useEffect(() => {
@@ -119,7 +125,10 @@ export function GoogleAnalyticsRuntime({
     return () => document.removeEventListener("click", onClick, true);
   }, [isActive]);
 
-  const onInitReady = React.useCallback(() => setHint(readConsentHint()), []);
+  const onInitReady = React.useCallback(() => {
+    const consentHint = readConsentHint();
+    React.startTransition(() => setHint(consentHint));
+  }, []);
 
   const choose = (next: ConsentChoice) => {
     applyConsentChoice(measurementId, next);

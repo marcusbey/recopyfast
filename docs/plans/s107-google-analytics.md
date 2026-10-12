@@ -49,8 +49,10 @@ on this branch.
    `nosniff`, `private, no-store`. Body is built by `buildGtagInitScript({ consentRequired })` from
    constants only — no request value is reflected. Sessionless in the middleware.
 5. **Client** `src/components/analytics/GoogleAnalytics.tsx` (a shell in the root layout) and
-   `GoogleAnalyticsRuntime.tsx` (its own chunk, `next/dynamic`, `ssr: false`, so the banner and
-   the gtag runtime stay out of the bundle every page hydrates with — TBT headroom, see T9):
+   `GoogleAnalyticsRuntime.tsx` (its own chunk, fetched by a plain `import()` in
+   `load-runtime.ts` after hydration and mounted in `startTransition`, so the banner and the gtag
+   runtime stay out of the bundle every page hydrates with and never render as a long task — TBT,
+   see T9). The footer's "Cookie settings" dispatches from the import-free `cookie-settings.ts`:
    - renders nothing when GA is off or the route is off the allowlist;
    - after mount, loads the init script; on `onReady` decides: load gtag.js now (no consent
      needed, or granted) or show the banner (consent needed, no choice);

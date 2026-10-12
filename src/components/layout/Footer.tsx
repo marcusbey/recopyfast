@@ -3,7 +3,7 @@
 import { Zap, Github, Mail, Rocket, Shield } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { openCookieSettings } from "@/lib/analytics/google-analytics/gtag";
+import { openCookieSettings } from "@/lib/analytics/google-analytics/cookie-settings";
 import { getMeasurementId } from "@/lib/analytics/google-analytics/measurement-id";
 
 const footerLinks = {
