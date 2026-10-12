@@ -26,6 +26,7 @@ const mockConstructEvent = jest.fn();
 const mockSubscriptionRetrieve = jest.fn();
 const mockSubscriptionUpdate = jest.fn();
 const mockSubscriptionCancel = jest.fn();
+const mockSubscriptionsList = jest.fn();
 const mockSessionsList = jest.fn();
 const mockSessionsExpire = jest.fn();
 const mockSessionsRetrieve = jest.fn();
@@ -41,6 +42,7 @@ jest.mock("stripe", () =>
       retrieve: mockSubscriptionRetrieve,
       update: mockSubscriptionUpdate,
       cancel: mockSubscriptionCancel,
+      list: mockSubscriptionsList,
     },
     checkout: {
       sessions: {
@@ -484,11 +486,49 @@ function armStripe() {
     id,
     created: LIFETIME_PAID_AT,
   }));
+  mockSubscriptionsList.mockImplementation(listSubscriptions);
   mockSessionsList.mockResolvedValue({ data: [], has_more: false });
   mockSessionsExpire.mockImplementation(async (id: string) => ({
     id,
     status: "expired",
   }));
+}
+
+/**
+ * `subscriptions.list` over Stripe's subscriptions: the customer and status
+ * filters applied, newest first, paged by `limit` / `starting_after`.
+ *
+ * The creation window (`created.gte`) is deliberately NOT applied: the route's
+ * own payment-order check must be what spares a subscription bought before the
+ * lifetime. The window itself is pinned by the request parameters.
+ */
+async function listSubscriptions(params: Row) {
+  if (params.status !== "ended") {
+    throw new Error(`Unexpected subscriptions.list status: ${params.status}`);
+  }
+  const matches = Object.values(stripeSubscriptions)
+    .filter(
+      (subscription) =>
+        subscription.customer === params.customer &&
+        ["canceled", "incomplete_expired"].includes(
+          String(subscription.status),
+        ),
+    )
+    .sort(
+      (a, b) =>
+        Number(b.created) - Number(a.created) ||
+        String(a.id).localeCompare(String(b.id)),
+    );
+  const start = params.starting_after
+    ? matches.findIndex((row) => row.id === params.starting_after) + 1
+    : 0;
+  const limit = Number(params.limit ?? 10);
+  return {
+    data: matches
+      .slice(start, start + limit)
+      .map((subscription) => ({ ...subscription })),
+    has_more: start + limit < matches.length,
+  };
 }
 
 function subscriptionCreated(eventId: string, subscriptionId: string) {
@@ -1774,7 +1814,7 @@ describe("M-2 and m-3: recorded before the grant's own event", () => {
     );
   });
 
-  it("m-3: leaves alone a subscription Stripe already ended for another reason", async () => {
+  it("m-3 / finding 6: refunds, never cancels or updates, a subscription bought after the lifetime that Stripe already ended", async () => {
     liveRow("pro");
     stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
       SUBSCRIPTION_ID,
@@ -1796,8 +1836,10 @@ describe("M-2 and m-3: recorded before the grant's own event", () => {
     expect(response.status).toBe(200);
     expect(mockSubscriptionCancel).not.toHaveBeenCalled();
     expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
-    expect(mockRefundsList).not.toHaveBeenCalled();
-    expect(mockLoggerError).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    // The refusal report, and no false alarm.
+    expect(refusalReports()).toHaveLength(1);
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -2399,6 +2441,337 @@ describe("finding 5: a refused subscription already cancelled by the customer, w
 
     expect(response.status).toBe(200);
     expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * s82, finding 6 (implementer-found, opposite ordering): the lifetime's event
+ * is processed AFTER the subscription's, and the customer had already ended
+ * the subscription. `stopBillingForLifetimeOwner` reads live rows only and
+ * skips a subscription Stripe says is over, so one bought after the lifetime
+ * was neither refunded nor recorded: what it collected, and any payment still
+ * in flight, stayed charged.
+ */
+describe("finding 6: a covered subscription the customer ended before the lifetime's event lands", () => {
+  const CUSTOMER_REASON = {
+    comment: "Cancelled by the customer",
+    feedback: null,
+    reason: "cancellation_requested",
+  };
+
+  function endedByCustomer(
+    overrides: Row = {},
+    plan: "pro" | "agency" = "pro",
+  ): Row {
+    return stripeSubscription(SUBSCRIPTION_ID, plan, {
+      status: "canceled",
+      created: LIFETIME_PAID_AT + 120,
+      canceled_at: LIFETIME_PAID_AT + 300,
+      cancellation_details: CUSTOMER_REASON,
+      ...overrides,
+    });
+  }
+
+  function recordedRow(status: string, plan = "pro"): Row {
+    return {
+      user_id: USER_ID,
+      customer_id: "bc_1",
+      stripe_subscription_id: SUBSCRIPTION_ID,
+      plan,
+      status,
+    };
+  }
+
+  function terminalRefusalRecords(): Row[] {
+    return db.billing_events.filter((row) =>
+      String(row.stripe_event_id).startsWith(TERMINAL_REFUSAL_ID_PREFIX),
+    );
+  }
+
+  beforeEach(() => {
+    // Recorded by its own event before the grant existed, then ended by the
+    // customer; its deletion has been processed.
+    db.billing_subscriptions = [recordedRow("canceled")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = endedByCustomer();
+  });
+
+  it.each(["canceled", "active"])(
+    "(a) refunds a subscription bought after the lifetime once and records the refusal, never cancelling or updating it (local row %s)",
+    async (localStatus) => {
+      db.billing_subscriptions = [recordedRow(localStatus)];
+
+      const response = await deliver(lifetimePaid("evt_lifetime"));
+
+      expect(response.status).toBe(200);
+      expect(db.plan_entitlements).toHaveLength(1);
+      expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+      expect(mockRefundsCreate).toHaveBeenCalledWith(
+        {
+          payment_intent: SUBSCRIPTION_PAYMENT_INTENT,
+          metadata: {
+            reason_code: "covered_by_lifetime",
+            subscription_id: SUBSCRIPTION_ID,
+          },
+        },
+        { idempotencyKey: REFUND_KEY },
+      );
+      expect(terminalRefusalRecords()).toEqual([
+        expect.objectContaining({
+          user_id: USER_ID,
+          event_type: "internal.terminal_subscription_refused",
+          data: expect.objectContaining({
+            subscription_id: SUBSCRIPTION_ID,
+            plan_id: "pro",
+          }),
+        }),
+      ]);
+      expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+      expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+      expect(stripeSubscriptions[SUBSCRIPTION_ID].cancellation_details).toEqual(
+        CUSTOMER_REASON,
+      );
+      expect(refusalReports()).toHaveLength(1);
+    },
+  );
+
+  it("(b) refunds a payment in flight at the lifetime's event once, when it settles", async () => {
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_debit", "open", "pi_debit")],
+      has_more: false,
+    });
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(refusalReports()[0][0]).toContain("refunded when it settles");
+    expect(terminalRefusalRecords()).toHaveLength(1);
+
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_debit", "paid", "pi_debit")],
+      has_more: false,
+    });
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_intent: "pi_debit" }),
+      {
+        idempotencyKey: `covered_by_lifetime-refund-${SUBSCRIPTION_ID}-pi_debit`,
+      },
+    );
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("(c) leaves a subscription bought before the lifetime untouched, then and when a payment of it settles", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = endedByCustomer({
+      created: LIFETIME_PAID_AT - 60,
+    });
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+    expect((await deliver(invoicePaid("evt_invoice_paid"))).status).toBe(200);
+
+    expect(terminalRefusalRecords()).toEqual([]);
+    expect(mockInvoicePaymentsList).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockLoggerError).not.toHaveBeenCalled();
+  });
+
+  it("(c) leaves an Agency subscription beside a Lifetime Pro purchase untouched", async () => {
+    db.billing_subscriptions = [recordedRow("canceled", "agency")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = endedByCustomer({}, "agency");
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+    expect(terminalRefusalRecords()).toEqual([]);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(mockLoggerError).not.toHaveBeenCalled();
+  });
+
+  it("(d) refunds once across a replayed lifetime event and the lifetime's second event after Stripe's idempotency key expires", async () => {
+    const event = lifetimePaid("evt_lifetime");
+
+    expect((await deliver(event)).status).toBe(200);
+    expect(await (await deliver(event)).json()).toEqual({
+      received: true,
+      duplicate: true,
+    });
+    refundsByIdempotencyKey = {};
+    // The same purchase's other event: the grant is a duplicate.
+    expect((await deliver(lifetimePaid("evt_lifetime_again"))).status).toBe(
+      200,
+    );
+
+    expect(db.plan_entitlements).toHaveLength(1);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(stripeRefunds).toHaveLength(1);
+    expect(terminalRefusalRecords()).toHaveLength(1);
+    expect(refusalReports()).toHaveLength(1);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("(e) the live path is unchanged: a live subscription bought after the lifetime is cancelled and refunded once, and recorded by its marker only", async () => {
+    db.billing_subscriptions = [recordedRow("active")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT + 120 },
+    );
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+    expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+    expect(mockSubscriptionCancel).toHaveBeenCalledWith(
+      SUBSCRIPTION_ID,
+      expect.objectContaining({
+        cancellation_details: { comment: "covered_by_lifetime" },
+      }),
+    );
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockInvoicePaymentsList).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(refusalReports()).toHaveLength(1);
+    expect(terminalRefusalRecords()).toEqual([]);
+  });
+
+  it("(e) the live path is unchanged: a live subscription bought before the lifetime is set to end at period end", async () => {
+    db.billing_subscriptions = [recordedRow("active")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT - 86400 },
+    );
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+    expect(mockSubscriptionUpdate).toHaveBeenCalledTimes(1);
+    expect(mockSubscriptionUpdate).toHaveBeenCalledWith(
+      SUBSCRIPTION_ID,
+      expect.objectContaining({ cancel_at_period_end: true }),
+    );
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockInvoicePaymentsList).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(terminalRefusalRecords()).toEqual([]);
+  });
+
+  it("lists only this customer's ended subscriptions created since the lifetime was paid, page by page", async () => {
+    // A full first page of newer ended Agency subscriptions, which Lifetime
+    // Pro does not cover; the covered one is the oldest, on the second page.
+    for (let index = 0; index < 100; index += 1) {
+      const id = `sub_agency_${String(index).padStart(3, "0")}`;
+      stripeSubscriptions[id] = stripeSubscription(id, "agency", {
+        status: "canceled",
+        created: LIFETIME_PAID_AT + 1000 + index,
+      });
+    }
+    // Another customer's ended Pro subscription is never listed.
+    stripeSubscriptions.sub_other = stripeSubscription("sub_other", "pro", {
+      customer: "cus_other",
+      status: "canceled",
+      created: LIFETIME_PAID_AT + 500,
+    });
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+
+    const bound = {
+      customer: STRIPE_CUSTOMER_ID,
+      status: "ended",
+      created: { gte: LIFETIME_PAID_AT },
+      limit: 100,
+    };
+    expect(mockSubscriptionsList.mock.calls).toEqual([
+      [bound],
+      [{ ...bound, starting_after: "sub_agency_000" }],
+    ]);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate.mock.calls[0][0]).toMatchObject({
+      metadata: { subscription_id: SUBSCRIPTION_ID },
+    });
+    expect(terminalRefusalRecords()).toHaveLength(1);
+  });
+
+  it("fails closed, alerts in words, and finishes on the retry when the listing says more but does not advance", async () => {
+    mockSubscriptionsList.mockResolvedValueOnce({ data: [], has_more: true });
+    const event = lifetimePaid("evt_lifetime");
+
+    const response = await deliver(event);
+
+    expect(response.status).toBe(500);
+    expect(db.plan_entitlements).toHaveLength(1);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const [alert] = alertsSaying("could not be read");
+    expect(alert[0]).toContain(LIFETIME_PAYMENT_INTENT);
+    expect(alert[0]).toContain("Returning 5xx so Stripe redelivers");
+    expect(alert[1]).toBeUndefined();
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        action: "refuse_ended_covered_subscriptions",
+        paymentIntentId: LIFETIME_PAYMENT_INTENT,
+        cause: expect.objectContaining({
+          message: expect.stringContaining("did not advance its cursor"),
+        }),
+      }),
+    );
+
+    // Stripe's redelivery: the grant is a duplicate, the step runs again.
+    expect((await deliver(event)).status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(terminalRefusalRecords()).toHaveLength(1);
+  });
+
+  it("asks Stripe to retry, alerts in words, and scans nothing when the refusal cannot be recorded; the retry finishes it", async () => {
+    terminalRefusalWriteFails = true;
+    const event = lifetimePaid("evt_lifetime");
+
+    const response = await deliver(event);
+
+    expect(response.status).toBe(500);
+    expect(db.plan_entitlements).toHaveLength(1);
+    expect(mockInvoicePaymentsList).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const [alert] = alertsSaying("could not be recorded");
+    expect(alert[0]).toContain(SUBSCRIPTION_ID);
+    expect(alert[0]).toContain("Returning 5xx so Stripe redelivers");
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        action: "record_terminal_refusal",
+        subscriptionId: SUBSCRIPTION_ID,
+      }),
+    );
+
+    terminalRefusalWriteFails = false;
+    expect((await deliver(event)).status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(terminalRefusalRecords()).toHaveLength(1);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+  });
+
+  it("asks Stripe to retry, alerts in words, and refunds once on the retry when the refund fails", async () => {
+    mockRefundsCreate.mockRejectedValueOnce(new Error("Stripe is down"));
+    const event = lifetimePaid("evt_lifetime");
+
+    const response = await deliver(event);
+
+    expect(response.status).toBe(500);
+    const [alert] = alertsSaying("could not be refunded");
+    expect(alert[0]).toContain(SUBSCRIPTION_ID);
+    expect(alert[0]).toContain("Returning 5xx so Stripe redelivers");
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        subscriptionId: SUBSCRIPTION_ID,
+        cause: expect.objectContaining({ message: "Stripe is down" }),
+      }),
+    );
+
+    expect((await deliver(event)).status).toBe(200);
+    expect(stripeRefunds).toHaveLength(1);
+    expect(refusalReports()).toHaveLength(1);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
   });
 });
 

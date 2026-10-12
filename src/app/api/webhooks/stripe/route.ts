@@ -44,6 +44,7 @@ import {
   expireCheckoutsCoveredByGrant,
   isRefusedAsCoveredByLifetime,
   lifetimePaymentTime,
+  listEndedSubscriptionsSince,
   readLifetimeCover,
   recordTerminalRefusal,
   refundCoveredInvoice,
@@ -605,6 +606,7 @@ async function refuseIfLifetimeCovers(
   planId: PaidPlanId,
   userId: string,
   supabase: ServiceClient,
+  when = "recorded after the grant",
 ): Promise<StripeSubscriptionWithPeriod> {
   const isTerminal = isTerminalSubscriptionStatus(subscription.status);
   // Set to end at period end for a lifetime purchase, by either ordering: it
@@ -653,7 +655,7 @@ async function refuseIfLifetimeCovers(
       refusal,
       userId,
       planId,
-      "recorded after the grant",
+      when,
       supabase,
     );
     return refusal.subscription as StripeSubscriptionWithPeriod;
@@ -1259,7 +1261,10 @@ async function grantLifetime(
 
   if (result.duplicate) {
     console.log(`Lifetime entitlement for ${paymentIntentId} already granted.`);
-    // Already handled on the first delivery, including the cancellation below.
+    // Already handled on the first delivery, including the cancellation below
+    // — except the one retryable step, which a 5xx of that delivery left for
+    // this one (s82 finding 6). Idempotent when it already ran.
+    await refuseEndedSubscriptionsCoveredByGrant(userId, paymentIntentId);
     return;
   }
 
@@ -1361,6 +1366,8 @@ async function grantLifetime(
   // open could otherwise be paid between the two.
   await closeCheckoutsCoveredByGrant(userId, paymentIntentId, grantsPlanId);
   await stopBillingForLifetimeOwner(userId, paymentIntentId, grantsPlanId);
+  // Last, because it is the one step that throws: everything above has run.
+  await refuseEndedSubscriptionsCoveredByGrant(userId, paymentIntentId);
 }
 
 /**
@@ -1466,8 +1473,9 @@ async function closeCheckoutsCoveredByGrant(
  * subscription at least never renews, and ops hear of it. Should only the
  * refund fail, the subscription is already cancelled: ops are told to refund
  * it by hand, and nothing is set to end (s82 review, m-3). A covered
- * subscription Stripe already ended for another reason is left alone: nothing
- * bills, and it is not ours to refund.
+ * subscription Stripe already ended is left to
+ * `refuseEndedSubscriptionsCoveredByGrant` (s82 finding 6), which refunds one
+ * bought after the lifetime and leaves any other alone.
  *
  * Failures here are logged, never thrown. The customer's $199 has been captured
  * and the entitlement is already written; throwing would make Stripe retry the
@@ -1520,8 +1528,9 @@ async function stopBillingForLifetimeOwner(
       if (plan && isPlanCoveredByGrants(plan, [grantsPlanId])) {
         try {
           const current = await retrieveCurrentSubscription(subscriptionId);
-          // Over already (our row lags): nothing bills, an update would fail,
-          // and a subscription ended for another reason is not ours to refund.
+          // Over already (our row lags): nothing bills and an update would
+          // fail. One bought after the lifetime is refunded by
+          // `refuseEndedSubscriptionsCoveredByGrant` (s82 finding 6).
           if (isTerminalSubscriptionStatus(current.status)) continue;
 
           lifetimePaidAt ??= await lifetimePaymentTime(paymentIntentId);
@@ -1610,6 +1619,115 @@ async function stopBillingForLifetimeOwner(
       },
     );
   }
+}
+
+/**
+ * Refuse the covered subscriptions the customer had already ended when this
+ * lifetime's event lands.
+ *
+ * s82 finding 6 (implementer-found, opposite ordering): `stopBillingForLifetimeOwner`
+ * reads live rows only and leaves a subscription Stripe says is over. One bought
+ * after the lifetime and ended by the customer before this event (a Checkout
+ * opened before the purchase, paid after it, then cancelled) was neither
+ * refunded nor recorded: what it collected stayed charged, and so did a payment
+ * still in flight. Each subscription `listEndedSubscriptionsSince` names (this
+ * customer, ended, created since the lifetime was paid, every page) goes
+ * through `refuseIfLifetimeCovers`, the decision the other ordering makes
+ * (findings 4 and 5): on a plan an undated grant covers
+ * (`readLifetimeCover`) and bought at or after it, its refusal is recorded,
+ * then what its invoice collected is refunded, never cancelled again and its
+ * reason kept; anything else is left untouched. One refused by our own
+ * cancellation carries the marker, and that refusal owns it.
+ *
+ * Unlike the rest of the grant's follow-up, this throws (after alerting): the
+ * route answers 5xx and the redelivery comes back here through
+ * `grantLifetime`'s duplicate path. Every part is idempotent: the record is
+ * write-once, a refund is found by its metadata, the report is claimed once.
+ * Each subscription is tried before the first failure is thrown, so one cannot
+ * hold up the rest.
+ */
+async function refuseEndedSubscriptionsCoveredByGrant(
+  userId: string,
+  paymentIntentId: string,
+): Promise<void> {
+  const supabase = createServiceRoleClient();
+
+  let ended: Stripe.Subscription[];
+  try {
+    const { data: customer, error } = await supabase
+      .from("billing_customers")
+      .select("stripe_customer_id")
+      .eq("user_id", userId)
+      .maybeSingle<{ stripe_customer_id: string | null }>();
+    if (error) {
+      throw new Error(`billing_customers lookup failed: ${error.message}`);
+    }
+    // No Stripe customer, no subscription.
+    if (!customer?.stripe_customer_id) return;
+
+    ended = await listEndedSubscriptionsSince(
+      customer.stripe_customer_id,
+      await lifetimePaymentTime(paymentIntentId),
+    );
+  } catch (error) {
+    alertOps(
+      `Lifetime purchase ${paymentIntentId} granted, but the customer's ended ` +
+        `subscriptions could not be read: one bought after it and already ` +
+        `cancelled would stay charged. Returning 5xx so Stripe redelivers; if ` +
+        `this repeats, refund any covered subscription bought after the ` +
+        `lifetime by hand.`,
+      error,
+      { userId },
+      {
+        component: "webhooks/stripe",
+        action: "refuse_ended_covered_subscriptions",
+        paymentIntentId,
+      },
+    );
+    throw error;
+  }
+
+  const failures: unknown[] = [];
+  for (const subscription of ended) {
+    if (isRefusedAsCoveredByLifetime(subscription)) continue;
+
+    let planId: PaidPlanId;
+    try {
+      planId = await resolveSubscriptionPlan(subscription);
+    } catch (error) {
+      alertOps(
+        `Lifetime purchase ${paymentIntentId} granted, but the plan of ended ` +
+          `subscription ${subscription.id} could not be resolved, so whether ` +
+          `the lifetime covers it is unknown. Returning 5xx so Stripe ` +
+          `redelivers; if this repeats, refund it by hand if it was bought ` +
+          `after the lifetime on a plan the lifetime covers.`,
+        error,
+        { userId },
+        {
+          component: "webhooks/stripe",
+          action: "refuse_ended_covered_subscriptions",
+          subscriptionId: subscription.id,
+          paymentIntentId,
+        },
+      );
+      failures.push(error);
+      continue;
+    }
+    try {
+      // Decides coverage and payment order; alerts its own failures.
+      await refuseIfLifetimeCovers(
+        subscription,
+        planId,
+        userId,
+        supabase,
+        `ended before lifetime purchase ${paymentIntentId} was processed`,
+      );
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  if (failures.length > 0) throw failures[0];
 }
 
 /**

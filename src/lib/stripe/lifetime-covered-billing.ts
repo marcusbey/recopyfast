@@ -661,6 +661,54 @@ export async function wasRefusedAsCoveredByLifetime(
   return data !== null;
 }
 
+/** Ended-subscription page size: Stripe's maximum. */
+const ENDED_SUBSCRIPTION_PAGE_SIZE = 100;
+
+/**
+ * Every subscription of a customer that is already over (`canceled` or
+ * `incomplete_expired`, Stripe's `ended`) and that Stripe created at or after
+ * `createdSince`.
+ *
+ * s82 finding 6 (implementer-found, opposite ordering): when a lifetime's event
+ * is processed after a covered subscription's, and the customer had already
+ * ended it, the subscription is no longer live, so the live rows the lifetime
+ * handler reads never name it. Stripe does. Bounded three ways (one customer,
+ * ended only, created since the lifetime was paid) and read page by page until
+ * Stripe says there is no more. A cursor that does not advance throws, like
+ * every other money-moving scan here.
+ */
+export async function listEndedSubscriptionsSince(
+  stripeCustomerId: string,
+  createdSince: number,
+): Promise<Stripe.Subscription[]> {
+  const ended: Stripe.Subscription[] = [];
+  let startingAfter: string | undefined;
+  const seenCursors = new Set<string>();
+
+  for (;;) {
+    const page = await stripe.subscriptions.list({
+      customer: stripeCustomerId,
+      status: "ended",
+      created: { gte: createdSince },
+      limit: ENDED_SUBSCRIPTION_PAGE_SIZE,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const nextCursor = nextStripePageCursor(
+      page.data,
+      page.has_more,
+      startingAfter,
+      seenCursors,
+      `ended-subscription lookup for customer ${stripeCustomerId}`,
+    );
+    ended.push(...page.data);
+
+    if (!nextCursor) break;
+    startingAfter = nextCursor;
+  }
+
+  return ended;
+}
+
 /** What closing the covered Checkouts did, for the ops report. */
 export interface CoveredCheckoutExpiry {
   expiredSessionIds: string[];
