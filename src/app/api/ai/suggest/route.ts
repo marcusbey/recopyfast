@@ -19,6 +19,7 @@ import {
   requireUuid,
 } from "@/lib/api/validation";
 import { withPublicCors, publicOptions } from "@/lib/http/public-cors";
+import { logger } from "@/lib/monitoring/logger";
 
 /**
  * AI suggestions for the in-page editor.
@@ -123,6 +124,17 @@ const NO_PAYER_MESSAGE = "AI suggestions aren't available on this site.";
 const EDITOR_DENIED_MESSAGE =
   "AI suggestions aren't available on this site's plan right now. Ask the site owner to add AI credits.";
 
+/** The model failed and the whole charge came back. */
+const NOT_CHARGED_MESSAGE =
+  "AI suggestions are unavailable right now. You were not charged.";
+
+/**
+ * The model failed and the refund did not land, or not in full. s82: this
+ * route said "You were not charged" either way.
+ */
+const REFUND_FAILED_MESSAGE =
+  "AI suggestions are unavailable right now. We could not refund the credit for this request automatically, and we have been notified.";
+
 function cors(response: NextResponse, request: NextRequest) {
   return withPublicCors(response, request, CORS_METHODS);
 }
@@ -136,7 +148,8 @@ function fail(
 }
 
 /**
- * Give back what this request took, after the model failed to deliver.
+ * Give back what this request took, after the model failed to deliver, and
+ * say whether ALL of it came back.
  *
  * By the receipt the charge returned (s48), never by the owner's id: the old
  * owner-keyed refund, `(ownerId, 1, reason)`, could not know the credit had
@@ -145,20 +158,48 @@ function fail(
  * balance that kept a lapsed trial past the paywall (P3). `refundCharge` returns the credit to
  * where it came from and never creates a row.
  *
+ * s82: the answer used to be discarded, and the 502 told the widget "You were
+ * not charged" whatever had happened. The caller now says that only when this
+ * returns true. A refund that failed, threw or came back short is reported
+ * through `logger.error` — stdout plus Sentry in production — because
+ * `console.error` never reaches Sentry for a response this route handles
+ * itself, so the owner's lost credit was visible to nobody. The report carries
+ * ids and amounts only: never the editor's token, grant or email.
+ *
  * Never throws: it runs on the way out of a failure, and a refund that threw
  * from the `catch` would turn a 500 with CORS into an unhandled rejection the
- * widget cannot read. `refundCharge` logs its own failure and never throws; the
- * guard stays because this is the last line before the response.
+ * widget cannot read.
  */
-async function refundOwner(charge: CreditCharge): Promise<void> {
+async function refundOwner(
+  charge: CreditCharge,
+  siteId: string,
+): Promise<boolean> {
+  let refunded = 0;
+  let isRefunded = false;
+  let failure: unknown;
   try {
-    await refundCharge(charge);
+    const outcome = await refundCharge(charge);
+    refunded = outcome.refunded;
+    isRefunded = outcome.success && outcome.refunded >= charge.credits;
   } catch (refundError) {
-    console.error(
-      `[ai/suggest] refund to site owner ${charge.userId} failed:`,
-      refundError,
+    failure = refundError;
+  }
+
+  if (!isRefunded) {
+    logger.error(
+      "[ai/suggest] AI credit refund failed: the site owner was charged for a suggestion that never arrived. Refund this usage by hand.",
+      failure instanceof Error ? failure : undefined,
+      { siteId, userId: charge.userId },
+      {
+        component: "ai/suggest",
+        action: "refund",
+        usageId: charge.usageId,
+        credits: charge.credits,
+        refunded,
+      },
     );
   }
+  return isRefunded;
 }
 
 export async function POST(request: NextRequest) {
@@ -168,6 +209,8 @@ export async function POST(request: NextRequest) {
   // Once refunded it is cleared, so the `catch` cannot refund it a second time
   // (the database would cap a second refund at 0 anyway — s48).
   let charge: CreditCharge | null = null;
+  // The site that charge was for, named in the ops report if its refund fails.
+  let chargedSiteId = "";
 
   try {
     // Pre-auth IP limit. Every request here is a potential OpenAI call, so the
@@ -308,6 +351,7 @@ export async function POST(request: NextRequest) {
       });
     }
     charge = usageResult.charge ?? null;
+    chargedSiteId = siteId.value;
 
     // Generate content suggestions
     const result = await aiService.generateContentSuggestion({
@@ -332,12 +376,12 @@ export async function POST(request: NextRequest) {
       );
       const failedCharge = charge;
       charge = null;
-      if (failedCharge) {
-        await refundOwner(failedCharge);
-      }
+      // No receipt means nothing was taken, which is "not charged" too.
+      const isRefunded = failedCharge
+        ? await refundOwner(failedCharge, siteId.value)
+        : true;
       return fail(request, 502, {
-        error:
-          "AI suggestions are unavailable right now. You were not charged.",
+        error: isRefunded ? NOT_CHARGED_MESSAGE : REFUND_FAILED_MESSAGE,
       });
     }
 
@@ -353,7 +397,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Content suggestion API error:", error);
     if (charge) {
-      await refundOwner(charge);
+      await refundOwner(charge, chargedSiteId);
     }
     return fail(request, 500, { error: "Internal server error" });
   }

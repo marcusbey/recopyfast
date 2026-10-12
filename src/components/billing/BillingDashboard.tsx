@@ -271,6 +271,14 @@ export function BillingDashboard({
     const isPlanHeldForLife =
       lifetimeGrant.kind === "granted" &&
       lifetimeGrant.planIds.includes(plan.id);
+    // s96, folded into s82 (Devin Review on PR #81, finding 3): when every
+    // grant of the plan in force is dated, when the latest ends. The card and
+    // the dialog then say "Included until <date>" — a dated grant ends, and it
+    // was called "Lifetime". Undefined for a plan held for life.
+    const heldUntil =
+      isPlanHeldForLife && lifetimeGrant.kind === "granted"
+        ? lifetimeGrant.endsAt?.[plan.id]
+        : undefined;
     // The plan a still-live subscription bills, named from the catalogue the
     // page already holds. Undefined when the row's plan is not in it.
     const subscriptionPlanName = findSubscriptionPlan(
@@ -311,11 +319,17 @@ export function BillingDashboard({
                 subscription={dashboardData.subscription}
                 plan={plan}
                 isLifetime={isPlanHeldForLife}
+                heldUntil={heldUntil}
                 subscriptionPlanName={subscriptionPlanName}
                 // The allowance the server resolved for this account, not the
                 // catalogue row's: they differ for a lifetime Founding Agency owner
                 // (ADR 038).
                 monthlyCredits={dashboardData.creditWallet?.included ?? null}
+                // s82: what that allowance becomes once the subscription the
+                // card's running-out row names ends, when it is lower.
+                includedAfterSubscription={
+                  dashboardData.includedAfterSubscription ?? null
+                }
                 onUpdate={handleSubscriptionUpdate}
               />
               <PaymentMethodsCard
@@ -360,6 +374,40 @@ export function BillingDashboard({
             lifetimeOffers={lifetimeOffers}
             foundingAgencyAvailability={foundingAgencyAvailability}
             agencyCheckoutEnabled={agencyCheckoutEnabled}
+            // s82 (s45 review #1): the dialog marked this plan "Current" at
+            // its monthly price; held for life, it reads as the card does.
+            heldForLife={
+              isPlanHeldForLife
+                ? {
+                    planId: plan.id,
+                    monthlyCredits:
+                      dashboardData.creditWallet?.included ?? null,
+                    endsAt: heldUntil,
+                  }
+                : undefined
+            }
+            // s82 review, finding 1: every plan a grant includes is refused
+            // in the dialog as Checkout and the plan change refuse it —
+            // including under a higher subscription (Lifetime Pro + Agency),
+            // where nothing on the card is held for life. Same read as the
+            // offer card's (`lifetimeGrant`), so the two cannot disagree.
+            grantedPlanIds={
+              lifetimeGrant.kind === "granted" ? lifetimeGrant.planIds : []
+            }
+            // Second pass, m3: a plan included only by a dated grant reads
+            // "until <date>", never "for life".
+            grantEndsAt={
+              lifetimeGrant.kind === "granted"
+                ? lifetimeGrant.endsAt
+                : undefined
+            }
+            // Devin Review on PR #81, finding 2: a plan change keeps a
+            // subscription set to end, and the dialog says so.
+            subscriptionEndsAt={
+              dashboardData.subscription?.cancel_at_period_end
+                ? dashboardData.subscription.current_period_end
+                : undefined
+            }
             onSuccess={handleSubscriptionUpdate}
           />
         </>

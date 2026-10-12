@@ -6,6 +6,7 @@ import type {
   OneTimeProductId,
   PaidPlanId,
 } from "@/lib/stripe/plan-types";
+import { formatRetryTime, rateLimitRetrySentence } from "./rate-limit-retry";
 
 /**
  * Starts a Stripe Checkout Session and hands the browser over to Stripe.
@@ -32,36 +33,8 @@ const GENERIC_ERROR =
   "We could not reach the payment service. Check your connection and try again.";
 
 function formatRetrySentence(retryAt: unknown): string | null {
-  if (typeof retryAt !== "string") {
-    return null;
-  }
-
-  const retryDate = new Date(retryAt);
-  if (Number.isNaN(retryDate.getTime())) {
-    return null;
-  }
-
-  const retryTime = new Intl.DateTimeFormat("en-CA", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(retryDate);
-
-  return `You can start a new checkout at ${retryTime}.`;
-}
-
-function getRateLimitRetryAt(response: Response): string | null {
-  const resetEpoch = Number(response.headers.get("X-RateLimit-Reset"));
-  if (Number.isFinite(resetEpoch) && resetEpoch > 0) {
-    return new Date(resetEpoch * 1000).toISOString();
-  }
-
-  const retryAfter = Number(response.headers.get("Retry-After"));
-  if (Number.isFinite(retryAfter) && retryAfter > 0) {
-    return new Date(Date.now() + retryAfter * 1000).toISOString();
-  }
-
-  return null;
+  const retryTime = formatRetryTime(retryAt);
+  return retryTime ? `You can start a new checkout at ${retryTime}.` : null;
 }
 
 export function useCheckout(): UseCheckoutResult {
@@ -101,18 +74,10 @@ export function useCheckout(): UseCheckoutResult {
 
       if (!response.ok && !canResumeOpenCheckout) {
         const responseError = data?.error || "Failed to start checkout";
-        const retrySentence = formatRetrySentence(
-          response.status === 429
-            ? getRateLimitRetryAt(response)
-            : data?.retryAt,
-        );
         const retryMessage =
           response.status === 429
-            ? retrySentence?.replace(
-                "You can start a new checkout",
-                "Try again",
-              )
-            : retrySentence;
+            ? rateLimitRetrySentence(response)
+            : formatRetrySentence(data?.retryAt);
 
         throw new Error(
           retryMessage ? `${responseError} ${retryMessage}` : responseError,
