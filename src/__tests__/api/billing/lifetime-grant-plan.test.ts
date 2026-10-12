@@ -131,6 +131,28 @@ function createFakeClient() {
         predicates.push((row) => (row[column] ?? null) === value);
         return builder;
       },
+      // s82 finding 6 / review minor 3: a new grant reads the account's
+      // lifetime cover through the shared grant reader, which filters with
+      // `neq` and an `or` of `expires_at` arms.
+      neq: (column: string, value: unknown) => {
+        predicates.push((row) => row[column] !== value);
+        return builder;
+      },
+      or: (expression: string) => {
+        const arms = expression.split(",").map((arm) => {
+          const [column, operator, ...rest] = arm.split(".");
+          const value = rest.join(".");
+          if (operator === "is" && value === "null") {
+            return (row: Row) => (row[column] ?? null) === null;
+          }
+          if (operator === "gt") {
+            return (row: Row) => String(row[column] ?? "") > value;
+          }
+          throw new Error(`Unsupported or() arm in test stub: ${arm}`);
+        });
+        predicates.push((row) => arms.some((arm) => arm(row)));
+        return builder;
+      },
       returns: () => builder,
       insert: (payload: Row) => {
         operation = "insert";

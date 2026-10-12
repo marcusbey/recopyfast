@@ -183,12 +183,54 @@ export interface CoveredInvoiceRefund {
    * own failure; this one neither alerts nor retries for it.
    */
   inFlightPaymentIds: string[];
+  /**
+   * Charges already refunded in full outside this flow (support, the Stripe
+   * dashboard) before this refusal reached them (s82 review, MAJOR 1). Settled:
+   * nothing more is refunded, and nothing is retried for them.
+   */
+  refundedOutsideChargeIds: string[];
+  /**
+   * Charges the customer disputed. Not refunded here: Stripe refuses a refund
+   * of a disputed charge, and the dispute decides where the money goes. Ops
+   * resolve it in Stripe (s82 review, MAJOR 1).
+   */
+  disputedChargeIds: string[];
 }
 
 /** What a refusal took back, for the ops report. */
 export interface CoveredSubscriptionRefusal extends CoveredInvoiceRefund {
   /** The subscription as Stripe holds it after the refusal: cancelled. */
   subscription: Stripe.Subscription;
+  /**
+   * Over before this refusal, and not by our cancellation: the customer ended
+   * it. Every paid invoice was refunded, not just the latest (s82 review,
+   * minor 2), and a credit balance its cancellation left is worth a look.
+   */
+  endedBeforeRefusal: boolean;
+}
+
+const NO_REFUNDS: CoveredInvoiceRefund = {
+  refundIds: [],
+  pendingPaymentIds: [],
+  inFlightPaymentIds: [],
+  refundedOutsideChargeIds: [],
+  disputedChargeIds: [],
+};
+
+function mergeRefunds(
+  a: CoveredInvoiceRefund,
+  b: CoveredInvoiceRefund,
+): CoveredInvoiceRefund {
+  return {
+    refundIds: [...a.refundIds, ...b.refundIds],
+    pendingPaymentIds: [...a.pendingPaymentIds, ...b.pendingPaymentIds],
+    inFlightPaymentIds: [...a.inFlightPaymentIds, ...b.inFlightPaymentIds],
+    refundedOutsideChargeIds: [
+      ...a.refundedOutsideChargeIds,
+      ...b.refundedOutsideChargeIds,
+    ],
+    disputedChargeIds: [...a.disputedChargeIds, ...b.disputedChargeIds],
+  };
 }
 
 /**
@@ -231,6 +273,12 @@ export class CoveredRefundFailed extends Error {
  * this subscription (found by its metadata — Stripe's idempotency keys expire,
  * the metadata does not) is not made again.
  *
+ * A subscription the customer had already ended (s82 review, minor 2) has
+ * every paid invoice refunded, not only its latest: a cancellation with
+ * proration can leave a final credit invoice as the latest, after the one that
+ * collected the money. A live subscription keeps the latest invoice: this
+ * refusal cancels it without a final invoice.
+ *
  * Throws on any Stripe failure — `CoveredRefundFailed` when the subscription
  * is stopped and only the refund failed. Callers decide: the subscription
  * webhook rethrows into a retryable 500, the lifetime webhook reports and
@@ -239,26 +287,79 @@ export class CoveredRefundFailed extends Error {
 export async function refuseSubscriptionCoveredByLifetime(
   subscription: Stripe.Subscription,
 ): Promise<CoveredSubscriptionRefusal> {
+  const endedBeforeRefusal =
+    isTerminalSubscriptionStatus(subscription.status) &&
+    !isRefusedAsCoveredByLifetime(subscription);
   const stopped = await cancelCovered(subscription);
 
-  const invoiceId = idOf(stopped.latest_invoice);
-  if (!invoiceId) {
-    return {
-      subscription: stopped,
-      refundIds: [],
-      pendingPaymentIds: [],
-      inFlightPaymentIds: [],
-    };
-  }
-
   try {
-    return {
-      subscription: stopped,
-      ...(await refundCoveredInvoice(invoiceId, stopped.id)),
-    };
+    let refunds = NO_REFUNDS;
+    for (const invoiceId of await invoicesToRefund(
+      stopped,
+      endedBeforeRefusal,
+    )) {
+      refunds = mergeRefunds(
+        refunds,
+        await refundCoveredInvoice(invoiceId, stopped.id),
+      );
+    }
+    return { subscription: stopped, endedBeforeRefusal, ...refunds };
   } catch (error) {
     throw new CoveredRefundFailed(stopped, error);
   }
+}
+
+/**
+ * The invoices a refusal scans: the latest, and for a subscription the
+ * customer ended, every paid one too, each once.
+ */
+async function invoicesToRefund(
+  subscription: Stripe.Subscription,
+  endedBeforeRefusal: boolean,
+): Promise<string[]> {
+  const latest = idOf(subscription.latest_invoice);
+  const ids = latest ? [latest] : [];
+  if (!endedBeforeRefusal) return ids;
+  return [...new Set([...ids, ...(await listPaidInvoiceIds(subscription.id))])];
+}
+
+/** Paid-invoice page size: Stripe's maximum. */
+const PAID_INVOICE_PAGE_SIZE = 100;
+
+/**
+ * Every paid invoice of one subscription: bounded by the subscription and the
+ * status, read page by page; a cursor that does not advance throws.
+ */
+async function listPaidInvoiceIds(subscriptionId: string): Promise<string[]> {
+  const ids: string[] = [];
+  let startingAfter: string | undefined;
+  const seenCursors = new Set<string>();
+
+  for (;;) {
+    const page = await stripe.invoices.list({
+      subscription: subscriptionId,
+      status: "paid",
+      limit: PAID_INVOICE_PAGE_SIZE,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const nextCursor = nextStripePageCursor(
+      page.data.filter((invoice): invoice is Stripe.Invoice & { id: string } =>
+        Boolean(invoice.id),
+      ),
+      page.has_more,
+      startingAfter,
+      seenCursors,
+      `paid-invoice lookup for subscription ${subscriptionId}`,
+    );
+    for (const invoice of page.data) {
+      if (invoice.id) ids.push(invoice.id);
+    }
+
+    if (!nextCursor) break;
+    startingAfter = nextCursor;
+  }
+
+  return ids;
 }
 
 /**
@@ -307,7 +408,8 @@ async function cancelCovered(
  * `invoice.payment_succeeded` when a payment that was in flight at the refusal
  * settles (s82 review, m-2). Both go through `refundOnce`, so a payment
  * already refunded is found by its metadata, and two concurrent calls send the
- * same idempotency key: one refund either way.
+ * same idempotency key: one refund either way. A charge refunded or disputed
+ * outside this flow is reported, never thrown on (s82 review, MAJOR 1).
  */
 export async function refundCoveredInvoice(
   invoiceId: string,
@@ -316,6 +418,8 @@ export async function refundCoveredInvoice(
   const refundIds: string[] = [];
   const pendingPaymentIds: string[] = [];
   const inFlightPaymentIds: string[] = [];
+  const refundedOutsideChargeIds: string[] = [];
+  const disputedChargeIds: string[] = [];
   let startingAfter: string | undefined;
   const seenCursors = new Set<string>();
 
@@ -340,11 +444,20 @@ export async function refundCoveredInvoice(
       }
       if (payment.status !== "paid") continue;
 
-      const refundId = await refundOnce(payment.payment, subscriptionId);
-      if (refundId === REFUND_IN_FLIGHT) {
-        inFlightPaymentIds.push(payment.id);
-      } else {
-        refundIds.push(refundId);
+      const outcome = await refundOnce(payment.payment, subscriptionId);
+      switch (outcome.kind) {
+        case "refunded":
+          refundIds.push(outcome.refundId);
+          break;
+        case "in_flight":
+          inFlightPaymentIds.push(payment.id);
+          break;
+        case "refunded_outside":
+          refundedOutsideChargeIds.push(outcome.chargeId);
+          break;
+        case "disputed":
+          disputedChargeIds.push(outcome.chargeId);
+          break;
       }
     }
 
@@ -352,11 +465,25 @@ export async function refundCoveredInvoice(
     startingAfter = nextCursor;
   }
 
-  return { refundIds, pendingPaymentIds, inFlightPaymentIds };
+  return {
+    refundIds,
+    pendingPaymentIds,
+    inFlightPaymentIds,
+    refundedOutsideChargeIds,
+    disputedChargeIds,
+  };
 }
 
-/** `refundOnce`'s answer when another request is making the same refund. */
-const REFUND_IN_FLIGHT = Symbol("refund in flight");
+/** What became of one paid payment. */
+type RefundOutcome =
+  /** Refunded by this refusal, now or before. */
+  | { kind: "refunded"; refundId: string }
+  /** Another delivery is making this very refund (s82 verification, mi-3). */
+  | { kind: "in_flight" }
+  /** Already refunded in full outside this flow (s82 review, MAJOR 1). */
+  | { kind: "refunded_outside"; chargeId: string }
+  /** Disputed: the dispute decides, not a refund (s82 review, MAJOR 1). */
+  | { kind: "disputed"; chargeId: string };
 
 /**
  * Invoice-payment page size. A subscription's first invoice is normally paid
@@ -373,11 +500,22 @@ const INVOICE_PAYMENT_LOOKUP_LIMIT = 10;
  * — the refund not made yet — send the same key with the same parameters, and
  * Stripe answers the second with the first refund. After a failed or cancelled
  * refund the key names it, so the retry is a new request.
+ *
+ * s82 review (MAJOR 1): support can refund a charge, or the customer dispute
+ * it, before a delayed or redelivered event reaches this refusal. A refund
+ * made outside this flow carries no metadata, so the lookup misses it, and
+ * Stripe refuses a second refund: `CoveredRefundFailed` and a 500 forever,
+ * with the subscription never recorded and its Checkout never finished. So the
+ * charge is read first. Refunded in full: settled outside, nothing more to do.
+ * Partly refunded: only the remainder, under a key that names it. Disputed: no
+ * refund, the dispute decides. The same two refusals from Stripe
+ * (`charge_already_refunded`, `charge_disputed`) are caught as a backstop for
+ * a change between the read and the refund.
  */
 async function refundOnce(
   payment: Stripe.InvoicePayment.Payment,
   subscriptionId: string,
-): Promise<string | typeof REFUND_IN_FLIGHT> {
+): Promise<RefundOutcome> {
   const target =
     payment.type === "payment_intent"
       ? { payment_intent: idOf(payment.payment_intent) ?? undefined }
@@ -390,11 +528,24 @@ async function refundOnce(
     );
   }
 
+  // Our own refund first: once made, it is also what makes the charge read
+  // as refunded.
   const found = await findCoveredRefund(target, subscriptionId);
   if (found.live) {
-    return found.live.id;
+    return { kind: "refunded", refundId: found.live.id };
   }
   const previous = found.retryable;
+
+  const charge = await readChargeOf(target);
+  const chargeId = charge?.id ?? targetId;
+  if (charge?.disputed) return { kind: "disputed", chargeId };
+  const remainder = charge
+    ? charge.amount_captured - charge.amount_refunded
+    : 0;
+  if (charge && (charge.refunded || remainder <= 0)) {
+    return { kind: "refunded_outside", chargeId };
+  }
+  const partial = charge !== null && charge.amount_refunded > 0;
 
   const baseKey = `${COVERED_BY_LIFETIME}-refund-${subscriptionId}-${targetId}`;
   let refund: Stripe.Refund;
@@ -402,31 +553,62 @@ async function refundOnce(
     refund = await stripe.refunds.create(
       {
         ...target,
+        ...(partial ? { amount: remainder } : {}),
         metadata: {
           reason_code: COVERED_BY_LIFETIME,
           subscription_id: subscriptionId,
         },
       },
       {
-        idempotencyKey: previous ? `${baseKey}-after-${previous.id}` : baseKey,
+        idempotencyKey:
+          baseKey +
+          (previous ? `-after-${previous.id}` : "") +
+          (partial ? `-remainder-${remainder}` : ""),
       },
     );
   } catch (error) {
+    const code = stripeErrorCode(error);
+    if (code === "charge_already_refunded") {
+      return { kind: "refunded_outside", chargeId };
+    }
+    if (code === "charge_disputed") return { kind: "disputed", chargeId };
     // s82 verification (mi-3): another delivery is creating this very refund
     // — same key — and Stripe answered ours 409 (after the SDK's own retries
     // of a 409). It is in flight, not failed: re-check once, and if it has not
     // landed yet leave it to the request that owns it, which reports its own
     // failure.
-    if (stripeErrorCode(error) !== "idempotency_key_in_use") throw error;
+    if (code !== "idempotency_key_in_use") throw error;
     const landed = await findCoveredRefund(target, subscriptionId);
-    return landed.live ? landed.live.id : REFUND_IN_FLIGHT;
+    return landed.live
+      ? { kind: "refunded", refundId: landed.live.id }
+      : { kind: "in_flight" };
   }
   if (refundDisposition(refund, subscriptionId) === "retryable") {
     throw new Error(
       `refund ${refund.id} for subscription ${subscriptionId} is ${refund.status}`,
     );
   }
-  return refund.id;
+  return { kind: "refunded", refundId: refund.id };
+}
+
+/**
+ * The charge a refund would return: a charge as is, a payment intent's latest.
+ * Null when a payment intent has none, in which case the refund is attempted
+ * as before and Stripe's own refusal is the backstop.
+ */
+async function readChargeOf(
+  target: RefundTarget,
+): Promise<Stripe.Charge | null> {
+  if (target.charge) return stripe.charges.retrieve(target.charge);
+  if (!target.payment_intent) return null;
+
+  const paymentIntent = await stripe.paymentIntents.retrieve(
+    target.payment_intent,
+    { expand: ["latest_charge"] },
+  );
+  const latest = paymentIntent.latest_charge;
+  if (!latest) return null;
+  return typeof latest === "string" ? stripe.charges.retrieve(latest) : latest;
 }
 
 interface RefundTarget {
@@ -563,6 +745,8 @@ export async function claimRefusalReport(
       refund_ids: refusal.refundIds,
       pending_payment_ids: refusal.pendingPaymentIds,
       in_flight_payment_ids: refusal.inFlightPaymentIds,
+      refunded_outside_charge_ids: refusal.refundedOutsideChargeIds,
+      disputed_charge_ids: refusal.disputedChargeIds,
     },
     processed: true,
   });
@@ -574,6 +758,61 @@ export async function claimRefusalReport(
       `${refusal.subscription.id}; reporting it anyway: ${error.message}`,
   );
   return true;
+}
+
+/** `billing_events.event_type` of the once-only warning of a disputed charge. */
+const DISPUTE_WARNING_EVENT_TYPE = "internal.covered_charge_disputed";
+
+/**
+ * Claim the one warning about a disputed charge of a refused subscription;
+ * true for the caller that should make it (s82 review, MAJOR 1: alert ops
+ * once). Same write-once pattern as `claimRefusalReport`; a claim the database
+ * could not write answers true, since a second warning beats none.
+ */
+export async function claimDisputeWarning(
+  supabase: SupabaseClient,
+  chargeId: string,
+  subscriptionId: string,
+  userId: string,
+): Promise<boolean> {
+  const { error } = await supabase.from("billing_events").insert({
+    user_id: userId,
+    event_type: DISPUTE_WARNING_EVENT_TYPE,
+    stripe_event_id: `${COVERED_BY_LIFETIME}_disputed:${chargeId}`,
+    data: { charge_id: chargeId, subscription_id: subscriptionId },
+    processed: true,
+  });
+
+  if (!error) return true;
+  if (error.code === UNIQUE_VIOLATION) return false;
+  console.error(
+    `Could not record the dispute warning of charge ${chargeId}; warning ` +
+      `anyway: ${error.message}`,
+  );
+  return true;
+}
+
+/** A customer's credit balance, as a positive amount in the smallest unit. */
+export interface CustomerCredit {
+  amount: number;
+  currency: string | null;
+}
+
+/**
+ * What credit a customer holds (s82 review, minor 2). A cancellation with
+ * proration credits the unused time to the customer's balance; refunding the
+ * whole payment beside it would pay that time back twice. Stripe keeps credit
+ * as a negative balance. A deleted customer holds none. Throws on a read failure.
+ */
+export async function readCustomerCredit(
+  stripeCustomerId: string,
+): Promise<CustomerCredit> {
+  const customer = await stripe.customers.retrieve(stripeCustomerId);
+  if (customer.deleted) return { amount: 0, currency: null };
+  return {
+    amount: Math.max(0, -customer.balance),
+    currency: customer.currency ?? null,
+  };
 }
 
 /** `billing_events.event_type` of the refusal of a subscription already over. */

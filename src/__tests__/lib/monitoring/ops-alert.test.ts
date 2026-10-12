@@ -24,7 +24,7 @@ jest.mock("@sentry/nextjs", () => ({
   captureException: (...args: unknown[]) => mockCaptureException(...args),
 }));
 
-import { alertOps } from "@/lib/monitoring/ops-alert";
+import { alertOps, warnOps } from "@/lib/monitoring/ops-alert";
 
 const SENTENCE =
   "Subscription sub_1 (pro) was cancelled, but its payment could not be refunded — refund it by hand.";
@@ -94,5 +94,58 @@ describe("alertOps", () => {
       }),
     );
     expect(mockCaptureMessage).toHaveBeenCalledWith(SENTENCE, "error");
+  });
+});
+
+/**
+ * s82 review: something ops must look at but nobody is billed wrongly for (a
+ * charge disputed, a credit balance left behind) is a Sentry WARNING.
+ * `logger.warn` writes to stdout only, so it cannot be the alarm.
+ */
+describe("warnOps", () => {
+  const env = process.env as Record<string, string | undefined>;
+  const saved = { ...env };
+  const WARNING =
+    "Charge ch_1 of subscription sub_1 is disputed; resolve it in Stripe.";
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    env.NODE_ENV = "production";
+    env.NEXT_PUBLIC_SENTRY_DSN = "https://public@sentry.example/1";
+    jest.spyOn(process.stdout, "write").mockImplementation(() => true);
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    env.NODE_ENV = saved.NODE_ENV;
+    env.NEXT_PUBLIC_SENTRY_DSN = saved.NEXT_PUBLIC_SENTRY_DSN;
+    jest.restoreAllMocks();
+  });
+
+  it("makes the sentence the Sentry event, at level warning, with its ids", () => {
+    warnOps(
+      WARNING,
+      { userId: "user-1" },
+      { component: "webhooks/stripe", chargeId: "ch_1" },
+    );
+
+    expect(mockCaptureMessage).toHaveBeenCalledTimes(1);
+    expect(mockCaptureMessage).toHaveBeenCalledWith(WARNING, "warning");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+    expect(mockSetContext).toHaveBeenCalledWith("log_context", {
+      userId: "user-1",
+    });
+    expect(mockSetContext).toHaveBeenCalledWith(
+      "log_metadata",
+      expect.objectContaining({ chargeId: "ch_1" }),
+    );
+  });
+
+  it("sends nothing to Sentry outside production", () => {
+    env.NODE_ENV = "test";
+
+    warnOps(WARNING, {}, {});
+
+    expect(mockCaptureMessage).not.toHaveBeenCalled();
   });
 });

@@ -265,6 +265,8 @@ entry; both main's entries and this branch's entry remain intact.
      write-once, refunds are found by metadata, the report is claimed once.
      The step runs last, so every never-throw step has already run when it
      throws. It tries every subscription before rethrowing the first failure.
+     (Changed by the independent review, minor 3 below: a plan that cannot be
+     resolved is now skipped with a warning, not retried.)
    - **Live path unchanged.** A live subscription bought after the lifetime is
      still cancelled with the marker and refunded once. A live subscription
      bought before is still set to end at period end. The ended-subscription
@@ -299,10 +301,10 @@ entry; both main's entries and this branch's entry remain intact.
    redelivery); a record-write failure (5xx and alert, nothing scanned, then
    finished on redelivery); and a refund failure (5xx and alert, then one
    refund on redelivery).
-   The fake `subscriptions.list` applies the customer and status filters but
-   deliberately not the creation window. So (c) proves the route's own
-   payment-order check spares a predating subscription, and the window itself
-   is pinned by the request parameters.
+   The fake `subscriptions.list` applied the customer and status filters but
+   deliberately not the creation window, so (c) proved the route's own
+   payment-order check. (Changed by the independent review, minor 5 below:
+   the fake now honours `created.gte` too.)
 
    **Existing assertion changed, declared:** "m-3: leaves alone a subscription
    Stripe already ended for another reason" was a subscription bought after
@@ -335,10 +337,162 @@ entry; both main's entries and this branch's entry remain intact.
    `readLifetimeCover`'s own coverage rule. The filter was removed rather than
    kept as a dead guard, so every ended subscription in the window gets
    exactly the other ordering's decision. The suite stays 110/110.
+   (Changed by the independent review, minor 3 below: the cover is now read
+   once per run for the grant's plan, so the filter is back and no longer
+   redundant; mutation R14 pins it.)
 
-   Limit, same as findings 1 and 4: only the subscription's latest invoice is
-   refunded. A subscription bought after the lifetime and ended before its
-   event has, in practice, only its first invoice.
+   Limit, same as findings 1 and 4: only the subscription's latest invoice was
+   refunded. (Fixed by the independent review, minor 2 below, for
+   subscriptions the customer ended.)
+
+## Independent review of `9807278..5ae80b1`
+
+The review blocked ship at max severity major. Each finding was fixed in this
+branch, test-first.
+
+1. **MAJOR 1: a charge already refunded or disputed outside the webhook stays
+   at 500 forever.** `refundOnce` is reachable from the subscription refusal,
+   the lifetime step and settlement. Suppose support fully refunds or cancels
+   from the dashboard before a delayed `customer.subscription.created` or
+   `checkout.session.completed` is redelivered. `findCoveredRefund` misses that
+   refund, which has no metadata. `refunds.create` fails with
+   `charge_already_refunded` or `charge_disputed`, which becomes
+   `CoveredRefundFailed` and a 500 forever. The `billing_subscriptions` upsert
+   and `finishSubscriptionCheckoutIntent` never run, so the user cannot start
+   another Checkout.
+
+   **Fix.** After our own refund is looked up (our refund is what makes a
+   charge read as refunded, so it is looked up first), `refundOnce` reads the
+   charge: the payment intent's `latest_charge` (expanded), or the charge
+   itself.
+   - **Refunded in full**: settled outside this flow
+     (`refundedOutsideChargeIds`). Reported at info; nothing more is refunded
+     and nothing throws.
+   - **Partly refunded**: only `amount_captured - amount_refunded` is
+     refunded, under a key that names the remainder
+     (`…-remainder-<amount>`), so a full-refund key is never reused with other
+     parameters.
+   - **Disputed** (`disputedChargeIds`): nothing is refunded and nothing
+     throws. The new `warnOps` warns ops once per charge, as a Sentry
+     *warning*: "is disputed, so it was not refunded: resolve it in Stripe".
+     "Once" comes from a write-once `billing_events` claim
+     (`covered_by_lifetime_disputed:<charge>`). `logger.warn` reaches stdout
+     only, so `warnOps` sends the Sentry warning itself, behind the logger's
+     production gate.
+   - **Backstop**: `charge_already_refunded` and `charge_disputed` from
+     `refunds.create` are caught, with the same outcomes.
+   - A payment intent with no charge is refunded as before, with Stripe's
+     refusal as the backstop. A charge that cannot be read still throws: no
+     money decision is made without knowing.
+
+   Tests, all through `checkout.session.completed`, assert 200, the
+   subscription recorded and the Checkout intent `completed`:
+   - a charge already refunded in full;
+   - a partly refunded charge (`amount: 1400`, the remainder key, and found
+     again by the subscription's own event);
+   - a disputed charge (one warning across two events);
+   - each backstop code;
+   - a late payment refunded outside before it settles (settlement answers 200,
+     no refund).
+2. **Minor 2: only `latest_invoice` was refunded.**
+   `refuseSubscriptionCoveredByLifetime` now marks a subscription that was
+   already over, and not by our cancellation, as `endedBeforeRefusal`. For
+   those it refunds the latest invoice plus every paid invoice
+   (`invoices.list({subscription, status: "paid", limit: 100})`, paged with
+   the shared cursor check), each once. A live subscription keeps the
+   latest-invoice refund: our cancellation issues no final invoice. After an
+   ended subscription's refusal is reported (once), the customer's credit
+   balance is read. If it holds credit, likely its cancellation's proration,
+   ops get a warning to clear it, since otherwise the unused time is paid
+   back twice. A balance that cannot be read is itself the warning. Never
+   throws.
+   Tests: the latest invoice is a final credit invoice and the first invoice
+   is refunded; two pages of paid invoices; a non-advancing cursor fails
+   closed; one credit warning across two events; a live subscription lists
+   no invoices and reads no balance.
+3. **Minor 3: duplicate-path fragility.** `refuseEndedSubscriptionsCoveredByGrant`
+   now reads the billing customer, then `readLifetimeCover` for the grant's
+   plan once per run, and returns early when there is no live cover. Such as
+   a revoked lifetime whose late duplicate event arrives: nothing is listed.
+   The cover's `paidAt` bounds the listing. Each subscription gets
+   `refuseIfLifetimeCovers` with that cover, so its plan must be one the grant
+   covers (`isPlanCoveredByGrants`). The cover's `paidAt` also handles a
+   payment Stripe does not have, which `lifetimePaymentTime` threw on. An
+   ended subscription whose plan cannot be resolved is skipped with a
+   warning, not retried for days.
+   Tests: a revoked lifetime lists nothing; two ended subscriptions read the
+   lifetime's payment once; an unresolvable plan gets one warning while the
+   covered subscription is still refunded.
+4. **Minor 4: a false alarm when nothing was collected.** A refusal that
+   refunded nothing and left nothing pending or in flight is reported at info
+   ("nothing it collected needed refunding"), not as an error. A refusal
+   whose only outcome is "refunded outside" or "disputed" is also reported at
+   info, with the dispute's own warning.
+   Test: an `incomplete_expired` subscription bought after the grant produces
+   no `logger.error`.
+5. **Minor 5: the fake honours `created.gte`.** `subscriptions.list` in the
+   suite now applies the creation window. The pagination case includes a
+   predating ended subscription of the same customer, which is not listed.
+
+**Red first:** in the lifetime-covered suite, 14 failed, 111 passed. In
+`ops-alert.test.ts`, 2 failed, 3 passed (`warnOps` did not exist). After: 125/125
+and 5/5. The live-subscription case of minor 2 is a guard that passed before.
+
+**Fixtures changed, declared.**
+- Lifetime-covered suite: its Stripe fake gained `charges.retrieve`,
+  `invoices.list` (default: the first invoice, paid) and `customers.retrieve`
+  (balance 0). `paymentIntents.retrieve` now answers `latest_charge` from a
+  per-test charge table with a clean default. The logger's `warn` is a named
+  mock. In "mi-2", the fake rejects only the seeded grant's missing payment
+  (`pi_qa_journey`) instead of every payment intent, because the refund now
+  reads the subscription's own payment, which exists. No assertion changed.
+- `lifetime-grant-plan.test.ts`: the fake database gained `neq` and `or`,
+  which the shared grant reader uses now that a new grant reads its cover.
+  No assertion changed.
+
+**Mutations,** each restored afterwards (files byte-identical; baseline
+125/125):
+
+| Mutation | Red |
+|---|---:|
+| R1 no charge pre-check | 4 |
+| R2 full outside refund not settled | 2 |
+| R3 partial refunds the whole charge | 1 |
+| R4 dispute not detected | 1 |
+| R5a backstop `charge_already_refunded` missing | 1 |
+| R5b backstop `charge_disputed` missing | 1 |
+| R6 dispute warning not once | 1 |
+| R7 ended subscription: latest invoice only | 4 |
+| R8 paid invoices: first page only | 3 |
+| R9 credit balance never checked | 1 |
+| R10 cover re-read per subscription | 1 |
+| R11 no early return without a cover | 1 |
+| R12 unresolvable plan fails the run | 1 |
+| R13 nothing collected reported as an error | 4 |
+| R14 no plan-coverage filter | 2 |
+
+Total: 28 red. All 15 mutations were caught.
+
+### Known follow-up, not this PR: s82b
+
+**s82b: a subscription `incomplete` at both events, then activating.** A
+subscription Checkout is paid after the lifetime, but its first payment needs
+action (3-D Secure, a bank debit), so the subscription is `incomplete`.
+
+1. Its own event is processed before the grant exists:
+   `refuseIfLifetimeCovers` finds no cover, and the subscription is recorded
+   `incomplete`.
+2. The lifetime's event comes next. `stopBillingForLifetimeOwner` reads only
+   live rows (`active`, `trialing`, `past_due`), and the ended-subscription
+   step lists only `ended` ones. An `incomplete` subscription is neither, so
+   nothing refuses it.
+3. When its payment then completes, `customer.subscription.updated` records it
+   `active` without any refusal. The owner is billed monthly for a plan the
+   lifetime covers.
+
+Decision needed: refuse on the transition to live in the update handler,
+include `incomplete` subscriptions in the lifetime step, or both.
+
 
 ### Current implementation verification
 
@@ -397,8 +551,26 @@ Same environment and rules: no Stripe, Supabase or production calls.
   0 failures.
 - DB harness: not run. No migration was added.
 
+### Independent-review fixes verification
+
+Same environment and rules: no Stripe, Supabase or production calls.
+
+- `npm run lint`: passed, 0 errors / 31 existing warnings.
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath src/__tests__/api/billing/stripe-webhook-lifetime-covered.test.ts src/__tests__/api/billing/lifetime-grant-plan.test.ts src/__tests__/lib/monitoring/ops-alert.test.ts`:
+  3 suites, 148/148 passed (125 + 18 + 5).
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/|src/__tests__/lib/monitoring/'`:
+  54 suites / 911 tests passed, 0 failures.
+- `npm test`: 437 suites passed, 2 skipped; 6,109 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added; the dispute claim reuses
+  `billing_events`.
+
+The gate lines below are `pending` until the architect re-reviews.
+
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.
 
-Max severity: none
-Ship allowed: yes
+Max severity: pending
+Ship allowed: pending

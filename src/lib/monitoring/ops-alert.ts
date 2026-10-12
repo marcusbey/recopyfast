@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/nextjs";
 import { logger } from "./logger";
 
 type AlertContext = Parameters<typeof logger.error>[2];
@@ -28,6 +29,35 @@ export function alertOps(
   logger.error(message, undefined, context, {
     ...metadata,
     cause: describeCause(error),
+  });
+}
+
+/**
+ * Tell ops about something to look at that bills nobody wrongly (a charge
+ * disputed, a credit balance left behind) as a Sentry WARNING, `message` being
+ * the event.
+ *
+ * WHY NOT `logger.warn` — it writes to stdout only; only `logger.error` reaches
+ * Sentry. A warning nobody receives is not an alert. Same production gate as the
+ * logger's own Sentry branch; ids only in `context` and `metadata`.
+ */
+export function warnOps(
+  message: string,
+  context: AlertContext,
+  metadata: AlertMetadata,
+): void {
+  logger.warn(message, context, metadata);
+
+  if (
+    process.env.NODE_ENV !== "production" ||
+    !process.env.NEXT_PUBLIC_SENTRY_DSN
+  ) {
+    return;
+  }
+  Sentry.withScope((scope) => {
+    if (context) scope.setContext("log_context", context);
+    if (metadata) scope.setContext("log_metadata", metadata);
+    Sentry.captureMessage(message, "warning");
   });
 }
 
