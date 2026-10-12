@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ReCopyFast analytics consent — design reference</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      :root {
+        color-scheme: light;
+        --marketing-page: #f0f9ff;
+        --marketing-card: #ffffff;
+        --marketing-line: #e0f2fe;
+        --marketing-accent: #0284c7;
+        --marketing-text: #0f172a;
+        --marketing-muted: #475569;
+        --card: hsl(0 0% 100%);
+        --foreground: hsl(200 22% 11%);
+        --muted-foreground: hsl(200 11% 38%);
+        --border: hsl(200 15% 87%);
+        --input: hsl(200 13% 55%);
+        --primary: hsl(176 54% 28%);
+        --primary-foreground: hsl(0 0% 100%);
+        --focus: hsl(176 54% 28%);
+        --shadow: hsl(200 22% 11% / 0.14);
+      }
+
+      body {
+        margin: 0;
+        background: var(--marketing-page);
+        color: var(--marketing-text);
+        font:
+          16px/1.55 "Instrument Sans",
+          system-ui,
+          sans-serif;
+      }
+
+      button,
+      a {
+        font: inherit;
+      }
+
+      button:focus-visible,
+      a:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      .reference-bar {
+        position: sticky;
+        top: 0;
+        z-index: 80;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 12px max(16px, calc((100vw - 1152px) / 2));
+        border-bottom: 1px solid var(--border);
+        background: var(--card);
+      }
+
+      .reference-label {
+        color: var(--muted-foreground);
+        font-size: 13px;
+      }
+
+      .state-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .state-button,
+      .consent-button,
+      .close-button {
+        min-height: 40px;
+        border: 1px solid var(--input);
+        border-radius: 2px;
+        background: var(--card);
+        color: var(--foreground);
+        padding: 0 14px;
+        cursor: pointer;
+      }
+
+      .state-button[aria-pressed="true"] {
+        border-color: var(--primary);
+        background: hsl(176 40% 94%);
+      }
+
+      .site-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 20px max(24px, calc((100vw - 1152px) / 2));
+        border-bottom: 1px solid var(--marketing-line);
+        background: var(--marketing-card);
+      }
+
+      .brand {
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+
+      .site-nav {
+        display: flex;
+        gap: 20px;
+      }
+
+      .site-nav a,
+      .footer a,
+      .cookie-settings {
+        color: var(--marketing-muted);
+        text-decoration: none;
+      }
+
+      .site-nav a:hover,
+      .footer a:hover,
+      .cookie-settings:hover {
+        color: var(--marketing-text);
+      }
+
+      main {
+        min-height: 560px;
+        padding: 96px 24px;
+      }
+
+      .hero {
+        max-width: 896px;
+        margin: 0 auto;
+      }
+
+      .eyebrow {
+        margin: 0 0 12px;
+        color: var(--marketing-accent);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: 0;
+        font-family:
+          "Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif;
+        font-size: clamp(40px, 7vw, 72px);
+        line-height: 1.02;
+        letter-spacing: -0.045em;
+      }
+
+      .lead {
+        max-width: 650px;
+        margin: 24px 0 0;
+        color: var(--marketing-muted);
+        font-size: 18px;
+      }
+
+      .sample-card {
+        max-width: 896px;
+        margin: 40px auto 0;
+        padding: 24px;
+        border: 1px solid var(--marketing-line);
+        border-radius: 12px;
+        background: var(--marketing-card);
+      }
+
+      .sample-card strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .sample-card p {
+        margin: 0;
+        color: var(--marketing-muted);
+      }
+
+      .footer {
+        padding: 48px max(24px, calc((100vw - 1152px) / 2));
+        border-top: 1px solid var(--marketing-line);
+        background: var(--marketing-card);
+      }
+
+      .footer-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) repeat(3, minmax(140px, 1fr));
+        gap: 32px;
+      }
+
+      .footer h2 {
+        margin: 0 0 14px;
+        font-size: 14px;
+        letter-spacing: 0.075em;
+        text-transform: uppercase;
+      }
+
+      .footer p {
+        max-width: 340px;
+        margin: 0;
+        color: var(--marketing-muted);
+      }
+
+      .footer ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .footer li + li {
+        margin-top: 12px;
+      }
+
+      .cookie-settings {
+        min-height: auto;
+        border: 0;
+        background: none;
+        padding: 0;
+        cursor: pointer;
+      }
+
+      .banner-space {
+        height: 180px;
+      }
+
+      .banner-wrap {
+        position: fixed;
+        inset: auto 0 0;
+        z-index: 60;
+        padding: 0 16px max(16px, env(safe-area-inset-bottom));
+      }
+
+      .banner {
+        position: relative;
+        max-width: 768px;
+        margin: 0 auto;
+        padding: 20px;
+        border: 1px solid var(--border);
+        border-radius: 0;
+        background: var(--card);
+        color: var(--foreground);
+        box-shadow: 0 12px 32px var(--shadow);
+      }
+
+      .banner h2 {
+        margin: 0;
+        padding-right: 40px;
+        font-size: 16px;
+        line-height: 24px;
+      }
+
+      .banner p {
+        margin: 4px 0 0;
+        color: var(--muted-foreground);
+        font-size: 14px;
+      }
+
+      .banner a {
+        color: var(--foreground);
+        font-weight: 500;
+        text-underline-offset: 2px;
+      }
+
+      .consent-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .consent-button[aria-pressed="true"] {
+        border-color: var(--primary);
+        background: hsl(176 40% 94%);
+      }
+
+      .close-button {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 32px;
+        min-height: 32px;
+        padding: 0;
+        border-color: transparent;
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      @media (max-width: 760px) {
+        .reference-bar,
+        .site-header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .site-nav {
+          flex-wrap: wrap;
+        }
+
+        main {
+          min-height: 460px;
+          padding: 64px 20px;
+        }
+
+        .footer-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (max-width: 440px) {
+        .reference-bar,
+        .site-header,
+        .footer {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+
+        .state-controls,
+        .footer-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .state-controls {
+          display: grid;
+          width: 100%;
+        }
+
+        h1 {
+          font-size: 42px;
+        }
+
+        .banner {
+          padding: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <aside class="reference-bar" aria-label="Reference states">
+      <span class="reference-label"
+        >Design reference · not product controls</span
+      >
+      <div class="state-controls">
+        <button class="state-button" data-state="ask" aria-pressed="true">
+          First visit
+        </button>
+        <button class="state-button" data-state="granted" aria-pressed="false">
+          Analytics on
+        </button>
+        <button class="state-button" data-state="denied" aria-pressed="false">
+          Analytics off
+        </button>
+        <button class="state-button" data-state="disabled" aria-pressed="false">
+          GA not configured
+        </button>
+        <button class="state-button" data-state="report" aria-pressed="false">
+          Report page
+        </button>
+      </div>
+    </aside>
+
+    <header class="site-header">
+      <span class="brand">ReCopyFast</span>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#tools">Free tools</a>
+      </nav>
+    </header>
+
+    <main>
+      <div class="hero">
+        <p class="eyebrow" id="page-eyebrow">Public marketing page</p>
+        <h1 id="page-title">
+          Make website copy editable without rebuilding it.
+        </h1>
+        <p class="lead" id="page-lead">
+          This reference keeps the existing marketing page intact. Analytics is
+          visible only when a visitor needs to choose or reopens Cookie
+          settings.
+        </p>
+      </div>
+      <section class="sample-card" aria-labelledby="sample-title">
+        <strong id="sample-title">Existing page content</strong>
+        <p>
+          No marketing section, route layout or app screen changes for this
+          story.
+        </p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-grid">
+        <div>
+          <span class="brand">ReCopyFast</span>
+          <p>Make the copy on the site you already built editable.</p>
+        </div>
+        <div>
+          <h2>Product</h2>
+          <ul>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#tools">Free tools</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>Company</h2>
+          <ul>
+            <li><a href="#blog">Blog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>Legal</h2>
+          <ul>
+            <li><a href="#privacy">Privacy Policy</a></li>
+            <li><a href="#terms">Terms of Service</a></li>
+            <li id="cookie-item">
+              <button
+                class="cookie-settings"
+                id="cookie-settings"
+                type="button"
+              >
+                Cookie settings
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <div class="banner-space" id="banner-space" aria-hidden="true"></div>
+    <div class="banner-wrap" id="banner-wrap">
+      <section
+        class="banner"
+        role="region"
+        aria-labelledby="banner-title"
+        aria-describedby="banner-description"
+      >
+        <h2 id="banner-title">Analytics cookies</h2>
+        <p id="banner-description"></p>
+        <div class="consent-actions">
+          <button
+            class="consent-button"
+            id="allow"
+            type="button"
+            aria-pressed="false"
+          >
+            Allow analytics
+          </button>
+          <button
+            class="consent-button"
+            id="decline"
+            type="button"
+            aria-pressed="false"
+          >
+            Decline
+          </button>
+        </div>
+        <button
+          class="close-button"
+          id="close"
+          type="button"
+          aria-label="Close cookie settings"
+          hidden
+        >
+          ×
+        </button>
+      </section>
+    </div>
+
+    <script>
+      const copy = {
+        ask: "May we use Google Analytics to count visits to these public pages? It sets cookies only if you allow it. You can change your answer any time under Cookie settings at the bottom of the page.",
+        granted:
+          "Google Analytics is on: it counts visits to these public pages and keeps its cookies in your browser. Decline turns it off and deletes them.",
+        denied:
+          "Google Analytics is off: these public pages set no analytics cookies. Allow it to help us see which pages are useful.",
+      };
+
+      const controls = [...document.querySelectorAll("[data-state]")];
+      const bannerWrap = document.querySelector("#banner-wrap");
+      const bannerSpace = document.querySelector("#banner-space");
+      const description = document.querySelector("#banner-description");
+      const allow = document.querySelector("#allow");
+      const decline = document.querySelector("#decline");
+      const close = document.querySelector("#close");
+      const cookieItem = document.querySelector("#cookie-item");
+      const cookieSettings = document.querySelector("#cookie-settings");
+      const eyebrow = document.querySelector("#page-eyebrow");
+      const title = document.querySelector("#page-title");
+      const lead = document.querySelector("#page-lead");
+      let state = "ask";
+
+      function showBanner(visible) {
+        bannerWrap.hidden = !visible;
+        bannerSpace.hidden = !visible;
+      }
+
+      function render(next) {
+        state = next;
+        controls.forEach((control) =>
+          control.setAttribute(
+            "aria-pressed",
+            String(control.dataset.state === next),
+          ),
+        );
+
+        const isReport = next === "report";
+        const isDisabled = next === "disabled";
+        cookieItem.hidden = isReport || isDisabled;
+        showBanner(!isReport && !isDisabled);
+
+        eyebrow.textContent = isReport
+          ? "Website Typo Finder report"
+          : "Public marketing page";
+        title.textContent = isReport
+          ? "example.com"
+          : "Make website copy editable without rebuilding it.";
+        lead.textContent = isReport
+          ? "Reports keep their existing design and carry no analytics. Cookie settings is absent because no listener or Google runtime exists here."
+          : "This reference keeps the existing marketing page intact. Analytics is visible only when a visitor needs to choose or reopens Cookie settings.";
+
+        if (isReport || isDisabled) return;
+        const choice = next === "ask" ? null : next;
+        description.innerHTML = `${copy[next]} <a href="#privacy">How we use analytics</a>`;
+        allow.setAttribute("aria-pressed", String(choice === "granted"));
+        decline.setAttribute("aria-pressed", String(choice === "denied"));
+        close.hidden = choice === null;
+      }
+
+      controls.forEach((control) => {
+        control.addEventListener("click", () => render(control.dataset.state));
+      });
+
+      allow.addEventListener("click", () => render("granted"));
+      decline.addEventListener("click", () => render("denied"));
+      close.addEventListener("click", () => showBanner(false));
+      cookieSettings.addEventListener("click", () => {
+        showBanner(true);
+        allow.focus();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state !== "ask") showBanner(false);
+      });
+
+      render("ask");
+    </script>
+  </body>
+</html>

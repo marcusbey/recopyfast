@@ -4716,7 +4716,10 @@ Embed allocation: 0 bytes.
 Owner request 2026-10-12: Google Analytics 4 on the public marketing site, "with the settings
 perfectly fine". Architect brief the same day (pre-approved scope). Plan:
 `docs/plans/s107-google-analytics.md`. Decision: ADR 063. Operations record (every GA setting and
-its value): `docs/operations/analytics.md`.
+its value): `docs/operations/analytics.md`. Retrospective pipeline records, added after the
+implementation without claiming the missing pre-implementation checkpoints: research
+`docs/research/s107-google-analytics.md`; UI design
+`docs/designs/s107-google-analytics.md` + `.html`.
 
 Before: no visitor analytics at all (launch kit §10 "Channel: nowhere automatic", §12 ledger).
 

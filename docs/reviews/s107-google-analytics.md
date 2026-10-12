@@ -402,3 +402,75 @@ deviation 6.
 
 Max severity: major
 Ship allowed: no
+
+## Independent re-review of 12da10d
+
+Fresh review after the F1–F7 repair commit. The blocked review above is retained as history; this
+section is the current gate for PR #94 at `12da10d8c88d3fb0dd0128f1433b1133fb343b89`.
+
+### Scope and result
+
+Reviewed `origin/main...HEAD`, the validated plan, ADR 063, the prior findings, every analytics
+module and its callers, the changed tests, the privacy/operations copy, middleware/CSP wiring, and
+the uncommitted retrospective research/design/story cross-reference. The retrospective files say
+plainly that they were written after implementation and do not invent a missed pipeline
+checkpoint. They change no runtime behaviour.
+
+No new finding remains. The previous major is repaired: analytics now requires both the visible
+route and the route that owns the current document/CSP to be allowlisted. The shell, runtime and
+footer use that same guard. A marketing route reached inside a login, dashboard, settings, auth or
+free-tool-report document therefore loads no runtime, init script, Google script or dead settings
+control.
+
+### F1–F7 disposition
+
+| Prior finding | Re-review result |
+|---|---|
+| F1 — document/CSP crossing | **Closed.** `getDocumentPathname()` snapshots the navigation entry at module evaluation; `isAnalyticsPage()` requires both paths. Shell, runtime and footer call it. The focused mutation that ignored the document path made **22 tests fail across four suites**; the file was restored and `git diff --exit-code HEAD -- routes.ts` passed. |
+| F2 — three non-biting guards | **Closed.** Missing/malformed init hints fail closed; landing referrers are sanitised; client marketing navigation emits the second manual page view with a sanitised referrer. Unit/component coverage and the `/` → `/blog` browser spec pin those paths. |
+| F3 — unknown codes and Quebec | **Closed.** Only assigned ISO country codes may default analytics on; missing/unknown country and missing/unknown Canadian province ask first; Quebec asks and `CA-QC` is in Google's regional default. Vercel's official header contract confirms `x-vercel-ip-country-region` is the region portion of ISO 3166-2. The focused mutation that let every Canadian request default on made **12 tests fail across two suites**; the file was restored clean. |
+| F4 — banner state and cookie-domain deletion | **Closed.** Reopened copy, pressed state and dismissal use the effective choice. Decline generates host-only and dotted-parent deletions for GA cookie names only. Real-domain deletion remains a manual check below. |
+| F5 — dead Cookie settings control | **Closed.** The control renders after mount only where the same page/document guard permits the runtime. The free-tool-report regression is covered locally. Devin's later comment links the pre-fix footer at `4e068e9`; current `12da10d` already contains this guard. |
+| F6 — vacuous Escape test | **Closed.** `ConsentBanner.test.tsx` focuses Allow and proves first-visit Escape does not dismiss; the contract is tested at the component that owns the key handler. |
+| F7 — stale inventory | **Closed.** Non-CI `npx playwright test --list` exits zero with **104 tests in 20 files**. The CI strict reporter is configured for 104 and the exact-head E2E check passed. (`CI=true --list` intentionally classifies listed tests as skipped and exits nonzero; it is not the inventory command used for the re-review.) |
+
+Both GitHub-visible Devin bugs are accounted for: the early calculator completion is retained until
+`track()` returns true, and Cookie settings is absent where no runtime listens. The Devin review
+page reports two additional flags withheld by repository settings; their contents are not exposed
+through GitHub and could not be independently classified here.
+
+### Fresh verification
+
+- Full local Jest attempt: **498 suites passed, 2 skipped; 7,289 tests passed, 38 skipped; one
+  untouched content-route CORS assertion failed** because `NEXT_PUBLIC_APP_URL` was absent. The
+  route and test blobs are identical to `origin/main`; rerunning that exact assertion with CI's
+  `NEXT_PUBLIC_APP_URL=http://localhost:3000` passed. This is an environment precondition, not an
+  s107 regression.
+- All touched/relevant Jest suites: **23/23 suites, 586/586 tests passed**.
+- `npm run type-check`: passed. `npm run lint -- --quiet`: passed. Branch and dirty-doc
+  `git diff --check`: passed.
+- Mutation proof: F1 document guard **22 red**; F3 Canadian consent guard **12 red**; both source
+  files restored with no source diff.
+- Playwright inventory: **104 tests in 20 files**. GitHub PR #94 at the exact reviewed SHA shows
+  green TypeScript, lint/test/build, 104-test Playwright, built-embed fixture, production dependency
+  audit, realtime audit and comparison Lighthouse checks.
+
+### Could not verify, and the human gesture
+
+- GA property/admin state is external and can drift. Before production publication, re-open the
+  property and confirm the web stream, 14-month retention, browser-history page views off, Google
+  signals and ad personalisation off, user-provided-data collection off, redaction keys, custom
+  dimensions and developer filter recorded in `docs/operations/analytics.md`.
+- Cookie deletion was proved as browser assignments, not against cookies on `.recopyfa.st`.
+  Allow on the real domain, confirm `_ga`/`_ga_*`, decline, and confirm both host and parent-domain
+  cookies disappear.
+- Real GA delivery during the report navigation, outside-consent-region performance, and the
+  mobile/keyboard banner were not exercised in this re-review. Use GA Realtime/Tag Assistant for
+  one scan, run the outside-region Lighthouse gesture recorded above, and tab through the banner
+  at a phone viewport.
+- The two Devin flags hidden by repository settings were not available through GitHub. Open the
+  linked Devin Review dashboard and classify them before merge if the repository's policy treats
+  hidden flags as blocking.
+
+Max severity: none
+Ship allowed: yes
