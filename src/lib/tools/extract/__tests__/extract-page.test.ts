@@ -18,6 +18,10 @@ import {
   MAX_TREE_DEPTH,
   type ExtractedPage,
 } from "../extract-page";
+import {
+  NEXT_STREAMED_FALLBACK_TEXT,
+  NEXT_STREAMED_PAGE,
+} from "./next-streamed-page";
 
 const PAGE_URL = "https://example.com/about";
 
@@ -409,5 +413,336 @@ describe("hostile and huge input", () => {
     extract(html);
 
     expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});
+
+/**
+ * s96c — found in production right after s96 shipped: the Typo Finder said
+ * https://www.recopyfa.st/terms "shows almost no text in its HTML". A Next.js
+ * App Router page that streams through a Suspense boundary (there, the root
+ * `loading.tsx`) sends the boundary's fallback in the visible shell and the
+ * real page later in the same response, in `<div hidden id="S:0">`; React's
+ * inline `$RC("B:0","S:0")` swaps it in. The extractor read that `hidden` as
+ * hidden and saw one word: "Loading…".
+ */
+describe("React streaming (s96c)", () => {
+  const TERMS_URL = "https://www.recopyfa.st/terms";
+
+  /** A segment as React writes one: `<div hidden id="S:<hex id>">`. */
+  const segment = (id: string, content: string) =>
+    `<div hidden id="S:${id}">${content}</div>`;
+
+  /** A pending boundary as React writes it. */
+  const pending = (id: string, fallback: string) =>
+    `<!--$?--><template id="B:${id}"></template>${fallback}<!--/$-->`;
+
+  describe("a streamed segment is read", () => {
+    it("reads the server-rendered page out of a real streamed response", () => {
+      const page = extract(NEXT_STREAMED_PAGE, TERMS_URL);
+
+      expect(page.blocks).toContainEqual({
+        tag: "h1",
+        text: "Terms of Service",
+      });
+      expect(texts(page)).toContain(
+        "By accessing or using ReCopyFast (“Service”), you agree to be bound by these Terms of Service (“Terms”). If you disagree with any part of these terms, you may not access the Service.",
+      );
+      expect(texts(page).join(" ")).toContain("and you recieve a report.");
+      expect(page.wordCount).toBeGreaterThan(100);
+    });
+
+    it("reads several segments, nested ones and hexadecimal ids, in document order", () => {
+      // React numbers segments with id.toString(16): the eleventh is S:a.
+      const page = extract(
+        "<p>Shell words here.</p>" +
+          segment(
+            "0",
+            "<p>First segment words.</p>" +
+              segment("1", "<p>Nested segment words.</p>"),
+          ) +
+          segment("2", "<p>Second segment words.</p>") +
+          segment("a", "<p>Eleventh segment words.</p>"),
+      );
+
+      expect(texts(page)).toEqual([
+        "Shell words here.",
+        "First segment words.",
+        "Nested segment words.",
+        "Second segment words.",
+        "Eleventh segment words.",
+      ]);
+    });
+
+    it("reads the links and images inside a segment", () => {
+      const page = extract(
+        segment(
+          "0",
+          '<p>See <a href="/pricing">our prices</a> today.</p><img src="/hero.png" alt="Hero">',
+        ),
+      );
+
+      expect(page.sameHostLinks).toEqual(["https://example.com/pricing"]);
+      expect(page.images).toEqual([
+        expect.objectContaining({
+          src: "https://example.com/hero.png",
+          alt: "Hero",
+        }),
+      ]);
+    });
+
+    it.each([
+      ["a plain hidden element", "<div hidden><p>Hiddenword</p></div>"],
+      ["Next's metadata outlet", '<div hidden=""><p>Hiddenword</p></div>'],
+      ["an id that is not hexadecimal", segment("x", "<p>Hiddenword</p>")],
+      ["an empty segment number", segment("", "<p>Hiddenword</p>")],
+      ["a suffixed id", segment("0a-b", "<p>Hiddenword</p>")],
+      ["a boundary id", '<div hidden id="B:0"><p>Hiddenword</p></div>'],
+      ["a prefixed id", '<div hidden id="xS:0"><p>Hiddenword</p></div>'],
+      [
+        "an aria-hidden segment",
+        '<div hidden id="S:0" aria-hidden="true"><p>Hiddenword</p></div>',
+      ],
+      [
+        "a display:none segment",
+        '<div hidden id="S:0" style="display:none"><p>Hiddenword</p></div>',
+      ],
+    ])("still excludes %s", (_label, markup) => {
+      expect(texts(extract(`<p>Visible</p>${markup}`))).toEqual(["Visible"]);
+    });
+  });
+
+  /**
+   * Devin review of d513552: inside a table, React cannot wrap a segment in a
+   * `<div>`. It writes `<table hidden><tbody id="S:n">` (rows), `<table
+   * hidden><tr id="S:n">` (cells) or `<table hidden><colgroup id="S:n">`
+   * (react-dom-server `writeStartSegment`). The `hidden` sits on a table with
+   * no id, so the rows streamed into a table stayed unread.
+   */
+  describe("a table-mode segment is read", () => {
+    const ROW =
+      "Our opening hours change on public holidays, so please check this table before you travel to the shop this weekend.";
+
+    it("reads a streamed table body: <table hidden><tbody id=S:n>", () => {
+      const page = extract(
+        `<table hidden><tbody id="S:0"><tr><td>${ROW}</td></tr></tbody></table>`,
+      );
+
+      expect(texts(page)).toEqual([ROW]);
+      expect(page.wordCount).toBe(20);
+    });
+
+    it("reads a streamed table row: <table hidden><tr id=S:n>, under the <tbody> the parser implies", () => {
+      const page = extract(
+        `<table hidden><tr id="S:1"><td>${ROW}</td></tr></table>`,
+      );
+
+      expect(texts(page)).toEqual([ROW]);
+    });
+
+    it("reads a table that is the segment itself: <table hidden id=S:n>", () => {
+      const page = extract(
+        `<table hidden id="S:2"><tr><td>${ROW}</td></tr></table>`,
+      );
+
+      expect(texts(page)).toEqual([ROW]);
+    });
+
+    it("skips a fallback streamed inside a table and reads the rows that replace it", () => {
+      const page = extract(
+        "<table><tbody><tr><td>Opening hours</td></tr>" +
+          pending("0", "<tr><td>Loading rows…</td></tr>") +
+          "</tbody></table>" +
+          '<table hidden><tbody id="S:0"><tr><td>Monday to Friday</td></tr></tbody></table>' +
+          '<script>$RC("B:0","S:0")</script>',
+      );
+
+      expect(texts(page)).toEqual(["Opening hours", "Monday to Friday"]);
+    });
+
+    it.each([
+      [
+        "an ordinary hidden table",
+        "<table hidden><tbody><tr><td>Hiddenword</td></tr></tbody></table>",
+      ],
+      [
+        "a hidden table whose body has another id",
+        '<table hidden><tbody id="rows"><tr><td>Hiddenword</td></tr></tbody></table>',
+      ],
+      [
+        "a hidden table whose segment body is not its first child",
+        '<table hidden><thead><tr><td>Hiddenword</td></tr></thead><tbody id="S:0"><tr><td>Hiddenword</td></tr></tbody></table>',
+      ],
+      [
+        "a hidden table whose row sits in an authored <tbody>",
+        '<table hidden><tbody class="rows"><tr id="S:0"><td>Hiddenword</td></tr></tbody></table>',
+      ],
+      [
+        "a hidden <div> around a segment-id child",
+        '<div hidden><div id="S:0"><p>Hiddenword</p></div></div>',
+      ],
+      [
+        "an aria-hidden segment table",
+        '<table hidden aria-hidden="true"><tbody id="S:0"><tr><td>Hiddenword</td></tr></tbody></table>',
+      ],
+    ])("still excludes %s", (_label, markup) => {
+      expect(texts(extract(`<p>Visible</p>${markup}`))).toEqual(["Visible"]);
+    });
+  });
+
+  /**
+   * React's `$RV` removes the `<template id="B:n">` and every next sibling up
+   * to the matching `<!--/$-->` before it moves the segment in: that run is
+   * the fallback, loading UI rather than the page's copy.
+   */
+  describe("the fallback a segment replaces is not read", () => {
+    it("drops the loading text of a real streamed response", () => {
+      const page = extract(NEXT_STREAMED_PAGE, TERMS_URL);
+
+      expect(texts(page).join(" ")).not.toContain(NEXT_STREAMED_FALLBACK_TEXT);
+      // The first block is now the segment's logo, not the loading status.
+      expect(page.blocks[0]).toEqual({ tag: "div", text: "ReCopyFast" });
+    });
+
+    it("reads a page streamed the way React writes it: shell, fallbacks, segments", () => {
+      const page = extract(
+        "<main><h1>Shell heading</h1>" +
+          pending("0", '<div role="status"><span>Loading…</span></div>') +
+          "</main>" +
+          segment(
+            "0",
+            "<p>First segment words.</p>" +
+              pending("1", "<p>Loading more…</p>") +
+              "<p>Tail of the first segment.</p>",
+          ) +
+          segment("1", "<p>Second segment words.</p>") +
+          '<script>$RC("B:0","S:0");$RC("B:1","S:1")</script>',
+      );
+
+      expect(texts(page)).toEqual([
+        "Shell heading",
+        "First segment words.",
+        "Tail of the first segment.",
+        "Second segment words.",
+      ]);
+    });
+
+    it("does not count fallback words: a shell with only a fallback has no text", () => {
+      // In <body>, as React writes it: before <body> exists, parse5 would
+      // put the <template> in <head>, away from the comment.
+      const page = extract(
+        "<body>" +
+          pending(
+            "0",
+            "<p>Please wait while we load every word of this page for you, it will only take a moment or two longer than usual today.</p>",
+          ) +
+          "</body>",
+      );
+
+      expect(page.blocks).toEqual([]);
+      expect(page.wordCount).toBe(0);
+    });
+
+    it("skips to the MATCHING closer, past a boundary nested in the fallback", () => {
+      const page = extract(
+        "<div>" +
+          pending(
+            "0",
+            "<p>Loading</p><!--$--><p>Nested fallback words.</p><!--/$--><p>Still the fallback.</p>",
+          ) +
+          "<p>After the boundary.</p></div>",
+      );
+
+      expect(texts(page)).toEqual(["After the boundary."]);
+    });
+
+    /**
+     * s96c review, minor 1: each boundary kind `$RV` counts must keep the
+     * depth. Without it, the nested closer ends the skip early and the rest of
+     * the loading UI is read.
+     */
+    it.each([
+      [
+        "a client-rendered boundary <!--$!-->",
+        "<!--$!--><template></template><p>Errored inside the fallback.</p><!--/$-->",
+      ],
+      [
+        "a pending boundary <!--$?-->",
+        '<!--$?--><template id="B:1"></template><p>Pending inside the fallback.</p><!--/$-->',
+      ],
+      [
+        "a boundary being revealed <!--$~-->",
+        "<!--$~--><p>Revealing inside the fallback.</p><!--/$-->",
+      ],
+      [
+        "an Activity boundary <!--&-->",
+        "<!--&--><p>Activity inside the fallback.</p><!--/&-->",
+      ],
+    ])("keeps depth across %s nested in a fallback", (_label, nested) => {
+      const page = extract(
+        "<div>" +
+          pending("0", `<p>Loading</p>${nested}<p>Still the fallback.</p>`) +
+          "<p>After the boundary.</p></div>",
+      );
+
+      expect(texts(page)).toEqual(["After the boundary."]);
+    });
+
+    /** s96c review, minor 1: only `<!--$?-->` + a `B:` template opens a skip. */
+    it.each([
+      [
+        "<!--$?--> before a placeholder template",
+        '<!--$?--><template id="P:0"></template>',
+      ],
+      [
+        "<!--$?--> before a template with no id",
+        "<!--$?--><template></template>",
+      ],
+      [
+        "a plain comment before a B: template",
+        '<!-- note --><template id="B:0"></template>',
+      ],
+      [
+        "<!--$--> before a B: template",
+        '<!--$--><template id="B:0"></template>',
+      ],
+      [
+        "<!--$!--> before a B: template",
+        '<!--$!--><template id="B:0"></template>',
+      ],
+    ])("skips nothing after %s", (_label, start) => {
+      const page = extract(`<div>${start}<p>Read me.</p><!--/$--></div>`);
+
+      expect(texts(page)).toEqual(["Read me."]);
+    });
+
+    it("keeps the words either side of an inline fallback apart", () => {
+      const page = extract(
+        `<p>Total${pending("0", "<span>loading</span>")}today</p>`,
+      );
+
+      expect(texts(page)).toEqual(["Total today"]);
+    });
+
+    it("reads a client-rendered boundary, and skips nothing for a lone B: template", () => {
+      const page = extract(
+        '<body><!--$!--><template data-dgst="BAILOUT_TO_CLIENT_SIDE_RENDERING"></template><p>Client boundary words.</p><!--/$-->' +
+          '<div><template id="B:0"></template><p>Not a fallback.</p></div>' +
+          "<div><!--$?--><p>No template, no fallback.</p><!--/$--></div>",
+      );
+
+      expect(texts(page)).toEqual([
+        "Client boundary words.",
+        "Not a fallback.",
+        "No template, no fallback.",
+      ]);
+    });
+
+    it("stops skipping an unclosed fallback at the end of its parent", () => {
+      const page = extract(
+        '<div><!--$?--><template id="B:0"></template><p>Loading</p></div><p>After the parent.</p>',
+      );
+
+      expect(texts(page)).toEqual(["After the parent."]);
+    });
   });
 });

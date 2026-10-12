@@ -18,6 +18,24 @@
 
 User agent: `RecopyFastToolsBot/1.0 (+https://www.recopyfa.st/tools)`.
 
+### What the extractor skips (s96c)
+
+`src/lib/tools/extract/extract-page.ts` reads the HTML as served and runs no JavaScript. Some
+subtrees it skips whole. Nothing inside them is recorded: no text, no script or stylesheet
+source, no `<meta>` CSP or refresh, no image, no link. The skipped subtrees are:
+
+- **Hidden elements:** `hidden`, `aria-hidden="true"`, or inline `display:none` /
+  `visibility:hidden`. This has been true since s96. One exception: React streaming segments are
+  read. These are `<div hidden id="S:n">`, `<table hidden id="S:n">`, and the table forms
+  `<table hidden><tbody id="S:n">` and `<table hidden><tr id="S:n">`.
+- **The fallback of a pending React Suspense boundary:** `<!--$?--><template id="B:n">` up to
+  the matching `<!--/$-->`. This is the loading UI that a streamed segment replaces. A
+  `<!--$?-->` that never closes skips the rest of its parent.
+
+For the CSP checker (s97) and the Alt Text Checker (s101), this means that on a streamed Next.js
+page, `scriptSrcs`, `stylesheetHrefs`, `metaCsp` and `images` hold what the segments and the shell
+contain. They hold nothing that sits only inside a loading fallback.
+
 ## Limits
 
 | Bucket (Redis, fail closed) | Limit | Key |

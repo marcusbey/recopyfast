@@ -5729,10 +5729,14 @@ describe("Devin + final check of 7f8e8b5", () => {
       it("pages legacy string-valued claims for one invoice past PostgREST's row cap", async () => {
         db.billing_events = Array.from({ length: 1500 }, (_, index) => {
           const amountPaid = index + 1;
+          // `amountWarnedBefore` orders by this unique id before applying
+          // ranges. Padding makes page one exactly amounts 1..1,000, so the
+          // required maximum (1,500) cannot be observed without page two.
+          const orderedAmount = String(amountPaid).padStart(4, "0");
           return {
             user_id: USER_ID,
             event_type: "internal.covered_invoice_manual_review",
-            stripe_event_id: `covered_by_lifetime_manual_invoice:in_late:${amountPaid}`,
+            stripe_event_id: `covered_by_lifetime_manual_invoice:in_late:${orderedAmount}`,
             data: {
               invoice_id: "in_late",
               subscription_id: SUBSCRIPTION_ID,
@@ -5742,6 +5746,7 @@ describe("Devin + final check of 7f8e8b5", () => {
           };
         });
         mockInvoicesRetrieve.mockResolvedValue(collected(1900));
+        fakeQueryLog = [];
 
         expect((await settle("evt_late_paid")).status).toBe(200);
 
@@ -5749,6 +5754,15 @@ describe("Devin + final check of 7f8e8b5", () => {
         expect(alert[0]).toContain("400 more since the alert at 1500");
         expect(alert[3]).toEqual(
           expect.objectContaining({ amountPaidBefore: 1500 }),
+        );
+        expect(fakeQueryLog).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              table: "billing_events",
+              method: "range",
+              value: { from: 1000, to: 1999 },
+            }),
+          ]),
         );
       });
     });

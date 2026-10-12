@@ -1335,3 +1335,57 @@ production/provider call or deployment was made by this implementation pass.
 
 Max severity: minor
 Ship allowed: yes
+
+## Incremental re-review of 5f3c4a1
+
+Fresh, bounded review of the `03100a8..5f3c4a1` repair to
+`amountWarnedBefore`, plus the final test-only pagination-fixture correction. The staged s96c
+merge is inherited `main` work and is outside this verdict.
+
+### Result
+
+No finding remains in this delta. The previous implementation read every manual-invoice warning
+for an account and filtered in memory, so PostgREST's row cap could hide this invoice's earlier
+amounts. The repaired query:
+
+- filters by event type, user and `data->>invoice_id` before rows leave PostgREST;
+- orders by the unique `stripe_event_id` before applying inclusive ranges;
+- advances by the number of rows actually returned, so a server cap below the requested 1,000
+  still progresses correctly, and stops only on an empty page;
+- parses both the deployed string representation and JSON numbers, rejects non-finite values and
+  selects the numerically highest amount below the current collection;
+- leaves new writes in their existing string representation, avoiding a mixed-format schema
+  change, and keeps a read failure non-blocking by alerting the invoice total without an increment.
+
+The source uses existing Supabase/PostgREST builder calls with their established signatures. No
+migration, provider write, refund decision or webhook control flow changed.
+
+### Fresh test and mutation evidence
+
+- Independent focused baseline after the fixture repair: the lifetime-covered webhook suite
+  passed **230/230**.
+- Removing the invoice JSON-path filter made **2 tests red**: the query-contract assertion and the
+  account-with-more-than-1,000-warnings scenario.
+- Ignoring legacy string amounts made **3 tests red**.
+- Returning after page one originally survived, exposing a real test gap: lexicographic event-id
+  order happened to put amount 1,500 on the first page. The fixture was repaired with zero-padded
+  ordered ids and an explicit `{ from: 1000, to: 1999 }` query assertion. Repeating the mutation
+  then made the page-two scenario **1 test red** (`900 more since … 1000` instead of `400 more
+  since … 1500`).
+- Every mutation was restored. Source SHA-256 after restoration:
+  `fc5b591fb6bec844f89cf416d3184c0214691235b13251a24b4a05084c1e2478`;
+  `git diff --exit-code HEAD -- src/lib/stripe/lifetime-covered-billing.ts` passed.
+- The parent pre-commit run, with CI's `NEXT_PUBLIC_APP_URL`, reported lint, type-check and format
+  green and **495 passed suites / 7,329 passed tests / 38 skipped**. This is supporting parent
+  evidence; the 230-test run and mutations above are the independent evidence for this delta.
+
+### Could not verify
+
+- No disposable PostgreSQL/PostgREST instance was used, so the JSON-path filter and pagination
+  were verified through the query-contract fake and Supabase's typed builder, not a live database.
+- No Stripe test-mode/live event, provider write, production deployment or hosted webhook delivery
+  was exercised. This delta only reads the existing `billing_events` warning ledger and changes
+  the explanatory increment in an ops alert.
+
+Max severity: none
+Ship allowed: yes
