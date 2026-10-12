@@ -176,7 +176,7 @@ export default function Privacy() {
               </li>
               <li>
                 The report is stored with short excerpts of that public page
-                text. It is public to anyone with its link and is deleted after
+                text. It is public to anyone with its link and is kept for up to
                 30 days.
               </li>
               <li>
@@ -452,7 +452,7 @@ export default function Privacy() {
                 service delivery
               </li>
               <li>
-                <strong>Free tool reports:</strong> Deleted after 30 days
+                <strong>Free tool reports:</strong> Kept for up to 30 days
               </li>
             </ul>
           </section>

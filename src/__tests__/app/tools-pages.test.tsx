@@ -175,9 +175,11 @@ describe("/tools", () => {
     expect(about?.textContent).not.toMatch(/@recopyfa\.st|mailto:/);
   });
 
-  it("says no more than 24 requests, 30 days and the 24 h key, as the code does", () => {
+  it("says no more than 24 requests, up to 30 days and the 24 h key, as the code does", () => {
     expect(ABOUT_SCANNER.fetched).toContain("never more than 24 requests");
-    expect(ABOUT_SCANNER.stored).toContain("deleted after 30 days");
+    // s96 review (minor 4): the row ceiling can remove a report sooner.
+    expect(ABOUT_SCANNER.stored).toContain("kept for up to 30 days");
+    expect(HUB_FAQS[1].answer).toContain("kept for up to 30 days");
     expect(ABOUT_SCANNER.stored).toContain("kept for at most 24 hours");
   });
 });

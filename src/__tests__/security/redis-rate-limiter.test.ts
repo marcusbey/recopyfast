@@ -8,6 +8,7 @@
 const pipeline = {
   incr: jest.fn(),
   expire: jest.fn(),
+  pExpireAt: jest.fn(),
   ttl: jest.fn(),
   exec: jest.fn(),
 };
@@ -51,7 +52,10 @@ describe("RedisRateLimiter", () => {
     // Assert — the TTL round trip is the regression this guards against. On a
     // metered store a third command is a 50% quota increase for no new data.
     expect(pipeline.incr).toHaveBeenCalledTimes(1);
-    expect(pipeline.expire).toHaveBeenCalledTimes(1);
+    // s96 review (minor 4): the expiry is PEXPIREAT at the window's end. It
+    // replaced EXPIRE, still one command, so the count is unchanged.
+    expect(pipeline.pExpireAt).toHaveBeenCalledTimes(1);
+    expect(pipeline.expire).not.toHaveBeenCalled();
     expect(pipeline.ttl).not.toHaveBeenCalled();
   });
 
@@ -82,7 +86,30 @@ describe("RedisRateLimiter", () => {
     expect(pipeline.incr).toHaveBeenCalledWith(
       `rate_limit:user:user123:/api/test:${window}`,
     );
-    expect(pipeline.expire).toHaveBeenCalledWith(expect.any(String), 60);
+    expect(pipeline.pExpireAt).toHaveBeenCalledWith(
+      `rate_limit:user:user123:/api/test:${window}`,
+      (window + 1) * config.windowMs,
+    );
+  });
+
+  /**
+   * s96 review (minor 4). `EXPIRE key <window>` on every increment pushed the
+   * expiry forward each time, so a key could outlive its window by almost a
+   * whole window — a daily key holding a client address for ~48 h while
+   * /privacy says 24. The expiry is now the window's absolute end: the same
+   * timestamp on every check in the window, never extended.
+   */
+  it("expires the key at its window's end, the same instant on every check, never later", async () => {
+    const day = { ...config, windowMs: 24 * 60 * 60 * 1000 };
+    const now = Date.now();
+    const windowEnd = (Math.floor(now / day.windowMs) + 1) * day.windowMs;
+
+    await limiter.checkLimit(day);
+    await limiter.checkLimit(day);
+
+    const expiries = pipeline.pExpireAt.mock.calls.map((call) => call[1]);
+    expect(expiries).toEqual([windowEnd, windowEnd]);
+    expect(windowEnd - now).toBeLessThanOrEqual(day.windowMs);
   });
 
   it("allows a request at the limit and denies the one past it", async () => {

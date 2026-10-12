@@ -38,7 +38,31 @@ const RANGE_DESCRIPTIONS: Record<string, string> = {
   ipv4Mapped: "an IPv4-mapped address",
   "6to4": "a 6to4 tunnelling address",
   teredo: "a Teredo tunnelling address",
+  rfc8215: "a local-use NAT64 address",
+  documentation: "a documentation address",
+  notGlobalUnicast: "not a globally routable IPv6 address",
 };
+
+/**
+ * IPv6 needs more than ipaddr.js's "unicast" (s96 review, minor 2): version
+ * 2.2 reports "unicast" for everything it has no name for — `::7f00:1` (the
+ * deprecated IPv4-compatible ::/96), `fec0::/10` (site-local), `5f00::/16`
+ * (SRv6), `3fff::/20` (documentation, RFC 9637) and `64:ff9b:1::/48` (local-use
+ * NAT64, RFC 8215). So an IPv6 address must also sit in global unicast,
+ * 2000::/3, and outside the special ranges carved out of it. ipaddr.js already
+ * names 2001:db8::/32 "reserved" and 2001:2::/48 "benchmarking"; they are
+ * listed here as well so a library change cannot quietly readmit them.
+ */
+const GLOBAL_UNICAST_V6 = ipaddr.parseCIDR("2000::/3");
+const SPECIAL_V6_RANGES: readonly [string, string][] = [
+  ["64:ff9b:1::/48", "rfc8215"],
+  ["2001:db8::/32", "reserved"],
+  ["3fff::/20", "documentation"],
+  ["2001:2::/48", "benchmarking"],
+];
+const SPECIAL_V6 = SPECIAL_V6_RANGES.map(
+  ([cidr, range]) => [ipaddr.parseCIDR(cidr), range] as const,
+);
 
 export interface AddressRefusal {
   /** The address as classified — an IPv4-mapped address is unwrapped first. */
@@ -82,10 +106,23 @@ export function classifyAddress(rawAddress: string): AddressRefusal | null {
     }
   }
 
-  const range: string = parsed.range();
+  let range: string = parsed.range();
+  if (range === ALLOWED_RANGE && parsed.kind() === "ipv6") {
+    range = globalUnicastRangeOf(parsed as ipaddr.IPv6);
+  }
   if (range === ALLOWED_RANGE) return null;
 
   return { address: parsed.toString(), range, why: describeRange(range) };
+}
+
+/** "unicast" for a usable global IPv6 address, else the range that refuses it. */
+function globalUnicastRangeOf(address: ipaddr.IPv6): string {
+  for (const [cidr, range] of SPECIAL_V6) {
+    if (address.match(cidr as [ipaddr.IPv6, number])) return range;
+  }
+  return address.match(GLOBAL_UNICAST_V6 as [ipaddr.IPv6, number])
+    ? ALLOWED_RANGE
+    : "notGlobalUnicast";
 }
 
 /** Strips the brackets an IPv6 literal wears inside a URL. */

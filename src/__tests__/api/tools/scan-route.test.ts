@@ -337,6 +337,87 @@ describe("limiter order and what each refusal spares", () => {
   });
 });
 
+/**
+ * s96 review, minor 3: the per-target hourly cap is keyed on the registrable
+ * domain, and charged again on the final host after redirects.
+ */
+describe("the per-target cap", () => {
+  function targetIdentifiers(): string[] {
+    return checkLimit.mock.calls
+      .map(([config]) => config as RateLimitConfig)
+      .filter((config) => config.endpoint === "tools/scan:target")
+      .map((config) => config.identifier);
+  }
+
+  it("is keyed on the registrable domain, so subdomains share one bucket", async () => {
+    await POST(
+      request({ tool: "website-spell-checker", url: "a.b.example.com" }),
+    );
+    await POST(
+      request({ tool: "website-spell-checker", url: "shop.example.co.uk" }),
+    );
+
+    expect(targetIdentifiers()).toEqual(["example.com", "example.co.uk"]);
+  });
+
+  it("charges the final host after redirects, and its refusal is a 429 with nothing stored", async () => {
+    mockedRunScan.mockImplementationOnce(async (input) => {
+      const allowed = await input.authorizeFinalHost?.("victim.example");
+      return allowed
+        ? { ok: true, report: REPORT }
+        : { ok: false, reason: "target_limited" };
+    });
+    checkLimit.mockImplementation(async (config) => {
+      const { endpoint, identifier } = config as RateLimitConfig;
+      return endpoint === "tools/scan:target" && identifier === "victim.example"
+        ? REFUSED
+        : ALLOWED;
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({
+      message: SCAN_MESSAGES.target,
+    });
+    expect(targetIdentifiers()).toEqual(["example.com", "victim.example"]);
+    expect(store.insertReport).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the store is down at the final-host check", async () => {
+    mockedRunScan.mockImplementationOnce(async (input) => {
+      const allowed = await input.authorizeFinalHost?.("victim.example");
+      return allowed
+        ? { ok: true, report: REPORT }
+        : { ok: false, reason: "target_limited" };
+    });
+    checkLimit.mockImplementation(async (config) => {
+      const { identifier } = config as RateLimitConfig;
+      if (identifier === "victim.example") throw new Error("redis down");
+      return ALLOWED;
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(store.insertReport).not.toHaveBeenCalled();
+  });
+
+  it("stores the report when the final host's bucket allows it", async () => {
+    mockedRunScan.mockImplementationOnce(async (input) => {
+      const allowed = await input.authorizeFinalHost?.("victim.example");
+      return allowed
+        ? { ok: true, report: REPORT }
+        : { ok: false, reason: "target_limited" };
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(store.insertReport).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("bad input gets fixed text", () => {
   it.each([
     [

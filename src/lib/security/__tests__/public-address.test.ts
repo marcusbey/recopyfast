@@ -57,12 +57,37 @@ describe("classifyAddress", () => {
     });
   });
 
-  it.each(["1.1.1.1", "2606:4700:4700::1111", "::ffff:1.1.1.1"])(
-    "allows the globally routable unicast address %s",
-    (address) => {
-      expect(classifyAddress(address)).toBeNull();
-    },
-  );
+  /**
+   * s96 review, minor 2. ipaddr.js 2.2 calls each of these "unicast", so the
+   * unicast allowlist alone admitted them. An IPv6 address must also be global
+   * unicast (2000::/3) and outside the special ranges carved out of it.
+   */
+  it.each([
+    ["64:ff9b:1::1", "rfc8215"],
+    ["::7f00:1", "notGlobalUnicast"],
+    ["fec0::1", "notGlobalUnicast"],
+    ["5f00::1", "notGlobalUnicast"],
+    ["3fff::1", "documentation"],
+    ["3fff:fff::1", "documentation"],
+    ["2001:db8::1", "reserved"],
+    ["2001:db8:ffff::1", "reserved"],
+    ["2001:2::1", "benchmarking"],
+  ])("refuses %s, which is not global unicast (%s)", (address, range) => {
+    const refusal = classifyAddress(address);
+
+    expect(refusal).not.toBeNull();
+    expect(refusal?.range).toBe(range);
+  });
+
+  it.each([
+    "1.1.1.1",
+    "2606:4700:4700::1111",
+    "2001:4860:4860::8888",
+    "2a00:1450:4001:80b::200e",
+    "::ffff:1.1.1.1",
+  ])("allows the globally routable unicast address %s", (address) => {
+    expect(classifyAddress(address)).toBeNull();
+  });
 
   it("describes a refused range in words, and names the unwrapped IPv4 address", () => {
     expect(classifyAddress("::ffff:169.254.169.254")).toEqual({

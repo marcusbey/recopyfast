@@ -109,6 +109,12 @@ describe("visible text, by block", () => {
     expect(texts(page)).toEqual(["spelling checked evil today x"]);
   });
 
+  it("strips the Arabic letter mark (U+061C) and the Mongolian vowel separator (U+180E)", () => {
+    const page = extract("<p>spell\u061cing check\u180eed</p>");
+
+    expect(texts(page)).toEqual(["spelling checked"]);
+  });
+
   it("caps blocks, block length and the page's text", () => {
     const many = extract("<p>w</p>".repeat(MAX_BLOCKS + 50));
     const long = extract(`<p>${"word ".repeat(1_000)}</p>`);

@@ -5,10 +5,11 @@
  * Page text is attacker-chosen. It is never markup here (React renders it as
  * text), but two kinds of character still do damage as plain text:
  *
- * - bidi controls (U+202A–U+202E, U+2066–U+2069) reorder what a reader SEES
- *   without changing the bytes, so a report could display a sentence the page
- *   never said — the "Trojan Source" class;
- * - zero-width characters and soft hyphens (U+00AD) split one word into two
+ * - bidi controls (U+061C, U+200E–U+200F, U+202A–U+202E, U+2066–U+2069)
+ *   reorder what a reader SEES without changing the bytes, so a report could
+ *   display a sentence the page never said — the "Trojan Source" class;
+ * - zero-width characters, soft hyphens (U+00AD) and the Mongolian vowel
+ *   separator (U+180E, no longer whitespace to `\s`) split one word into two
  *   tokens invisibly, which turns "spell<U+00AD>ing" into a false typo.
  *
  * Both are stripped at extraction, and stripped again by the report schema on
@@ -19,7 +20,7 @@
 export const TEXT_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
 const INVISIBLE_CHARACTERS =
-  /[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+  /[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 
 /** Removes bidi controls, zero-width characters and soft hyphens. */
 export function stripInvisibleCharacters(text: string): string {

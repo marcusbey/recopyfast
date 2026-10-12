@@ -34,7 +34,7 @@ primitive, no new token.
 ## `/tools/<slug>/r/<id>` — the report
 
 - Eyebrow "<Tool> report", h1 = the scanned host (wraps anywhere), a line with the scan time and
-  "public to anyone with this link … deleted after 30 days".
+  "public to anyone with this link … kept for up to 30 days".
 - **Summary card:** verdict `Badge` (`tone-warning` "Worth a look", `tone-success` "Looks good",
   `tone-neutral` "Not checked", …), the headline (h2), facts in a two-column `dl`.
 - **Partial:** an info `Alert` when a page was not reached in time; another when findings were

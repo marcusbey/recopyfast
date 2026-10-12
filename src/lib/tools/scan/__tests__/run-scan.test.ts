@@ -12,6 +12,7 @@
 import http from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 
+import { compressedBomb } from "@/lib/tools/fetch/__tests__/bombs";
 import type { FetchPolicy } from "@/lib/tools/fetch/safe-fetch";
 import { typoLens } from "@/lib/tools/lenses/typos/typo-lens";
 import { parseStoredReport } from "@/lib/tools/report/report-schema";
@@ -86,8 +87,15 @@ function text(body: string, type = "text/plain"): Handler {
   };
 }
 
-function scan(overrides: { deadlineMs?: number; denylist?: string[] } = {}) {
+function scan(
+  overrides: {
+    deadlineMs?: number;
+    denylist?: string[];
+    authorizeFinalHost?: (domain: string) => Promise<boolean>;
+  } = {},
+) {
   return runScan({
+    authorizeFinalHost: overrides.authorizeFinalHost,
     tool: "website-spell-checker",
     lens: typoLens,
     url: site(),
@@ -211,5 +219,165 @@ describe("runScan", () => {
         reason: PAGE_SKIP_REASONS.timeLimit,
       },
     ]);
+  });
+
+  /**
+   * s96 review, minor 3: the per-target cap is charged on the FINAL host too,
+   * so a host that redirects to a victim cannot spend the victim's hourly
+   * scans from its own bucket. Checked right after the homepage, before any
+   * sitemap or page request.
+   */
+  describe("the final host after redirects", () => {
+    it("is charged when its registrable domain differs, and a refusal stops the scan", async () => {
+      routes.set("/", (_req, res) => {
+        res.writeHead(302, {
+          location: `http://www.elsewhere.test:${port}/home`,
+        });
+        res.end();
+      });
+      routes.set("/home", html(`<p>${FILLER}</p>`));
+      const charged: string[] = [];
+
+      const result = await scan({
+        authorizeFinalHost: async (domain) => {
+          charged.push(domain);
+          return false;
+        },
+      });
+
+      expect(result).toEqual({ ok: false, reason: "target_limited" });
+      expect(charged).toEqual(["elsewhere.test"]);
+      expect(requested).not.toContain("/sitemap.xml");
+    });
+
+    it("lets the scan go on when the final host's bucket allows it", async () => {
+      routes.set("/", (_req, res) => {
+        res.writeHead(302, { location: `http://elsewhere.test:${port}/home` });
+        res.end();
+      });
+      routes.set("/home", html(`<p>${FILLER}</p>`));
+
+      const result = await scan({ authorizeFinalHost: async () => true });
+
+      expect(result.ok).toBe(true);
+    });
+
+    it("is not charged again for the same registrable domain (www.)", async () => {
+      routes.set("/", (_req, res) => {
+        res.writeHead(301, { location: `http://www.bakery.test:${port}/home` });
+        res.end();
+      });
+      const charged: string[] = [];
+      // www.bakery.test serves the same handler table.
+      routes.set("/home", html(`<p>${FILLER}</p>`));
+
+      const result = await scan({
+        authorizeFinalHost: async (domain) => {
+          charged.push(domain);
+          return true;
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(charged).toEqual([]);
+    });
+  });
+
+  /**
+   * s96 review, major 1: a decompression bomb anywhere in a scan used to keep
+   * `runScan` pending past its deadline (> 25 s with deadlineMs 3000). Every
+   * one now resolves inside deadlineMs plus a small margin.
+   */
+  describe("decompression bombs (200 MB decoded each)", () => {
+    const DEADLINE_MS = 3_000;
+    const MARGIN_MS = 1_500;
+
+    function bomb(type: string): Handler {
+      return (_req, res) => {
+        void compressedBomb("gzip").then((body) => {
+          res.writeHead(200, {
+            "content-type": type,
+            "content-encoding": "gzip",
+          });
+          res.end(body);
+        });
+      };
+    }
+
+    async function timedScan() {
+      const started = Date.now();
+      const result = await scan({ deadlineMs: DEADLINE_MS });
+      return { result, elapsed: Date.now() - started };
+    }
+
+    beforeAll(async () => {
+      await compressedBomb("gzip");
+    }, 30_000);
+
+    it("a bombed robots.txt refuses the scan as too_large, in time", async () => {
+      routes.set("/robots.txt", bomb("text/plain"));
+      routes.set("/", html(`<p>${FILLER}</p>`));
+
+      const { result, elapsed } = await timedScan();
+
+      expect(result).toEqual({ ok: false, reason: "too_large" });
+      expect(elapsed).toBeLessThan(DEADLINE_MS + MARGIN_MS);
+    });
+
+    it("a bombed homepage fails the scan as too_large, in time", async () => {
+      routes.set("/", bomb("text/html"));
+
+      const { result, elapsed } = await timedScan();
+
+      expect(result).toEqual({ ok: false, reason: "too_large" });
+      expect(elapsed).toBeLessThan(DEADLINE_MS + MARGIN_MS);
+    });
+
+    it("a bombed sitemap falls back to the homepage's links, in time", async () => {
+      routes.set("/", html(`<p>${FILLER}</p><a href="/menu">menu</a>`));
+      routes.set("/sitemap.xml", bomb("application/xml"));
+      routes.set("/menu", html(`<p>${FILLER}</p>`));
+
+      const { result, elapsed } = await timedScan();
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.report.pages.map((page) => page.status)).toEqual([
+          "checked",
+          "checked",
+        ]);
+      }
+      expect(elapsed).toBeLessThan(DEADLINE_MS + MARGIN_MS);
+    });
+
+    it("a bombed sitemap page is skipped as too large, in time", async () => {
+      const origin = `http://bakery.test:${port}`;
+      routes.set("/", html(`<p>${FILLER}</p>`));
+      routes.set(
+        "/sitemap.xml",
+        text(
+          `<urlset><url><loc>${origin}/bomb</loc></url><url><loc>${origin}/menu</loc></url></urlset>`,
+          "application/xml",
+        ),
+      );
+      routes.set("/bomb", bomb("text/html"));
+      routes.set("/menu", html(`<p>${FILLER}</p>`));
+
+      const { result, elapsed } = await timedScan();
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.report.pages).toEqual([
+          { url: `${origin}/`, status: "checked" },
+          {
+            url: `${origin}/bomb`,
+            status: "skipped",
+            reason: PAGE_SKIP_REASONS.tooLarge,
+          },
+          { url: `${origin}/menu`, status: "checked" },
+        ]);
+      }
+      expect(elapsed).toBeLessThan(DEADLINE_MS + MARGIN_MS);
+    });
   });
 });

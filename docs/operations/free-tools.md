@@ -11,8 +11,10 @@
 2. Fetches robots.txt (obeyed for `RecopyFastToolsBot`, else `*`), the homepage, up to two sitemap
    files and up to nine pages: at most **24 requests**, **8 s** each, **20 s** for the scan, **2 MB**
    of decompressed HTML per page. Every hop goes through `src/lib/tools/fetch/safe-fetch.ts`
-   (public unicast addresses only, ports 80/443, no proxy, no cookies).
-3. Runs the tool's lens and stores one row in `tool_reports` (30-day expiry).
+   (public unicast addresses only — for IPv6, global unicast `2000::/3` minus the NAT64 local-use,
+   documentation and benchmarking ranges — ports 80/443, no proxy, no cookies).
+3. Runs the tool's lens and stores one row in `tool_reports` (expires after 30 days at most; the
+   5,000-row trim can remove older rows sooner at full volume, so the copy says "up to 30 days").
 
 User agent: `RecopyFastToolsBot/1.0 (+https://www.recopyfa.st/tools)`.
 
@@ -24,7 +26,7 @@ User agent: `RecopyFastToolsBot/1.0 (+https://www.recopyfa.st/tools)`.
 | `tools/scan:daily` | 5 / day (cache misses only) | IPv4 address, or IPv6 /64 |
 | `tools/scan:daily48` | 20 / day (cache misses only) | IPv6 /48 |
 | `tools/scan:global` | 500 / day (cache misses only) | everyone |
-| `tools/scan:target` | 20 / hour (cache misses only) | scanned host name |
+| `tools/scan:target` | 20 / hour (cache misses only) | registrable domain (eTLD+1, `tldts` with private suffixes) of the submitted host; charged again for the final host after redirects when its registrable domain differs |
 
 A request refused by a later bucket has spent the earlier ones (strict on purpose). A failed scan
 has spent its daily allowance. A cache hit spends only the burst bucket. Daily windows reset at

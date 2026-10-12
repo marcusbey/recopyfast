@@ -40,6 +40,12 @@ import {
   type SafeFetchOptions,
 } from "../safe-fetch";
 import {
+  BOMB_DECODED_BYTES,
+  compressedBomb,
+  contentEncodingOf,
+  type BombEncoding,
+} from "./bombs";
+import {
   createValidatingLookup,
   PUBLIC_ADDRESS_RULE,
   type ResolvedAddress,
@@ -500,6 +506,78 @@ describe("size: the 2 MB cap counts decompressed bytes", () => {
     expect(result.reason).toBe("too_large");
     expect(result.bytesRead).toBeGreaterThan(MAX_BODY_BYTES);
     expect(result.bytesRead).toBeLessThanOrEqual(MAX_BODY_BYTES + 64 * 1024);
+  });
+
+  /**
+   * s96 review, major 1. A ~200 KB body inflating to 200 MB used to hang
+   * safeFetch past every timeout: the decoded-byte counter tripped after the
+   * response had completed, `pipeline`'s callback never fired, and the abort
+   * signal could not help because the socket was already closed. Each bomb
+   * must now resolve `too_large` well inside the deadline.
+   */
+  it.each(["gzip", "deflate", "deflate-raw", "br"] as BombEncoding[])(
+    "a %s bomb (200 MB decoded) resolves too_large inside the deadline",
+    async (encoding) => {
+      const bomb = await compressedBomb(encoding);
+      expect(bomb.length).toBeLessThan(BOMB_DECODED_BYTES / 200);
+      fixture.route("/big-bomb", (_req, res) => {
+        res.writeHead(200, {
+          "content-type": "text/html",
+          "content-encoding": contentEncodingOf(encoding),
+        });
+        res.end(bomb);
+      });
+      const deadlineMs = 4_000;
+
+      const started = Date.now();
+      const result = await safeFetch(
+        fixture.url("/big-bomb"),
+        options({ deadline: Date.now() + deadlineMs }),
+      );
+      const elapsed = Date.now() - started;
+
+      expect(result).toMatchObject({ ok: false, reason: "too_large" });
+      expect(elapsed).toBeLessThan(deadlineMs);
+      if (!result.ok) {
+        expect(result.bytesRead).toBeLessThanOrEqual(
+          MAX_BODY_BYTES + 256 * 1024,
+        );
+      }
+    },
+    30_000,
+  );
+
+  it("an endless compressed body is refused and its connection closed", async () => {
+    let closed!: () => void;
+    const serverSawClose = new Promise<void>((resolve) => (closed = resolve));
+    fixture.route("/endless", (_req, res) => {
+      res.writeHead(200, {
+        "content-type": "text/html",
+        "content-encoding": "gzip",
+      });
+      const gzip = zlib.createGzip();
+      gzip.pipe(res);
+      const zeros = Buffer.alloc(64 * 1024, 0x20);
+      const timer = setInterval(() => gzip.write(zeros), 1);
+      res.on("close", () => {
+        clearInterval(timer);
+        gzip.destroy();
+        closed();
+      });
+    });
+
+    const result = await safeFetch(
+      fixture.url("/endless"),
+      options({ deadline: Date.now() + 4_000 }),
+    );
+
+    expect(result).toMatchObject({ ok: false, reason: "too_large" });
+    await expect(
+      Promise.race([
+        serverSawClose.then(() => "closed"),
+        new Promise((resolve) => setTimeout(() => resolve("open"), 1_000)),
+      ]),
+    ).resolves.toBe("closed");
   });
 
   it.each([

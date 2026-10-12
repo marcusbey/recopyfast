@@ -39,6 +39,7 @@ import {
 import { isDenylistedHost } from "./denylist";
 import type { NormalizedScanUrl } from "./normalize-url";
 import { createRobotsAuthorizer, MAX_ROBOTS_BYTES } from "./robots";
+import { registrableDomain } from "./registrable-domain";
 import { samplePages } from "./sample-pages";
 
 export const SCAN_DEADLINE_MS = 20_000;
@@ -46,10 +47,10 @@ export const PAGE_CONCURRENCY = 3;
 export { PAGE_SKIP_REASONS };
 
 /** The reasons a scan as a whole can fail (the route's 422 `reason`). */
-export type ScanFailureReason = Exclude<
-  FetchFailureReason,
-  "invalid_url" | "request_limit"
->;
+export type ScanFailureReason =
+  | Exclude<FetchFailureReason, "invalid_url" | "request_limit">
+  /** The final host's per-target bucket refused it (the route answers 429). */
+  | "target_limited";
 
 export interface RunScanInput {
   tool: string;
@@ -61,6 +62,12 @@ export interface RunScanInput {
   policy?: FetchPolicy;
   resolver?: Resolver;
   deadlineMs?: number;
+  /**
+   * Charges the per-target hourly cap for the homepage's FINAL registrable
+   * domain when a redirect changed it (s96 review, minor 3). False stops the
+   * scan before any sitemap or page request.
+   */
+  authorizeFinalHost?: (registrableDomain: string) => Promise<boolean>;
 }
 
 export type RunScanResult =
@@ -137,6 +144,18 @@ export async function runScan(input: RunScanInput): Promise<RunScanResult> {
   const homepage = await safeFetch(input.url.href, fetchOptions("html"));
   if (!homepage.ok)
     return { ok: false, reason: asScanFailure(homepage.reason) };
+
+  // A redirect may have moved the scan to another site. Its owner's hourly
+  // cap is charged before anything else is read or parsed from it; otherwise any host
+  // could redirect to a victim and spend the victim's scans from its own
+  // bucket.
+  const submittedDomain = registrableDomain(input.url.hostname);
+  const finalDomain = registrableDomain(new URL(homepage.value.url).hostname);
+  if (finalDomain !== submittedDomain && input.authorizeFinalHost) {
+    if (!(await input.authorizeFinalHost(finalDomain))) {
+      return { ok: false, reason: "target_limited" };
+    }
+  }
 
   const extracted = extractPage(homepage.value.body, {
     url: homepage.value.url,

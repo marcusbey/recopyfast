@@ -70,7 +70,7 @@ export default async function ToolReportPage({ params }: ReportRouteProps) {
             </h1>
             <p className="mt-3 text-sm text-slate-600">
               Scanned {scannedOn}. Reports are public to anyone with this link
-              and are deleted after 30 days.
+              and are kept for up to 30 days.
             </p>
           </header>
 

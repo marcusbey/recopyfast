@@ -222,28 +222,46 @@ function decoderFor(
   }
 }
 
-/** Sniffs zlib-wrapped versus raw deflate on the first chunk, then streams. */
-function createDeflateDecoder(): Transform {
-  let inner: Transform | null = null;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      if (!inner) {
-        const isZlib =
-          chunk.length >= 2 &&
-          (chunk[0] & 0x0f) === 8 &&
-          ((chunk[0] << 8) | chunk[1]) % 31 === 0;
-        inner = isZlib ? zlib.createInflate() : zlib.createInflateRaw();
-        inner.on("data", (out: Buffer) => this.push(out));
-        inner.on("error", (error) => this.destroy(error));
-      }
-      inner.write(chunk, callback);
-    },
-    flush(callback) {
-      if (!inner) return callback();
-      inner.once("end", () => callback());
-      inner.end();
-    },
+/**
+ * The first chunk of a body, put back for the pipeline to read, or null when
+ * the body is empty or failed. Lets `deflate` pick zlib-wrapped or raw
+ * inflate from its first bytes WITHOUT a wrapper stream. (Until the s96
+ * review the choice was a Transform wrapping an inner inflater whose output it
+ * pushed without backpressure and never destroyed — a deflate bomb inflated
+ * into memory long after the cap.)
+ */
+function peekFirstChunk(stream: Readable): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      stream.off("readable", onReadable);
+      stream.off("end", onDone);
+      stream.off("close", onDone);
+      stream.off("error", onDone);
+    };
+    const onReadable = () => {
+      const chunk = stream.read() as Buffer | null;
+      if (chunk === null) return;
+      cleanup();
+      stream.unshift(chunk);
+      resolve(chunk);
+    };
+    const onDone = () => {
+      cleanup();
+      resolve(null);
+    };
+    stream.on("readable", onReadable);
+    stream.once("end", onDone);
+    stream.once("close", onDone);
+    stream.once("error", onDone);
   });
+}
+
+function isZlibHeader(chunk: Buffer): boolean {
+  return (
+    chunk.length >= 2 &&
+    (chunk[0] & 0x0f) === 8 &&
+    ((chunk[0] << 8) | chunk[1]) % 31 === 0
+  );
 }
 
 /** Counts bytes through a point in the chain and fails past `max`. */
@@ -363,18 +381,33 @@ function request(
   });
 }
 
-/** Streams, decompresses and caps the body; resolves with the decoded bytes. */
+type BodyResult =
+  | { ok: true; body: Buffer }
+  | { ok: false; reason: FetchFailureReason; bytesRead: number };
+
+/**
+ * Streams, decompresses and caps the body; resolves with the decoded bytes.
+ *
+ * SETTLES ON THE FIRST SIGNAL, AND DESTROYS EVERY STREAM ITSELF (s96 review,
+ * major 1). It used to resolve only from `pipeline`'s callback. With a
+ * decompression bomb — 200 KB of gzip inflating to 200 MB — the decoded-byte
+ * counter trips after the RESPONSE has already ended; `pipeline` then waits
+ * for every stream to close, the inflater is mid-chunk, the callback never
+ * fires, and the abort signal cannot help because the socket is already
+ * closed. Measured: hung past 12 s, 3 runs of 3, and `runScan` past 25 s with
+ * a 3 s deadline. Now the first error from ANY stream, the abort signal, or
+ * the pipeline's own end settles the promise once, and every stream is
+ * destroyed on the way out. `pipeline` is kept for its backpressure.
+ */
 function readBody(
   response: IncomingMessage,
   decoders: Transform[],
   maxBytes: number,
   signal: AbortSignal,
-): Promise<
-  | { ok: true; body: Buffer }
-  | { ok: false; reason: FetchFailureReason; bytesRead: number }
-> {
+): Promise<BodyResult> {
   return new Promise((resolve) => {
     let decodedBytes = 0;
+    let isSettled = false;
     const chunks: Buffer[] = [];
     const sink = new Writable({
       write(chunk: Buffer, _encoding, callback) {
@@ -391,19 +424,38 @@ function readBody(
       }),
       sink,
     ];
-    pipeline(streams as unknown as [Readable, Writable], (error) => {
-      if (!error) {
-        resolve({ ok: true, body: Buffer.concat(chunks) });
-        return;
-      }
-      response.destroy();
+
+    const failureFor = (error: unknown): BodyResult => {
       if (error instanceof TooLargeError) {
-        resolve({ ok: false, reason: "too_large", bytesRead: decodedBytes });
-      } else if (signal.aborted) {
-        resolve({ ok: false, reason: "timeout", bytesRead: decodedBytes });
-      } else {
-        resolve({ ok: false, reason: "unreachable", bytesRead: decodedBytes });
+        return { ok: false, reason: "too_large", bytesRead: decodedBytes };
       }
+      if (signal.aborted) {
+        return { ok: false, reason: "timeout", bytesRead: decodedBytes };
+      }
+      return { ok: false, reason: "unreachable", bytesRead: decodedBytes };
+    };
+    const onAbort = () =>
+      settle({ ok: false, reason: "timeout", bytesRead: decodedBytes });
+    const settle = (result: BodyResult) => {
+      if (isSettled) return;
+      isSettled = true;
+      signal.removeEventListener("abort", onAbort);
+      for (const stream of streams) stream.destroy();
+      resolve(result);
+    };
+
+    for (const stream of streams) {
+      stream.once("error", (error) => settle(failureFor(error)));
+    }
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    pipeline(streams as unknown as [Readable, Writable], (error) => {
+      settle(
+        error ? failureFor(error) : { ok: true, body: Buffer.concat(chunks) },
+      );
     });
   });
 }
@@ -502,8 +554,16 @@ export async function safeFetch(
       return fail("unreachable");
     }
     const decoders: Transform[] = [];
-    if (decoder === "deflate") decoders.push(createDeflateDecoder());
-    else if (decoder) decoders.push(decoder);
+    if (decoder === "deflate") {
+      const first = await peekFirstChunk(response);
+      decoders.push(
+        first !== null && !isZlibHeader(first)
+          ? zlib.createInflateRaw()
+          : zlib.createInflate(),
+      );
+    } else if (decoder) {
+      decoders.push(decoder);
+    }
     if (isGzipFile(options.kind, type, url)) decoders.push(zlib.createGunzip());
 
     const body = await readBody(response, decoders, maxBytes, signal);

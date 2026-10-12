@@ -22,6 +22,8 @@ export const SCAN_FAILURE_MESSAGES: Record<ScanFailureReason, string> = {
   redirect_invalid: "That website redirected somewhere we can't scan.",
   unreachable: "We couldn't connect to that website.",
   denylisted: "This website has asked not to be scanned.",
+  target_limited:
+    "That website has been scanned a lot in the last hour. Try again later.",
   robots_disallowed:
     "This website's robots.txt asks automated tools not to read it, so we didn't scan it.",
 };

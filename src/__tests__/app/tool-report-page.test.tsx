@@ -121,6 +121,8 @@ describe("the report page", () => {
     expect(
       screen.getByText("1 possible typo on 1 page of 1"),
     ).toBeInTheDocument();
+    // s96 review (minor 4): the row ceiling can remove a report sooner.
+    expect(screen.getByText(/kept for up to 30 days/)).toBeInTheDocument();
     expect(document.querySelector("mark")?.textContent).toContain("recieve");
     expect(
       screen.getByRole("link", { name: /fix it on your live page/i }),

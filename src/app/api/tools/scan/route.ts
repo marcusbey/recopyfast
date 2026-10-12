@@ -15,7 +15,8 @@
  *   6. The 24 h cache (one indexed read). A hit answers at once and spends no
  *      daily allowance.
  *   7. On a miss only: 5/day per /64 or IPv4, 20/day per IPv6 /48, 500/day for
- *      everyone together (env override), 20/hour per scanned host. A limiter
+ *      everyone together (env override), 20/hour per scanned site — its
+ *      registrable domain, charged again for the final site after redirects. A limiter
  *      counts when checked, so a call refused by a later one has spent the
  *      earlier ones — strict on purpose, and a call refused by the per-site
  *      limit still counts against the caller's day (architect decision 10).
@@ -57,6 +58,7 @@ import {
   SCAN_MESSAGES,
 } from "@/lib/tools/scan/messages";
 import { normalizeScanUrl } from "@/lib/tools/scan/normalize-url";
+import { registrableDomain } from "@/lib/tools/scan/registrable-domain";
 import { runScan } from "@/lib/tools/scan/run-scan";
 import { refuseCrossSiteScan } from "@/lib/tools/scan/same-origin-guard";
 
@@ -223,17 +225,40 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return global;
   }
 
-  const target = await enforceRateLimit(request, {
-    limit: "TOOLS_SCAN_TARGET_HOURLY",
-    endpoint: "tools/scan:target",
-    identifier: url.hostname,
-    identifierType: "host",
-    onStoreFailure: "deny",
-    message: SCAN_MESSAGES.target,
-  });
+  // Keyed on the registrable domain (s96 review, minor 3): keyed on the host
+  // name, a victim's subdomains were each a fresh bucket.
+  const chargeTarget = (domain: string) =>
+    enforceRateLimit(request, {
+      limit: "TOOLS_SCAN_TARGET_HOURLY",
+      endpoint: "tools/scan:target",
+      identifier: domain,
+      identifierType: "host",
+      onStoreFailure: "deny",
+      message: SCAN_MESSAGES.target,
+    });
+  const target = await chargeTarget(registrableDomain(url.hostname));
   if (target) return target;
 
-  const result = await runScan({ tool, lens, url, now, denylist });
+  // ...and charged again for the FINAL site when a redirect changed it, so a
+  // host that redirects to a victim cannot spend the victim's scans from its
+  // own bucket. Its refusal (429, or 503 when the store is down) is returned
+  // as is.
+  let finalHostRefusal: NextResponse | null = null;
+  const result = await runScan({
+    tool,
+    lens,
+    url,
+    now,
+    denylist,
+    authorizeFinalHost: async (domain) => {
+      finalHostRefusal = await chargeTarget(domain);
+      return finalHostRefusal === null;
+    },
+  });
+  if (!result.ok && result.reason === "target_limited" && finalHostRefusal) {
+    log("target_limited", { tool, host: url.hostname, startedAt });
+    return finalHostRefusal;
+  }
   if (!result.ok) {
     log(result.reason, { tool, host: url.hostname, startedAt });
     return json(

@@ -332,11 +332,19 @@ export class RedisRateLimiter {
      * The third of the traffic this removes matters on a metered store: the
      * auth endpoints fail closed, so exhausting a command quota takes down
      * editor login exactly the way a dead instance does.
+     *
+     * The expiry is ABSOLUTE: PEXPIREAT at `windowEnd` (s96 review, minor 4).
+     * It was `EXPIRE key <windowMs>`, re-sent with every increment, which
+     * pushed the expiry forward each time — a key last touched near its
+     * window's end outlived the window by almost a whole window. For the free
+     * tools' daily buckets that kept a client address ~48 h while /privacy
+     * says 24. The count is unchanged (the key was always window-scoped), and
+     * PEXPIREAT is Redis 2.6, so every store this runs on speaks it.
      */
     const pipeline = this.client!.multi();
 
     pipeline.incr(key);
-    pipeline.expire(key, Math.ceil(config.windowMs / 1000));
+    pipeline.pExpireAt(key, windowEnd);
 
     let results: unknown[] | null;
     try {
