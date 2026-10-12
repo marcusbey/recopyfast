@@ -134,11 +134,12 @@ inseparable lock-order outcome.
 - **Broad regression:** 484 Jest suites passed (6,948 tests; 38 skipped). Lint (zero errors, 34
   inherited warnings), full and production type-checks, source/changed-file format checks and
   `npm audit --omit=dev --audit-level=high` passed.
-- **Build gap:** the default Turbopack build could not follow this worktree's disk-saving
-  `node_modules` symlink outside its project root. The webpack build compiled successfully, then
-  Next's generated route types rejected three pre-existing named page exports
-  (`buildComparisonStaticParams`, `CompareIndexContent`, `ToolsHubContent`) outside this story. No
-  dependency, project config or unrelated page was changed to conceal that baseline failure.
+- **Production build:** the unchanged default `npm run build` passed at `4aca6fe` after replacing
+  the external dependency symlink with an isolated APFS copy-on-write clone of the exact installed
+  dependency tree and removing this run's generated `.next` directory. The earlier symlink refusal
+  and webpack-generated route-type errors were local setup failures, not established product
+  defects. No dependency, project configuration or unrelated page source changed. The root-owned
+  run used only CI placeholder configuration (`/tmp/recopyfast-s65b-build.log`).
 
 The regression proves removal of this revision-trigger/site-delete cycle. It does not claim global
 freedom from every possible database deadlock.

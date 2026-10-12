@@ -23,11 +23,11 @@ DROP TRIGGER IF EXISTS rotate_public_content_revision_delete
 DROP TRIGGER IF EXISTS rotate_public_content_revision_truncate
   ON public.content_elements;
 
--- Revoke before dropping even though these functions are about to disappear.
--- This keeps the migration safe if a failure stops it between statements: no
--- retired coordination helper is left callable by a role that once had it.
--- Resolve each fixed signature first so retrying after an uncertain connection
--- result also converges when some or all functions were already removed.
+-- Revoke explicitly before dropping to document and normalize each retired
+-- helper's ACL before removal. The enclosing DO statement is atomic: a failure
+-- rolls back both the REVOKE and DROP rather than preserving a half-step.
+-- Resolve each fixed signature with to_regprocedure so pre-existing partial
+-- removal and retries converge when some or all functions are already absent.
 DO $$
 DECLARE
   v_signature TEXT;
