@@ -91,7 +91,7 @@
     "tailwind-merge": "^3.3.1",
     "three": "^0.182.0",
     "tldts": "^6.1.86",
-    "uuid": "^11.1.0",
+    "uuid": "^14.0.0",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",
     "wordlist-english": "1.2.1"
