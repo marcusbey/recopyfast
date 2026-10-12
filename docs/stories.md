@@ -4371,8 +4371,9 @@ Acceptance criteria:
 - [x] `/privacy` states, factually, where GA runs, what is sent, the consent rule, the cookies
   (`_ga`, `_ga_<ID>`, `rcf_analytics_consent`), 14-month retention and three ways to opt out.
   Test: `privacy-analytics.test.tsx`; the s54 tripwires unchanged.
-- [ ] The comparison Lighthouse gate (ADR 061) stays green with GA in the build; CI e2e strict
-  count 94 → 99. (Local results in `docs/reviews/s107-google-analytics.md`; open until CI runs.)
+- [x] The comparison Lighthouse gate (ADR 061) stays green with GA in the build (PR #94, run
+  38220513115: perf 98–99, LCP 1,630–1,656 ms, CLS ≤ 0.015, TBT 92–103 ms; `main` 172–185 ms TBT);
+  CI e2e strict count 94 → 99, all passing.
 
 Complexity: 3. Dependencies: none (s98 merged). s96 rebases on this branch (hook and rebase note
 in the analytics doc). Branch `feature/s107-google-analytics`.

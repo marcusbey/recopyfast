@@ -101,7 +101,7 @@ on this branch.
 - [x] T7 Privacy page, legal tests.
 - [x] T8 Playwright `e2e/google-analytics.spec.ts` (googletagmanager stubbed), `csp.spec.ts`
   updated; CI e2e and Lighthouse jobs build with a fake id; strict count recomputed.
-- [ ] T9 Lighthouse before/after on the 8 comparison routes. Before: main's CI run 38194772674. After: this PR's Comparison Lighthouse run (local runs were meaningless at a load average of 100–400 from other agents).
+- [x] T9 Lighthouse before/after on the 8 comparison routes. Before: main's CI run 38194772674 (TBT 172–185 ms). First PR run 38217319595 failed TBT (187–210 ms); after the fix, run 38220513115 passes (TBT 92–103 ms). Local runs were meaningless at a load average of 100–400 from other agents.
 - [x] T10 Docs: `docs/operations/analytics.md`, ADR 063, launch kit §10/§12, stories entry,
   review self-check.
 

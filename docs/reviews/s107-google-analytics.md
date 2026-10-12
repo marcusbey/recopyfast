@@ -100,7 +100,7 @@ reviewer, not the gate.
 |---|---|---|---|---|---|
 | Before — `main` 9541589, run 38194772674 | 96–97 | 1,673–1,691 | ≤ 0.0150 | 172–185 | pass |
 | First PR run (8bb0173), run 38217319595 | 95–96 | 1,684–1,706 | ≤ 0.0150 | 187–210 | **fail** (TBT on 4 routes) |
-| After the fix | see the PR's latest Comparison Lighthouse run | | | | |
+| After the fix (fb3983d), run 38220513115 | 98–99 | 1,630–1,656 | ≤ 0.0150 | 92–103 | pass |
 
 Diagnosis from the failing run's reports (`/compare/tinacms`): a new 63 ms long task at ~4.3 s,
 when the runtime chunk arrived and React rendered it in one go; the gtag runtime (`gtag.ts` with
@@ -109,9 +109,13 @@ when the runtime chunk arrived and React rendered it in one go; the gtag runtime
 Fix: the footer's event moved to the import-free `cookie-settings.ts` (the gtag runtime is now only
 in the runtime chunk and the `/tools` and `/try` page chunks); the runtime is fetched by a plain
 `import()` and mounted, and its init-ready update applied, in `startTransition`. `next/script` is
-kept, as briefed. If the gate still fails on TBT, the next lever is replacing `next/script` with
-two `document.createElement('script')` calls inside the runtime chunk (same external, first-party
-init + gtag.js order, still no inline script), which moves those ~6 KB off the critical path.
+kept, as briefed. In the passing run the post-hydration long task is gone (`/compare/tinacms`:
+long tasks only the page's own and the main chunk's hydration). The drop below `main`'s TBT is
+partly runner-to-runner variance (the main chunk's hydration task measured 152 ms there against
+233 ms on both earlier runs); the claim is the gate, green with margin, not an improvement. The
+gate takes the consent-required path (no country header): init script and banner, no gtag.js.
+gtag.js itself (≈150 KB gzipped, loaded `afterInteractive` for visitors outside the EEA/UK/CH)
+is not measured by the gate, which never contacts Google.
 
 ## Bot review findings
 
