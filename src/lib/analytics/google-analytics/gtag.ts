@@ -232,6 +232,8 @@ export function applyConsentChoice(
   document.cookie = serializeConsentCookie(choice, {
     isSecure: window.location.protocol === "https:",
   });
+  document.cookie =
+    "rcf_analytics_consent_at=; Max-Age=0; Path=/; SameSite=Lax";
   gtag()?.("consent", "update", { analytics_storage: choice });
   if (choice === "denied") {
     setAnalyticsActive(measurementId, false);

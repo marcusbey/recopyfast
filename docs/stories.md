@@ -4945,3 +4945,28 @@ Human validated 2026-10-12. The complete acceptance criteria, tasks and constrai
 - [x] Independent review passes and normal repository checks pass before a draft PR.
 
 Branch: `feature/s65b-site-delete-revision-lock-order`. Embed allocation: 0 bytes.
+
+## Story s110-analytics-consent-context — consented acquisition context reaches conversion boundaries safely
+
+Owner request 2026-10-12: finish analytics for visitors, completed signups and paying customers.
+This bounded follow-up preserves s107's public-only Google scripts and private-page CSP.
+Research/plan: `docs/research/s110-analytics-consent-context.md` and
+`docs/plans/s110-analytics-consent-context.md` (human validated2026-10-12).
+
+As the operator, I need a visitor's permitted GA attribution to reach an authenticated conversion
+without sending account details to Google or continuing after that visitor declines analytics.
+
+Acceptance criteria:
+- [ ] Capture documented GA client IDs only after the marketing runtime is active;
+  absent/denied/expired context remains unattributed, with no fabricated visitor identity.
+  Session IDs are omitted in s110 because the true session boundaries cannot be proved,
+  as required by the validated plan; a client ID never invents session attribution.
+- [ ] Persist only bounded consent/context with same-origin protection, fail-closed rate limiting,
+  service-only/RLS storage, opaque secure cookie and a short expiry; bind only after verified auth.
+- [ ] Decline revokes server context and prevents later claims (already claimed requests may still send); signout cannot attribute the next
+  account to the prior person. No Google scripts or CSP hosts on auth/dashboard/report documents.
+- [ ] Privacy copy and tests reflect actual storage, expiry, revocation and collection boundaries.
+- [ ] Independent review and required local/hosted/database/browser gates pass.
+
+Complexity: 3. Dependencies: s107. Branch `feature/s110-analytics-consent-context`.
+No new dependency. Forward-only migration required. Embed allocation: 0 bytes.

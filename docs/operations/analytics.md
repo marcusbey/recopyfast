@@ -175,3 +175,82 @@ streams → RecopyFast web → Measurement Protocol API secrets) stored as a ser
   network panel shows `/analytics/gtag-init.js` and, unless consent is pending, `gtag/js?id=G-DQ…`.
 - The Developer Traffic filter is in **Testing**: tagged, still counted. Activate it once the
   owner's own visits are tagged.
+
+## Consented attribution context (s110, ADR070)
+
+A public eligible interaction may capture a validated documented `gtag get`
+client ID into `analytics_contexts`. No session ID is stored or sent: the get
+callback alone does not establish both boundaries of the true session. No private
+page loads Google. Auth and checkout only bind existing captures after verified
+`getUser`; analytics failure never changes their business outcome.
+
+Each capture is a new record, with server capture/consent time and a maximum
+30-day expiry, capped by the recorded explicit-choice expiry. Legacy `granted`
+cookies without a valid signed server receipt remain usable for visitor analytics but cannot
+create conversion attribution until a fresh choice. A settled regional default
+uses the same existing trusted edge rule. A stored denial always wins.
+
+The host-only `__Host-rcf_analytics_context` cookie is Secure, HttpOnly and
+SameSite=Lax. Only its SHA256 hash is stored. Existing capabilities may refresh
+only while a live row exists; an erased/stale capability cannot resurrect an old
+capture. A successful eligible refresh renews the same capability cookie to the
+new capture's retention ceiling, never beyond consent expiry. A verified account
+binding cannot switch users. Sign-out revokes this
+browser capability before auth sign-out; denial also revokes the verified
+account's other contexts. Failed browser revocation stores only a pending-action
+record with separately versioned revoke/signout slots, blocks capture/binding,
+and retries on subsequent first-party interaction. Only the exact sent generation
+is acknowledged. A settled denial with no pending work sends no repeated requests.
+A failed remote request cannot promise immediate global withdrawal.
+
+Revoke erases the hash/client ID synchronously. Expiry prevents selection
+immediately. `/api/cron/analytics-context-cleanup`, authenticated by the existing
+CRON_SECRET check, sweeps at most1000 records every five minutes independently of
+any dispatcher. It reports aggregate counts and logs an error for rows overdue by
+more than ten minutes. Monitor the cron's non-2xx responses and this overdue signal;
+an outage may delay physical deletion but never extends eligibility. The
+`ANALYTICS_CONTEXT_DISABLED=1` switch stops capture/binding but preserves revoke
+and cleanup. Deploy the migration before enabling application paths.
+
+Integration contract for s111/s112: service-only `eligible_analytics_context`
+selects the latest captured-before-occurrence record, stable UUID tie-break.
+Pass a signup capability hash only on verified confirmation through that same
+browser; normal payment selection also requires binding before occurrence.
+Freeze the selected context ID in the source disposition. Future FKs use
+`ON DELETE SET NULL`, never cascade, so cleanup cannot destroy dedupe records.
+Claim must acquire `pg_advisory_xact_lock(710110)` and recheck the frozen context's
+expiry/revocation. Revoke-before-claim suppresses; already claimed work is in
+flight. Release the transaction before Google HTTP. No outbox or fake future
+table is introduced by s110. Internal source/account metadata remains sensitive
+and follows its source retention/account deletion, not this identifier lifetime.
+
+### Explicit-consent issuance integrity
+
+The explicit Allow handler posts the guarded `grant` action; page load, capture,
+binding and legacy readable cookies never mint a receipt. The server issues
+`__Host-rcf_analytics_consent` as Secure/HttpOnly/SameSite=Lax with a purpose/version-bound
+HMAC over server issuance and expiry only. Its maximum lifetime is180 days; it
+contains no GA/account identifier. This establishes server-recorded issuance and
+expiry integrity, not cryptographic proof that a human clicked. Both a readable
+`granted` choice and a valid receipt are required for explicit context, including
+outside consent-required geography. Denial/pending work always overrides it.
+
+`ANALYTICS_CONSENT_SIGNING_KEY` must be a dedicated server-only32-byte random key
+encoded as exactly64 hexadecimal characters. Provision it separately; never reuse
+the service-role key or use the public CI fixture. Missing/malformed keys fail
+explicit attribution closed without blocking authentication or payment. Key rotation
+invalidates existing receipts until a fresh Allow choice. Regional default consent
+is unchanged. No additional database table is introduced.
+
+The readable choice is synchronized to the receipt's fixed expiry only if the
+original Allow interaction is still current. Grant, capture and withdrawal responses
+are serialized; a delayed grant cannot overwrite a newer Decline. Capture/bind never
+renew receipts. Withdrawal clears the receipt even when an account-wide retry must
+remain pending. Sign-out clears the identifier capability, not this identifier-free
+choice receipt: a fresh eligible public interaction may create a new context without
+requiring another Allow. A delayed pre-signout callback remains invalidated.
+
+Root authentication imports only lightweight first-party lifecycle controls; it
+must not import gtag, page-location or the geography catalog. The deferred public
+runtime owns GA capture. Keep the module-boundary regression and the unchanged
+40-sample comparison Lighthouse gate when changing these dependencies.

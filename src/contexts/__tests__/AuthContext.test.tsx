@@ -1,3 +1,5 @@
+import { captureAnalyticsContext } from "@/lib/analytics/google-analytics/context";
+import { setAnalyticsActive } from "@/lib/analytics/google-analytics/gtag";
 import React from "react";
 import {
   render,
@@ -21,6 +23,17 @@ const mockAuth = {
 jest.mock("@/lib/supabase/client", () => ({
   createClient: () => ({ auth: mockAuth }),
 }));
+
+beforeEach(() => {
+  // Each browser fixture starts independently; a previous sign-out deliberately
+  // leaves a pending withdrawal marker when its mocked network is unavailable.
+  for (const name of [
+    "rcf_analytics_pending",
+    "rcf_analytics_consent",
+    "rcf_analytics_consent_at",
+  ])
+    document.cookie = `${name}=; Max-Age=0; Path=/`;
+});
 
 const ORIGIN = window.location.origin;
 
@@ -245,6 +258,28 @@ describe("AuthContext — sign-out", () => {
     renderProbe();
     return (event, session) => emit(event, session);
   }
+
+  it("a cross-tab SIGNED_OUT cancels a pending analytics get without auth or network work in the notification", async () => {
+    const emit = renderListening();
+    await waitFor(() =>
+      expect(screen.getByTestId("state")).toHaveTextContent("anonymous"),
+    );
+    document.cookie = "rcf_analytics_consent=granted; Path=/";
+    setAnalyticsActive("G-TEST", true);
+    let callback: ((value: unknown) => void) | undefined;
+    (window as unknown as { gtag: jest.Mock }).gtag = jest.fn(
+      (_cmd, _id, _field, cb) => {
+        callback = cb;
+      },
+    );
+    const capture = captureAnalyticsContext("G-TEST");
+    act(() => emit("SIGNED_OUT", null));
+    callback?.("1.2");
+    await capture;
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mockAuth.signOut).not.toHaveBeenCalled();
+    setAnalyticsActive("G-TEST", false);
+  });
 
   it("forgets every cached change history when the user signs out", async () => {
     const emit = renderListening();
