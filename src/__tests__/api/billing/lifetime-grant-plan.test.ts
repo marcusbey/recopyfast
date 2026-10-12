@@ -27,6 +27,10 @@ const mockSubscriptionUpdate = jest.fn();
 const mockRefundCreate = jest.fn();
 const mockRefundList = jest.fn();
 const mockCheckoutSessionList = jest.fn();
+// s82 finding 6: a new grant lists the customer's ended subscriptions bought
+// since the lifetime was paid. None here.
+const mockSubscriptionList = jest.fn();
+const mockPaymentIntentRetrieve = jest.fn();
 const mockCompleteFoundingAgencyPurchase = jest.fn();
 const mockBindFoundingAgencyDuplicateRefundSession = jest.fn();
 const mockMarkFoundingAgencyDuplicateRefunded = jest.fn();
@@ -35,9 +39,13 @@ const mockReleaseFoundingAgencyCheckout = jest.fn();
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
-    subscriptions: { update: mockSubscriptionUpdate },
+    subscriptions: {
+      update: mockSubscriptionUpdate,
+      list: mockSubscriptionList,
+    },
     refunds: { create: mockRefundCreate, list: mockRefundList },
     checkout: { sessions: { list: mockCheckoutSessionList } },
+    paymentIntents: { retrieve: mockPaymentIntentRetrieve },
   })),
 );
 
@@ -121,6 +129,28 @@ function createFakeClient() {
       },
       is: (column: string, value: unknown) => {
         predicates.push((row) => (row[column] ?? null) === value);
+        return builder;
+      },
+      // s82 finding 6 / review minor 3: a new grant reads the account's
+      // lifetime cover through the shared grant reader, which filters with
+      // `neq` and an `or` of `expires_at` arms.
+      neq: (column: string, value: unknown) => {
+        predicates.push((row) => row[column] !== value);
+        return builder;
+      },
+      or: (expression: string) => {
+        const arms = expression.split(",").map((arm) => {
+          const [column, operator, ...rest] = arm.split(".");
+          const value = rest.join(".");
+          if (operator === "is" && value === "null") {
+            return (row: Row) => (row[column] ?? null) === null;
+          }
+          if (operator === "gt") {
+            return (row: Row) => String(row[column] ?? "") > value;
+          }
+          throw new Error(`Unsupported or() arm in test stub: ${arm}`);
+        });
+        predicates.push((row) => arms.some((arm) => arm(row)));
         return builder;
       },
       returns: () => builder,
@@ -273,6 +303,11 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
     });
     mockReleaseFoundingAgencyCheckout.mockResolvedValue(true);
     mockRefundList.mockResolvedValue({ data: [] });
+    mockSubscriptionList.mockResolvedValue({ data: [], has_more: false });
+    mockPaymentIntentRetrieve.mockImplementation(async (id: string) => ({
+      id,
+      created: 1785484800,
+    }));
     mockCheckoutSessionList.mockResolvedValue({
       data: [
         {

@@ -119,3 +119,21 @@ allow_ad_personalization_signals: false })`, then one `page_view` per allowliste
 
 Server-side `sign_up` (Measurement Protocol) — documented follow-up. Internal-traffic rule (the
 owner's IP is not known to be stable). Any change to the nonce policy.
+
+## Approved release integration — 2026-10-12
+
+The owner asked to finish the analytics release and had already authorized merging PR #94.
+Integrated released `origin/main` `2b3f864abcff2f24398a42cabf33cc9aa5dd057a` into approved
+analytics head `c0243682b0f15aa794d7dc14186baf31e01bf099`. The only conflict was the independent
+s107 and s82 additions in `docs/stories.md`; both entries are retained verbatim. No runtime
+behavior, dependency or migration was changed by conflict resolution.
+
+- Every non-stories path changed by the two released stories matches `origin/main` byte for byte
+  (69 paths checked).
+- Every non-stories analytics path matches the approved analytics head byte for byte
+  (73 paths checked before this evidence appendix).
+- Node 24.14.0 focused validation passed 23 suites and 586 tests, including analytics routing,
+  consent, sanitized events, runtime, footer, tool scan, calculator, try flow, CSP, privacy and
+  CI contract checks. `git diff --cached --check` passed.
+- Fresh integration review, normal hooks and hosted exact-head checks remain release gates.
+  This evidence does not claim Google event receipt or production deployment.

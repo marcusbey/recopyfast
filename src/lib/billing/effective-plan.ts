@@ -242,30 +242,147 @@ export function hasAnyEntitlement(entitlement: Entitlement): boolean {
  * 409 that reads as intentional, and have the offer card hidden from them.
  * That is the defect the comment above documents having already shipped once,
  * arriving through a second door. A trial is not a purchase.
+ *
+ * Expired grants are excluded too, by the same predicate `readEffectivePlanBasis`
+ * uses (s82 review, finding 2). Purchases and comps write `expires_at` NULL,
+ * but a non-trial grant CAN carry a date — production holds one
+ * (`qa_recovery_20260919`). Without the filter this reader kept answering
+ * "held" after the resolver had stopped honouring the grant, so the lifetime
+ * guards refused checkout, plan changes and reactivation for a plan the
+ * account no longer had. One rule for both reads: held while not revoked and
+ * not yet expired.
  */
 export async function readGrantedPlanIds(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<string[]> {
-  const { data, error } = await supabase
-    .from("plan_entitlements")
-    .select("plan_id")
-    .eq("user_id", userId)
-    .is("revoked_at", null)
-    .neq("source", TRIAL_SOURCE)
-    .returns<Array<{ plan_id: string }>>();
+  return (await readGrantedPlans(supabase, userId)).map(
+    (granted) => granted.planId,
+  );
+}
+
+/** A plan held through live non-trial grants, and until when. */
+export interface GrantedPlan {
+  readonly planId: string;
+  /**
+   * Null when some live grant of the plan has no end date: held for life.
+   * Otherwise the latest `expires_at` among its grants — a dated grant, such
+   * as the QA recovery grant (`qa_recovery_20260919`), is held until then and
+   * is not a lifetime one.
+   */
+  readonly expiresAt: string | null;
+}
+
+/**
+ * The read behind `readGrantedPlanIds` — same rows, same filters (see above) —
+ * with when each plan's holding ends, one entry per plan in first-seen order.
+ *
+ * s82 review (second pass), m3: the plan dialog said "Included for life" for a
+ * plan held only through a dated grant. The billing page reads this instead of
+ * the bare ids, so it can tell the two apart without a second query.
+ */
+export async function readGrantedPlans(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<GrantedPlan[]> {
+  const { data, error } = await selectHeldGrants<{
+    plan_id: string;
+    expires_at: string | null;
+  }>(supabase, userId, "plan_id, expires_at");
 
   if (error) {
     throw new Error(`Failed to read plan entitlements: ${error.message}`);
   }
 
-  return Array.from(
-    new Set(
-      (data ?? [])
-        .map((row) => row.plan_id)
-        .filter((planId) => !isRetired(planId)),
-    ),
+  const heldUntil = new Map<string, string | null>();
+  for (const row of data ?? []) {
+    if (isRetired(row.plan_id)) continue;
+    const expiresAt = row.expires_at ?? null;
+    heldUntil.set(
+      row.plan_id,
+      heldUntil.has(row.plan_id)
+        ? laterGrantEnd(heldUntil.get(row.plan_id) ?? null, expiresAt)
+        : expiresAt,
+    );
+  }
+  return Array.from(heldUntil, ([planId, expiresAt]) => ({
+    planId,
+    expiresAt,
+  }));
+}
+
+/**
+ * The grants `readGrantedPlanIds` holds — not revoked, not a trial, not
+ * expired — one query for every reader of "held", whatever columns it needs.
+ */
+function selectHeldGrants<Row>(
+  supabase: SupabaseClient,
+  userId: string,
+  columns: string,
+) {
+  return supabase
+    .from("plan_entitlements")
+    .select(columns)
+    .eq("user_id", userId)
+    .is("revoked_at", null)
+    .neq("source", TRIAL_SOURCE)
+    .or(spendableFilter())
+    .returns<Row[]>();
+}
+
+/** A held grant with no end date, and what paid for it. */
+export interface LifetimeGrant {
+  readonly planId: string;
+  /** The purchase's payment intent; null for a grant nobody paid for (a comp). */
+  readonly paymentIntentId: string | null;
+  /** When the grant was written. */
+  readonly grantedAt: string | null;
+}
+
+/**
+ * The account's held grants with no end date — one entry per grant, with its
+ * payment — read by the same query as `readGrantedPlans`.
+ *
+ * s82 review (m-1): the Stripe webhook refuses a subscription a lifetime grant
+ * covers only when it was bought after that lifetime was paid for, in both
+ * event orderings, so it needs the grant's payment and not only its plan.
+ * Dated grants are left out: a dated grant ends, and the subscription is what
+ * keeps the plan after it (plan decision 17).
+ */
+export async function readLifetimeGrants(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<LifetimeGrant[]> {
+  const { data, error } = await selectHeldGrants<{
+    plan_id: string;
+    expires_at: string | null;
+    stripe_payment_intent_id: string | null;
+    granted_at: string | null;
+  }>(
+    supabase,
+    userId,
+    "plan_id, expires_at, stripe_payment_intent_id, granted_at",
   );
+
+  if (error) {
+    throw new Error(`Failed to read plan entitlements: ${error.message}`);
+  }
+
+  return (data ?? [])
+    .filter(
+      (row) => !isRetired(row.plan_id) && (row.expires_at ?? null) === null,
+    )
+    .map((row) => ({
+      planId: row.plan_id,
+      paymentIntentId: row.stripe_payment_intent_id ?? null,
+      grantedAt: row.granted_at ?? null,
+    }));
+}
+
+/** The later of two grant ends; no end (null) outlasts every date. */
+function laterGrantEnd(a: string | null, b: string | null): string | null {
+  if (a === null || b === null) return null;
+  return Date.parse(b) > Date.parse(a) ? b : a;
 }
 
 export async function readEffectivePlanId(
@@ -383,9 +500,41 @@ function otherHeldPlans(
     }));
 }
 
+/** The plan the newest live subscription bills, or null when none is live. */
+async function readLiveSubscription(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<{ plan: string } | null> {
+  const { data: subscription, error: subscriptionError } = await supabase
+    .from("billing_subscriptions")
+    .select("plan")
+    .eq("user_id", userId)
+    .in("status", LIVE_SUBSCRIPTION_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ plan: string }>();
+
+  if (subscriptionError) {
+    throw new Error(
+      `Failed to read billing subscriptions: ${subscriptionError.message}`,
+    );
+  }
+  return subscription;
+}
+
+interface ReadBasisOptions {
+  /**
+   * Resolve as if no subscription were live (s82). Only
+   * `resolveMonthlyCreditsWithoutSubscription` sets it; every entitlement
+   * decision reads the subscription.
+   */
+  readonly ignoreSubscription?: boolean;
+}
+
 async function readEffectivePlanBasis(
   supabase: SupabaseClient,
   userId: string,
+  options: ReadBasisOptions = {},
 ): Promise<EffectivePlanBasis | null> {
   const { data: entitlements, error: entitlementError } = await supabase
     .from("plan_entitlements")
@@ -445,20 +594,9 @@ async function readEffectivePlanBasis(
     return fullPlan(HIGHEST_PAID_PLAN_ID);
   }
 
-  const { data: subscription, error: subscriptionError } = await supabase
-    .from("billing_subscriptions")
-    .select("plan")
-    .eq("user_id", userId)
-    .in("status", LIVE_SUBSCRIPTION_STATUSES)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ plan: string }>();
-
-  if (subscriptionError) {
-    throw new Error(
-      `Failed to read billing subscriptions: ${subscriptionError.message}`,
-    );
-  }
+  const subscription = options.ignoreSubscription
+    ? null
+    : await readLiveSubscription(supabase, userId);
 
   if (
     isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
@@ -596,6 +734,37 @@ async function withHeldAllowance(
     { ...plan, limits: { ...plan.limits, monthlyCredits } },
     basis.otherHeldPlans,
   );
+}
+
+/**
+ * The monthly AI-credit allowance this account keeps once its live
+ * subscription is gone, or null when it would hold no plan at all.
+ *
+ * s82 (s71 review N-1): a Founding Agency owner still running out an Agency
+ * subscription holds the full 1,000 credits while it runs and 250 after it
+ * ends (ADR 038), and the billing card said nothing about the drop. Only the
+ * server can answer: whether the grant was bought (250) or comped (1,000) is a
+ * payment-intent question the page never sees. It is `resolveEntitlement`'s
+ * own computation with the subscription read skipped, so Agency precedence,
+ * purchase-only overrides, offers and the allowance floor answer exactly as
+ * they do for the plan in force.
+ *
+ * Presentation only — never authorisation; nothing may gate on it.
+ */
+export async function resolveMonthlyCreditsWithoutSubscription(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<number | null> {
+  const basis = await readEffectivePlanBasis(supabase, userId, {
+    ignoreSubscription: true,
+  });
+  if (basis === null) {
+    return null;
+  }
+  const plan = await findHeldPlan(basis);
+  return plan === null
+    ? null
+    : (await withHeldAllowance(plan, basis)).limits.monthlyCredits;
 }
 
 /**

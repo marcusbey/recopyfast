@@ -58,6 +58,13 @@ jest.mock("@/lib/api/rate-limit", () => ({
   getClientIp: jest.fn(() => "127.0.0.1"),
 }));
 
+// s82: a failed refund is reported through the project logger, which forwards
+// errors to Sentry in production — `console.error` alone never reaches it for
+// a handled 502.
+jest.mock("@/lib/monitoring/logger", () => ({
+  logger: { error: jest.fn() },
+}));
+
 import { NextRequest, NextResponse } from "next/server";
 import { POST } from "@/app/api/ai/suggest/route";
 import { aiService } from "@/lib/ai/openai-service";
@@ -68,6 +75,7 @@ import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import { checkOwnerCanEdit } from "@/lib/billing/owner-can-edit";
 import { refundCharge } from "@/lib/credits/system";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { logger } from "@/lib/monitoring/logger";
 
 const mockAiService = aiService as jest.Mocked<typeof aiService>;
 const mockCreateServiceRoleClient = createServiceRoleClient as jest.Mock;
@@ -76,6 +84,7 @@ const mockConsumeFeatureUsage = consumeFeatureUsage as jest.Mock;
 const mockCheckOwnerCanEdit = checkOwnerCanEdit as jest.Mock;
 const mockRefundCharge = refundCharge as jest.Mock;
 const mockEnforceRateLimit = enforceRateLimit as jest.Mock;
+const mockLoggerError = logger.error as jest.Mock;
 
 const SITE_ID = "6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
 const OWNER_ID = "owner-user-1";
@@ -769,6 +778,110 @@ describe("/api/ai/suggest - POST", () => {
       expect(response.status).toBe(500);
       expect(data).toEqual({ error: "Internal server error" });
       expectPublicCors(response);
+    });
+
+    // s82: "You were not charged" was said whatever the refund did —
+    // `refundOwner` discarded `refundCharge`'s answer. It is said only when the
+    // whole charge came back; otherwise the page says what is true and ops
+    // hear about it, with ids and amounts and nothing secret.
+    const REFUND_FAILED =
+      "AI suggestions are unavailable right now. We could not refund the credit for this request automatically, and we have been notified.";
+
+    function expectRefundFailureReported(refunded: number, credits = 1) {
+      expect(mockLoggerError).toHaveBeenCalledTimes(1);
+      const [message, , context, metadata] = mockLoggerError.mock.calls[0];
+      expect(message).toMatch(/refund/i);
+      expect(context).toEqual({ siteId: SITE_ID, userId: OWNER_ID });
+      expect(metadata).toEqual(
+        expect.objectContaining({
+          usageId: RECEIPT.usageId,
+          credits,
+          refunded,
+        }),
+      );
+      // No credential of the caller travels into the report.
+      expect(JSON.stringify(mockLoggerError.mock.calls)).not.toContain(
+        GRANT_EDITOR.token,
+      );
+    }
+
+    it("never says 'not charged' when the refund failed, and reports it", async () => {
+      mockAiService.generateContentSuggestion.mockResolvedValueOnce({
+        success: false,
+        error: "OpenAI API rate limit exceeded",
+      });
+      mockRefundCharge.mockResolvedValueOnce({ success: false, refunded: 0 });
+
+      const response = await POST(postRequest(validBody));
+      const data = await response.json();
+
+      expect(response.status).toBe(502);
+      expect(data).toEqual({ error: REFUND_FAILED });
+      expect(JSON.stringify(data)).not.toMatch(/not charged/i);
+      expectPublicCors(response);
+      expectRefundFailureReported(0);
+    });
+
+    it("never says 'not charged' when the refund threw, and reports it", async () => {
+      mockAiService.generateContentSuggestion.mockResolvedValueOnce({
+        success: false,
+        error: "upstream timeout",
+      });
+      mockRefundCharge.mockRejectedValueOnce(new Error("connection reset"));
+
+      const response = await POST(postRequest(validBody));
+
+      expect(response.status).toBe(502);
+      await expect(response.json()).resolves.toEqual({
+        error: REFUND_FAILED,
+      });
+      expectRefundFailureReported(0);
+    });
+
+    it("never says 'not charged' when only part of the charge came back", async () => {
+      const twoCredits = { ...RECEIPT, credits: 2 };
+      mockConsumeFeatureUsage.mockResolvedValueOnce({
+        success: true,
+        charge: twoCredits,
+      });
+      mockAiService.generateContentSuggestion.mockResolvedValueOnce({
+        success: false,
+        error: "upstream timeout",
+      });
+      mockRefundCharge.mockResolvedValueOnce({ success: true, refunded: 1 });
+
+      const response = await POST(postRequest(validBody));
+
+      await expect(response.json()).resolves.toEqual({
+        error: REFUND_FAILED,
+      });
+      expectRefundFailureReported(1, 2);
+    });
+
+    it("reports a failed refund on the thrown-error path too, with the 500 unchanged", async () => {
+      mockAiService.generateContentSuggestion.mockRejectedValueOnce(
+        new Error("Network failure"),
+      );
+      mockRefundCharge.mockResolvedValueOnce({ success: false, refunded: 0 });
+
+      const response = await POST(postRequest(validBody));
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Internal server error",
+      });
+      expectRefundFailureReported(0);
+    });
+
+    it("reports nothing when the refund succeeded", async () => {
+      mockAiService.generateContentSuggestion.mockResolvedValueOnce({
+        success: false,
+        error: "upstream timeout",
+      });
+
+      await POST(postRequest(validBody));
+
+      expect(mockLoggerError).not.toHaveBeenCalled();
     });
 
     it("refunds nothing when the gate itself throws, before the charge landed", async () => {

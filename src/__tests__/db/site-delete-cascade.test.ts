@@ -36,7 +36,14 @@
  * instead of raising 23503.
  */
 
-import { describeDb } from "./db-harness";
+import { describeDb, type QueryResult } from "./db-harness";
+
+interface PgClient {
+  query<R = Record<string, unknown>>(
+    text: string,
+    values?: unknown[],
+  ): Promise<QueryResult<R>>;
+}
 
 interface TriggerRow {
   trigger_name: string;
@@ -44,7 +51,8 @@ interface TriggerRow {
   event_manipulation: string;
 }
 
-describeDb("deleting a site with content (A-35)", ({ query, createSite }) => {
+describeDb("deleting a site with content (A-35)", (db) => {
+  const { query, withClient, createSite } = db;
   /** A site with one content element, i.e. the case that used to be undeletable. */
   async function seedSiteWithContent(label: string): Promise<{
     siteId: string;
@@ -67,6 +75,39 @@ describeDb("deleting a site with content (A-35)", ({ query, createSite }) => {
       [elementId],
     );
     return Number(rows[0].count);
+  }
+
+  async function waitForLock(
+    backendPid: number,
+    blockerPid: number,
+  ): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const { rows } = await query<{
+        wait_event_type: string | null;
+        blocking_pids: number[];
+      }>(
+        `SELECT wait_event_type, pg_blocking_pids(pid) AS blocking_pids
+           FROM pg_stat_activity
+          WHERE pid = $1`,
+        [backendPid],
+      );
+      if (
+        rows[0]?.wait_event_type === "Lock" &&
+        rows[0].blocking_pids.includes(blockerPid)
+      ) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    throw new Error(
+      `Timed out waiting for PostgreSQL backend ${backendPid} to block behind editor ${blockerPid}`,
+    );
+  }
+
+  async function rollbackIfOpen(client: PgClient): Promise<void> {
+    await client.query("ROLLBACK").catch(() => undefined);
   }
 
   // Guard for everything below: proves the seed reached the database and that the
@@ -136,6 +177,97 @@ describeDb("deleting a site with content (A-35)", ({ query, createSite }) => {
     // audit trail survives, because in this schema it cannot.
     expect(await countHistory(elementId)).toBe(0);
   });
+
+  test("a product-shaped site delete waits for an in-flight draft write and both complete without deadlock", async () => {
+    const { siteId, elementId } = await seedSiteWithContent(
+      "delete-draft-overlap",
+    );
+
+    await withClient(async (editor) => {
+      await withClient(async (deleter) => {
+        let editorOpen = false;
+        let deleterOpen = false;
+        let deleteAttempt:
+          | Promise<
+              | { ok: true; rowCount: number | null }
+              | { ok: false; error: unknown }
+            >
+          | undefined;
+
+        try {
+          await editor.query("BEGIN");
+          editorOpen = true;
+          await deleter.query("BEGIN");
+          deleterOpen = true;
+          await editor.query("SET LOCAL lock_timeout = '5s'");
+          await editor.query("SET LOCAL statement_timeout = '10s'");
+          await editor.query("SET LOCAL deadlock_timeout = '100ms'");
+          await deleter.query("SET LOCAL lock_timeout = '5s'");
+          await deleter.query("SET LOCAL statement_timeout = '10s'");
+          await deleter.query("SET LOCAL deadlock_timeout = '100ms'");
+
+          // save_staging_content_atomic begins with this exact row lock. Hold
+          // it long enough to place the product's one-statement site delete
+          // behind the cascade, then observe that lock wait in PostgreSQL
+          // before allowing the draft update to proceed. The s62 revision
+          // trigger used to make that update ask for the already-held site
+          // row, completing a deterministic child -> parent / parent -> child
+          // cycle and raising 40P01.
+          await editor.query(
+            "SELECT id FROM public.content_elements WHERE id = $1 FOR UPDATE",
+            [elementId],
+          );
+          const { rows: editorBackendRows } = await editor.query<{
+            pid: number;
+          }>("SELECT pg_backend_pid() AS pid");
+          const { rows: backendRows } = await deleter.query<{ pid: number }>(
+            "SELECT pg_backend_pid() AS pid",
+          );
+
+          deleteAttempt = deleter
+            .query("DELETE FROM public.sites WHERE id = $1", [siteId])
+            .then((result) => ({
+              ok: true as const,
+              rowCount: result.rowCount,
+            }))
+            .catch((error: unknown) => ({ ok: false as const, error }));
+          await waitForLock(backendRows[0].pid, editorBackendRows[0].pid);
+
+          const saved = await editor.query(
+            `SELECT * FROM public.save_staging_content_atomic(
+               $1, 'rcf-a35-headline', 'en', 'default', 'Concurrent draft',
+               '{}'::jsonb, NULL, 's65b@example.invalid'
+             )`,
+            [siteId],
+          );
+          expect(saved.rowCount).toBe(1);
+          await editor.query("COMMIT");
+          editorOpen = false;
+
+          const deleteOutcome = await deleteAttempt;
+          if (!deleteOutcome.ok) throw deleteOutcome.error;
+          expect(deleteOutcome.rowCount).toBe(1);
+          await deleter.query("COMMIT");
+          deleterOpen = false;
+        } catch (error) {
+          // Attach a rejection handler when the DELETE starts, then settle it
+          // before rollback. Otherwise whichever backend PostgreSQL selects
+          // as a deadlock victim can escape as an unhandled rejection and
+          // conceal the actual 40P01 regression.
+          if (editorOpen) await rollbackIfOpen(editor);
+          if (deleteAttempt) await deleteAttempt;
+          if (deleterOpen) await rollbackIfOpen(deleter);
+          throw error;
+        }
+      });
+    });
+
+    const { rows } = await query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM public.sites WHERE id = $1",
+      [siteId],
+    );
+    expect(rows).toEqual([{ count: "0" }]);
+  }, 15_000);
 
   test("log_content_change() runs as its owner on a pinned search_path (A-13)", async () => {
     const { rows } = await query<{
