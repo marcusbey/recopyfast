@@ -22,6 +22,7 @@ const MARKETING_BOUNDARY_FILES = [
   "src/app/tools/website-spell-checker/page.tsx",
   "src/app/tools/[slug]/r/[id]/page.tsx",
   "src/app/tools/[slug]/r/[id]/not-found.tsx",
+  "src/app/tools/website-maintenance-cost/page.tsx",
   "src/app/try/page.tsx",
   "src/components/auth/UserMenu.tsx",
   "src/components/compare/ComparisonPage.tsx",
@@ -44,6 +45,10 @@ const ATTRIBUTED_BOUNDARIES = [
   [
     "src/app/compare/page.tsx",
     'href="/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_index"',
+  ],
+  [
+    "src/app/tools/website-maintenance-cost/page.tsx",
+    'href="/signup?utm_source=tools&utm_medium=free_tool&utm_campaign=website-maintenance-cost"',
   ],
   [
     "src/app/try/page.tsx",

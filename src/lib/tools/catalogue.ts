@@ -39,6 +39,15 @@ export const TOOL_CATALOGUE: readonly ToolEntry[] = [
     lens: "typos",
     cta: "fix-on-page",
   },
+  {
+    // s98: computed in the browser; no scan, no report.
+    slug: "website-maintenance-cost",
+    name: "Website maintenance cost calculator",
+    description:
+      "Add up what the free copy changes you make for clients cost you a year, from your own numbers, calculated in your browser.",
+    lens: null,
+    cta: null,
+  },
 ];
 
 /** Own-property lookup: `constructor` or `__proto__` is not a tool. */

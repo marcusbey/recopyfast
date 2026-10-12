@@ -92,6 +92,12 @@ describe("GET /llms.txt", () => {
     expect(linked.filter((url) => /\/tools\/[^/]+\/r\//.test(url))).toEqual([]);
   });
 
+  it("links the free maintenance cost calculator", async () => {
+    expect(await links()).toContain(
+      `${siteUrl}/tools/website-maintenance-cost`,
+    );
+  });
+
   it("lists every comparison page, from the routes' own data", async () => {
     const linked = await links();
 

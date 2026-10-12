@@ -136,6 +136,12 @@ const INDEXABLE: Route[] = [
     ],
   },
   {
+    path: "/tools/website-maintenance-cost",
+    layers: async () => [
+      layerOf(await import("@/app/tools/website-maintenance-cost/page")),
+    ],
+  },
+  {
     path: "/blog",
     layers: async () => [layerOf(await import("@/app/blog/page"))],
   },
