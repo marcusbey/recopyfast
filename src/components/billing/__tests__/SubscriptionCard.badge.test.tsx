@@ -366,3 +366,96 @@ describe("the plan card's price", () => {
     expect(card).not.toHaveTextContent(/\bFree\b/);
   });
 });
+
+/**
+ * s96, folded into s82 (Devin Review on PR #81, finding 3): the plan in force
+ * held only through a dated grant — production holds one, the QA recovery
+ * grant `qa_recovery_20260919` — read "Lifetime" / "Lifetime access" / "you
+ * hold Agency for life". A dated grant ends, so the card says until when, in
+ * the dialog's "Included until <date>" wording, and never calls it lifetime or
+ * says the subscription beside it is no longer needed: it is what keeps the
+ * plan after the grant ends.
+ */
+describe("a plan in force held through a dated grant", () => {
+  // Midday, so the dates read the same in any test timezone.
+  const GRANT_END = "2026-11-19T12:00:00.000Z";
+  const PERIOD_END = "2026-10-10T12:00:00.000Z";
+
+  function renderDated(subscriptionRow?: Subscription) {
+    const { container } = render(
+      <SubscriptionCard
+        subscription={subscriptionRow}
+        plan={AGENCY}
+        isLifetime
+        heldUntil={GRANT_END}
+        subscriptionPlanName="Pro"
+        monthlyCredits={AGENCY.limits.monthlyCredits}
+        onUpdate={jest.fn()}
+      />,
+    );
+    const title = screen.getByRole("heading", {
+      name: "Current subscription",
+    });
+    return {
+      card: container,
+      header: title.parentElement?.parentElement as HTMLElement,
+    };
+  }
+
+  it("says Included until the grant's end, never Lifetime", () => {
+    const { card, header } = renderDated();
+
+    expect(within(header).getByText("Included")).toBeInTheDocument();
+    expect(
+      screen.getByText("Included until November 19, 2026"),
+    ).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(/lifetime/i);
+    expect(card).not.toHaveTextContent(/for life/);
+  });
+
+  it("never says a renewing subscription beside it is no longer needed", () => {
+    const { card } = renderDated(
+      subscription("pro", { current_period_end: PERIOD_END }),
+    );
+
+    expect(
+      screen.getByText(
+        "Your Pro subscription renews October 10, 2026 — Agency is included until November 19, 2026.",
+      ),
+    ).toBeInTheDocument();
+    expect(card).not.toHaveTextContent(/no longer need/);
+  });
+
+  it("confirms a cancel with the grant's end, not for life", () => {
+    renderDated(subscription("pro", { current_period_end: PERIOD_END }));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cancel Subscription" }),
+    );
+
+    expect(
+      screen.getByText(
+        "Cancel your Pro subscription? Agency stays included until November 19, 2026, and you will not be charged again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("still offers no Reactivate for a subscription set to end beside it", () => {
+    // The server refuses to restart a plan a live dated grant covers.
+    renderDated(
+      subscription("pro", {
+        cancel_at_period_end: true,
+        current_period_end: PERIOD_END,
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        "Your Pro subscription ends October 10, 2026 — you won't be charged again.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /reactivate/i }),
+    ).not.toBeInTheDocument();
+  });
+});

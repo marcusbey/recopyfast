@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { useCheckout } from "./useCheckout";
+import { rateLimitRetrySentence } from "./rate-limit-retry";
 import type { PaymentMethod } from "@/types/billing";
 
 interface PaymentMethodsCardProps {
@@ -30,6 +31,30 @@ function formatCardBrand(brand: string): string {
 function formatExpiry(month?: number, year?: number): string | null {
   if (!month || !year) return null;
   return `${String(month).padStart(2, "0")}/${year}`;
+}
+
+/**
+ * What a refused card action says. s82 review, finding 7: the route's limiter
+ * answers `{ error: "Rate limit exceeded", message: <sentence> }`, and the
+ * card printed `error` — so the sentence written for the customer never
+ * showed. A 429 reads like checkout's: that sentence, then when to retry.
+ */
+function failureMessage(
+  response: Response,
+  data: { error?: unknown; message?: unknown } | null,
+  fallbackMessage: string,
+): string {
+  const error =
+    typeof data?.error === "string" && data.error ? data.error : null;
+  if (response.status !== 429) {
+    return error ?? fallbackMessage;
+  }
+  const sentence =
+    typeof data?.message === "string" && data.message
+      ? data.message
+      : (error ?? fallbackMessage);
+  const retry = rateLimitRetrySentence(response);
+  return retry ? `${sentence} ${retry}` : sentence;
 }
 
 export function PaymentMethodsCard({
@@ -65,7 +90,7 @@ export function PaymentMethodsCard({
 
       if (!response.ok) {
         const data = await response.json().catch(() => null);
-        throw new Error(data?.error || fallbackMessage);
+        throw new Error(failureMessage(response, data, fallbackMessage));
       }
 
       setConfirmingRemoval(null);

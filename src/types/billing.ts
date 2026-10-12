@@ -230,6 +230,13 @@ export interface BillingDashboardData {
    * ("Your founding offer has ended") over the 14-day trial's.
    */
   endedOfferId?: FoundingOfferId;
+  /**
+   * s82: the monthly AI-credit allowance this account keeps once its live
+   * subscription ends, when that is lower than the allowance in force — a
+   * Founding Agency owner running out an Agency subscription: 250 after,
+   * against 1,000 now (ADR 038). Absent otherwise. Presentation only.
+   */
+  includedAfterSubscription?: number;
 }
 
 // Subscription management
