@@ -58,12 +58,19 @@ const customJestConfig = {
   // floors; lines keeps the least slack (0.54).
   // src/__tests__/ci/release-gates.test.ts holds the same floor, so lowering
   // one here fails that test too.
+  //
+  // Raised 2026-10-11 (s96) from 61/65/69/68. Measured on the s96 tree with
+  // `npx jest --coverage` (476 suites): branches 68.21, functions 72.19,
+  // lines 75.37, statements 74.66. Set one point below the integer under each
+  // measurement, not at it: the measurement was local, and CI's placeholder
+  // environment gates a few suites differently. The next story can tighten
+  // them to its own CI measurement.
   coverageThreshold: {
     global: {
-      branches: 61,
-      functions: 65,
-      lines: 69,
-      statements: 68,
+      branches: 67,
+      functions: 71,
+      lines: 74,
+      statements: 73,
     },
   },
   // Only *.test.* / *.spec.* are suites. The previous

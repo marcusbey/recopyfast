@@ -62,8 +62,7 @@ export default function WebsiteMaintenanceCostPage() {
   const siteUrl = resolveSiteUrl();
   const pageUrl = `${siteUrl}${TOOL_PATH}`;
 
-  // The middle "Free tools" crumb joins when /tools exists (s96); until then
-  // a crumb pointing at a 404 would be structured data that lies.
+  // The middle "Free tools" crumb joined when s96 shipped /tools.
   const structuredData = [
     buildWebApplicationLd({
       url: pageUrl,
@@ -72,6 +71,7 @@ export default function WebsiteMaintenanceCostPage() {
     }),
     buildBreadcrumbListLd([
       { name: "Home", url: siteUrl },
+      { name: "Free tools", url: `${siteUrl}/tools` },
       { name: TOOL_NAME, url: pageUrl },
     ]),
     buildFAQPageLd(FAQS),
@@ -86,6 +86,13 @@ export default function WebsiteMaintenanceCostPage() {
             <nav aria-label="Breadcrumb" className="text-sm text-slate-600">
               <Link href="/" className="hover:text-slate-900 hover:underline">
                 Home
+              </Link>
+              <span aria-hidden="true"> / </span>
+              <Link
+                href="/tools"
+                className="hover:text-slate-900 hover:underline"
+              >
+                Free tools
               </Link>
               <span aria-hidden="true"> / </span>
               <span aria-current="page">{TOOL_NAME}</span>

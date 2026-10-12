@@ -234,3 +234,20 @@ plan's citations.
   - `src/app/tools/website-maintenance-cost/{page,opengraph-image,twitter-image}.tsx`;
   - `src/__tests__/app/maintenance-cost-page.test.tsx`;
   - `e2e/tools-maintenance-cost.spec.ts`.
+
+## Architect decisions (2026-10-11)
+
+> Binding answers to the open questions of s96–s101, recorded by the architect when the plans
+> were validated. Where they differ from the plan above, they win.
+
+
+1. Report TTL: 30 days.
+2. Global daily cap: 500 scans/day, env override `TOOLS_SCAN_GLOBAL_DAILY_CAP` for launch day.
+3. Site-owner opt-out: the scanner fetches and honours `robots.txt` for its user agent (Disallow for `RecopyFastToolsBot` or `*` on the path → refuse with reason `robots_disallowed`, 422, fixed message). "About our scanner" page explains the robots.txt opt-out. The env denylist stays as the operator override. No email address is published until support@ works.
+4. Turnstile: deferred to a later story (s96b), built only when the global cap is actually hit.
+5. CTA measurement: CTA links carry `utm_source=tools&utm_medium=free_tool&utm_campaign=<slug>`. Capturing UTMs at sign-up is a separate later story.
+6. s97 style-src: say plainly the editor's styles need the site's `style-src` to allow our origin; never recommend `'unsafe-inline'`; link /docs/install.
+7. s97 per-platform steps: yes, name where custom code goes for Wix, Squarespace, Shopify, Framer and Webflow, each with a link to the vendor's own doc (verified at implementation time).
+8. s101 claims-ledger row: the s101 PR adds "Alt Text Checker finds missing, empty or filename-like alt text. It never claims accessibility compliance." to docs/gtm/launch-2026-09-28.md §12.
+9. /privacy and /terms: add only factual wording — what a scan processes (the submitted URL without query, public page text, the caller's IP used only for rate limiting and never stored), that reports are public to anyone with the link and deleted after 30 days, and how to opt out (robots.txt).
+10. A scan refused by the per-site limit still counts against the caller's daily allowance.

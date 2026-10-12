@@ -200,6 +200,30 @@ describe("usesNoncePolicy", () => {
   ])("is false for %s", (pathname) => {
     expect(usesNoncePolicy(pathname)).toBe(false);
   });
+
+  // s96 (ADR 062): a free-tool report renders a stranger's page text, so it
+  // joins the nonce policy — at exactly /tools/<slug>/r/<id>, nothing wider.
+  it.each([
+    "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+    "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c/",
+    "/tools/x/r/y",
+  ])("is true for the report path %s", (pathname) => {
+    expect(usesNoncePolicy(pathname)).toBe(true);
+  });
+
+  it.each([
+    "/tools",
+    "/tools/",
+    "/tools/website-spell-checker",
+    "/tools/x/r",
+    "/tools/x/r/",
+    "/tools/x/r/y/z",
+    "/tools/x/report/y",
+    "/toolsx/x/r/y",
+    "/api/tools/scan",
+  ])("is false for %s, which must stay static", (pathname) => {
+    expect(usesNoncePolicy(pathname)).toBe(false);
+  });
 });
 
 describe("connect-src", () => {
