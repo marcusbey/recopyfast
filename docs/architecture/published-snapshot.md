@@ -156,6 +156,16 @@ row's `original_content` is never overwritten with the published text you render
   (`Cache-Control: public, max-age=0, must-revalidate`). Each response carries a strong `ETag`;
   send it back as `If-None-Match` to get a `304` with no body.
 
+### Reserved database revision
+
+The historical `sites.public_content_revision` column remains private, non-null and UUID-backed for
+schema compatibility, but no runtime reads it and no content trigger rotates it.
+[ADR 064](../decisions/064-public-content-revision-rotation-is-retired.md) retired that mechanism
+after a content-write/site-delete lock-order cycle reproduced `40P01`. Snapshot freshness comes
+from the bounded CDN lifetime and body `ETag` above, not from a database revision. Content writes
+therefore no longer mutate the parent site row or advance `sites.updated_at`; a future cache must
+introduce a separately reviewed lock order before it can reuse the column.
+
 ## Plan
 
 Published copy is served whatever the site owner's plan (ADR 041): a lapsed plan stops editing,
