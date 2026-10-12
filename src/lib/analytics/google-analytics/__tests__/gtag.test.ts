@@ -249,6 +249,66 @@ describe("trackPageView", () => {
       page_referrer: "http://localhost/compare",
     });
   });
+
+  /**
+   * Independent review F2 (M18). Under `Referrer-Policy:
+   * strict-origin-when-cross-origin` a same-origin referrer keeps its whole
+   * query: a checkout session id, an edit token, an auth code. The landing
+   * view's `page_referrer` goes through the same sanitiser as any location.
+   */
+  describe("the landing view's referrer", () => {
+    function referredBy(referrer: string): void {
+      Object.defineProperty(document, "referrer", {
+        value: referrer,
+        configurable: true,
+      });
+    }
+
+    afterEach(() => {
+      delete (document as unknown as { referrer?: string }).referrer;
+    });
+
+    it.each([
+      [
+        "http://localhost/edit?rcf_edit_token=v1.secret&utm_source=x#rcf_edit=v1.secret",
+        "http://localhost/edit",
+      ],
+      [
+        "http://localhost/dashboard/sites/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c/billing?session_id=cs_test_a1b2",
+        "http://localhost/dashboard/sites/[id]/billing",
+      ],
+      [
+        "http://localhost/auth/confirm?token_hash=abc&type=email&email=jane%40example.com",
+        "http://localhost/auth/confirm",
+      ],
+      [
+        "https://news.example.com/story?id=42&utm_campaign=launch",
+        "https://news.example.com/story",
+      ],
+    ])("sends %s as %s", (referrer, expected) => {
+      referredBy(referrer);
+      runtime.setAnalyticsActive(ID, true);
+
+      at("/pricing");
+      runtime.trackPageView();
+
+      expect(events("page_view")[0][2]).toEqual({
+        page_location: "http://localhost/pricing",
+        page_referrer: expected,
+      });
+    });
+
+    it("sends no referrer for one that is not an http(s) URL", () => {
+      referredBy("android-app://com.example/");
+      runtime.setAnalyticsActive(ID, true);
+
+      runtime.trackPageView();
+
+      expect(events("page_view")[0][2]).toEqual({
+        page_location: "http://localhost/",
+      });
+    });
+  });
 });
 
 describe("applyConsentChoice", () => {
@@ -282,6 +342,69 @@ describe("applyConsentChoice", () => {
     expect(document.cookie).not.toMatch(/(^|; )_ga(_|=)/);
     expect(document.cookie).toContain("unrelated=keep");
     expect(document.cookie).toContain("rcf_analytics_consent=denied");
+  });
+});
+
+/**
+ * Independent review F4: jsdom only proves host-only deletion. gtag.js writes
+ * `_ga` with `cookie_domain: 'auto'`, i.e. on the registrable domain
+ * (`.recopyfa.st` from `recopyfa.st` or `www.recopyfa.st`); a deletion
+ * without that exact Domain attribute leaves it in place.
+ */
+describe("googleAnalyticsCookieDeletions", () => {
+  const COOKIES =
+    "_ga=GA1.1.1.1; _ga_TEST123456=GS1.1.1; _gid=GA1.2.3; _gat_UA-1=1; rcf_analytics_consent=granted; unrelated=keep; sb-access-token=x";
+
+  it("deletes each GA cookie host-only and on the registrable domain", () => {
+    expect(
+      runtime.googleAnalyticsCookieDeletions(
+        "_ga=GA1.1.1.1; _ga_TEST123456=GS1.1.1",
+        "recopyfa.st",
+      ),
+    ).toEqual([
+      "_ga=; Max-Age=0; Path=/",
+      "_ga=; Max-Age=0; Path=/; Domain=.recopyfa.st",
+      "_ga_TEST123456=; Max-Age=0; Path=/",
+      "_ga_TEST123456=; Max-Age=0; Path=/; Domain=.recopyfa.st",
+    ]);
+  });
+
+  it("from a subdomain, tries the subdomain and every parent but the bare suffix", () => {
+    expect(
+      runtime.googleAnalyticsCookieDeletions(
+        "_ga=GA1.1.1.1",
+        "www.recopyfa.st",
+      ),
+    ).toEqual([
+      "_ga=; Max-Age=0; Path=/",
+      "_ga=; Max-Age=0; Path=/; Domain=.www.recopyfa.st",
+      "_ga=; Max-Age=0; Path=/; Domain=.recopyfa.st",
+    ]);
+  });
+
+  it("touches only GA's cookies: never the consent choice, the session or anything else", () => {
+    const deleted = runtime
+      .googleAnalyticsCookieDeletions(COOKIES, "recopyfa.st")
+      .map((assignment) => assignment.split("=")[0]);
+
+    expect([...new Set(deleted)]).toEqual([
+      "_ga",
+      "_ga_TEST123456",
+      "_gid",
+      "_gat_UA-1",
+    ]);
+  });
+
+  it("on a host without a dot (localhost), deletes host-only", () => {
+    expect(
+      runtime.googleAnalyticsCookieDeletions("_ga=GA1.1.1.1", "localhost"),
+    ).toEqual(["_ga=; Max-Age=0; Path=/"]);
+  });
+
+  it("is empty when there is nothing of GA's", () => {
+    expect(
+      runtime.googleAnalyticsCookieDeletions("unrelated=keep", "recopyfa.st"),
+    ).toEqual([]);
   });
 });
 

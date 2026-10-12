@@ -55,3 +55,23 @@ export function isAnalyticsRoute(pathname: string | null | undefined): boolean {
     (prefix) => path === prefix || path.startsWith(`${prefix}/`),
   );
 }
+
+/**
+ * May Google Analytics run here: the page the visitor is on (`pathname`) AND
+ * the page the document was loaded as (`getDocumentPathname()`, null on the
+ * server) both on the list (independent review F1).
+ *
+ * The CSP is the document's: the middleware picks it from the path the
+ * browser requested, and a client navigation (`<Link>`, back/forward) changes
+ * the URL but keeps the document and its policy. `/login` → "Terms" is still
+ * the `/login` document under the nonce policy, whose `'strict-dynamic'`
+ * would admit a script-inserted gtag.js whatever its host list says; a
+ * `/settings` → `/` crossing keeps a static policy that names no Google host.
+ * Neither may load anything.
+ */
+export function isAnalyticsPage(
+  pathname: string | null | undefined,
+  documentPathname: string | null | undefined,
+): boolean {
+  return isAnalyticsRoute(pathname) && isAnalyticsRoute(documentPathname);
+}

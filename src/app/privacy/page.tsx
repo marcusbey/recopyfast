@@ -448,7 +448,7 @@ export default function Privacy() {
               - the pages: isAnalyticsRoute (src/lib/analytics/google-analytics/routes.ts);
               - what is sent: page-location.ts and gtag.ts (no query string but
                 utm_*, no fragment, slug-only event values);
-              - the consent rule: consent.ts (EEA + UK + CH, fail-closed) and
+              - the consent rule: consent.ts (EEA + UK + CH + Quebec, fail-closed) and
                 GoogleAnalytics.tsx (nothing requested before "Allow analytics");
               - the cookies: CONSENT_COOKIE_* and GA_COOKIE_EXPIRES_SECONDS;
               - 14 months, signals off, ads personalisation off, no city-level
@@ -486,14 +486,15 @@ export default function Privacy() {
                 </li>
                 <li>
                   <strong>Your choice:</strong> in the European Economic Area,
-                  the United Kingdom and Switzerland, Google Analytics does not
-                  load until you choose &ldquo;Allow analytics&rdquo; in the
-                  banner. To know whether to ask, we use the country our host,
-                  Vercel, reports for the request; it is not stored. Elsewhere
-                  it loads with analytics allowed, and you can decline.
-                  Advertising storage is denied everywhere: we run no ads,
-                  Google signals and ad personalisation are off, and the data is
-                  not used for advertising.
+                  the United Kingdom, Switzerland and Quebec, Google Analytics
+                  does not load until you choose &ldquo;Allow analytics&rdquo;
+                  in the banner. To know whether to ask, we use the country —
+                  and in Canada the province — our host, Vercel, reports for the
+                  request; it is not stored. When it cannot tell, it asks.
+                  Elsewhere it loads with analytics allowed, and you can
+                  decline. Advertising storage is denied everywhere: we run no
+                  ads, Google signals and ad personalisation are off, and the
+                  data is not used for advertising.
                 </li>
                 <li>
                   <strong>Cookies:</strong> Google Analytics sets{" "}

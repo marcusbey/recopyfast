@@ -16,7 +16,8 @@ import {
   track,
   trackPageView,
 } from "@/lib/analytics/google-analytics/gtag";
-import { isAnalyticsRoute } from "@/lib/analytics/google-analytics/routes";
+import { getDocumentPathname } from "@/lib/analytics/google-analytics/document-path";
+import { isAnalyticsPage } from "@/lib/analytics/google-analytics/routes";
 import { ConsentBanner } from "./ConsentBanner";
 
 /** What the init script leaves on `window` (see `init-script.ts`). */
@@ -51,8 +52,8 @@ function readConsentHint(): ConsentHint {
  *
  * Leaving the allowlist by a client navigation unmounts it (the shell stops
  * rendering it) and raises Google's opt-out flag on the way out, so nothing
- * more is sent from that page. It still checks the route itself, as a second
- * line.
+ * more is sent from that page. It still checks the route and the document's
+ * route itself (`isAnalyticsPage`), as a second line.
  */
 export function GoogleAnalyticsRuntime({
   measurementId,
@@ -60,7 +61,7 @@ export function GoogleAnalyticsRuntime({
   measurementId: string;
 }) {
   const pathname = usePathname();
-  const isAllowedRoute = isAnalyticsRoute(pathname);
+  const isAllowedRoute = isAnalyticsPage(pathname, getDocumentPathname());
   const [isMounted, setIsMounted] = React.useState(false);
   const [hint, setHint] = React.useState<ConsentHint | null>(null);
   const [choice, setChoice] = React.useState<ConsentChoice | null>(null);
@@ -144,6 +145,11 @@ export function GoogleAnalyticsRuntime({
 
   const needsChoice = hint?.consentRequired === true && choice === null;
   const isBannerVisible = isSettingsOpen || needsChoice;
+  // The choice in effect, for the banner (independent review F4): where no
+  // consent is needed and nothing is stored, analytics is on — say so, show
+  // "Allow" pressed, and let a visitor who opened it from the footer close it.
+  const choiceInEffect: ConsentChoice | null =
+    choice ?? (hint?.consentRequired === false ? "granted" : null);
 
   return (
     <>
@@ -163,7 +169,7 @@ export function GoogleAnalyticsRuntime({
       <div aria-live="polite">
         {isBannerVisible ? (
           <ConsentBanner
-            currentChoice={choice}
+            currentChoice={choiceInEffect}
             shouldTakeFocus={isSettingsOpen}
             onChoose={choose}
             onDismiss={() => setIsSettingsOpen(false)}

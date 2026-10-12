@@ -121,6 +121,31 @@ function isGtag(request: Request): boolean {
   return GTAG_URL.test(request.url());
 }
 
+async function pageViews(page: Page): Promise<unknown[][]> {
+  return (await dataLayer(page)).filter(
+    ([command, name]) => command === "event" && name === "page_view",
+  );
+}
+
+/**
+ * Marks the current document, so a later check proves a navigation was a
+ * client one (same document, same CSP) and not a full load.
+ */
+async function markDocument(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as unknown as { __rcfSameDocument?: boolean }).__rcfSameDocument =
+      true;
+  });
+}
+
+async function isSameDocument(page: Page): Promise<boolean> {
+  return page.evaluate(
+    () =>
+      (window as unknown as { __rcfSameDocument?: boolean })
+        .__rcfSameDocument === true,
+  );
+}
+
 test.describe("s107 Google Analytics: a visitor outside the EEA", () => {
   test.use({ extraHTTPHeaders: { "x-vercel-ip-country": "US" } });
 
@@ -243,6 +268,98 @@ test.describe("s107 Google Analytics: a visitor outside the EEA", () => {
 
     expect(requested).toEqual([]);
     expect(fetched.filter((url) => url.includes(INIT_PATH))).toEqual([]);
+  });
+
+  /**
+   * Independent review F1 (major). The CSP belongs to the document: "Terms"
+   * on /login is a `<Link>`, so /terms renders inside the /login document,
+   * under the nonce policy whose 'strict-dynamic' would admit a
+   * script-inserted gtag.js. GA must not load there, nor after Back.
+   */
+  test("never loads Google Analytics into the /login document, after a client navigation to /terms and back", async ({
+    context,
+    page,
+  }) => {
+    const requested = await stubGoogle(context);
+    const violations = await watchViolations(page);
+    const fetched: string[] = [];
+    page.on("request", (request) => fetched.push(request.url()));
+
+    const response = await page.goto("/login", { waitUntil: "networkidle" });
+    expect(response?.headers()["content-security-policy"]).toMatch(/'nonce-/);
+    await markDocument(page);
+
+    // Nothing to wait FOR when nothing may happen: give the shell the window
+    // in which it would fetch the runtime (import() after the new route
+    // renders), the init script and gtag.js. Without the document check, all
+    // three arrive within it (a build with the guard removed fails here).
+    const noAnalytics = async () => {
+      await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(3_000);
+      expect(requested).toEqual([]);
+      expect(fetched.filter((url) => url.includes(INIT_PATH))).toEqual([]);
+      expect(
+        await page.locator('script[src*="googletagmanager"]').count(),
+      ).toBe(0);
+      expect(
+        await page.evaluate(() => "dataLayer" in window || "gtag" in window),
+      ).toBe(false);
+      await expect(page.getByRole("region", BANNER)).toHaveCount(0);
+      // Review F5: nothing would answer it in this document.
+      await expect(
+        page.getByRole("button", { name: "Cookie settings" }),
+      ).toHaveCount(0);
+    };
+
+    await page.getByRole("link", { name: "Terms of Service" }).first().click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: /Terms/ }),
+    ).toBeVisible();
+    await expect(page.locator("footer")).toBeVisible();
+    expect(await isSameDocument(page)).toBe(true);
+    await noAnalytics();
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/login$/);
+    expect(await isSameDocument(page)).toBe(true);
+    await noAnalytics();
+
+    expect(await violations()).toEqual([]);
+  });
+
+  /**
+   * Independent review F2 (M19), in a browser: GA's own history-change page
+   * views are off in the property, so each client navigation between
+   * marketing pages is one `page_view` of ours. (/pricing is a redirect to
+   * /#pricing, not a page; the header's "Blog" link is a client navigation.)
+   */
+  test("sends one page view per client navigation between marketing pages", async ({
+    context,
+    page,
+  }) => {
+    const requested = await stubGoogle(context);
+
+    const gtagLoaded = page.waitForRequest(isGtag);
+    await page.goto("/", { waitUntil: "load" });
+    await gtagLoaded;
+    await expect.poll(async () => (await pageViews(page)).length).toBe(1);
+    await markDocument(page);
+    const origin = new URL(page.url()).origin;
+
+    await page
+      .locator("header nav")
+      .getByRole("link", { name: "Blog", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/blog$/);
+
+    await expect.poll(async () => (await pageViews(page)).length).toBe(2);
+    expect(await isSameDocument(page)).toBe(true);
+    expect((await pageViews(page))[1][2]).toEqual({
+      page_location: `${origin}/blog`,
+      page_referrer: `${origin}/`,
+    });
+    expect(requested.filter((url) => GTAG_URL.test(url))).toHaveLength(1);
   });
 });
 

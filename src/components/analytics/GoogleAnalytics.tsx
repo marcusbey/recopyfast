@@ -3,7 +3,8 @@
 import * as React from "react";
 import { usePathname } from "next/navigation";
 import { getMeasurementId } from "@/lib/analytics/google-analytics/measurement-id";
-import { isAnalyticsRoute } from "@/lib/analytics/google-analytics/routes";
+import { getDocumentPathname } from "@/lib/analytics/google-analytics/document-path";
+import { isAnalyticsPage } from "@/lib/analytics/google-analytics/routes";
 import { loadGoogleAnalyticsRuntime } from "./load-runtime";
 import type { GoogleAnalyticsRuntime } from "./GoogleAnalyticsRuntime";
 
@@ -14,10 +15,13 @@ type Runtime = typeof GoogleAnalyticsRuntime;
  *
  * Mounted once, in the root layout, so it follows client navigations. Renders
  * nothing — and fetches nothing — unless a measurement id is configured
- * (Production only) AND the current path is on the allowlist
- * (`isAnalyticsRoute`): the dashboard, auth and account pages, the API and the
- * widget never get the runtime, let alone gtag.js. Leaving the allowlist by a
- * client navigation unmounts the runtime, which switches GA off on the way out.
+ * (Production only) AND both the current path and the path the document was
+ * loaded on are on the allowlist (`isAnalyticsPage`): the dashboard, auth and
+ * account pages, the API and the widget never get the runtime, let alone
+ * gtag.js — nor does a marketing page reached from one of them by a client
+ * navigation, which keeps that page's document and its CSP (independent
+ * review F1). Leaving the allowlist by a client navigation unmounts the
+ * runtime, which switches GA off on the way out.
  *
  * TBT, measured (PR #94, Comparison Lighthouse run 38217319595): the gate's
  * median TBT went from 172–185 ms on `main` to 187–210 ms, over its 200 ms
@@ -30,7 +34,8 @@ type Runtime = typeof GoogleAnalyticsRuntime;
 export function GoogleAnalytics() {
   const measurementId = getMeasurementId();
   const pathname = usePathname();
-  const isEnabled = measurementId !== null && isAnalyticsRoute(pathname);
+  const isEnabled =
+    measurementId !== null && isAnalyticsPage(pathname, getDocumentPathname());
   const [Runtime, setRuntime] = React.useState<Runtime | null>(null);
 
   React.useEffect(() => {

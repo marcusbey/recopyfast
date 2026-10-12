@@ -12,9 +12,10 @@ import { GA_COOKIE_EXPIRES_SECONDS } from "@/lib/analytics/google-analytics/gtag
  *
  * Each sentence here is pinned to the code or to a GA admin setting recorded
  * in docs/operations/analytics.md: which pages, what is collected, the consent
- * rule for the EEA/UK/CH, the cookie names and lifetimes, the 14-month
- * retention, and the three ways to opt out. legal-pages-truth.test.tsx keeps
- * the s54 tripwires (no "cookie consent", no "geolocation", no "anytime").
+ * rule for the EEA/UK/CH and Quebec, the cookie names and lifetimes, the
+ * 14-month retention, and the three ways to opt out.
+ * legal-pages-truth.test.tsx keeps the s54 tripwires (no "cookie consent", no
+ * "geolocation", no "anytime").
  */
 
 jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
@@ -60,13 +61,16 @@ describe("/privacy — Google Analytics", () => {
     expect(text).toMatch(/approximate location/);
   });
 
-  it("states the consent rule for the EEA, the UK and Switzerland", () => {
+  it("states the consent rule for the EEA, the UK, Switzerland and Quebec", () => {
     const text = analyticsSection().textContent ?? "";
 
     expect(text).toMatch(
-      /European Economic Area, the United Kingdom and Switzerland/,
+      /European Economic Area, the United Kingdom, Switzerland and Quebec/,
     );
     expect(text).toMatch(/does not load until you choose .Allow analytics./);
+    // consent.ts fails closed: no country, an unknown one, or Canada without
+    // a province all ask.
+    expect(text).toMatch(/When it cannot tell, it asks/);
   });
 
   it("names the cookies, with lifetimes that match the code", () => {

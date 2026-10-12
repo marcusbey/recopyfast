@@ -181,24 +181,41 @@ export function track<E extends AnalyticsEventName>(
 }
 
 /**
- * Deletes GA's first-party cookies (`_ga`, `_ga_<id>`, and the legacy `_gid`
- * / `_gat*`). gtag.js writes them on the highest domain it can (`cookie_domain:
- * 'auto'`), so each parent of the host is tried as well as the host itself.
+ * The `document.cookie` assignments that delete GA's first-party cookies
+ * (`_ga`, `_ga_<id>`, and the legacy `_gid` / `_gat*`) found in
+ * `cookieHeader`, and nothing else. gtag.js writes them on the highest domain
+ * it can (`cookie_domain: 'auto'`: `.recopyfa.st`), and a cookie is deleted
+ * only by an assignment with its exact Domain, so each is deleted host-only
+ * and on every parent of `hostname` that has a dot (a bare suffix such as
+ * `st` cannot hold one; a public suffix such as `co.uk` is refused by the
+ * browser, harmlessly).
  */
-function deleteGoogleAnalyticsCookies(): void {
-  const names = document.cookie
+export function googleAnalyticsCookieDeletions(
+  cookieHeader: string,
+  hostname: string,
+): string[] {
+  const names = cookieHeader
     .split(";")
     .map((part) => part.split("=")[0]?.trim() ?? "")
     .filter((name) => /^(_ga|_ga_.+|_gid|_gat.*)$/.test(name));
-  const labels = window.location.hostname.split(".");
+  const labels = hostname.split(".");
   const domains = labels
     .map((_, index) => labels.slice(index).join("."))
     .filter((domain) => domain.includes("."));
-  for (const name of names) {
-    document.cookie = `${name}=; Max-Age=0; Path=/`;
-    for (const domain of domains) {
-      document.cookie = `${name}=; Max-Age=0; Path=/; Domain=.${domain}`;
-    }
+  return names.flatMap((name) => [
+    `${name}=; Max-Age=0; Path=/`,
+    ...domains.map(
+      (domain) => `${name}=; Max-Age=0; Path=/; Domain=.${domain}`,
+    ),
+  ]);
+}
+
+function deleteGoogleAnalyticsCookies(): void {
+  for (const deletion of googleAnalyticsCookieDeletions(
+    document.cookie,
+    window.location.hostname,
+  )) {
+    document.cookie = deletion;
   }
 }
 

@@ -1,8 +1,10 @@
 /**
  * s107 — the shell in the root layout: the runtime (its own chunk, fetched
  * with a plain dynamic `import()` after hydration) is loaded and mounted only
- * with a configured measurement id AND on an allowlisted path. Everywhere else
- * nothing renders and nothing is fetched, not even our own chunk.
+ * with a configured measurement id AND on an allowlisted path AND in a
+ * document that was itself loaded on an allowlisted path (independent review
+ * F1: the CSP is the document's, and a client navigation keeps it). Everywhere
+ * else nothing renders and nothing is fetched, not even our own chunk.
  *
  * Why not `next/dynamic`: through it the runtime's first render ran as one
  * 63 ms task and the s17 comparison gate's TBT went over 200 ms (PR #94). The
@@ -16,6 +18,11 @@ import { render, screen } from "@testing-library/react";
 let mockPathname = "/";
 jest.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
+}));
+
+let mockDocumentPathname: string | null = "/";
+jest.mock("@/lib/analytics/google-analytics/document-path", () => ({
+  getDocumentPathname: () => mockDocumentPathname,
 }));
 
 const mockLoadRuntime = jest.fn(async () => {
@@ -35,6 +42,7 @@ const saved = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 beforeEach(() => {
   mockLoadRuntime.mockClear();
   mockPathname = "/";
+  mockDocumentPathname = "/";
   process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID = "G-TEST123456";
 });
 
@@ -121,4 +129,58 @@ describe("GoogleAnalytics (shell)", () => {
       expect(mockLoadRuntime).not.toHaveBeenCalled();
     },
   );
+
+  /**
+   * Independent review F1 (major). `/login` → "Terms" is a client navigation:
+   * the URL says /terms, the document is still /login's, under the nonce
+   * policy, whose 'strict-dynamic' would admit a script-inserted gtag.js.
+   * A static document loaded off the allowlist (/settings, /auth/error) has a
+   * policy without Google's hosts. Neither may fetch the runtime.
+   */
+  it.each([
+    ["/terms", "/login"],
+    ["/privacy", "/signup"],
+    ["/", "/edit"],
+    ["/docs/install", "/dashboard/sites/abc"],
+    ["/tools", "/tools/website-spell-checker/r/6f1c2b9e"],
+    ["/", "/settings"],
+    ["/", "/auth/error"],
+  ])(
+    "on %s in a document loaded as %s: renders nothing and never fetches the runtime",
+    async (pathname, documentPathname) => {
+      mockPathname = pathname;
+      mockDocumentPathname = documentPathname;
+
+      const { container } = render(<GoogleAnalytics />);
+      await settle();
+
+      expect(container).toBeEmptyDOMElement();
+      expect(mockLoadRuntime).not.toHaveBeenCalled();
+    },
+  );
+
+  it("never fetches it in an app document, however the visitor moves between pages", async () => {
+    mockDocumentPathname = "/login";
+    mockPathname = "/login";
+    const { container, rerender } = render(<GoogleAnalytics />);
+
+    for (const pathname of ["/terms", "/login", "/privacy", "/"]) {
+      mockPathname = pathname;
+      rerender(<GoogleAnalytics />);
+      await settle();
+    }
+
+    expect(container).toBeEmptyDOMElement();
+    expect(mockLoadRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not render until the document's path is known (null on the server)", async () => {
+    mockDocumentPathname = null;
+
+    const { container } = render(<GoogleAnalytics />);
+    await settle();
+
+    expect(container).toBeEmptyDOMElement();
+    expect(mockLoadRuntime).not.toHaveBeenCalled();
+  });
 });

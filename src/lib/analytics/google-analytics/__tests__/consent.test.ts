@@ -15,6 +15,7 @@ import {
   CONSENT_COOKIE_MAX_AGE_SECONDS,
   CONSENT_COOKIE_NAME,
   CONSENT_REQUIRED_REGIONS,
+  CONSENT_REQUIRED_SUBDIVISIONS,
   consentDefaults,
   isConsentRequiredCountry,
   readConsentChoice,
@@ -94,7 +95,8 @@ describe("isConsentRequiredCountry", () => {
     },
   );
 
-  it.each(["US", "CA", "BR", "JP"])("is false for %s", (country) => {
+  // Canada depends on the province: see "in Canada, by province" below.
+  it.each(["US", "BR", "JP"])("is false for %s", (country) => {
     expect(isConsentRequiredCountry(country)).toBe(false);
   });
 
@@ -104,6 +106,68 @@ describe("isConsentRequiredCountry", () => {
       expect(isConsentRequiredCountry(country)).toBe(true);
     },
   );
+
+  /**
+   * Independent review F3: two letters are not a country. GeoIP sources
+   * answer "unknown" (XX, ZZ), Tor (T1), anonymous proxy or satellite (A1,
+   * A2), "other" (O1) and the legacy continent codes EU and AP. Only an
+   * officially assigned ISO 3166-1 code can mean "no consent needed".
+   */
+  it.each(["XX", "ZZ", "T1", "EU", "AP", "A1", "A2", "O1", "QO", "AA", "XA"])(
+    "fails closed on a placeholder or unassigned code: %s",
+    (country) => {
+      expect(isConsentRequiredCountry(country)).toBe(true);
+    },
+  );
+
+  it.each(["US", "AU", "IN", "MX", "ZA", "SG", "NZ", "AE", "TW", "HK"])(
+    "is false for the assigned country %s",
+    (country) => {
+      expect(isConsentRequiredCountry(country)).toBe(false);
+    },
+  );
+
+  /**
+   * Quebec's Law 25 (owner decision on the review, 2026-10-12): Quebec asks
+   * first, like the EEA. Vercel sends the province as
+   * `x-vercel-ip-country-region`, the ISO 3166-2 code without its country
+   * prefix. A Canadian request whose province is missing or unknown cannot be
+   * told apart from Quebec, so it asks too.
+   */
+  describe("in Canada, by province", () => {
+    it.each(["QC", "qc", " QC "])("is true for Quebec (%j)", (region) => {
+      expect(isConsentRequiredCountry("CA", region)).toBe(true);
+    });
+
+    it.each([
+      "ON",
+      "BC",
+      "AB",
+      "MB",
+      "NB",
+      "NL",
+      "NS",
+      "NT",
+      "NU",
+      "PE",
+      "SK",
+      "YT",
+    ])("is false for %s", (region) => {
+      expect(isConsentRequiredCountry("CA", region)).toBe(false);
+    });
+
+    it.each([null, undefined, "", "Q", "XX", "QUE", "<script>"])(
+      "fails closed on a missing or unknown province: %j",
+      (region) => {
+        expect(isConsentRequiredCountry("CA", region)).toBe(true);
+      },
+    );
+
+    it("does not apply a province outside Canada", () => {
+      expect(isConsentRequiredCountry("US", "QC")).toBe(false);
+      expect(isConsentRequiredCountry("FR", "ON")).toBe(true);
+    });
+  });
 });
 
 describe("consentDefaults", () => {
@@ -119,8 +183,16 @@ describe("consentDefaults", () => {
 
     expect(regional).toEqual({
       ...DENIED_EVERYTHING,
-      region: [...CONSENT_REQUIRED_REGIONS],
+      region: [...CONSENT_REQUIRED_REGIONS, ...CONSENT_REQUIRED_SUBDIVISIONS],
     });
+  });
+
+  it("names Quebec to Google as the ISO 3166-2 subdivision CA-QC, not all of Canada", () => {
+    const [regional] = consentDefaults({ consentRequired: false });
+
+    expect(CONSENT_REQUIRED_SUBDIVISIONS).toEqual(["CA-QC"]);
+    expect(regional.region).toContain("CA-QC");
+    expect(regional.region).not.toContain("CA");
   });
 
   it("grants analytics elsewhere when the hint needs no consent, ads still denied", () => {

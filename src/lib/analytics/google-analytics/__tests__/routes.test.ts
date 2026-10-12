@@ -12,7 +12,10 @@
  * off — a new page has to be added on purpose.
  */
 
-import { isAnalyticsRoute } from "@/lib/analytics/google-analytics/routes";
+import {
+  isAnalyticsPage,
+  isAnalyticsRoute,
+} from "@/lib/analytics/google-analytics/routes";
 import { usesNoncePolicy } from "@/lib/security/content-security-policy";
 
 describe("isAnalyticsRoute", () => {
@@ -149,5 +152,47 @@ describe("isAnalyticsRoute", () => {
   it("refuses null and undefined (usePathname can be null)", () => {
     expect(isAnalyticsRoute(null)).toBe(false);
     expect(isAnalyticsRoute(undefined)).toBe(false);
+  });
+});
+
+/**
+ * Independent review F1 (major): the Content-Security-Policy belongs to the
+ * DOCUMENT. The middleware picks it from the path the browser requested; a
+ * client navigation (`<Link>`, back/forward) changes the URL and keeps the
+ * document and its policy. So `/login` → "Terms" is still the `/login`
+ * document under the nonce policy, whose `'strict-dynamic'` would let a
+ * script-inserted gtag.js in whatever its host list says. GA may run only
+ * where the current page AND the page the document was loaded as are both on
+ * the list.
+ */
+describe("isAnalyticsPage", () => {
+  it.each([
+    ["/", "/"],
+    ["/blog", "/"],
+    ["/compare/webflow-editor", "/compare"],
+    ["/tools", "/tools/website-maintenance-cost"],
+  ])("is true on %s in a document loaded as %s", (pathname, documentPath) => {
+    expect(isAnalyticsPage(pathname, documentPath)).toBe(true);
+  });
+
+  it.each([
+    // A nonce-policy document, client-navigated onto a marketing page.
+    ["/terms", "/login"],
+    ["/privacy", "/signup"],
+    ["/", "/edit"],
+    ["/docs/install", "/dashboard/sites/abc"],
+    ["/tools", "/tools/website-spell-checker/r/6f1c2b9e"],
+    // A static document whose policy names no Google host.
+    ["/", "/settings"],
+    ["/", "/auth/error"],
+    // The current page itself is off the list.
+    ["/login", "/"],
+    ["/tools/website-spell-checker/r/6f1c2b9e", "/tools"],
+  ])("is false on %s in a document loaded as %s", (pathname, documentPath) => {
+    expect(isAnalyticsPage(pathname, documentPath)).toBe(false);
+  });
+
+  it("is false when the document's path is unknown (no window: the server render)", () => {
+    expect(isAnalyticsPage("/", null)).toBe(false);
   });
 });

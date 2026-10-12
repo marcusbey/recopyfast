@@ -7,10 +7,11 @@ import { getMeasurementId } from "@/lib/analytics/google-analytics/measurement-i
  * (s107, ADR 063). Loaded by `GoogleAnalytics` on allowlisted marketing pages
  * only, before gtag.js.
  *
- * Per request, on purpose: the body depends on Vercel's `x-vercel-ip-country`,
- * which a prerendered page cannot read without turning dynamic. The country is
- * reduced to one boolean (`isConsentRequiredCountry`, fail-closed) and nothing
- * from the request is written into the body. `private, no-store`: the same URL
+ * Per request, on purpose: the body depends on Vercel's `x-vercel-ip-country`
+ * (and, for Canada, `x-vercel-ip-country-region`: Quebec asks first), which a
+ * prerendered page cannot read without turning dynamic. Both are reduced to
+ * one boolean (`isConsentRequiredCountry`, fail-closed) and nothing from the
+ * request is written into the body. `private, no-store`: the same URL
  * answers differently per country, so neither Vercel's CDN nor a shared cache
  * may keep it.
  *
@@ -29,6 +30,7 @@ export function GET(request: Request): Response {
 
   const consentRequired = isConsentRequiredCountry(
     request.headers.get("x-vercel-ip-country"),
+    request.headers.get("x-vercel-ip-country-region"),
   );
   return new Response(buildGtagInitScript({ consentRequired }), {
     status: 200,

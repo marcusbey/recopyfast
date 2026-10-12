@@ -4758,7 +4758,15 @@ Acceptance criteria:
   Test: `privacy-analytics.test.tsx`; the s54 tripwires unchanged.
 - [x] The comparison Lighthouse gate (ADR 061) stays green with GA in the build (PR #94, run
   38220513115: perf 98–99, LCP 1,630–1,656 ms, CLS ≤ 0.015, TBT 92–103 ms; `main` 172–185 ms TBT);
-  CI e2e strict count 94 → 99, all passing; 102 after merging s96 (97 + 5).
+  CI e2e strict count 94 → 99, all passing; 102 after merging s96 (97 + 5); 104 with the
+  independent review's fixes (97 + 7).
+- [x] Independent review of `4e068e9` (max severity major, ship blocked) fixed: GA loads only when
+  the page AND the document it lives in were both loaded on an allowlisted path (a client
+  navigation keeps the document's CSP; `/login` → "Terms" loaded gtag.js under the nonce policy
+  before the fix, reproduced in a browser); placeholder country codes and Quebec (Law 25) ask
+  first; the reopened banner describes the choice in effect; "Cookie settings" only where GA can
+  run; guards no test bit (landing referrer, page view per client navigation, missing init hint,
+  first-visit Escape) now pinned. Record: `docs/reviews/s107-google-analytics.md`.
 
 Complexity: 3. Dependencies: none (s98 merged). Merged with s96 (`c905292`): its scan reports carry
 no analytics (architect decision, ADR 063); the scan is measured on the tool page. Branch

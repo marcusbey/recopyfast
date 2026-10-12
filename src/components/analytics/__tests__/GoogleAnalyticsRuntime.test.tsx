@@ -25,6 +25,11 @@ jest.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
 }));
 
+let mockDocumentPathname: string | null = "/";
+jest.mock("@/lib/analytics/google-analytics/document-path", () => ({
+  getDocumentPathname: () => mockDocumentPathname,
+}));
+
 const readyCallbacks = new Map<string, () => void>();
 jest.mock("next/script", () => ({
   __esModule: true,
@@ -96,6 +101,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   readyCallbacks.clear();
   mockPathname = "/";
+  mockDocumentPathname = "/";
   process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID = ID;
   delete (window as unknown as Record<string, unknown>).__rcfAnalytics;
   clearCookies();
@@ -123,6 +129,26 @@ describe("off the allowlist (a second line behind the shell)", () => {
     expect(readyCallbacks.size).toBe(0);
     expect(mocked.trackPageView).not.toHaveBeenCalled();
   });
+
+  // Independent review F1: the URL is a marketing page, the document (and its
+  // CSP) is still the one loaded on an app page.
+  it.each([
+    ["/terms", "/login"],
+    ["/docs/install", "/dashboard/sites/abc"],
+    ["/", "/settings"],
+  ])(
+    "renders nothing on %s in a document loaded as %s",
+    (pathname, documentPathname) => {
+      mockPathname = pathname;
+      mockDocumentPathname = documentPathname;
+
+      const { container } = render(<GoogleAnalytics />);
+
+      expect(container).toBeEmptyDOMElement();
+      expect(readyCallbacks.size).toBe(0);
+      expect(mocked.trackPageView).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("a visitor whose country needs no consent", () => {
@@ -167,6 +193,21 @@ describe("a visitor whose country needs no consent", () => {
     unmount();
 
     expect(mocked.setAnalyticsActive).toHaveBeenLastCalledWith(ID, false);
+  });
+
+  // Independent review F2 (M19): the page view per client navigation rests on
+  // `pathname` being a dependency; on → on never flips `isActive`.
+  it("sends one page view per client navigation between allowlisted pages", () => {
+    mockPathname = "/compare";
+    const { rerender } = render(<GoogleAnalytics />);
+    initScriptRuns({ consentRequired: false });
+    expect(mocked.trackPageView).toHaveBeenCalledTimes(1);
+
+    mockPathname = "/blog";
+    rerender(<GoogleAnalytics />);
+
+    expect(mocked.trackPageView).toHaveBeenCalledTimes(2);
+    expect(mocked.setAnalyticsActive).not.toHaveBeenCalledWith(ID, false);
   });
 
   it("stops on a client navigation off the allowlist, and resumes on return", () => {
@@ -241,12 +282,46 @@ describe("a visitor whose country needs consent", () => {
     expect(region?.closest("[aria-live='polite']")).not.toBeNull();
   });
 
+  // Independent review F2 (M6): the init script did not leave its hint (an
+  // old cached copy, a blocked response, a page script that clobbered it).
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["empty", {}],
+    ["a string 'false'", { consentRequired: "false" }],
+    ["zero", { consentRequired: 0 }],
+    ["not an object", "false"],
+  ])(
+    "fails closed when the init script's hint is %s: the banner asks, nothing is requested",
+    (_case, value) => {
+      render(<GoogleAnalytics />);
+      if (value !== undefined) {
+        (window as unknown as Record<string, unknown>).__rcfAnalytics = value;
+      }
+      const ready = readyCallbacks.get("rcf-ga-init");
+      if (!ready) throw new Error("the init script was never rendered");
+      act(() => ready());
+
+      expect(banner()).toBeInTheDocument();
+      expect(screen.queryByTestId("rcf-ga-gtag")).toBeNull();
+      expect(mocked.startGoogleAnalytics).not.toHaveBeenCalled();
+      expect(mocked.trackPageView).not.toHaveBeenCalled();
+    },
+  );
+
   it("does not take focus on first display, and Escape does not dismiss it", async () => {
     const user = userEvent.setup();
     render(<GoogleAnalytics />);
     initScriptRuns({ consentRequired: true });
 
     expect(document.body).toHaveFocus();
+    // Independent review F6: Escape pressed from inside the banner, where its
+    // keydown handler listens; pressed on <body> it proved nothing.
+    await user.tab();
+    await user.tab();
+    expect(
+      screen.getByRole("button", { name: "Allow analytics" }),
+    ).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(banner()).toBeInTheDocument();
     expect(
@@ -335,6 +410,58 @@ describe("Cookie settings", () => {
     expect(banner()).toBeNull();
     expect(trigger).toHaveFocus();
     expect(mocked.applyConsentChoice).not.toHaveBeenCalled();
+  });
+
+  // Independent review F4: outside the consent regions, with nothing stored,
+  // analytics is on (and `_ga` may be set). The banner says so, shows "Allow"
+  // pressed, and closes like any other reopened banner.
+  it("where no consent is needed and nothing is stored: shows analytics on, and closes", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <button type="button" onClick={() => openCookieSettings()}>
+          Cookie settings
+        </button>
+        <GoogleAnalytics />
+      </>,
+    );
+    initScriptRuns({ consentRequired: false });
+    const trigger = screen.getByRole("button", { name: "Cookie settings" });
+
+    await user.click(trigger);
+
+    expect(banner()).toHaveAccessibleDescription(/Google Analytics is on/);
+    expect(banner()).not.toHaveAccessibleDescription(/only if you allow/);
+    expect(
+      screen.getByRole("button", { name: "Allow analytics" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Decline" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(
+      screen.getByRole("button", { name: "Close cookie settings" }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(banner()).toBeNull();
+    expect(trigger).toHaveFocus();
+    expect(mocked.applyConsentChoice).not.toHaveBeenCalled();
+  });
+
+  it("after a decline, says analytics is off and no analytics cookie is set", () => {
+    setCookie("denied");
+    render(<GoogleAnalytics />);
+    initScriptRuns({ consentRequired: false });
+
+    act(() => openCookieSettings());
+
+    expect(banner()).toHaveAccessibleDescription(/Google Analytics is off/);
+    expect(screen.getByRole("button", { name: "Decline" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("the close button dismisses without changing the choice", async () => {

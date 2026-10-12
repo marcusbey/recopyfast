@@ -17,6 +17,7 @@
 import vm from "node:vm";
 import {
   CONSENT_REQUIRED_REGIONS,
+  CONSENT_REQUIRED_SUBDIVISIONS,
   consentDefaults,
 } from "@/lib/analytics/google-analytics/consent";
 import { buildGtagInitScript } from "@/lib/analytics/google-analytics/init-script";
@@ -68,7 +69,10 @@ describe("buildGtagInitScript", () => {
     const window = execute(buildGtagInitScript({ consentRequired: false }));
     const regional = commands(window)[0][2] as { region: string[] };
 
-    expect(regional.region).toEqual([...CONSENT_REQUIRED_REGIONS]);
+    expect(regional.region).toEqual([
+      ...CONSENT_REQUIRED_REGIONS,
+      ...CONSENT_REQUIRED_SUBDIVISIONS,
+    ]);
   });
 
   it("defines window.gtag as the queue, and later calls land on the same dataLayer", () => {

@@ -73,6 +73,12 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
   everything below them — **except s96's scan reports, `/tools/<slug>/r/…`**. Never `/dashboard`,
   `/settings`, `/edit`, `/login`, `/signup`, `/auth/*`, the API, `/embed/*` or `/try/rcf-try.js`.
   A test pins that no path is both on the allowlist and under the nonce policy.
+- **The document, too** (`isAnalyticsPage`, independent review F1): the client also requires the
+  path the *document* was loaded on to be allowlisted (`getDocumentPathname`, `document-path.ts`:
+  the navigation entry, else `location.pathname` when the module first ran). The CSP belongs to
+  the document and a client navigation keeps it, so a marketing page reached by a `<Link>` from
+  `/login`, `/signup`, the dashboard or a report loads nothing and shows no "Cookie settings";
+  the next full page load measures normally.
 - **Loading:** the shell in the root layout fetches the runtime chunk (`import()`) after
   hydration on allowlisted pages only and mounts it in `startTransition`. Then the first-party
   `/analytics/gtag-init.js` (route handler: Consent Mode
@@ -80,13 +86,24 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
   boolean; `private, no-store`, 404 without an id). On its `onReady`, gtag.js
   (`https://www.googletagmanager.com/gtag/js?id=…`, `afterInteractive`) is requested only when no
   consent is needed or the visitor allowed it. No inline script.
-- **Consent:** EEA + UK + CH (and the EU outermost regions with their own ISO codes) default to
-  everything denied, by Google's `region` match and by our hint. Elsewhere analytics is granted,
-  ads always denied. Missing or malformed `x-vercel-ip-country` → consent required. Where consent
-  is required, **nothing is requested from Google until "Allow analytics"**. The choice is the
-  first-party cookie `rcf_analytics_consent=granted|denied`, 180 days, `SameSite=Lax`, `Secure`.
-  "Cookie settings" in the footer reopens the banner. Declining after allowing denies consent,
-  sets `window['ga-disable-<id>']`, and deletes `_ga`/`_ga_*`.
+- **Consent:** EEA + UK + CH (and the EU outermost regions with their own ISO codes) and Quebec
+  (`CA-QC`, by `x-vercel-ip-country-region`) default to everything denied, by Google's `region`
+  match and by our hint. Elsewhere analytics is granted, ads always denied. Fail-closed → consent
+  required: a missing or malformed `x-vercel-ip-country`, a code that is not one of ISO 3166-1's
+  249 assigned codes (GeoIP placeholders XX, ZZ, T1, A1, A2, O1, EU, AP), or `CA` without a known
+  province. Where consent is required, **nothing is requested from Google until "Allow
+  analytics"**. The choice is the first-party cookie `rcf_analytics_consent=granted|denied`, 180
+  days, `SameSite=Lax`, `Secure`. "Cookie settings" in the footer reopens the banner (only where
+  GA can run on that page); the banner describes the choice in effect — outside the consent
+  regions with nothing stored, "analytics is on", "Allow" pressed, closable. Declining after
+  allowing denies consent, sets `window['ga-disable-<id>']`, and deletes `_ga`/`_ga_*`/`_gid`/
+  `_gat*` host-only and on every parent domain (`.recopyfa.st`, where gtag.js writes them;
+  `googleAnalyticsCookieDeletions`).
+- **GA admin, unchanged for Quebec:** "Granular location and device data collection" stays as
+  configured above (off for the EEA, the UK and Switzerland); it was not touched for Canada when
+  Quebec joined the consent rule (code-only change, 2026-10-12). The privacy page's "city-level
+  location … not collected" sentence names the EEA, the UK and Switzerland only, so it stays
+  true. Turning it off for Canada too is an owner choice in the property.
 - **Config:** `send_page_view: false`, `allow_google_signals: false`,
   `allow_ad_personalization_signals: false`, `cookie_expires` 395 days (13 months).
 - **`page_location`:** no fragment, no query key but `utm_*` (and those only on the landing page

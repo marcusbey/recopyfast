@@ -6,17 +6,22 @@
  * - Ads are denied for every visitor, everywhere. RecopyFast runs no ads, so
  *   there is no ad signal to grant; `ad_storage`, `ad_user_data` and
  *   `ad_personalization` are never anything but "denied" in this file.
- * - In the EEA, the UK and Switzerland, analytics is denied until the visitor
- *   chooses "Allow analytics". Two layers say so: Google's own `region` match
- *   (the first default), and our country hint from Vercel's edge (the second,
- *   the visitor's own default). Where the hint says consent is required, the
- *   component does not even request gtag.js before the choice.
- * - A missing or malformed hint FAILS CLOSED. Vercel always sends
+ * - In the EEA, the UK, Switzerland and Quebec, analytics is denied until the
+ *   visitor chooses "Allow analytics". Two layers say so: Google's own
+ *   `region` match (the first default), and our hint from Vercel's edge (the
+ *   second, the visitor's own default). Where the hint says consent is
+ *   required, the component does not even request gtag.js before the choice.
+ * - A missing, malformed or unknown hint FAILS CLOSED. Vercel always sends
  *   `x-vercel-ip-country` in production; its absence means local, CI or some
- *   other host, and none of those may be treated as "no consent needed".
+ *   other host, and none of those may be treated as "no consent needed". Nor
+ *   may a code that is not a country: GeoIP placeholders (XX, ZZ, T1, A1, A2,
+ *   O1, EU, AP) and anything else outside ISO 3166-1's assigned codes
+ *   (independent review F3). A Canadian request without a known province
+ *   cannot be told apart from Quebec, so it asks too.
  *
- * The country is read per request by `/analytics/gtag-init.js` and reduced to
- * one boolean there. It is never stored, logged or written into a response.
+ * The country and province are read per request by `/analytics/gtag-init.js`
+ * and reduced to one boolean there. They are never stored, logged or written
+ * into a response.
  */
 
 export type ConsentChoice = "granted" | "denied";
@@ -79,18 +84,74 @@ export const CONSENT_REQUIRED_REGIONS: readonly string[] = Object.freeze([
   "CH",
 ]);
 
+/**
+ * Subdivisions where analytics needs consent first, as ISO 3166-2 codes —
+ * the form Google's `region` parameter takes. Quebec: Law 25 (owner decision
+ * on the s107 independent review, 2026-10-12). Not the rest of Canada.
+ */
+export const CONSENT_REQUIRED_SUBDIVISIONS: readonly string[] = Object.freeze([
+  "CA-QC",
+]);
+
 const REGION_SET = new Set(CONSENT_REQUIRED_REGIONS);
 
 /**
- * Does a visitor from this country (Vercel's `x-vercel-ip-country`) have to
- * choose before analytics runs? True for a missing or malformed value.
+ * ISO 3166-1 alpha-2, the 249 officially assigned codes (checked against
+ * CLDR's region names). Anything else — user-assigned (AA, QM–QZ, XA–XZ, ZZ),
+ * exceptionally or transitionally reserved (EU, UK, EA, IC, FX, AN, …), or a
+ * GeoIP vendor's own (T1, A1, A2, O1, AP) — is not a country we can place.
+ */
+const ASSIGNED_COUNTRIES = new Set(
+  (
+    "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ " +
+    "BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ " +
+    "CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ " +
+    "DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR " +
+    "GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY " +
+    "HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP " +
+    "KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY " +
+    "MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ " +
+    "NA NC NE NF NG NI NL NO NP NR NU NZ OM " +
+    "PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW " +
+    "SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ " +
+    "TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ " +
+    "VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW"
+  ).split(" "),
+);
+
+/** Canada's provinces and territories other than Quebec (ISO 3166-2:CA). */
+const CANADA_WITHOUT_CONSENT = new Set([
+  "AB",
+  "BC",
+  "MB",
+  "NB",
+  "NL",
+  "NS",
+  "NT",
+  "NU",
+  "ON",
+  "PE",
+  "SK",
+  "YT",
+]);
+
+/**
+ * Does a visitor from this country (Vercel's `x-vercel-ip-country`) and, in
+ * Canada, province (`x-vercel-ip-country-region`, ISO 3166-2 without the
+ * country prefix) have to choose before analytics runs? True for a missing,
+ * malformed or unknown value of either that matters.
  */
 export function isConsentRequiredCountry(
   country: string | null | undefined,
+  region?: string | null,
 ): boolean {
   const code = (country ?? "").trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(code)) return true;
-  return REGION_SET.has(code);
+  if (!ASSIGNED_COUNTRIES.has(code)) return true;
+  if (REGION_SET.has(code)) return true;
+  if (code === "CA") {
+    return !CANADA_WITHOUT_CONSENT.has((region ?? "").trim().toUpperCase());
+  }
+  return false;
 }
 
 export interface ConsentDefault {
@@ -123,7 +184,7 @@ export function consentDefaults({
     {
       ...adsDenied,
       analytics_storage: "denied",
-      region: [...CONSENT_REQUIRED_REGIONS],
+      region: [...CONSENT_REQUIRED_REGIONS, ...CONSENT_REQUIRED_SUBDIVISIONS],
     },
     {
       ...adsDenied,

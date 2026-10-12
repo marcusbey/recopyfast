@@ -6,13 +6,26 @@ import { Button } from "@/components/ui/button";
 import type { ConsentChoice } from "@/lib/analytics/google-analytics/consent";
 
 export interface ConsentBannerProps {
-  /** The stored choice, if any. With one, Escape and the close button dismiss. */
+  /**
+   * The choice in effect: the stored one, or "granted" where no consent is
+   * needed and none is stored. Null only while the banner asks first. With
+   * one, the copy describes it and Escape and the close button dismiss.
+   */
   currentChoice: ConsentChoice | null;
   /** Opened from "Cookie settings": take focus now, give it back on close. */
   shouldTakeFocus: boolean;
   onChoose: (choice: ConsentChoice) => void;
   onDismiss: () => void;
 }
+
+/** What the banner says, for the choice in effect. */
+const DESCRIPTION: Record<ConsentChoice | "ask", string> = {
+  ask: "May we use Google Analytics to count visits to these public pages? It sets cookies only if you allow it. You can change your answer any time under “Cookie settings” at the bottom of the page.",
+  granted:
+    "Google Analytics is on: it counts visits to these public pages and keeps its cookies in your browser. Decline turns it off and deletes them.",
+  denied:
+    "Google Analytics is off: these public pages set no analytics cookies. Allow it to help us see which pages are useful.",
+};
 
 /**
  * The analytics consent banner (s107, ADR 063).
@@ -26,10 +39,13 @@ export interface ConsentBannerProps {
  * Accessibility: a labelled, described region (a landmark a screen reader can
  * jump to); two buttons of equal weight — declining is exactly as easy as
  * allowing; native buttons, so Tab/Enter/Space work with no handlers of ours.
- * Escape and the close button exist only once a choice exists: the first
- * visit asks for an explicit answer, though nothing on the page is blocked
- * meanwhile. Reopened from the footer, it moves focus to its first button and
- * returns it to the footer on close.
+ * Escape and the close button exist only once a choice is in effect (stored,
+ * or analytics on by default where no consent is needed): the first visit
+ * where consent is needed asks for an explicit answer, though nothing on the
+ * page is blocked meanwhile. The copy describes the choice in effect, so it
+ * never says "no cookies unless you allow" to a visitor who already has
+ * `_ga` (independent review F4). Reopened from the footer, it moves focus to
+ * its first button and returns it to the footer on close.
  *
  * Composed from `Button` and card tokens, pinned light like the marketing
  * surface. The design system has no banner/toast primitive (gap 1); this is a
@@ -100,9 +116,7 @@ export function ConsentBanner({
             id={descriptionId}
             className="mt-1 text-sm leading-relaxed text-muted-foreground"
           >
-            May we use Google Analytics to count visits to these public pages?
-            It sets cookies only if you allow it. You can change your answer any
-            time under &ldquo;Cookie settings&rdquo; at the bottom of the page.{" "}
+            {DESCRIPTION[currentChoice ?? "ask"]}{" "}
             <a
               href="/privacy#analytics"
               className="font-medium text-foreground underline underline-offset-2"

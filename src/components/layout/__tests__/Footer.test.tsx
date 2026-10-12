@@ -1,7 +1,18 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
 import Footer from "../Footer";
 import { OPEN_COOKIE_SETTINGS_EVENT } from "@/lib/analytics/google-analytics/cookie-settings";
+
+let mockPathname: string | null = "/";
+jest.mock("next/navigation", () => ({
+  usePathname: () => mockPathname,
+}));
+
+let mockDocumentPathname: string | null = "/";
+jest.mock("@/lib/analytics/google-analytics/document-path", () => ({
+  getDocumentPathname: () => mockDocumentPathname,
+}));
 
 describe("Footer", () => {
   it("links the public installation guide", () => {
@@ -14,11 +25,17 @@ describe("Footer", () => {
 
   /**
    * s107 — "Cookie settings" reopens the analytics consent banner from every
-   * marketing page. It exists only when Google Analytics is configured: with
-   * no analytics there is nothing to set.
+   * marketing page. It exists only where Google Analytics can run: configured,
+   * on an allowlisted page, in a document loaded on one (independent review
+   * F5 — elsewhere nothing listens and the button would do nothing).
    */
   describe("Cookie settings", () => {
     const saved = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+
+    beforeEach(() => {
+      mockPathname = "/";
+      mockDocumentPathname = "/";
+    });
 
     afterEach(() => {
       if (saved === undefined) delete process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
@@ -47,6 +64,38 @@ describe("Footer", () => {
       expect(
         screen.queryByRole("button", { name: "Cookie settings" }),
       ).toBeNull();
+    });
+
+    it.each([
+      // s96's free-tool report and its not-found: off the allowlist.
+      [
+        "/tools/website-spell-checker/r/6f1c2b9e",
+        "/tools/website-spell-checker/r/6f1c2b9e",
+      ],
+      // A marketing page reached by a client navigation from an app page.
+      ["/terms", "/login"],
+      ["/docs/install", "/dashboard/sites/abc"],
+      // A page off the allowlist that renders this footer.
+      ["/settings", "/settings"],
+    ])(
+      "is absent on %s in a document loaded as %s, where analytics never runs",
+      (pathname, documentPathname) => {
+        process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID = "G-TEST123456";
+        mockPathname = pathname;
+        mockDocumentPathname = documentPathname;
+
+        render(<Footer />);
+
+        expect(
+          screen.queryByRole("button", { name: "Cookie settings" }),
+        ).toBeNull();
+      },
+    );
+
+    it("is not in the server-rendered HTML, so hydration matches whatever the document is", () => {
+      process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID = "G-TEST123456";
+
+      expect(renderToString(<Footer />)).not.toContain("Cookie settings");
     });
   });
 });

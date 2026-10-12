@@ -17,9 +17,12 @@ import { buildGtagInitScript } from "@/lib/analytics/google-analytics/init-scrip
 
 const saved = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 
-function request(country?: string): Request {
+function request(country?: string, region?: string): Request {
+  const headers: Record<string, string> = {};
+  if (country !== undefined) headers["x-vercel-ip-country"] = country;
+  if (region !== undefined) headers["x-vercel-ip-country-region"] = region;
   return new Request("https://www.recopyfa.st/analytics/gtag-init.js", {
-    headers: country === undefined ? {} : { "x-vercel-ip-country": country },
+    headers,
   });
 }
 
@@ -47,15 +50,19 @@ describe("GET /analytics/gtag-init.js", () => {
   });
 
   it.each([
-    ["FR", true],
-    ["GB", true],
-    ["CH", true],
-    ["US", false],
-    ["CA", false],
+    ["FR", undefined, true],
+    ["GB", undefined, true],
+    ["CH", undefined, true],
+    ["US", undefined, false],
+    ["XX", undefined, true],
+    // Quebec (Law 25) by Vercel's province header; Canada without one asks.
+    ["CA", "QC", true],
+    ["CA", "ON", false],
+    ["CA", undefined, true],
   ])(
-    "for a visitor from %s, consentRequired is %s",
-    async (country, required) => {
-      const response = GET(request(country));
+    "for a visitor from %s (province %s), consentRequired is %s",
+    async (country, region, required) => {
+      const response = GET(request(country, region));
 
       expect(response.status).toBe(200);
       expect(await response.text()).toBe(
@@ -70,8 +77,10 @@ describe("GET /analytics/gtag-init.js", () => {
     );
   });
 
-  it("never reflects the header into the script", async () => {
-    const body = await GET(request('US"</script><script>alert(1)')).text();
+  it("never reflects the headers into the script", async () => {
+    const body = await GET(
+      request('US"</script><script>alert(1)', '"</script><script>alert(2)'),
+    ).text();
 
     expect(body).not.toContain("alert");
     expect(body).toBe(buildGtagInitScript({ consentRequired: true }));

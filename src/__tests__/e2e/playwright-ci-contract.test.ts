@@ -52,10 +52,11 @@ describe("Playwright CI contract", () => {
   // s98: +1, the maintenance cost calculator flow (e2e/tools-maintenance-cost.spec.ts).
   // s96: +3, the three e2e/tools.spec.ts tests (hub and tool page, a scan
   // landing on a nonce report document, a hostile report rendered inert).
-  // s107: +5, the five e2e/google-analytics.spec.ts tests (US visitor, auth
-  // pages, EEA visitor, no country hint, signed-in dashboard).
-  // Combined: 86 + 2 + 5 + 1 + 3 + 5 = 102 distinct tests.
-  it("runs all 102 tests and always cleans up and uploads the redacted summary", () => {
+  // s107: +7, the seven e2e/google-analytics.spec.ts tests (US visitor, auth
+  // pages, a client navigation from /login to /terms and back, a page view
+  // per client navigation, EEA visitor, no country hint, signed-in dashboard).
+  // Combined: 86 + 2 + 5 + 1 + 3 + 7 = 104 distinct tests.
+  it("runs all 104 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -63,11 +64,11 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":102');
-    expect(workflow).toContain("report.expected !== 102");
-    expect(workflow).toContain("report.total !== 102");
-    expect(workflow).toContain("report.passed !== 102");
-    expect(config).toContain("expected: 102");
+    expect(workflow).toContain('"expected":104');
+    expect(workflow).toContain("report.expected !== 104");
+    expect(workflow).toContain("report.total !== 104");
+    expect(workflow).toContain("report.passed !== 104");
+    expect(config).toContain("expected: 104");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
@@ -81,7 +82,7 @@ describe("Playwright CI contract", () => {
     expect(workflow.match(/NEXT_PUBLIC_GA_MEASUREMENT_ID:/g)).toHaveLength(1);
   });
 
-  it("keeps the credential-free built-embed harness outside the strict 102-test suite", () => {
+  it("keeps the credential-free built-embed harness outside the strict 104-test suite", () => {
     // s06b was recovered after the strict-count reporter became a hard CI contract.
     // Its specs live below e2e/ for shared Playwright conventions, so without an
     // explicit exclusion Playwright recursively collects six extra tests into
