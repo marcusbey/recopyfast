@@ -32,40 +32,12 @@
 import { promises as dnsPromises } from "dns";
 import ipaddr from "ipaddr.js";
 import type { ValidationResult } from "@/lib/api/validation";
+import { classifyAddress, unwrapHostname } from "./public-address";
 
 /** Longest URL we will store. Well past any real endpoint. */
 const MAX_URL_LENGTH = 2048;
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
-
-/**
- * Only globally-routable unicast is allowed.
- *
- * Deliberately an allowlist, not a denylist of the ranges the story names.
- * `ipaddr.js` knows about ranges nobody thinks to enumerate — `6to4`,
- * `teredo`, `benchmarking`, `as112`, `broadcast` — several of which are routes
- * to an internal destination by another name, and new ones arrive with library
- * upgrades. A denylist silently admits whatever it has not heard of; this
- * silently refuses it, which is the correct direction to be wrong in.
- */
-const ALLOWED_RANGE = "unicast";
-
-/** How each refused range is described to the person who typed the URL. */
-const RANGE_DESCRIPTIONS: Record<string, string> = {
-  loopback: "a loopback address",
-  linkLocal: "a link-local address",
-  private: "a private address",
-  uniqueLocal: "a private address",
-  unspecified: "an unspecified address",
-  multicast: "a multicast address",
-  broadcast: "a broadcast address",
-  carrierGradeNat: "a carrier-grade NAT address",
-  reserved: "a reserved address",
-  benchmarking: "a benchmarking-range address",
-  ipv4Mapped: "an IPv4-mapped address",
-  "6to4": "a 6to4 tunnelling address",
-  teredo: "a Teredo tunnelling address",
-};
 
 const PUBLIC_REACHABILITY_NOTE =
   "not something reachable from the public internet. A webhook endpoint must be a public URL your build system can reach from outside your network.";
@@ -74,49 +46,13 @@ function fail(error: string): ValidationResult<string> {
   return { ok: false, error };
 }
 
-function describeRange(range: string): string {
-  return RANGE_DESCRIPTIONS[range] ?? "not a publicly routable address";
-}
-
 /**
- * Classify one address. Returns null when it is safe to connect to.
- *
- * An IPv4-mapped IPv6 address is unwrapped first: `::ffff:169.254.169.254`
- * carries a link-local IPv4 address inside an IPv6 shell, and reading the
- * shell's range answers "ipv4Mapped", which says nothing about where the packet
- * actually goes. This is the specific smuggling pattern the story names.
+ * The address classifier — unicast-only allowlist, IPv4-mapped unwrapping,
+ * the per-range wording — lives in `./public-address` since s96, shared with
+ * the free-tools fetcher. It moved unchanged; this module's behaviour and its
+ * tests did not change with it.
  */
-function refusalFor(
-  rawAddress: string,
-): { address: string; why: string } | null {
-  let parsed: ipaddr.IPv4 | ipaddr.IPv6;
-  try {
-    parsed = ipaddr.parse(rawAddress);
-  } catch {
-    // An address the resolver returned that ipaddr cannot read is not something
-    // to connect to on the strength of not understanding it.
-    return { address: rawAddress, why: "not a readable IP address" };
-  }
-
-  if (parsed.kind() === "ipv6") {
-    const v6 = parsed as ipaddr.IPv6;
-    if (v6.isIPv4MappedAddress()) {
-      parsed = v6.toIPv4Address();
-    }
-  }
-
-  const range: string = parsed.range();
-  if (range === ALLOWED_RANGE) return null;
-
-  return { address: parsed.toString(), why: describeRange(range) };
-}
-
-/** Strips the brackets an IPv6 literal wears inside a URL. */
-function unwrapHostname(hostname: string): string {
-  return hostname.startsWith("[") && hostname.endsWith("]")
-    ? hostname.slice(1, -1)
-    : hostname;
-}
+const refusalFor = classifyAddress;
 
 /**
  * Validate a webhook URL against SSRF.

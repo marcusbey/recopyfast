@@ -50,8 +50,10 @@ describe("Playwright CI contract", () => {
   // s79: 86 -> 91, the five e2e/csp.spec.ts tests (marketing surface, /login,
   // /signup, /edit, signed-in dashboard).
   // s98: +1, the maintenance cost calculator flow (e2e/tools-maintenance-cost.spec.ts).
-  // Combined: 86 + 2 + 5 + 1 = 94 distinct tests.
-  it("runs all 94 tests and always cleans up and uploads the redacted summary", () => {
+  // s96: +3, the three e2e/tools.spec.ts tests (hub and tool page, a scan
+  // landing on a nonce report document, a hostile report rendered inert).
+  // Combined: 86 + 2 + 5 + 1 + 3 = 97 distinct tests.
+  it("runs all 97 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -59,15 +61,15 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":94');
-    expect(workflow).toContain("report.expected !== 94");
-    expect(workflow).toContain("report.total !== 94");
-    expect(workflow).toContain("report.passed !== 94");
-    expect(config).toContain("expected: 94");
+    expect(workflow).toContain('"expected":97');
+    expect(workflow).toContain("report.expected !== 97");
+    expect(workflow).toContain("report.total !== 97");
+    expect(workflow).toContain("report.passed !== 97");
+    expect(config).toContain("expected: 97");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
-  it("keeps the credential-free built-embed harness outside the strict 94-test suite", () => {
+  it("keeps the credential-free built-embed harness outside the strict 97-test suite", () => {
     // s06b was recovered after the strict-count reporter became a hard CI contract.
     // Its specs live below e2e/ for shared Playwright conventions, so without an
     // explicit exclusion Playwright recursively collects six extra tests into

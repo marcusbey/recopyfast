@@ -46,7 +46,8 @@ plus custom fetch hooks. See [ADR 005](./decisions/005-client-state-context-and-
 
 ### Two deploy targets
 
-- **Vercel** — the Next.js app. One cron in `vercel.json` (`/api/cron/generate-blog-post`, daily 14:00).
+- **Vercel** — the Next.js app. Crons in `vercel.json`: `/api/cron/generate-blog-post` (daily 14:00),
+  `/api/cron/webhook-dispatch` (every 5 min) and `/api/cron/tool-reports-cleanup` (daily 03:15, s96).
 - **Fly.io** — `server/index.js`, an Express + Socket.io process, deployed 2026-08-17 as
   `recopyfast-ws` in `iad`, **one** `shared-cpu-1x@512MB` machine.
   `https://recopyfast-ws.fly.dev/health` returns `{"status":"ok"}` — liveness only since s79: no
@@ -340,6 +341,11 @@ noise; a comment that says *what broke last time* is the asset.
 **Integrations**
 `webhooks` · `webhook_deliveries` · `api_keys` · `blog_posts` · `bulk_operations`
 
+**Free tools (s96)**
+`tool_reports` — free-tool scan reports and the 24 h scan cache. Not tenant-scoped: service role
+only, no web-principal privilege of any kind, 30-day expiry and a 5,000-row ceiling
+([ADR 062](./decisions/062-free-tool-reports-are-service-role-reads-under-the-nonce-csp.md)).
+
 **Graveyard — frozen, not deleted** (PRD)
 `teams` · `team_members` · `team_invitations` · `team_activity` · `team_activity_log` ·
 `collaboration_sessions` · `collaboration_notifications` · `compliance_reports` ·
@@ -382,7 +388,8 @@ noise; a comment that says *what broke last time* is the asset.
 | **Rate limit / cache** | Redis via `src/lib/api/rate-limit.ts` | `npm run check:redis` |
 | **Errors** | Sentry. Browser: `src/instrumentation-client.ts`. Server: `src/instrumentation.ts` loads `sentry.server.config.ts` (Node) or `sentry.edge.config.ts` (Edge) and exports `onRequestError`. Browser events post same-origin to the `/monitoring` tunnel (`src/lib/monitoring/sentry-tunnel.ts`), rewritten to Sentry's ingest | `next.config.ts` only wraps when the DSN is set, so CI builds without it. No root `instrumentation.ts` or `sentry.client.config.ts`: under Turbopack a root copy shadows `src/`, and the client config is never bundled (s46) |
 | **Cron** | `vercel.json` → `/api/cron/generate-blog-post`; `/api/cron/ab-test-lifecycle` exists but is unscheduled | Cron platforms retry — every job must be idempotent |
-| **Outbound webhooks** | `src/lib/webhooks/`, `/api/webhooks` | Distinct from Stripe's inbound `/api/webhooks/stripe`. SSRF check needs `ipaddr.js` at config **and** delivery time |
+| **Outbound webhooks** | `src/lib/webhooks/`, `/api/webhooks` | Distinct from Stripe's inbound `/api/webhooks/stripe`. SSRF check needs `ipaddr.js` at config **and** delivery time; the address classifier is `src/lib/security/public-address.ts`, shared with the free tools |
+| **Free tools** | `/tools`, `/tools/<slug>`, `/tools/<slug>/r/<id>`, `POST /api/tools/scan`, `src/lib/tools/` | Anonymous public scans of a URL a stranger names (s96). Every fetch goes through `src/lib/tools/fetch/safe-fetch.ts`: IP literals classified before connect, a validating `lookup` so the address checked is the address dialled (no DNS-rebinding window), `agent: false`, ports 80/443, ≤ 3 redirects re-guarded, a 2 MB decompressed cap, robots.txt obeyed for `RecopyFastToolsBot`. Same-origin guard plus fail-closed burst, daily, /48, global and per-target limiters. Reports in `tool_reports` through the service role, rendered under the nonce CSP ([ADR 062](./decisions/062-free-tool-reports-are-service-role-reads-under-the-nonce-csp.md)); ops: [`operations/free-tools.md`](./operations/free-tools.md) |
 
 ### CSP is a first-class constraint, in both directions
 
@@ -390,7 +397,8 @@ noise; a comment that says *what broke last time* is the asset.
 `src/lib/security/content-security-policy.ts` and chosen per request by `src/middleware.ts`:
 
 - **App surface** — `/dashboard`, `/login`, `/signup`, `/edit` and below
-  (`NONCE_POLICY_PATH_PREFIXES`): a fresh nonce per request, `script-src 'nonce-…'
+  (`NONCE_POLICY_PATH_PREFIXES`), plus exactly `/tools/<slug>/r/<id>` — a free-tool report, which
+  renders a stranger's page text (`NONCE_POLICY_PATH_PATTERNS`, s96, ADR 062): a fresh nonce per request, `script-src 'nonce-…'
   'strict-dynamic' '<theme script hash>' 'self' 'unsafe-inline'` (the last two are the CSP1/CSP2
   fallback CSP3 browsers ignore). The middleware puts the same policy on the forwarded request,
   which is where Next reads the nonce it stamps on its scripts. Each of those segments has a server
@@ -399,8 +407,8 @@ noise; a comment that says *what broke last time* is the asset.
   `[...missing]/page.tsx` catch-all so an unknown URL renders the 404 below that dynamic layout,
   rather than serving Next's static `/_not-found` under a nonce it never received. The root
   layout's theme script (`src/lib/theme/theme-init-script.ts`) is allowed by its hash.
-- **Everything else** — the static marketing pages, `/blog`, `/docs/install`, `/try`, the embed,
-  the API — keeps `script-src 'self' 'unsafe-inline'` and stays prerendered. Never add a nonce or
+- **Everything else** — the static marketing pages, `/blog`, `/docs/install`, `/try`, `/tools` and
+  the tool pages, the embed, the API — keeps `script-src 'self' 'unsafe-inline'` and stays prerendered. Never add a nonce or
   hash to it: either makes browsers ignore `'unsafe-inline'`, which is what lets a prerendered
   page's inline scripts run.
 
@@ -462,7 +470,7 @@ assert the following. None of it is true, and each was checked:
 | Cloudflare Workers serve the embed at the edge | No Workers. Vercel static + Next middleware |
 | Socket.io with Redis pub/sub, running | Running since `s07b` — but on **one** machine and with **no** Redis pub/sub. A single process keeps rooms coherent without an adapter; adding a second machine is what would make one mandatory |
 | Script size < 30KB gz | 46,781 gz today |
-| Test coverage ≥ 80% | Jest floor is 69% lines (68 / 61 / 65 / 69 statements / branches / functions / lines, measured 2026-10-09), enforced in CI and ratcheted from measured reality |
+| Test coverage ≥ 80% | Jest floor is 74% lines (73 / 67 / 71 / 74 statements / branches / functions / lines, raised by s96 on 2026-10-11 from a 74.7 / 68.2 / 72.2 / 75.4 measurement), enforced in CI and ratcheted from measured reality |
 
 Fixing the first three in `CLAUDE.md` and keeping this table honest is cheaper than the
 alternative: an agent reads the stale claim, writes a Zustand store, and now the assertion is

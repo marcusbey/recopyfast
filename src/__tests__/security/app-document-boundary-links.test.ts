@@ -18,6 +18,10 @@ const MARKETING_BOUNDARY_FILES = [
   "src/app/demo/page.tsx",
   "src/app/docs/install/page.tsx",
   "src/app/not-found.tsx",
+  "src/app/tools/page.tsx",
+  "src/app/tools/website-spell-checker/page.tsx",
+  "src/app/tools/[slug]/r/[id]/page.tsx",
+  "src/app/tools/[slug]/r/[id]/not-found.tsx",
   "src/app/tools/website-maintenance-cost/page.tsx",
   "src/app/try/page.tsx",
   "src/components/auth/UserMenu.tsx",
@@ -26,6 +30,12 @@ const MARKETING_BOUNDARY_FILES = [
   "src/components/sections/FoundingOfferCard.tsx",
   "src/components/sections/Hero.tsx",
   "src/components/sections/Pricing.tsx",
+  // s96: the free tools' components that link out of a static or report page.
+  "src/components/tools/FindingList.tsx",
+  "src/components/tools/ToolCard.tsx",
+  "src/components/tools/ToolCta.tsx",
+  "src/components/tools/ToolPageLayout.tsx",
+  "src/components/tools/ToolScanForm.tsx",
 ] as const;
 
 const APP_ROUTE_HREF =

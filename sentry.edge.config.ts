@@ -5,6 +5,7 @@
 
 import * as Sentry from '@sentry/nextjs';
 import { releaseOption } from './src/lib/monitoring/sentry-release';
+import { tracePropagationTargets } from './src/lib/monitoring/trace-propagation';
 
 const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -20,6 +21,11 @@ Sentry.init({
   // Performance Monitoring (reduced for edge)
   tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.05 : 1.0,
   
+  // s96: trace headers go to our own origins only. Unset, the SDK attaches
+  // them to EVERY outgoing request — including the free tools' fetches of
+  // sites a stranger named (src/lib/monitoring/trace-propagation.ts).
+  tracePropagationTargets: tracePropagationTargets(process.env),
+
   // Release tracking: the build's commit SHA, the same value the browser
   // reports (s84, src/lib/monitoring/sentry-release.ts). Spread, never
   // `release: undefined` — that would erase the SDK's own fallback.
