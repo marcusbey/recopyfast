@@ -197,7 +197,7 @@ jobs:
         run: node --test scripts/__tests__/uptime-check.test.mjs
 
   # This job is intentionally separate from `e2e`. That job owns the strict
-  # 93-test Next/Supabase/Redis/WebSocket stack; collecting this directory there
+  # 94-test Next/Supabase/Redis/WebSocket stack; collecting this directory there
   # would break its reviewed inventory and make a build-artifact safety net wait
   # on providers it does not use. This harness owns both loopback origins and
   # every API response, so credentials must never become a condition for it.
@@ -233,7 +233,7 @@ jobs:
   # constructing a service-role client, so changing only this workflow cannot
   # point them at production. The strict reporter makes skipped/flaky/missing
   # tests a failure and writes the only uploaded artifact: a credential-free
-  # summary with the exact expected 93-test count.
+  # summary with the exact expected 94-test count.
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
@@ -283,7 +283,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p test-results
-          printf '%s\n' '{"contract":"not-run","expected":93,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
+          printf '%s\n' '{"contract":"not-run","expected":94,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
           chmod 600 test-results/playwright-summary.json
 
       - name: Set up Node.js 24
@@ -435,7 +435,7 @@ jobs:
       - name: Build production app
         run: npm run build
 
-      - name: Run all 93 Playwright tests (blocking)
+      - name: Run all 94 Playwright tests (blocking)
         run: |
           set -euo pipefail
           ws_log="$RUNNER_TEMP/recopyfast-ws.log"
@@ -477,14 +477,14 @@ jobs:
           );
           if (
             report.contract !== "passed" ||
-            report.expected !== 93 ||
-            report.total !== 93 ||
-            report.passed !== 93 ||
+            report.expected !== 94 ||
+            report.total !== 94 ||
+            report.passed !== 94 ||
             report.failed !== 0 ||
             report.skipped !== 0 ||
             report.flaky !== 0
           ) {
-            throw new Error("Playwright did not produce the required clean 93-test summary.");
+            throw new Error("Playwright did not produce the required clean 94-test summary.");
           }
           NODE
 

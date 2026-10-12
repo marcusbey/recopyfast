@@ -51,6 +51,11 @@ export function buildStaticSitemapRoutes(
           priority: 0.7,
         }) as const,
     ),
+    {
+      path: "/tools/website-maintenance-cost",
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
     { path: "/blog", changeFrequency: "daily", priority: 0.7 },
     { path: "/privacy", changeFrequency: "yearly", priority: 0.2 },
     { path: "/terms", changeFrequency: "yearly", priority: 0.2 },

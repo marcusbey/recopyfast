@@ -114,6 +114,7 @@ const INDEXABLE_STATIC = [
   "/try",
   "/compare",
   ...comparisonList.map((comparison) => `/compare/${comparison.slug}`),
+  "/tools/website-maintenance-cost",
   "/blog",
   "/privacy",
   "/terms",
