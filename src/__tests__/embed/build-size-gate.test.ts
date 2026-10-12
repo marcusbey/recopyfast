@@ -139,8 +139,17 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // first (host-page-globals.test.ts). `window.` is back on every use (+10 /
 // +12), part-paid by `864e5` for two 24 h products (−5 / −5); itemised in
 // build-embed.mjs.
-const SEEDED_MAX_BUNDLE_GZ = 45818;
-const SEEDED_MAX_WIDGET_GZ = 33059;
+// RATCHETED 2026-10-12 (s67b-nested-edit-composition), DOWNWARD:
+// 45818 → 45801, 33059 → 33044. Corrected under the repository's Node 24.14.0 /
+// zlib 1.3.1-e00f703: main is 45818 / 33059; applied-descendant ownership is
+// +115 / +106; equivalent compaction is -143 / -146; the fresh-review fix is
+// +8 / +8; final 45798 / 33027. The constants stay at the stricter first-pass
+// pair, leaving 3 / 17 B of
+// headroom without weakening discovery, its cap or shadow coverage. The first
+// 45681 / 32932 evidence was Node 25.6.1 / zlib 1.2.12 and is invalid here.
+// build-embed.mjs itemises the corrected sequence.
+const SEEDED_MAX_BUNDLE_GZ = 45801;
+const SEEDED_MAX_WIDGET_GZ = 33044;
 
 interface CheckRun {
   status: number;

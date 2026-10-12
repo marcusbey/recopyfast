@@ -723,9 +723,7 @@
     element.removeAttribute('sizes');
     const picture = element.parentElement;
     if (picture && picture.tagName === 'PICTURE') {
-      Array.prototype.slice.call(picture.querySelectorAll('source')).forEach(function(source) {
-        source.remove();
-      });
+      picture.querySelectorAll('source').forEach(source => source.remove());
     }
 
     element.src = url;
@@ -772,31 +770,18 @@
    * server-rendered one after hydration (docs/research/s67-embed-spa-support.md
    * R1c, R1d, R3; embed-react-writes.test.tsx; e2e embed-spa E3, E4).
    *
-   * So the text goes into the element's first direct text node, every other
-   * text node beneath the element is blanked, and a text node is appended only
-   * when there is no direct one. No node is removed, replaced or reordered:
-   * element children (an icon's <svg>) stay, with their text blanked. A DOM
-   * that already says `text` is not touched at all, so the embed's own writes
-   * never feed its own MutationObserver a change to react to.
+   * So the text goes into the element's first direct owned text node, every
+   * other owned text node is blanked, and a text node is appended only when
+   * there is no direct one. Which nodes are owned is decided by `owned`
+   * below. No node is removed, replaced or reordered: element children (an
+   * icon's <svg>) stay. A DOM that already says `text` is not touched at all,
+   * so the embed's own writes never feed its own MutationObserver a change to
+   * react to.
    *
    * Every runtime text write goes through here: hydrate, realtime, A/B
    * variants, and the editor's save, cancel and AI paths. Never assign a
    * customer's element its textContent.
    */
-  function writeText(element, text) {
-    if (element.textContent === text) return;
-    // The walker visits text nodes in document order, so the first one whose
-    // parent is the element is its first direct text node.
-    let first = null;
-    const walker = document.createTreeWalker(element, 4 /* NodeFilter.SHOW_TEXT */);
-    for (let node; (node = walker.nextNode());) {
-      if (!first && node.parentNode === element) first = node;
-      else if (node.nodeValue) node.nodeValue = '';
-    }
-    if (first) first.nodeValue = text;
-    else element.append(text);
-  }
-
   // ==========================================
   // STABLE ELEMENT IDENTITY
   // ==========================================
@@ -1298,17 +1283,17 @@
       if (this.isMutationLocked) return true;
 
       this.isMutationLocked = true;
-      const keepDraft = function(id, text) {
+      const keepDraft = (id, text) => {
         try {
           if (id) window.sessionStorage.setItem('rcf_unsaved_draft:' + SITE_ID + ':' + id, text);
         } catch (e) { /* The visible DOM remains the recovery copy. */ }
       };
       keepDraft(elementId, content);
 
-      document.querySelectorAll('[data-rcf-editing]').forEach(function(element) {
+      document.querySelectorAll('[data-rcf-editing]').forEach(element => {
         // Typing can continue while Save is in flight; the latest DOM wins.
         if (element.hasAttribute('contenteditable')) keepDraft(element.getAttribute('data-rcf-id'), element.textContent);
-        ['contenteditable', 'spellcheck', 'role', 'aria-multiline'].forEach(function(attr) {
+        ['contenteditable', 'spellcheck', 'role', 'aria-multiline'].forEach(attr => {
           element.removeAttribute(attr);
         });
       });
@@ -1318,7 +1303,7 @@
         '[data-rcf-toolbar] button, .rcf-field-panel input, ' +
         '#rcf-editor-banner .rcf-editor-banner-publish, #rcf-publish-btn, .rcf-modal-btn-success, ' +
         '#rcf-edit-board-btn, #rcf-edit-board-panel button'
-      ).forEach(function(control) {
+      ).forEach(control => {
         control.disabled = true;
       });
       if (this.editBoard) {
@@ -1610,7 +1595,7 @@
       dismiss.textContent = 'Done';
       dismiss.setAttribute('aria-label', 'Dismiss the ReCopyFast editor bar');
       dismiss.onclick = function() {
-        if (banner.parentNode) banner.parentNode.removeChild(banner);
+        banner.remove();
         if (previousBodyPaddingTop) {
           document.body.style.setProperty('padding-top', previousBodyPaddingTop, previousBodyPaddingPriority);
         } else {
@@ -1766,7 +1751,7 @@
         let stage = 'email';
 
         function close() {
-          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          overlay.remove();
           resolve();
         }
 
@@ -1961,7 +1946,7 @@
 
               self.editMode = canEdit;
 
-              document.body.removeChild(overlay);
+              overlay.remove();
               self.showStagingBanner();
 
               // TOMBSTONE (s67). Every mapped element used to get an
@@ -2255,7 +2240,7 @@
       banner.setAttribute('aria-label', 'ReCopyFast staging toolbar');
 
       const permissions = this.stagingAccess.permissions || [];
-      const permText = permissions.map(function(p) { return p.charAt(0).toUpperCase() + p.slice(1); }).join(', ');
+      const permText = permissions.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ');
       const expiresAt = this.stagingAccess.expiresAt
         ? new Date(this.stagingAccess.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : null;
@@ -2688,7 +2673,7 @@
       const results = out || [];
       const scope = root || document;
 
-      Array.prototype.push.apply(results, Array.prototype.slice.call(scope.querySelectorAll(selector)));
+      results.push(...scope.querySelectorAll(selector));
 
       const all = scope.querySelectorAll('*');
       for (let i = 0; i < all.length; i++) {
@@ -2705,14 +2690,13 @@
     }
 
     scanForContent() {
-      const self = this;
       this.stale = false;
       const path = normalizedPagePath();
       const selector = 'h1, h2, h3, h4, h5, h6, p, span, li, td, th, label, button, ' +
                        'a.rcf-editable-link, img, div[data-rcf-content]';
       const textElements = this.queryDeep(selector);
 
-      textElements.forEach(function(element) {
+      textElements.forEach(element => {
         // Already mapped under its own stamp: nothing to re-derive. Without
         // this, every rescan recomputed the structural id and the selector of
         // every element on the page — 1.3–1.4 s per rescan for 3,005
@@ -2720,13 +2704,13 @@
         // the main thread (research, "Scan cost"). The same lookup decides the
         // page path below (one lookup, not two: s67 re-review, byte funding).
         const stampedId = element.getAttribute('data-rcf-id');
-        const stamped = self.elements.get(stampedId);
+        const stamped = this.elements.get(stampedId);
         if (stamped && stamped.element === element) return;
-        if (self.shouldSkipElement(element)) return;
+        if (this.shouldSkipElement(element)) return;
 
         // An <img> is identified by its source, not by text content.
         const isImage = element.tagName === 'IMG';
-        const text = self.getElementText(element);
+        const text = this.getElementText(element);
         if (!text || text.trim().length < 2) return;
 
         // Deterministic — see computeStableElementId. The same element yields
@@ -2739,20 +2723,20 @@
         const elementData = {
           element: element,
           originalContent: text,
-          selector: self.generateSelector(element),
+          selector: this.generateSelector(element),
           type: element.tagName.toLowerCase(),
           path: pagePath
         };
         elementData.extras = isImage && element.hasAttribute('alt') ? { alt: element.getAttribute('alt') } :
           element.tagName === 'A' && element.hasAttribute('href') ? { href: element.getAttribute('href') } : null;
-        self.elements.set(elementId, elementData);
+        this.elements.set(elementId, elementData);
       });
 
       // Entries whose element left the document. A single-page app replaces
       // whole subtrees on every render; kept, they piled up (241 entries,
       // 212 of them detached, after one navigation on openflows.ai).
-      this.elements.forEach(function(data, id) {
-        if (!data.element.isConnected) self.dropEntry(data, id);
+      this.elements.forEach((data, id) => {
+        if (!data.element.isConnected) this.dropEntry(data, id);
       });
     }
 
@@ -2795,20 +2779,63 @@
                element.offsetHeight < MIN_EDITABLE_IMAGE_PX;
       }
 
-      const hasOnlyElements = Array.from(element.childNodes).every(function(node) {
+      const hasOnlyElements = [...element.childNodes].every(node => {
         return node.nodeType !== Node.TEXT_NODE || !node.textContent.trim();
       });
 
       return hasOnlyElements && !element.hasAttribute('data-rcf-content');
     }
 
-    /** What the element shows now: its value, its image source, or its text. */
-    getElementText(element) {
+    /**
+     * The text nodes this element owns.
+     *
+     * TOMBSTONE (s67b-nested-edit-composition). s67's overwrite repair made a
+     * mapped parent and child erase one another: the parent writer blanked the
+     * child, then the child's repair changed the parent's aggregate text, for
+     * 10 writes each and 30 mutations at boot. A parent now yields only the
+     * text below a descendant whose own copy was actually applied in this page
+     * view (`written`), not every stamped descendant: old rows store a parent's
+     * whole text and would otherwise render the child's authored words twice.
+     * The entry identity check matters when a host repeats an authored id.
+     * Route restoration passes `whole` because originalContent includes the
+     * child's authored words; restoring only the owned prefix produced
+     * "Buy nownow".
+     */
+    owned(element, content, whole) {
+      let first = null;
+      let text = '';
+      const walk = (parent, write) => {
+        for (const node of parent.childNodes) {
+          const data = !whole && node.nodeType === 1 && this.elements.get(node.getAttribute('data-rcf-id'));
+          if (data && data.element === node && data.written !== undefined) continue;
+          if (node.nodeType === 3) {
+            if (write) {
+              if (node !== first && node.nodeValue) node.nodeValue = '';
+            } else {
+              text += node.nodeValue;
+              if (!first && parent === element) first = node;
+            }
+          } else {
+            walk(node, write);
+          }
+        }
+      };
+      walk(element);
+      if (content === undefined) return text;
+      if (text === content) return false;
+      walk(element, true);
+      if (first) first.nodeValue = content;
+      else element.append(content);
+      return true;
+    }
+
+    /** What the element shows now: its value, its image source, or its owned text. */
+    getElementText(element, whole) {
       if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
         return element.value;
       }
       if (element.tagName === 'IMG') return element.getAttribute('src') || '';
-      return element.textContent;
+      return whole ? element.textContent : this.owned(element);
     }
 
     /**
@@ -2824,6 +2851,8 @@
         return (element.value || element.placeholder || '').trim();
       }
 
+      const owned = this.owned(element);
+      if (owned !== element.textContent) return owned;
       const text = Rules.readEditableText(element);
 
       // Visually truncated copy sometimes stashes the full string out of band.
@@ -2899,7 +2928,7 @@
       // Container elements - check if contains only child elements
       if (['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav'].includes(tagName)) {
         // Check if element has direct text content (not just whitespace)
-        const hasDirectText = Array.from(element.childNodes).some(function(node) {
+        const hasDirectText = [...element.childNodes].some(node => {
           return node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0;
         });
 
@@ -2931,13 +2960,13 @@
         }
 
         if (current.className && typeof current.className === 'string') {
-          const classes = current.className.trim().split(/\s+/).filter(function(c) { return !c.startsWith('rcf-'); });
+          const classes = current.className.trim().split(/\s+/).filter(c => !c.startsWith('rcf-'));
           if (classes.length > 0) {
             selector += '.' + classes.join('.');
           }
         }
 
-        const siblings = Array.from(current.parentNode?.children || []);
+        const siblings = [...(current.parentNode?.children || [])];
         const index = siblings.indexOf(current);
         if (siblings.length > 1) {
           selector += ':nth-child(' + (index + 1) + ')';
@@ -3168,7 +3197,7 @@
       if (this.rowsPath !== this.pagePath) return;
       const contentMap = {};
 
-      this.elements.forEach(function(data, elementId) {
+      this.elements.forEach((data, elementId) => {
         const entry = contentMap[elementId] = {
           selector: data.selector,
           content: data.originalContent,
@@ -3258,7 +3287,7 @@
       // The upsert stays `ignoreDuplicates`, so re-reporting remains harmless —
       // this is about not paying for a write that can only be a no-op.
       const known = this.serverKnownElementIds;
-      const claimed = elementIds.filter(function(id) { return !known.has(id); });
+      const claimed = elementIds.filter(id => !known.has(id));
       if (!claimed.length) return;
 
       // Coalesced (s67). A page that keeps rendering — a live feed, an
@@ -3296,7 +3325,7 @@
       // The body carries only the claimed ids, so an id is reported once per
       // page lifetime however many reports the page makes (s67).
       const report = {};
-      claimed.forEach(function(id) {
+      claimed.forEach(id => {
         known.add(id);
         report[id] = contentMap[id];
       });
@@ -3314,13 +3343,13 @@
         // yet" forever. This runs on load rather than on unload, so there is
         // nothing for keepalive to buy.
         body: JSON.stringify(report)
-      }).catch(function() {
+      }).catch(() => {
         // Offline, blocked by an extension, or the site was deleted. Nothing
         // useful to say on a customer's page — but give the claim back, so the
         // next rescan or navigation retries instead of inheriting a report that
         // never happened. Only the ids this call added are removed; ones the
         // server already held are not ours to forget.
-        claimed.forEach(function(id) { known.delete(id); });
+        claimed.forEach(id => known.delete(id));
       });
     }
 
@@ -3425,11 +3454,10 @@
       }
 
       // Client-side fallback using FNV-1a hash
-      var self = this;
-      this.activeTests.forEach(function(test) {
-        if (self.variantAssignments[test.id]) return;
+      this.activeTests.forEach(test => {
+        if (this.variantAssignments[test.id]) return;
 
-        var hash = self.fnv1aHash(self.visitorId + ':' + test.id);
+        var hash = this.fnv1aHash(this.visitorId + ':' + test.id);
         var bucket = hash % 100;
         var cumulative = 0;
 
@@ -3443,7 +3471,7 @@
         // different variant whenever the planner returns the rows differently
         // — and nothing anywhere reports it: the visitor just sees a different
         // headline and both page views are recorded under one visitor_id.
-        var eligible = test.variants.slice().sort(function(a, b) {
+        var eligible = test.variants.slice().sort((a, b) => {
           return !!b.is_control - !!a.is_control || (a.id > b.id) - (a.id < b.id);
         });
 
@@ -3457,14 +3485,14 @@
         // server serves A, this serves B on the next page, and both are
         // recorded under one visitor_id. Declining costs the visitor the
         // page's own copy; guessing costs the marketer the experiment.
-        if (eligible.some(function(v) {
+        if (eligible.some(v => {
           return (v.geo_countries || '').length || (v.geo_regions || '').length;
         })) return;
 
         for (var i = 0; i < eligible.length; i++) {
           cumulative += eligible[i].traffic_percentage;
           if (bucket < cumulative) {
-            self.variantAssignments[test.id] = eligible[i].id;
+            this.variantAssignments[test.id] = eligible[i].id;
             break;
           }
         }
@@ -3495,13 +3523,11 @@
     }
 
     applyVariants() {
-      var self = this;
-
-      this.activeTests.forEach(function(test) {
-        var assignedVariantId = self.variantAssignments[test.id];
+      this.activeTests.forEach(test => {
+        var assignedVariantId = this.variantAssignments[test.id];
         if (!assignedVariantId) return;
 
-        var variant = test.variants.find(function(v) { return v.id === assignedVariantId; });
+        var variant = test.variants.find(v => v.id === assignedVariantId);
         if (!variant) return;
 
         // Skip replacement for control variants — visitor sees original
@@ -3511,7 +3537,7 @@
         var targetElementId = test.target_element_id;
         if (!targetElementId) return;
 
-        var elementData = self.elements.get(targetElementId);
+        var elementData = this.elements.get(targetElementId);
         if (!elementData || !elementData.element) return;
 
         // Replace content. Through the one writer of applied copy, so the
@@ -3519,7 +3545,7 @@
         // back when the route changes (PR #69 review, D2). It also leaves an
         // element being edited alone, and swaps an image's source instead of
         // appending text to the <img>.
-        self.applyContentToElement(elementData, variant.variant_content);
+        this.applyContentToElement(elementData, variant.variant_content);
 
         // Add data attributes for debugging/tracking
         elementData.element.setAttribute('data-rcf-test', test.id);
@@ -3528,13 +3554,11 @@
     }
 
     setupClickTracking() {
-      var self = this;
-
-      this.activeTests.forEach(function(test) {
+      this.activeTests.forEach(test => {
         var targetElementId = test.target_element_id;
         if (!targetElementId) return;
 
-        var elementData = self.elements.get(targetElementId);
+        var elementData = this.elements.get(targetElementId);
         if (!elementData || !elementData.element) return;
 
         var el = elementData.element;
@@ -3546,39 +3570,38 @@
           if (clickable) clickTarget = clickable;
         }
 
-        clickTarget.addEventListener('click', function() {
-          var variantId = self.variantAssignments[test.id];
-          if (!variantId || !self.visitorId) return;
+        clickTarget.addEventListener('click', () => {
+          var variantId = this.variantAssignments[test.id];
+          if (!variantId || !this.visitorId) return;
 
-          self.sendTrackEvent({
+          this.sendTrackEvent({
             site_id: SITE_ID,
             test_id: test.id,
             variant_id: variantId,
-            visitor_id: self.visitorId,
+            visitor_id: this.visitorId,
             event_type: 'click',
-            geo_country: self.geoData ? self.geoData.country : null,
-            geo_region: self.geoData ? self.geoData.region : null
+            geo_country: this.geoData ? this.geoData.country : null,
+            geo_region: this.geoData ? this.geoData.region : null
           });
         });
       });
     }
 
     trackImpressions() {
-      var self = this;
       var events = [];
 
-      this.activeTests.forEach(function(test) {
-        var variantId = self.variantAssignments[test.id];
-        if (!variantId || !self.visitorId) return;
+      this.activeTests.forEach(test => {
+        var variantId = this.variantAssignments[test.id];
+        if (!variantId || !this.visitorId) return;
 
         events.push({
           site_id: SITE_ID,
           test_id: test.id,
           variant_id: variantId,
-          visitor_id: self.visitorId,
+          visitor_id: this.visitorId,
           event_type: 'view',
-          geo_country: self.geoData ? self.geoData.country : null,
-          geo_region: self.geoData ? self.geoData.region : null
+          geo_country: this.geoData ? this.geoData.country : null,
+          geo_region: this.geoData ? this.geoData.region : null
         });
       });
 
@@ -3588,23 +3611,22 @@
     }
 
     trackConversion(eventName, value) {
-      var self = this;
       var events = [];
 
-      this.activeTests.forEach(function(test) {
-        var variantId = self.variantAssignments[test.id];
-        if (!variantId || !self.visitorId) return;
+      this.activeTests.forEach(test => {
+        var variantId = this.variantAssignments[test.id];
+        if (!variantId || !this.visitorId) return;
 
         events.push({
           site_id: SITE_ID,
           test_id: test.id,
           variant_id: variantId,
-          visitor_id: self.visitorId,
+          visitor_id: this.visitorId,
           event_type: 'conversion',
           value: value || 1,
           metadata: { event_name: eventName },
-          geo_country: self.geoData ? self.geoData.country : null,
-          geo_region: self.geoData ? self.geoData.region : null
+          geo_country: this.geoData ? this.geoData.country : null,
+          geo_region: this.geoData ? this.geoData.region : null
         });
       });
 
@@ -3628,25 +3650,24 @@
           headers: { 'Content-Type': 'application/json' },
           body: payload,
           keepalive: true
-        }).catch(function() {});
+        }).catch(() => {});
       }
     }
 
     handleABTestUpdate(data) {
-      var self = this;
       if (data.status === 'active') {
         // Reload test config
-        this.fetchActiveTests().then(function() {
-          return self.bucketVisitor();
-        }).then(function() {
-          self.applyVariants();
-          self.setupClickTracking();
-          self.trackImpressions();
+        this.fetchActiveTests().then(() => {
+          return this.bucketVisitor();
+        }).then(() => {
+          this.applyVariants();
+          this.setupClickTracking();
+          this.trackImpressions();
         });
       } else if (data.status === 'completed') {
         // Remove test from active list, winner content stays applied
-        self.activeTests = self.activeTests.filter(function(t) { return t.id !== data.test_id; });
-        delete self.variantAssignments[data.test_id];
+        this.activeTests = this.activeTests.filter(t => t.id !== data.test_id);
+        delete this.variantAssignments[data.test_id];
       }
     }
 
@@ -3708,8 +3729,11 @@
       // the comparison stale the moment the host re-rendered, and made
       // discovery and the route-change restore read published copy as if it
       // were authored (s65a's invariant). It now stays the first-seen authored
-      // text (s67).
-      if (content == null || content === this.getElementText(target)) return value !== null;
+      // text (s67). Whole route restoration compares aggregate text: comparing
+      // only the owned prefix skipped the whole writer when that prefix happened
+      // to equal originalContent, then the child's restore made "Buy nownow"
+      // (s67b fresh review).
+      if (content == null || content === this.getElementText(target, attributes === true)) return value !== null;
       elementData.writes = ~~elementData.writes + 1;
       elementData.written = content;
 
@@ -3720,7 +3744,7 @@
         // session cannot resize the page under the reader.
         applyImageSource(target, content);
       } else {
-        writeText(target, content);
+        this.owned(target, content, attributes === true);
       }
       return true;
     }
@@ -3800,7 +3824,7 @@
     dropEntry(data, id) {
       const element = data.element;
       if (data.written === this.getElementText(element)) {
-        this.applyContentToElement(data, data.originalContent);
+        this.applyContentToElement(data, data.originalContent, true);
       }
       element.removeAttribute('data-rcf-variant');
       element.removeAttribute('data-rcf-test');
@@ -4516,7 +4540,7 @@
         const host = element.parentNode || document.body;
         host.appendChild(ghost);
         const grew = ghost.scrollHeight > (parseFloat(computed.height) || 0) * 1.1;
-        host.removeChild(ghost);
+        ghost.remove();
 
         return grew;
       } catch (e) {
@@ -4821,8 +4845,8 @@
         // textContent, never innerText: innerText applies text-transform, so an
         // uppercase heading would save back as SHOUTING and overwrite the
         // author's real copy. It also collapses the whitespace <pre> depends on.
-        const raw = element.textContent || '';
-        return floor.preservesWhitespace ? raw : raw.trim();
+        const raw = self.owned(element);
+        return raw !== element.textContent || floor.preservesWhitespace ? raw : raw.trim();
       };
 
       let maxChars = self.calculateMaxChars(element);
@@ -4994,7 +5018,7 @@
         // Only an author who gives a field the same data-rcf-id as a mapped
         // element opens the popover, on that other element's entry.
         if (textChanged) {
-          writeText(element, newContent);
+          self.owned(element, newContent);
           elementData.written = newContent;
         }
         for (const f of fieldInputs) {
@@ -5015,7 +5039,7 @@
         // textContent restore is only safe when we would otherwise be leaving
         // edited text behind; if nothing changed, leave the DOM (and any author
         // markup inside it) exactly as it was.
-        if (sanitizeContent() !== originalText) writeText(element, originalText);
+        if (sanitizeContent() !== originalText) self.owned(element, originalText);
         cleanup();
       };
 
@@ -5026,7 +5050,7 @@
         e.stopPropagation();
         self.showAISuggestions({
           get value() { return sanitizeContent(); },
-          set value(v) { writeText(element, v); updateCounter(); scheduleReposition(); }
+          set value(v) { self.owned(element, v); updateCounter(); scheduleReposition(); }
         }, elementId);
       }, active);
 
@@ -5318,7 +5342,7 @@
         element.removeAttribute('data-rcf-editing');
         element.classList.remove('rcf-editing');
         if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
+          overlay.remove();
         }
       };
 
@@ -5440,7 +5464,7 @@
           // Inline styles are restored wholesale by startTextEdit's teardown;
           // only the badge needs removing here.
           return function() {
-            if (badge.parentNode) badge.parentNode.removeChild(badge);
+            badge.remove();
           };
         }
       });
@@ -5545,7 +5569,7 @@
       const cleanup = function() {
         element.removeAttribute('data-rcf-editing');
         element.classList.remove('rcf-editing');
-        if (document.body.contains(popover)) document.body.removeChild(popover);
+        popover.remove();
       };
 
       const save = async function() {
@@ -5626,7 +5650,7 @@
         hint.style.transition = 'opacity 0.3s ease';
         setTimeout(function() {
           if (document.body.contains(hint)) {
-            document.body.removeChild(hint);
+            hint.remove();
           }
         }, 300);
       }, 2000);
@@ -5729,7 +5753,7 @@
 
       const closeModal = function() {
         if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
+          overlay.remove();
         }
       };
 
@@ -5851,21 +5875,20 @@
     }
 
     startPolling() {
-      const self = this;
-      this.pollTimer = setInterval(async function() {
+      this.pollTimer = setInterval(async () => {
         try {
-          const staged = self.canReachStagingContent();
-          const endpoint = contentReadEndpoint(staged, self.editorTokenQuery(), self.pagePath);
+          const staged = this.canReachStagingContent();
+          const endpoint = contentReadEndpoint(staged, this.editorTokenQuery(), this.pagePath);
 
           const response = await fetch(endpoint, {
             headers: Object.assign({
               'Authorization': 'Bearer ' + SITE_TOKEN,
-            }, self.editorAuthHeaders()),
+            }, this.editorAuthHeaders()),
           });
           if (response.ok) {
             const data = await response.json();
             const updates = staged ? data.content : data;
-            updates.forEach(function(update) { self.handleContentUpdate(update); });
+            updates.forEach(update => this.handleContentUpdate(update));
           }
         } catch (error) {
           console.error('ReCopyFast: Polling error:', error);
@@ -5901,7 +5924,7 @@
 
       const banner = document.querySelector('#rcf-staging-banner');
       if (banner) {
-        document.body.removeChild(banner);
+        banner.remove();
       }
     }
   }
@@ -5932,7 +5955,7 @@
         this.panel.style.transform = 'translateX(100%)';
         setTimeout(() => {
           if (this.panel && document.body.contains(this.panel)) {
-            document.body.removeChild(this.panel);
+            this.panel.remove();
           }
           this.panel = null;
         }, 300);

@@ -3265,11 +3265,12 @@ build as is.
 Embed allocation: ≤ +850 gz gross on each measurement (bundle and widget), net ≤ 0, paid in
 this branch. See § Byte budget and `docs/plans/s67-embed-spa-support.md`.
 
-## Story s67b-nested-edit-composition — STUB (backlog)
+## Story s67b-nested-edit-composition — scheduled and validated 2026-10-12
 
 Owner decision, 2026-10-08, on the PR #69 fix run's byte overrun: **"Ship D2+D3 now, D1 as
 follow-up"**. D2 (A/B markers leave with the route) and D3 (null-prototype row index) shipped
-with s67. This story is D1. There is no research or plan until the owner schedules it.
+with s67. This story is D1. The owner validated its implementation on 2026-10-12; see
+`docs/plans/s67b-nested-edit-composition.md`.
 
 **Evidence: PR #69 bot review (Devin), D1, red** (`docs/reviews/s67-embed-spa-support.md`).
 A parent and a mapped descendant both have edited rows (`<h1>Buy <span>now</span></h1>`).
@@ -3325,7 +3326,13 @@ so each is the owner's call:
   copy. It costs +36 / +38 on top of D2+D3, against D1's +87 / +84. It is untested, and it
   renders "Shop " rather than "Shop today".
 
-**Embed allocation:** TBD.
+**Embed allocation (Node 24.14.0 / zlib 1.3.1-e00f703):** the applied-descendant feature is
++115 / +106 gz over current main (45,818 / 33,059). Behavior-equivalent compaction contributes
+-143 / -146; the fresh-review whole-restore correction and tombstone add +8 / +8. Final is
+45,798 / 33,027, net -20 / -32. The stricter ceilings committed for
+the story remain 45,801 / 33,044. Discovery spacing, its trailing report, the per-page cap and
+shadow-root observation are unchanged. The earlier 45,681 / 32,932 baseline came from the
+managed worktree's Node 25.6.1 / zlib 1.2.12 and is not valid repository evidence.
 
 ## s68 — security hardening (split into s68a / s68b / s68c)
 

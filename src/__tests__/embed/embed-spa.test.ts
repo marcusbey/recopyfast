@@ -53,9 +53,19 @@ interface FetchOptions {
   variantTarget?: string;
 }
 
+interface WidgetEntry {
+  element: Element;
+  path: string | null;
+  writes?: number;
+  written?: string;
+}
+
 interface Widget {
-  elements: Map<string, { element: Element; path: string | null }>;
+  elements: Map<string, WidgetEntry>;
   isInitialized: boolean;
+  rescan(): void;
+  startInlineEdit(element: Element): void;
+  handleContentUpdate(data: Record<string, unknown>): void;
   destroy(): void;
 }
 
@@ -474,6 +484,268 @@ describe("AC 4 — a host re-render cannot put the authored copy back", () => {
 
     expect(host.errors).toEqual([]);
     expect(hero.textContent).toBe("Published hero");
+  });
+});
+
+describe("s67b — nested edited elements compose by applied-descendant ownership", () => {
+  function nestedMarkup(withIds = true) {
+    document.body.innerHTML = `<h1${withIds ? ' data-rcf-id="parent"' : ""}>Buy <span${withIds ? ' data-rcf-id="child"' : ""}>now</span></h1>`;
+    return {
+      parent: document.querySelector("h1") as HTMLElement,
+      child: document.querySelector("h1 span") as HTMLElement,
+    };
+  }
+
+  function editedRows(parentId = "parent", childId = "child"): Row[] {
+    return [
+      {
+        element_id: parentId,
+        original_content: "Buy now",
+        current_content: "Shop ",
+      },
+      {
+        element_id: childId,
+        original_content: "now",
+        current_content: "today",
+      },
+    ];
+  }
+
+  it("settles in three writes, rescans silently, and repairs twelve alternating host write-backs without losing either edit", async () => {
+    const { parent, child } = nestedMarkup();
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((batch) => records.push(...batch));
+    observer.observe(parent, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    await boot({ rows: { "*": editedRows() } });
+
+    expect(parent.firstChild!.nodeValue).toBe("Shop ");
+    expect(child.textContent).toBe("today");
+    expect(parent.textContent).toBe("Shop today");
+    expect(
+      records.filter((record) => record.type === "characterData"),
+    ).toHaveLength(3);
+
+    const afterBoot = records.length;
+    widget().rescan();
+    await flushMicrotasks();
+    expect(records).toHaveLength(afterBoot);
+
+    for (let index = 0; index < 12; index++) {
+      if (index % 2 === 0) parent.firstChild!.nodeValue = `Host ${index} `;
+      else child.firstChild!.nodeValue = `host ${index}`;
+      await flushMicrotasks();
+      expect(parent.firstChild!.nodeValue).toBe("Shop ");
+      expect(child.textContent).toBe("today");
+      expect(parent.textContent).toBe("Shop today");
+    }
+
+    observer.disconnect();
+  });
+
+  it("keeps the whole-parent row behavior when a mapped child has no applied copy", async () => {
+    document.body.innerHTML =
+      '<h1 data-rcf-id="parent">Build faster with <span data-rcf-id="child">AI</span></h1>';
+    const parent = byId("parent");
+    const child = byId("child");
+
+    await boot({
+      rows: {
+        "*": [
+          {
+            element_id: "parent",
+            original_content: "Build faster with AI",
+            current_content: "Ship smarter with AI",
+          },
+        ],
+      },
+    });
+
+    expect(parent.firstChild!.nodeValue).toBe("Ship smarter with AI");
+    expect(child.textContent).toBe("");
+    expect(parent.textContent).toBe("Ship smarter with AI");
+  });
+
+  it("does not transfer applied ownership to a remounted descendant that reuses the old id", async () => {
+    const { parent, child } = nestedMarkup();
+    await boot({ rows: { "*": editedRows() } });
+    expect(parent.textContent).toBe("Shop today");
+
+    const replacement = document.createElement("span");
+    replacement.setAttribute("data-rcf-id", "child");
+    replacement.textContent = "replacement authored child";
+    child.replaceWith(replacement);
+    parent.firstChild!.nodeValue = "Host parent ";
+    await flushMicrotasks();
+
+    // The Map still points at the detached child until the scheduled rescan.
+    // Exact node identity keeps that stale entry from making this new span look
+    // applied: the parent owns and blanks it for now.
+    expect(parent.firstChild!.nodeValue).toBe("Shop ");
+    expect(replacement.textContent).toBe("");
+    expect(parent.textContent).toBe("Shop ");
+  });
+
+  it("keeps a realtime child update through later parent and child write-backs", async () => {
+    const { parent, child } = nestedMarkup();
+    await boot({ rows: { "*": [editedRows()[0]] } });
+
+    widget().handleContentUpdate({ elementId: "child", content: "today" });
+    expect(parent.textContent).toBe("Shop today");
+
+    for (let index = 0; index < 12; index++) {
+      if (index % 2 === 0) parent.firstChild!.nodeValue = `Host ${index} `;
+      else child.firstChild!.nodeValue = `host ${index}`;
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop today");
+    }
+  });
+
+  it("keeps a child variant and its markers when the host writes the parent back", async () => {
+    const { parent, child } = nestedMarkup();
+    await boot({
+      rows: { "*": [editedRows()[0]] },
+      variantTarget: "child",
+    });
+    expect(child.textContent).toBe("Variant copy");
+    expect(child.getAttribute("data-rcf-variant")).toBe(VARIANT_ID);
+
+    parent.firstChild!.nodeValue = "Host parent ";
+    await flushMicrotasks();
+
+    expect(parent.firstChild!.nodeValue).toBe("Shop ");
+    expect(child.textContent).toBe("Variant copy");
+    expect(child.getAttribute("data-rcf-test")).toBe(TEST_ID);
+    expect(child.getAttribute("data-rcf-variant")).toBe(VARIANT_ID);
+  });
+
+  it("restores the whole authored parent on navigation, then reports the host-rendered parent and child under the new path", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      const { parent, child } = nestedMarkup(false);
+      const recorded = await boot({
+        rows: (pagePath) =>
+          pagePath === "/"
+            ? editedRows(
+                parent.getAttribute("data-rcf-id")!,
+                child.getAttribute("data-rcf-id")!,
+              )
+            : [],
+      });
+      expect(parent.textContent).toBe("Shop today");
+
+      useFakeTimers();
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("");
+      expect(parent.hasAttribute("data-rcf-id")).toBe(false);
+      expect(child.hasAttribute("data-rcf-id")).toBe(false);
+
+      // The route's host render owns the complete authored tree. The restore
+      // above deliberately leaves the child blank until this render arrives.
+      parent.firstChild!.nodeValue = "Buy ";
+      child.firstChild!.nodeValue = "now";
+      await flushMicrotasks();
+      await advance(250, 50);
+
+      const parentId = parent.getAttribute("data-rcf-id")!;
+      const childId = child.getAttribute("data-rcf-id")!;
+      expect(widget().elements.get(parentId)!.path).toBe("/next");
+      expect(widget().elements.get(childId)!.path).toBe("/next");
+      const nextPage = discoveryBodies(recorded)
+        .flatMap((body) => Object.entries(body))
+        .filter(([, entry]) => entry.page_path === "/next");
+      expect(nextPage.find(([id]) => id === parentId)?.[1].content).toBe(
+        "Buy now",
+      );
+      expect(nextPage.find(([id]) => id === childId)?.[1].content).toBe("now");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("does not skip a whole route restore when the parent's owned copy equals its aggregate authored copy", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      const { parent, child } = nestedMarkup(false);
+      await boot({
+        rows: (pagePath) =>
+          pagePath === "/"
+            ? [
+                {
+                  element_id: child.getAttribute("data-rcf-id")!,
+                  original_content: "now",
+                  current_content: "today",
+                },
+              ]
+            : [],
+      });
+      const parentId = parent.getAttribute("data-rcf-id")!;
+      expect(parent.textContent).toBe("Buy today");
+
+      widget().handleContentUpdate({
+        elementId: parentId,
+        content: "Buy now",
+      });
+      await flushMicrotasks();
+      expect(parent.firstChild!.nodeValue).toBe("Buy now");
+      expect(child.textContent).toBe("today");
+      expect(parent.textContent).toBe("Buy nowtoday");
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("saves only the outer element's owned text and preserves the separating space", async () => {
+    const { parent, child } = nestedMarkup();
+    const recorded = await boot({ rows: { "*": editedRows() } });
+    jest.spyOn(window, "confirm").mockReturnValue(true);
+
+    const editor = widget() as Widget & {
+      stagingMode: boolean;
+      stagingToken: string;
+    };
+    // Exercise the editor renderer directly without installing a second
+    // document click listener into this shared jsdom suite.
+    editor.stagingMode = true;
+    editor.stagingToken = "test_nested_editor";
+    editor.startInlineEdit(parent);
+    parent.firstChild!.nodeValue = "Sell ";
+    (document.querySelector(".rcf-btn-save") as HTMLButtonElement).click();
+    await settle();
+
+    const saved = recorded.find(
+      (request) =>
+        request.method === "PUT" &&
+        request.url.includes(`/staging/content/${SITE_ID}`),
+    );
+    expect(saved).toBeDefined();
+    expect(JSON.parse(saved!.body!).content).toBe("Sell ");
+    expect(parent.firstChild!.nodeValue).toBe("Sell ");
+    expect(child.textContent).toBe("today");
+    expect(parent.textContent).toBe("Sell today");
   });
 });
 
