@@ -4753,12 +4753,12 @@ that row after the read, I see a conflict and refreshed content instead of losin
 
 The full plan `docs/plans/s81-version-restore-integrity.md` was human validated on 2026-10-12.
 
-- [ ] Discard carries the precise authoritative row version from the same content snapshot.
-- [ ] A service-only atomic conditional save returns a conflict without content/history changes.
-- [ ] HTTP 409 refreshes the row and requires another deliberate Discard; no automatic retry.
-- [ ] Existing callers omitting the optional precondition keep last-write-wins behavior.
-- [ ] Real PostgreSQL concurrent, privilege and replay checks and normal repository gates pass.
-- [ ] Fresh independent review passes. Production migrations and merge remain manual.
+- [x] Discard carries the precise authoritative row version from the same content snapshot.
+- [x] A service-only atomic conditional save returns a conflict without content/history changes.
+- [x] HTTP 409 refreshes the row and requires another deliberate Discard; no automatic retry.
+- [x] Existing callers omitting the optional precondition keep last-write-wins behavior.
+- [x] Real PostgreSQL concurrent, privilege and replay checks and normal repository gates pass.
+- [x] Fresh independent review passes. Production migrations and merge remain manual.
 
 Branch: `feature/s81-version-restore-integrity`. Dependency: s65b verification/deployment first.
 Embed allocation: 0 bytes.
