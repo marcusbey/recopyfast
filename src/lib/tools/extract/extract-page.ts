@@ -18,7 +18,10 @@
  * their block. Script, style, template, code-like and form-control content is
  * excluded, as is anything `hidden`, `aria-hidden="true"` or styled
  * `display:none` / `visibility:hidden` inline. Bidi controls, zero-width
- * characters and soft hyphens are stripped (`@/lib/tools/text`).
+ * characters and soft hyphens are stripped (`@/lib/tools/text`). One `hidden`
+ * is read: a React streaming segment, `<div hidden id="S:0">`. The Suspense
+ * fallback that segment replaces is skipped instead (s96c, see
+ * `STREAMED_SEGMENT_ID`).
  *
  * BOUNDED AND ITERATIVE. Every list is capped, and the tree is walked with an
  * explicit stack: 50,000 nested `<div>`s would overflow a recursive walk.
@@ -57,6 +60,7 @@ import {
 type Node = DefaultTreeAdapterMap["node"];
 type Element = DefaultTreeAdapterMap["element"];
 type TextNode = DefaultTreeAdapterMap["textNode"];
+type CommentNode = DefaultTreeAdapterMap["commentNode"];
 
 export const MAX_BLOCKS = 2_000;
 export const MAX_BLOCK_CHARS = 2_000;
@@ -185,9 +189,62 @@ const EXCLUDED_TAGS = new Set([
 const HIDDEN_STYLE =
   /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i;
 
+/**
+ * A React streaming segment: `<div hidden id="S:<id>">` (s96c).
+ *
+ * THE INCIDENT. Right after s96 shipped, the Typo Finder told us that our own
+ * https://www.recopyfa.st/terms "shows almost no text in its HTML". The page
+ * is server-rendered, but a Next.js App Router page that streams through a
+ * Suspense boundary (there, the root `loading.tsx`) sends the boundary's
+ * FALLBACK in the visible shell. The real content arrives later in the same
+ * response inside `<div hidden id="S:0">`, and React's inline
+ * `$RC("B:0","S:0")` moves it into place. Reading every `hidden` as hidden
+ * left one word, "Loading…", on every such page — and many of the sites our
+ * users build are App Router sites.
+ *
+ * So a hidden element whose id is a segment id is read where it sits. Its
+ * place in the page does not matter for what a lens looks for; leaving it out
+ * does. Only the `hidden` attribute is waived: `aria-hidden` and an inline
+ * `display:none` still hide it. The fallback it replaces is skipped by the
+ * walk (`PENDING_BOUNDARY_START`).
+ *
+ * HEXADECIMAL, NOT DIGITS. React writes the id as `id.toString(16)`
+ * (`writeStartSegment` in react-dom/server, and in Next's compiled copy), so
+ * the eleventh segment is `S:a`. `/^S:\d+$/` would silently drop it.
+ */
+const STREAMED_SEGMENT_ID = /^S:[0-9a-f]+$/;
+
+/**
+ * The fallback that a segment replaces (s96c). React writes a pending boundary
+ * as `<!--$?--><template id="B:<id>"></template>FALLBACK<!--/$-->`, and its
+ * `$RV` removes the template and every next sibling up to the MATCHING
+ * `<!--/$-->`. It counts depth: `$`, `$?`, `$!`, `$~` and `&` open a level,
+ * `/$` and `/&` close one. Then it moves the segment in. The walk skips that
+ * same run. On /terms the fallback was "Loading…": loading UI is not the
+ * page's copy, so it is never read and never counts toward "has text",
+ * whether or not its segment arrived.
+ *
+ * A `<!--$!-->` boundary (rendered on the client after a server error) is not
+ * pending. Its content stays on screen, so it is read as before.
+ */
+const PENDING_BOUNDARY_START = "$?";
+const PENDING_BOUNDARY_TEMPLATE_ID = /^B:[0-9a-f]+$/;
+const BOUNDARY_OPENERS: ReadonlySet<string> = new Set([
+  "$",
+  "$?",
+  "$!",
+  "$~",
+  "&",
+]);
+const BOUNDARY_CLOSERS: ReadonlySet<string> = new Set(["/$", "/&"]);
+
 function attr(element: Element, name: string): string | null {
   const found = element.attrs.find((attribute) => attribute.name === name);
   return found ? found.value : null;
+}
+
+function isStreamedSegment(element: Element): boolean {
+  return STREAMED_SEGMENT_ID.test(attr(element, "id") ?? "");
 }
 
 /**
@@ -196,7 +253,9 @@ function attr(element: Element, name: string): string | null {
  * Checker reports it as decorative — so images ask without it.
  */
 function isHidden(element: Element, countAriaHidden = true): boolean {
-  if (attr(element, "hidden") !== null) return true;
+  if (attr(element, "hidden") !== null && !isStreamedSegment(element)) {
+    return true;
+  }
   if (
     countAriaHidden &&
     (attr(element, "aria-hidden") ?? "").trim().toLowerCase() === "true"
@@ -212,6 +271,10 @@ function isElement(node: Node): node is Element {
 
 function isText(node: Node): node is TextNode {
   return node.nodeName === "#text";
+}
+
+function isComment(node: Node): node is CommentNode {
+  return node.nodeName === "#comment";
 }
 
 function cleanText(raw: string): string {
@@ -277,6 +340,35 @@ interface LinkContext {
 }
 
 type Frame = { node: Node; exit: boolean };
+
+/**
+ * True when `comment` opens a pending boundary: `<!--$?-->` directly followed
+ * by `<template id="B:<id>">`. A comment has no children, so the frame on top
+ * of the stack is its next sibling (or its parent's exit). Peeking at it costs
+ * O(1); looking the sibling up by index would be quadratic on a page made of
+ * 100,000 templates.
+ */
+function opensPendingFallback(
+  comment: CommentNode,
+  stack: readonly Frame[],
+): boolean {
+  if (comment.data !== PENDING_BOUNDARY_START) return false;
+  const next = stack[stack.length - 1];
+  return (
+    next !== undefined &&
+    !next.exit &&
+    isElement(next.node) &&
+    next.node.tagName === "template" &&
+    PENDING_BOUNDARY_TEMPLATE_ID.test(attr(next.node, "id") ?? "")
+  );
+}
+
+/** The fallback depth after skipping `node`, or null once its closer is passed. */
+function depthAfter(node: Node, depth: number): number | null {
+  if (!isComment(node)) return depth;
+  if (BOUNDARY_CLOSERS.has(node.data)) return depth === 0 ? null : depth - 1;
+  return BOUNDARY_OPENERS.has(node.data) ? depth + 1 : depth;
+}
 
 class PageTooComplexError extends Error {
   constructor() {
@@ -493,8 +585,31 @@ export function extractPage(
     .reverse()
     .map((node) => ({ node, exit: false }));
 
+  // Depth inside a pending boundary's fallback (s96c), null outside one.
+  let fallbackDepth: number | null = null;
+
   while (stack.length > 0) {
     const { node, exit } = stack.pop() as Frame;
+
+    if (fallbackDepth !== null) {
+      if (!exit) {
+        // A sibling inside the fallback: skipped whole, children and all.
+        fallbackDepth = depthAfter(node, fallbackDepth);
+        continue;
+      }
+      // Its parent ended before the closer did (malformed markup): the
+      // fallback cannot reach past it, so reading resumes here.
+      fallbackDepth = null;
+    }
+
+    if (isComment(node)) {
+      if (opensPendingFallback(node, stack)) {
+        fallbackDepth = 0;
+        // Like an excluded element, the fallback still separates words.
+        buffer += " ";
+      }
+      continue;
+    }
 
     if (isText(node)) {
       buffer += node.value;
