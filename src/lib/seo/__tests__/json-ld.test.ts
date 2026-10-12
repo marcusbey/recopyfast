@@ -2,6 +2,7 @@ import {
   buildBreadcrumbListLd,
   buildFAQPageLd,
   buildSoftwareApplicationLd,
+  buildWebApplicationLd,
   serializeJsonLd,
   type MonthlyOffer,
 } from "../json-ld";
@@ -159,5 +160,34 @@ describe("shared page schemas", () => {
         },
       ],
     });
+  });
+});
+
+describe("buildWebApplicationLd", () => {
+  const tool = {
+    url: "https://recopyfa.st/tools/website-maintenance-cost",
+    name: "Website maintenance cost calculator",
+    description: "Work out what free copy changes cost you.",
+  };
+
+  it("states a free web utility with a zero-dollar offer", () => {
+    expect(buildWebApplicationLd(tool)).toEqual({
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      name: tool.name,
+      description: tool.description,
+      url: tool.url,
+      applicationCategory: "UtilitiesApplication",
+      operatingSystem: "Web",
+      isAccessibleForFree: true,
+      offers: { "@type": "Offer", price: 0, priceCurrency: "USD" },
+    });
+  });
+
+  it("invents no rating or review (ADR 032 section 5)", () => {
+    const ld = buildWebApplicationLd(tool);
+
+    expect(ld).not.toHaveProperty("aggregateRating");
+    expect(ld).not.toHaveProperty("review");
   });
 });

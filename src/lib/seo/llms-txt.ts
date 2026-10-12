@@ -80,6 +80,14 @@ export function buildLlmsTxt(
     ),
     ...comparisonLinks,
     "",
+    "## Free tools",
+    "",
+    link(
+      "Website maintenance cost calculator",
+      "/tools/website-maintenance-cost",
+      "add up what free copy changes cost, from your own numbers; calculated in the browser.",
+    ),
+    "",
     "## Legal",
     "",
     link(
