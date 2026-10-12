@@ -692,7 +692,7 @@
   const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
   function validateImageFile(file) {
-    if (ACCEPTED_IMAGE_TYPES.indexOf(file.type) === -1) {
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
       return 'Unsupported format (' + (file.type || 'unknown') + '). Use JPEG, PNG, WebP, GIF or AVIF.';
     }
     if (file.size > MAX_IMAGE_BYTES) {
@@ -1237,9 +1237,9 @@
       // Graded with exactly the test the staging path uses at initStagingMode —
       // one rule for "may this person edit", not two that can drift apart.
       const permissions = (identity && identity.permissions) || [];
-      const canEdit = permissions.indexOf('edit') !== -1 ||
-                      permissions.indexOf('publish') !== -1 ||
-                      permissions.indexOf('admin') !== -1;
+      const canEdit = permissions.includes('edit') ||
+                      permissions.includes('publish') ||
+                      permissions.includes('admin');
 
       if (canEdit && !this.editMode) {
         this.editMode = true;
@@ -1318,11 +1318,10 @@
       const status = banner.querySelector('.rcf-editor-banner-status') || document.createElement('span');
       status.setAttribute('data-rcf-terminal-status', '');
       status.setAttribute('role', 'status');
-      if (!status.parentNode) { status.className = 'rcf-banner-meta'; banner.appendChild(status); }
+      if (!status.parentNode) { status.className = 'rcf-banner-meta'; banner.append(status); }
       status.textContent = 'Session ended — draft kept';
 
       if (!banner.querySelector('[data-rcf-reauthenticate]')) {
-        const self = this;
         const recovery = document.createElement('button');
         recovery.type = 'button';
         recovery.setAttribute('data-rcf-reauthenticate', '');
@@ -1331,11 +1330,11 @@
         recovery.className = banner.id === 'rcf-editor-banner'
           ? 'rcf-editor-banner-dismiss'
           : 'rcf-banner-btn rcf-banner-btn-ghost';
-        recovery.onclick = function() {
-          const path = self.editorGrant() ? '/edit' : '/dashboard/sites';
+        recovery.onclick = () => {
+          const path = this.editorGrant() ? '/edit' : '/dashboard/sites';
           window.open(new URL(path, RECOPYFAST_API).toString(), '_blank', 'noopener');
         };
-        banner.appendChild(recovery);
+        banner.append(recovery);
       }
 
       return true;
@@ -1512,7 +1511,7 @@
             #rcf-editor-banner .rcf-editor-banner-divider { display: none; }
           }
         `;
-        document.head.appendChild(style);
+        document.head.append(style);
       }
 
       const banner = document.createElement('div');
@@ -1526,7 +1525,7 @@
       mark.className = 'rcf-editor-banner-mark';
       mark.setAttribute('aria-hidden', 'true');
       mark.textContent = '<>';
-      banner.appendChild(mark);
+      banner.append(mark);
 
       // Claimed only when it is true. A view-only holder is named and nothing
       // more — telling them they can edit and then refusing every save is the
@@ -1535,24 +1534,24 @@
         const claim = document.createElement('span');
         claim.className = 'rcf-editor-banner-claim';
         claim.textContent = 'You can edit this page';
-        banner.appendChild(claim);
+        banner.append(claim);
 
         const divider = document.createElement('span');
         divider.className = 'rcf-editor-banner-divider';
         divider.setAttribute('aria-hidden', 'true');
-        banner.appendChild(divider);
+        banner.append(divider);
       }
 
       const email = document.createElement('span');
       email.className = 'rcf-editor-banner-email';
       email.textContent = this.editorAuth.email || 'an editor';
       if (this.editorAuth.email) email.title = this.editorAuth.email;
-      banner.appendChild(email);
+      banner.append(email);
 
       const status = document.createElement('span');
       status.className = 'rcf-editor-banner-status';
       status.setAttribute('role', 'status');
-      banner.appendChild(status);
+      banner.append(status);
 
       // s39: the bar had no way back to the list. An editor invited to several
       // sites, done with this one, could only hide the bar — reaching the next
@@ -1572,17 +1571,17 @@
           location.href = new URL('/edit', RECOPYFAST_API).toString();
         } catch (e) {}
       };
-      banner.appendChild(allSites);
+      banner.append(allSites);
 
       const permissions = this.editorAuth.permissions || [];
-      if (permissions.indexOf('publish') !== -1 || permissions.indexOf('admin') !== -1) {
+      if (permissions.includes('publish') || permissions.includes('admin')) {
         const publish = document.createElement('button');
         publish.type = 'button';
         publish.className = 'rcf-editor-banner-dismiss rcf-editor-banner-publish';
         publish.textContent = 'Publish';
         publish.setAttribute('aria-label', 'Publish');
         publish.onclick = this.showPublishConfirmation.bind(this);
-        banner.appendChild(publish);
+        banner.append(publish);
       }
 
       const dismiss = document.createElement('button');
@@ -1602,9 +1601,9 @@
           document.body.style.removeProperty('padding-top');
         }
       };
-      banner.appendChild(dismiss);
+      banner.append(dismiss);
 
-      document.body.appendChild(banner);
+      document.body.append(banner);
       // The first executed invited-editor E2E exposed the difference from the
       // owner toolbar: both bars are fixed across the full viewport, but only
       // the owner toolbar reserved its height. On a page whose first editable
@@ -1669,9 +1668,7 @@
         subtitle.className = 'rcf-modal-subtitle';
         subtitle.textContent = copy.subtitle;
 
-        iconContainer.appendChild(icon);
-        iconContainer.appendChild(title);
-        iconContainer.appendChild(subtitle);
+        iconContainer.append(icon, title, subtitle);
 
         const formContainer = document.createElement('div');
         formContainer.style.cssText = 'margin-bottom: 20px;';
@@ -1712,12 +1709,7 @@
         const errorEl = document.createElement('p');
         errorEl.className = 'rcf-modal-error';
 
-        formContainer.appendChild(emailLabel);
-        formContainer.appendChild(emailInput);
-        formContainer.appendChild(codeLabel);
-        formContainer.appendChild(codeInput);
-        formContainer.appendChild(noticeEl);
-        formContainer.appendChild(errorEl);
+        formContainer.append(emailLabel, emailInput, codeLabel, codeInput, noticeEl, errorEl);
 
         const rememberRow = document.createElement('label');
         rememberRow.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 20px; color: #cbd5e1; font-size: 13px; cursor: pointer;';
@@ -1726,8 +1718,7 @@
         rememberInput.id = 'rcf-editor-remember';
         const rememberText = document.createElement('span');
         rememberText.textContent = 'Remember this device for 7 days';
-        rememberRow.appendChild(rememberInput);
-        rememberRow.appendChild(rememberText);
+        rememberRow.append(rememberInput, rememberText);
 
         const submitBtn = document.createElement('button');
         submitBtn.className = 'rcf-modal-btn rcf-modal-btn-primary';
@@ -1738,14 +1729,10 @@
         cancelBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
         cancelBtn.textContent = 'Continue as a visitor';
 
-        modal.appendChild(iconContainer);
-        modal.appendChild(formContainer);
-        modal.appendChild(rememberRow);
-        modal.appendChild(submitBtn);
-        modal.appendChild(cancelBtn);
+        modal.append(iconContainer, formContainer, rememberRow, submitBtn, cancelBtn);
 
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
+        overlay.append(modal);
+        document.body.append(overlay);
         emailInput.focus();
 
         let stage = 'email';
@@ -1855,12 +1842,9 @@
         const emailSpan = document.createElement('strong');
         emailSpan.style.color = '#10b981';
         emailSpan.textContent = email;
-        subtitle.appendChild(document.createTextNode('We sent a 6-digit code to '));
-        subtitle.appendChild(emailSpan);
+        subtitle.append(document.createTextNode('We sent a 6-digit code to '), emailSpan);
 
-        iconContainer.appendChild(icon);
-        iconContainer.appendChild(title);
-        iconContainer.appendChild(subtitle);
+        iconContainer.append(icon, title, subtitle);
 
         const formContainer = document.createElement('div');
         formContainer.style.cssText = 'margin-bottom: 24px;';
@@ -1880,9 +1864,7 @@
         errorEl.id = 'rcf-code-error';
         errorEl.className = 'rcf-modal-error';
 
-        formContainer.appendChild(label);
-        formContainer.appendChild(codeInput);
-        formContainer.appendChild(errorEl);
+        formContainer.append(label, codeInput, errorEl);
 
         const submitBtn = document.createElement('button');
         submitBtn.className = 'rcf-modal-btn rcf-modal-btn-success';
@@ -1893,13 +1875,10 @@
         resendBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
         resendBtn.innerHTML = '<span>Resend Code</span>';
 
-        modal.appendChild(iconContainer);
-        modal.appendChild(formContainer);
-        modal.appendChild(submitBtn);
-        modal.appendChild(resendBtn);
+        modal.append(iconContainer, formContainer, submitBtn, resendBtn);
 
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
+        overlay.append(modal);
+        document.body.append(overlay);
 
         codeInput.focus();
 
@@ -2011,8 +1990,6 @@
 
     showStagingBanner() {
       if (!this.stagingAccess) return;
-
-      const self = this;
 
       /**
        * Line icons instead of emoji. Emoji render differently on every OS —
@@ -2231,7 +2208,7 @@
             .rcf-banner-btn:active { transform: none; }
           }
         `;
-        document.head.appendChild(style);
+        document.head.append(style);
       }
 
       const banner = document.createElement('div');
@@ -2262,36 +2239,34 @@
       saveStatus.className = 'rcf-editor-banner-status';
       infoDiv.append(statusContainer, saveStatus);
 
-      infoDiv.appendChild(divider('email'));
+      infoDiv.append(divider('email'));
 
       const userEmail = document.createElement('span');
       userEmail.className = 'rcf-banner-email';
       userEmail.textContent = this.stagingAccess.email;
       // The element truncates, so the full address stays reachable on hover.
       userEmail.title = this.stagingAccess.email;
-      infoDiv.appendChild(userEmail);
+      infoDiv.append(userEmail);
 
       if (permText) {
-        infoDiv.appendChild(divider('perms'));
+        infoDiv.append(divider('perms'));
         const perms = document.createElement('span');
         perms.className = 'rcf-banner-meta rcf-banner-meta-perms';
         const permValue = document.createElement('span');
         permValue.textContent = permText;
-        perms.appendChild(icon('shield', 13));
-        perms.appendChild(permValue);
-        infoDiv.appendChild(perms);
+        perms.append(icon('shield', 13), permValue);
+        infoDiv.append(perms);
       }
 
       if (expiresAt) {
-        infoDiv.appendChild(divider('expiry'));
+        infoDiv.append(divider('expiry'));
         const expires = document.createElement('span');
         expires.className = 'rcf-banner-meta rcf-banner-meta-expiry';
         const expiresValue = document.createElement('span');
         // "Aug 2" alone read as a creation date; the label removes the guess.
         expiresValue.textContent = 'Expires ' + expiresAt;
-        expires.appendChild(icon('clock', 13));
-        expires.appendChild(expiresValue);
-        infoDiv.appendChild(expires);
+        expires.append(icon('clock', 13), expiresValue);
+        infoDiv.append(expires);
       }
 
       const buttonsDiv = document.createElement('div');
@@ -2309,36 +2284,32 @@
         const text = document.createElement('span');
         text.className = 'rcf-banner-btn-label';
         text.textContent = label;
-        btn.appendChild(icon(iconName, 14));
-        btn.appendChild(text);
+        btn.append(icon(iconName, 14), text);
         return btn;
       }
 
       const previewBtn = actionButton('rcf-preview-live', 'ghost', 'eye', 'Preview Live');
-      buttonsDiv.appendChild(previewBtn);
+      buttonsDiv.append(previewBtn);
 
       const editBoardBtn = actionButton('rcf-edit-board-btn', 'ghost', 'board', 'Edit Board');
-      buttonsDiv.appendChild(editBoardBtn);
+      buttonsDiv.append(editBoardBtn);
 
-      editBoardBtn.onclick = function() {
-        if (!self.editBoard) {
-          self.editBoard = new EditBoardPanel(self);
+      editBoardBtn.onclick = () => {
+        if (!this.editBoard) {
+          this.editBoard = new EditBoardPanel(this);
         }
-        self.editBoard.open();
+        this.editBoard.open();
       };
 
       if (permissions.includes('publish') || permissions.includes('admin')) {
         const publishBtn = actionButton('rcf-publish-btn', 'primary', 'publish', 'Publish');
-        buttonsDiv.appendChild(publishBtn);
+        buttonsDiv.append(publishBtn);
 
-        publishBtn.onclick = function() {
-          self.showPublishConfirmation();
-        };
+        publishBtn.onclick = () => this.showPublishConfirmation();
       }
 
-      banner.appendChild(infoDiv);
-      banner.appendChild(buttonsDiv);
-      document.body.appendChild(banner);
+      banner.append(infoDiv, buttonsDiv);
+      document.body.append(banner);
 
       document.body.style.paddingTop = (banner.offsetHeight + parseInt(document.body.style.paddingTop || 0)) + 'px';
 
@@ -2355,7 +2326,6 @@
 
     async showPublishConfirmation() {
       if (this.isMutationLocked) return;
-      const self = this;
       const overlay = this.createOverlay();
       const modal = document.createElement('div');
       modal.className = 'rcf-modal';
@@ -2368,8 +2338,8 @@
       const cancelBtn = modal.querySelector('.rcf-modal-btn-ghost');
       const confirmBtn = modal.querySelector('.rcf-modal-btn-success');
 
-      overlay.appendChild(modal);
-      document.body.appendChild(overlay);
+      overlay.append(modal);
+      document.body.append(overlay);
 
       const close = function() { overlay.remove(); };
 
@@ -2394,9 +2364,9 @@
         const publishPreviewUrl =
           RECOPYFAST_API + '/staging/publish?siteId=' + SITE_ID +
           '&page_path=' + encodeURIComponent(normalizedPagePath()) +
-          self.editorTokenQuery().replace('?', '&');
-        const response = await fetch(publishPreviewUrl, { headers: self.editorAuthHeaders() });
-        if (self.handleTerminalWriteFailure(response)) { close(); return; }
+          this.editorTokenQuery().replace('?', '&');
+        const response = await fetch(publishPreviewUrl, { headers: this.editorAuthHeaders() });
+        if (this.handleTerminalWriteFailure(response)) { close(); return; }
         const result = await response.json();
 
         if (result.success && result.pendingChanges === 0) {
@@ -2423,21 +2393,21 @@
         confirmBtn.style.opacity = '';
       }
 
-      confirmBtn.onclick = async function() {
-        if (self.isMutationLocked) return;
+      confirmBtn.onclick = async () => {
+        if (this.isMutationLocked) return;
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Publishing...';
 
         try {
           const response = await fetch(RECOPYFAST_API + '/staging/publish', {
             method: 'POST',
-            headers: Object.assign({ 'Content-Type': 'application/json' }, self.editorAuthHeaders()),
+            headers: Object.assign({ 'Content-Type': 'application/json' }, this.editorAuthHeaders()),
             body: JSON.stringify(Object.assign({
               siteId: SITE_ID
-            }, self.editorTokenBody()))
+            }, this.editorTokenBody()))
           });
 
-          if (self.handleTerminalWriteFailure(response)) { close(); return; }
+          if (this.handleTerminalWriteFailure(response)) { close(); return; }
           const result = await response.json();
 
           if (result.success) {
@@ -2487,14 +2457,11 @@
       closeBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
       closeBtn.innerHTML = '<span>← Go Back</span>';
 
-      iconContainer.appendChild(icon);
-      iconContainer.appendChild(title);
-      iconContainer.appendChild(subtitle);
-      iconContainer.appendChild(closeBtn);
+      iconContainer.append(icon, title, subtitle, closeBtn);
 
-      modal.appendChild(iconContainer);
-      overlay.appendChild(modal);
-      document.body.appendChild(overlay);
+      modal.append(iconContainer);
+      overlay.append(modal);
+      document.body.append(overlay);
 
       closeBtn.onclick = function() {
         const url = new URL(location.href);
@@ -2646,7 +2613,7 @@
             box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
           }
         `;
-        document.head.appendChild(style);
+        document.head.append(style);
       }
 
       return overlay;
@@ -2710,6 +2677,7 @@
 
         // An <img> is identified by its source, not by text content.
         const isImage = element.tagName === 'IMG';
+        this.cut = false;
         const text = this.getElementText(element);
         if (!text || text.trim().length < 2) return;
 
@@ -2725,7 +2693,8 @@
           originalContent: text,
           selector: this.generateSelector(element),
           type: element.tagName.toLowerCase(),
-          path: pagePath
+          path: pagePath,
+          partial: this.cut
         };
         elementData.extras = isImage && element.hasAttribute('alt') ? { alt: element.getAttribute('alt') } :
           element.tagName === 'A' && element.hasAttribute('href') ? { href: element.getAttribute('href') } : null;
@@ -2797,9 +2766,9 @@
      * view (`written`), not every stamped descendant: old rows store a parent's
      * whole text and would otherwise render the child's authored words twice.
      * The entry identity check matters when a host repeats an authored id.
-     * Route restoration passes `whole` because originalContent includes the
-     * child's authored words; restoring only the owned prefix produced
-     * "Buy nownow".
+     * Discovery records when this walk pruned an applied child. Route restore
+     * passes `whole` only for a complete capture; a late parent's partial
+     * capture reuses ownership so it cannot blank or duplicate the child.
      */
     owned(element, content, whole) {
       let first = null;
@@ -2807,7 +2776,10 @@
       const walk = (parent, write) => {
         for (const node of parent.childNodes) {
           const data = !whole && node.nodeType === 1 && this.elements.get(node.getAttribute('data-rcf-id'));
-          if (data && data.element === node && data.written !== undefined) continue;
+          if (data && data.element === node && data.written !== undefined) {
+            this.cut = true;
+            continue;
+          }
           if (node.nodeType === 3) {
             if (write) {
               if (node !== first && node.nodeValue) node.nodeValue = '';
@@ -3120,8 +3092,6 @@
     }
 
     async establishConnection() {
-      const self = this;
-
       // No endpoint, no connection — and crucially, no socket.io download
       // either.
       //
@@ -3159,26 +3129,20 @@
           reconnectionAttempts: 5
         });
 
-        this.socket.on('connect', function() {
-          self.sendContentMap();
-        });
+        this.socket.on('connect', () => this.sendContentMap());
 
-        this.socket.on('content-update', function(data) {
-          self.handleContentUpdate(data);
-        });
+        this.socket.on('content-update', data => this.handleContentUpdate(data));
 
-        this.socket.on('ab-test-update', function(data) {
-          self.handleABTestUpdate(data);
-        });
+        this.socket.on('ab-test-update', data => this.handleABTestUpdate(data));
 
         this.socket.on('error', function(error) {
           console.error('ReCopyFast: Socket error:', error);
         });
 
-        this.socket.on('auth-error', function(data) {
+        this.socket.on('auth-error', data => {
           console.error('ReCopyFast: Auth error:', data.error);
-          if (self.stagingMode) {
-            self.showStagingError(data.error);
+          if (this.stagingMode) {
+            this.showStagingError(data.error);
           }
         });
 
@@ -3798,10 +3762,25 @@
       this.pagePath = path;
       this.stale = true;
       this.reports = this.lastReport = 0;
+      const dropped = [];
       this.elements.forEach((data, id) => {
         if (!data.path) data.writes = 0;
-        else if (!data.element.getAttribute('data-rcf-editing')) this.dropEntry(data, id);
+        else if (!data.element.getAttribute('data-rcf-editing')) {
+          dropped.push([data, id, data.written === this.getElementText(data.element)]);
+        }
       });
+      // TOMBSTONE (s67b, PR #99). A late parent stores only the authored text
+      // it owns around an already-applied child. Restoring and deleting entries
+      // in Map order made child-first end at "Shop now" and parent-first at
+      // "Buy ". Snapshot before any write, restore descendants first while
+      // every ownership mapping still exists, then remove the entries.
+      // `DOCUMENT_POSITION_FOLLOWING` is 4. Reversing document order gives a
+      // total order for unrelated entries while always putting a descendant
+      // before its ancestor; a containment-only comparator left interleaved
+      // [parent, unrelated, child] records in the wrong order.
+      dropped.sort((a, b) => a[0].element.compareDocumentPosition(b[0].element) & 4 ? 1 : -1);
+      dropped.forEach(entry => this.dropEntry(entry[0], entry[1], entry[2], true));
+      dropped.forEach(entry => this.dropEntry(entry[0], entry[1], false));
       // Before init's first fetch, init fetches for the path it finds.
       if (this.rows) this.loadRows().catch(function() {});
     }
@@ -3821,11 +3800,12 @@
      * applies a variant only where a test targets the new page's id, and
      * otherwise the new page's own row.
      */
-    dropEntry(data, id) {
+    dropEntry(data, id, restore, keep) {
       const element = data.element;
-      if (data.written === this.getElementText(element)) {
-        this.applyContentToElement(data, data.originalContent, true);
+      if (restore === undefined ? data.written === this.getElementText(element) : restore) {
+        this.applyContentToElement(data, data.originalContent, !data.partial);
       }
+      if (keep) return;
       element.removeAttribute('data-rcf-variant');
       element.removeAttribute('data-rcf-test');
       if (data.path) element.removeAttribute('data-rcf-id');
@@ -4162,7 +4142,7 @@
           hoverHint.className = 'rcf-hover-hint';
           hoverHint.textContent = '✏️ Click to edit';
           hoverHint.setAttribute('data-rcf-ignore', '');
-          document.body.appendChild(hoverHint);
+          document.body.append(hoverHint);
         }
         hoverHint.style.display = 'flex';
 
@@ -4455,7 +4435,7 @@
           opacity: 0.5;
         }
       `;
-      document.head.appendChild(style);
+      document.head.append(style);
     }
 
     /**
@@ -4538,7 +4518,7 @@
         ].join('; ');
 
         const host = element.parentNode || document.body;
-        host.appendChild(ghost);
+        host.append(ghost);
         const grew = ghost.scrollHeight > (parseFloat(computed.height) || 0) * 1.1;
         ghost.remove();
 
@@ -4662,7 +4642,7 @@
         sel + '::selection { background: ' + colors.selectionBackground + '; color: ' + colors.selectionColor + '; }',
         sel + '::-moz-selection { background: ' + colors.selectionBackground + '; color: ' + colors.selectionColor + '; }'
       ].join('\n');
-      document.head.appendChild(selectionStyle);
+      document.head.append(selectionStyle);
 
       element.style.setProperty('outline', '2px solid ' + colors.outlineColor, 'important');
       element.style.setProperty('outline-offset', '2px', 'important');
@@ -5058,7 +5038,7 @@
       // anything that already contains one, preserves whitespace, or renders
       // taller than two lines.
       const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20;
-      const isMultiline = originalText.indexOf('\n') !== -1 ||
+      const isMultiline = originalText.includes('\n') ||
                           floor.preservesWhitespace ||
                           floor.minHeight > lineHeight * 2;
 
@@ -5153,10 +5133,8 @@
       subtitle.className = 'rcf-modal-subtitle';
       subtitle.textContent = 'Replace image or edit properties';
 
-      iconContainer.appendChild(icon);
-      iconContainer.appendChild(title);
-      iconContainer.appendChild(subtitle);
-      modal.appendChild(iconContainer);
+      iconContainer.append(icon, title, subtitle);
+      modal.append(iconContainer);
 
       // Current image preview
       const previewContainer = document.createElement('div');
@@ -5174,10 +5152,8 @@
       dimensions.style.cssText = 'margin: 8px 0 0 0; font-size: 11px; color: #64748b; text-align: center;';
       dimensions.textContent = currentWidth + ' × ' + currentHeight + ' px';
 
-      previewContainer.appendChild(previewLabel);
-      previewContainer.appendChild(previewImg);
-      previewContainer.appendChild(dimensions);
-      modal.appendChild(previewContainer);
+      previewContainer.append(previewLabel, previewImg, dimensions);
+      modal.append(previewContainer);
 
       // URL input
       const urlContainer = document.createElement('div');
@@ -5193,9 +5169,8 @@
       urlInput.value = currentSrc;
       urlInput.placeholder = 'https://example.com/image.jpg';
 
-      urlContainer.appendChild(urlLabel);
-      urlContainer.appendChild(urlInput);
-      modal.appendChild(urlContainer);
+      urlContainer.append(urlLabel, urlInput);
+      modal.append(urlContainer);
 
       // Alt text input (for img elements)
       let altInput = null;
@@ -5213,9 +5188,8 @@
         altInput.value = currentAlt;
         altInput.placeholder = 'Describe this image';
 
-        altContainer.appendChild(altLabel);
-        altContainer.appendChild(altInput);
-        modal.appendChild(altContainer);
+        altContainer.append(altLabel, altInput);
+        modal.append(altContainer);
       }
 
       // Update preview on URL change
@@ -5237,8 +5211,7 @@
       uploadIcon.textContent = '📤';
       const uploadText = document.createElement('span');
       uploadText.textContent = 'Upload New Image';
-      uploadLabel.appendChild(uploadIcon);
-      uploadLabel.appendChild(uploadText);
+      uploadLabel.append(uploadIcon, uploadText);
 
       const fileInput = document.createElement('input');
       fileInput.type = 'file';
@@ -5253,7 +5226,7 @@
       progressTrack.style.cssText = 'margin-top: 8px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.1); overflow: hidden; display: none;';
       const progressBar = document.createElement('div');
       progressBar.style.cssText = 'height: 100%; width: 0%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); transition: width 0.15s ease;';
-      progressTrack.appendChild(progressBar);
+      progressTrack.append(progressBar);
 
       fileInput.addEventListener('change', async function(e) {
         const file = e.target.files && e.target.files[0];
@@ -5313,11 +5286,9 @@
         }
       });
 
-      uploadLabel.appendChild(fileInput);
-      uploadContainer.appendChild(uploadLabel);
-      uploadContainer.appendChild(progressTrack);
-      uploadContainer.appendChild(uploadStatus);
-      modal.appendChild(uploadContainer);
+      uploadLabel.append(fileInput);
+      uploadContainer.append(uploadLabel, progressTrack, uploadStatus);
+      modal.append(uploadContainer);
 
       // Action buttons
       const footer = document.createElement('div');
@@ -5331,12 +5302,11 @@
       saveBtn.className = 'rcf-modal-btn rcf-modal-btn-success';
       saveBtn.textContent = 'Save Changes';
 
-      footer.appendChild(cancelBtn);
-      footer.appendChild(saveBtn);
-      modal.appendChild(footer);
+      footer.append(cancelBtn, saveBtn);
+      modal.append(footer);
 
-      overlay.appendChild(modal);
-      document.body.appendChild(overlay);
+      overlay.append(modal);
+      document.body.append(overlay);
 
       const closeModal = function() {
         element.removeAttribute('data-rcf-editing');
@@ -5459,7 +5429,7 @@
           const r = el.getBoundingClientRect();
           badge.style.top = Math.max(4, r.top - 30) + 'px';
           badge.style.left = (r.left + r.width / 2) + 'px';
-          document.body.appendChild(badge);
+          document.body.append(badge);
 
           // Inline styles are restored wholesale by startTextEdit's teardown;
           // only the badge needs removing here.
@@ -5553,17 +5523,11 @@
       saveBtn.textContent = 'Save';
       saveBtn.style.cssText = 'padding: 8px 14px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 12px;';
 
-      btnContainer.appendChild(cancelBtn);
-      btnContainer.appendChild(saveBtn);
+      btnContainer.append(cancelBtn, saveBtn);
 
-      popover.appendChild(title);
-      popover.appendChild(placeholderLabel);
-      popover.appendChild(placeholderInput);
-      popover.appendChild(valueLabel);
-      popover.appendChild(valueInput);
-      popover.appendChild(btnContainer);
+      popover.append(title, placeholderLabel, placeholderInput, valueLabel, valueInput, btnContainer);
 
-      document.body.appendChild(popover);
+      document.body.append(popover);
       placeholderInput.focus();
 
       const cleanup = function() {
@@ -5642,7 +5606,7 @@
       hint.style.cssText = 'position: fixed; left: ' + (rect.left + rect.width / 2) + 'px; top: ' + (rect.top - 48) + 'px; transform: translateX(-50%); background: ' + hintBg + '; border: 1px solid ' + hintBorder + '; color: ' + hintColor + '; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-family: ui-sans-serif, system-ui, sans-serif; white-space: nowrap; z-index: 10001; animation: rcf-fadeIn 0.2s ease;';
       hint.textContent = '📦 Click on specific text elements inside';
 
-      document.body.appendChild(hint);
+      document.body.append(hint);
 
       // Auto-remove after 2 seconds
       setTimeout(function() {
@@ -5680,8 +5644,7 @@
       title.style.cssText = 'margin: 0; color: #f1f5f9; font-size: 18px; font-weight: 600;';
       title.textContent = 'AI Content Suggestions';
 
-      titleContainer.appendChild(titleIcon);
-      titleContainer.appendChild(title);
+      titleContainer.append(titleIcon, title);
 
       const closeBtn = document.createElement('button');
       closeBtn.style.cssText = 'background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1); width: 32px; height: 32px; border-radius: 8px; font-size: 18px; cursor: pointer; color: #94a3b8; display: flex; align-items: center; justify-content: center; transition: all 0.2s;';
@@ -5689,8 +5652,7 @@
       closeBtn.onmouseenter = function() { closeBtn.style.background = 'rgba(255, 255, 255, 0.12)'; closeBtn.style.color = '#e2e8f0'; };
       closeBtn.onmouseleave = function() { closeBtn.style.background = 'rgba(255, 255, 255, 0.08)'; closeBtn.style.color = '#94a3b8'; };
 
-      header.appendChild(titleContainer);
-      header.appendChild(closeBtn);
+      header.append(titleContainer, closeBtn);
 
       const goalContainer = document.createElement('div');
       goalContainer.style.cssText = 'margin-bottom: 20px;';
@@ -5716,11 +5678,10 @@
         option.value = opt.value;
         option.textContent = opt.text;
         option.style.background = '#1e293b';
-        goalSelect.appendChild(option);
+        goalSelect.append(option);
       });
 
-      goalContainer.appendChild(goalLabel);
-      goalContainer.appendChild(goalSelect);
+      goalContainer.append(goalLabel, goalSelect);
 
       const generateBtn = document.createElement('button');
       generateBtn.style.cssText = 'width: 100%; padding: 14px; background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4); transition: all 0.2s;';
@@ -5740,16 +5701,12 @@
       cancelBtn.onmouseenter = function() { cancelBtn.style.background = 'rgba(255, 255, 255, 0.12)'; cancelBtn.style.color = '#e2e8f0'; };
       cancelBtn.onmouseleave = function() { cancelBtn.style.background = 'rgba(255, 255, 255, 0.08)'; cancelBtn.style.color = '#94a3b8'; };
 
-      footer.appendChild(cancelBtn);
+      footer.append(cancelBtn);
 
-      modal.appendChild(header);
-      modal.appendChild(goalContainer);
-      modal.appendChild(generateBtn);
-      modal.appendChild(suggestionsList);
-      modal.appendChild(footer);
+      modal.append(header, goalContainer, generateBtn, suggestionsList, footer);
 
-      overlay.appendChild(modal);
-      document.body.appendChild(overlay);
+      overlay.append(modal);
+      document.body.append(overlay);
 
       const closeModal = function() {
         if (document.body.contains(overlay)) {
@@ -5772,7 +5729,7 @@
           errorP.style.cssText = 'color: #fbbf24; margin: 0; padding: 16px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 10px; font-size: 13px;';
           errorP.textContent = '⚠️ Please enter some text first.';
           suggestionsList.textContent = '';
-          suggestionsList.appendChild(errorP);
+          suggestionsList.append(errorP);
           return;
         }
 
@@ -5842,16 +5799,15 @@
                 suggestionDiv.style.borderColor = 'rgba(255, 255, 255, 0.1)';
               };
 
-              suggestionDiv.appendChild(suggestionText);
-              suggestionDiv.appendChild(useBtn);
-              suggestionsList.appendChild(suggestionDiv);
+              suggestionDiv.append(suggestionText, useBtn);
+              suggestionsList.append(suggestionDiv);
             });
           } else {
             const errorP = document.createElement('p');
             errorP.style.cssText = 'color: #f87171; margin: 0; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px;';
             errorP.textContent = data.error || 'Failed to generate suggestions. Please try again.';
             suggestionsList.textContent = '';
-            suggestionsList.appendChild(errorP);
+            suggestionsList.append(errorP);
           }
         } catch (error) {
           console.error('AI suggestion error:', error);
@@ -5859,7 +5815,7 @@
           errorP.style.cssText = 'color: #f87171; margin: 0; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px;';
           errorP.textContent = 'Error connecting to AI service. Please check your connection.';
           suggestionsList.textContent = '';
-          suggestionsList.appendChild(errorP);
+          suggestionsList.append(errorP);
         } finally {
           generateBtn.innerHTML = '<span>🪄</span><span>Generate Suggestions</span>';
           generateBtn.disabled = false;
@@ -6199,7 +6155,7 @@
             border-color: rgba(255, 255, 255, 0.15);
           }
         `;
-        document.head.appendChild(style);
+        document.head.append(style);
       }
 
       // Create panel
@@ -6220,8 +6176,7 @@
       closeBtn.textContent = '×';
       closeBtn.onclick = () => self.close();
 
-      header.appendChild(title);
-      header.appendChild(closeBtn);
+      header.append(title, closeBtn);
 
       // Tabs
       const tabs = document.createElement('div');
@@ -6243,7 +6198,7 @@
         tabBtn.className = 'rcf-eb-tab' + (tab.id === self.activeTab ? ' active' : '');
         tabBtn.textContent = tab.label;
         tabBtn.onclick = () => self.switchTab(tab.id);
-        tabs.appendChild(tabBtn);
+        tabs.append(tabBtn);
       });
 
       // Content area
@@ -6251,11 +6206,9 @@
       content.className = 'rcf-eb-content';
       content.id = 'rcf-eb-content';
 
-      this.panel.appendChild(header);
-      this.panel.appendChild(tabs);
-      this.panel.appendChild(content);
+      this.panel.append(header, tabs, content);
 
-      document.body.appendChild(this.panel);
+      document.body.append(this.panel);
 
       // Trigger open animation
       requestAnimationFrame(() => {
@@ -6320,7 +6273,7 @@
       const title = document.createElement('div');
       title.className = 'rcf-eb-section-title';
       title.textContent = 'Editable Elements (' + this.rcf.elements.size + ')';
-      section.appendChild(title);
+      section.append(title);
 
       // Filter out buttons and links - they are interactive, not content
       const contentElements = [];
@@ -6377,13 +6330,11 @@
           const live = self.rcf.getElementText(data.element);
           cardDesc.textContent = live.substring(0, 100) + (live.length > 100 ? '...' : '');
 
-          cardContent.appendChild(cardTitle);
-          cardContent.appendChild(cardDesc);
+          cardContent.append(cardTitle, cardDesc);
 
-          cardHeader.appendChild(checkbox);
-          cardHeader.appendChild(cardContent);
+          cardHeader.append(checkbox, cardContent);
 
-          card.appendChild(cardHeader);
+          card.append(cardHeader);
 
           card.onclick = () => {
             data.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -6391,11 +6342,11 @@
             setTimeout(() => data.element.classList.remove('rcf-hovering'), 2000);
           };
 
-          section.appendChild(card);
+          section.append(card);
         });
       }
 
-      content.appendChild(section);
+      content.append(section);
 
       // Actions
       //
@@ -6419,8 +6370,8 @@
         selectInfo.style.cssText = 'margin-bottom: 10px; font-size: 12px; color: #94a3b8;';
         selectInfo.textContent = this.selectedElements.size + ' element(s) selected';
 
-        actions.appendChild(selectInfo);
-        content.appendChild(actions);
+        actions.append(selectInfo);
+        content.append(actions);
       }
     }
 
@@ -6451,13 +6402,13 @@
       const title = document.createElement('div');
       title.className = 'rcf-eb-section-title';
       title.textContent = 'Site Languages';
-      section.appendChild(title);
+      section.append(title);
 
       if (this.languages.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'rcf-eb-empty';
         empty.textContent = 'No languages configured';
-        section.appendChild(empty);
+        section.append(empty);
       } else {
         this.languages.forEach(lang => {
           const card = document.createElement('div');
@@ -6474,20 +6425,19 @@
             const badge = document.createElement('span');
             badge.className = 'rcf-eb-badge';
             badge.textContent = 'Default';
-            cardMeta.appendChild(badge);
+            cardMeta.append(badge);
           }
 
           const coverage = document.createElement('span');
           coverage.textContent = Math.round(lang.translation_coverage || 0) + '% translated';
-          cardMeta.appendChild(coverage);
+          cardMeta.append(coverage);
 
-          card.appendChild(cardTitle);
-          card.appendChild(cardMeta);
-          section.appendChild(card);
+          card.append(cardTitle, cardMeta);
+          section.append(card);
         });
       }
 
-      content.appendChild(section);
+      content.append(section);
 
       // Add language section
       const addSection = document.createElement('div');
@@ -6496,7 +6446,7 @@
       const addTitle = document.createElement('div');
       addTitle.className = 'rcf-eb-section-title';
       addTitle.textContent = 'Add Language';
-      addSection.appendChild(addTitle);
+      addSection.append(addTitle);
 
       const select = document.createElement('select');
       select.className = 'rcf-eb-select';
@@ -6508,7 +6458,7 @@
           const option = document.createElement('option');
           option.value = lang.code;
           option.textContent = lang.name;
-          select.appendChild(option);
+          select.append(option);
         }
       });
 
@@ -6543,9 +6493,8 @@
         }
       };
 
-      addSection.appendChild(select);
-      addSection.appendChild(addBtn);
-      content.appendChild(addSection);
+      addSection.append(select, addBtn);
+      content.append(addSection);
     }
 
     // History Tab
@@ -6573,7 +6522,7 @@
       const title = document.createElement('div');
       title.className = 'rcf-eb-section-title';
       title.textContent = 'Version History';
-      section.appendChild(title);
+      section.append(title);
 
       if (this.versions.length === 0) {
         section.innerHTML += '<div class="rcf-eb-empty">No versions saved yet</div>';
@@ -6618,16 +6567,13 @@
             await self.restoreVersion(version.id);
           };
 
-          card.appendChild(cardTitle);
-          card.appendChild(cardDesc);
-          card.appendChild(cardMeta);
-          card.appendChild(restoreBtn);
+          card.append(cardTitle, cardDesc, cardMeta, restoreBtn);
 
-          section.appendChild(card);
+          section.append(card);
         });
       }
 
-      content.appendChild(section);
+      content.append(section);
 
       // Create snapshot button
       const createBtn = document.createElement('button');
@@ -6659,7 +6605,7 @@
         }
       };
 
-      content.appendChild(createBtn);
+      content.append(createBtn);
     }
 
     async restoreVersion(versionId) {

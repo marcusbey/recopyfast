@@ -71,6 +71,105 @@ test.describe("built embed fixture: nested edited copy", () => {
       });
     });
 
+    const lateAncestor = async (
+      order: "child-first" | "parent-first",
+      shared: boolean,
+    ) => {
+      await page.goto(fixture.liveUrl({ widget: false }), {
+        waitUntil: "networkidle",
+      });
+      await page.evaluate(
+        ({ servingOrigin, shared, siteId, siteToken }) => {
+          document.body.innerHTML = `<main id="mount"><span${shared ? ' data-rcf-id="shared-child"' : ""}>now</span></main>`;
+          const script = document.createElement("script");
+          script.src = `${servingOrigin}/embed/recopyfast.js`;
+          script.dataset.siteId = siteId;
+          script.dataset.siteToken = siteToken;
+          script.dataset.apiUrl = `${servingOrigin}/api`;
+          document.head.appendChild(script);
+        },
+        {
+          servingOrigin: fixture.servingOrigin,
+          shared,
+          siteId: FIXTURE_SITE_ID,
+          siteToken: FIXTURE_SITE_TOKEN,
+        },
+      );
+      await waitForWidget(page);
+      return page.evaluate(
+        async ({ order, shared }) => {
+          const mount = document.getElementById("mount")!;
+          const child = mount.querySelector("span")!;
+          const rcf = (
+            window as typeof window & {
+              ReCopyFast: {
+                handleContentUpdate(data: Record<string, unknown>): void;
+                rescan(): void;
+              };
+            }
+          ).ReCopyFast;
+
+          rcf.handleContentUpdate({
+            elementId: child.getAttribute("data-rcf-id")!,
+            content: "today",
+          });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+
+          const parent = document.createElement("h1");
+          parent.append("Buy ", child);
+          mount.replaceChildren(parent);
+          rcf.rescan();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const parentId = parent.getAttribute("data-rcf-id")!;
+
+          if (order === "parent-first") {
+            child.remove();
+            rcf.rescan();
+            const unrelated = document.createElement("p");
+            unrelated.textContent = "Aside";
+            mount.appendChild(unrelated);
+            rcf.rescan();
+            parent.appendChild(child);
+            rcf.rescan();
+            rcf.handleContentUpdate({
+              elementId: child.getAttribute("data-rcf-id")!,
+              content: "today",
+            });
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+
+          rcf.handleContentUpdate({ elementId: parentId, content: "Shop " });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+
+          let childMutations = 0;
+          const observer = new MutationObserver((records) => {
+            childMutations += records.filter(
+              (record) => record.type === "characterData",
+            ).length;
+          });
+          if (shared) {
+            observer.observe(child, { characterData: true, subtree: true });
+          }
+
+          history.pushState(
+            null,
+            "",
+            `/late-${order}-${shared ? "shared" : "page"}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          observer.disconnect();
+
+          return {
+            parent: parent.textContent,
+            child: child.textContent,
+            childId: child.getAttribute("data-rcf-id"),
+            childMutations,
+          };
+        },
+        { order, shared },
+      );
+    };
+
     await page.goto(fixture.liveUrl({ widget: false }), {
       waitUntil: "networkidle",
     });
@@ -225,6 +324,21 @@ test.describe("built embed fixture: nested edited copy", () => {
     });
     expect(restored.parent).toBe("Buy now");
     expect(restored.child).toBe("");
+
+    expect(await lateAncestor("child-first", false)).toMatchObject({
+      parent: "Buy now",
+      child: "now",
+    });
+    expect(await lateAncestor("parent-first", false)).toMatchObject({
+      parent: "Buy now",
+      child: "now",
+    });
+    expect(await lateAncestor("child-first", true)).toEqual({
+      parent: "Buy today",
+      child: "today",
+      childId: "shared-child",
+      childMutations: 0,
+    });
     expect(pageErrors).toEqual([]);
   });
 });

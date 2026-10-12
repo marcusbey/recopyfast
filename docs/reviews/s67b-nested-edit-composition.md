@@ -103,5 +103,69 @@ Independent verification under Node 24.14.0 / zlib 1.3.1-e00f703:
 No new finding was identified. The production, real-customer, cross-browser and invited-editor
 gestures listed above remain deployment-stage evidence rather than blockers to this code review.
 
+## Incoming Devin follow-up — pending re-review
+
+PR #99 thread `PRRT_kwDOPc_I2s6reyz2` reproduced loss of authored descendant text when an
+already-edited child receives a newly discovered parent. The parent captures only its owned
+prefix, but route cleanup restores that prefix as a complete original and blanks the child.
+The earlier independent verdict is superseded for this head. The PR is draft while the
+regression, capture-scope repair, order-independent restoration and independent re-review run.
+
+Max severity: critical
+Ship allowed: no
+
+## PR #99 follow-up re-review — final stable source, 2026-10-12
+
+The incoming Devin finding is closed. This review binds to source SHA-256
+`e012083864740b670b010b735c515e579d54bb6dbb1c56d63aa85b17312f096d` and generated artifact
+SHA-256 `cefe75e9ba9ffde17ba4555f658a6b6c354f79d983617f48d3a5f826342bcf65` over base
+`b890368`.
+
+Discovery now records an explicit partial-capture bit only when the ownership walk actually prunes
+an applied descendant with the exact mapped element identity. This covers an applied empty child;
+it does not infer scope from owned/aggregate string inequality. Complete originals retain ADR 066's
+whole-element restore, including its documented ability to blank a shared child that applied later.
+Late partial parents follow ADR 068 and restore through the ownership writer.
+
+Route cleanup snapshots every departing entry's restore eligibility before writing. It then restores
+in total reverse document order while every mapping remains available, so descendants precede
+ancestors regardless of `Map` insertion order or an interleaved unrelated entry. A second pass removes
+markers and mappings. Shared-id descendants remain mapped, and restoring a partial parent makes zero
+text writes inside them. Immediate detached-entry cleanup retains its prior one-entry path and uses the
+same captured scope.
+
+The byte-funding changes are equivalent in the reviewed contexts. Multi-node `append` calls build
+detached native subtrees before their single insertion into the live document; single live insertions
+ignore both the old and new return values. The four lexical-`this` callback clusters preserve the
+former `self` receiver, including socket listeners and asynchronous publish handlers. The array
+membership substitutions compare the same string values. No discovery spacing, trailing report,
+per-page cap, shadow-root observation, write cap or 200 ms rescan hold changed.
+
+### Independent verification
+
+- Node 24.14.0 / zlib 1.3.1-e00f703 through `/tmp/recopyfast-with-test-env.py` for every Node,
+  npm and Jest command.
+- The focused affected scope passed 9/9 suites and 155/155 tests with `--runInBand --no-cache`.
+- Neutralizing only partial restoration back to the old whole-element writer made 5/60
+  `embed-spa` tests red: both page-scoped record orders, the retained shared child, the empty child
+  and the three-level ancestor. The exact source hash was restored before the green run.
+- The generated-artifact Chromium fixture passed 7/7 with no failure, skip or flake. Its nested case
+  covers both late-parent insertion orders and the shared-child zero-mutation result.
+- The final generated artifact is current at bundle 45,769 B ≤ 45,801 B, widget
+  32,992 B ≤ 33,044 B and transport 13,141 B. The ceilings are unchanged.
+- Author gate evidence on the same final runtime: lint 0 errors / 34 inherited warnings, format,
+  type-check and type-check:build green; full Jest 484 suites / 6,964 tests passed with 2 suites /
+  38 database-gated tests skipped; the production build completed compile, type checking and
+  120/120 static pages. This reviewer did not duplicate the full suite or production build after the
+  focused, mutation and browser runs passed.
+
+### Not verified
+
+No production host, provider, paid API or production environment was used. Real customer routers,
+browsers other than bundled Chromium, an invited-editor account, cross-device behavior and the
+public-host 200 ms first-paint acceptance target remain outside this local code review.
+
+No new finding was identified.
+
 Max severity: none
 Ship allowed: yes

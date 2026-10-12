@@ -142,10 +142,13 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // RATCHETED 2026-10-12 (s67b-nested-edit-composition), DOWNWARD:
 // 45818 → 45801, 33059 → 33044. Corrected under the repository's Node 24.14.0 /
 // zlib 1.3.1-e00f703: main is 45818 / 33059; applied-descendant ownership is
-// +115 / +106; equivalent compaction is -143 / -146; the fresh-review fix is
-// +8 / +8; final 45798 / 33027. The constants stay at the stricter first-pass
-// pair, leaving 3 / 17 B of
-// headroom without weakening discovery, its cap or shadow coverage. The first
+// +115 / +106; equivalent compaction is -143 / -146; the first fresh-review
+// fix is +8 / +8. PR #99's partial-capture and staged route repair is
+// +136 / +132; equivalent DOM/callback compaction is -145 / -144 and
+// membership compaction is -19 / -22; the final tombstone's banner hash is
+// -1 / -1; final 45769 / 32992. The constants stay at the stricter first-pass
+// pair, leaving 32 / 52 B of headroom without
+// weakening discovery, its cap or shadow coverage. The first
 // 45681 / 32932 evidence was Node 25.6.1 / zlib 1.2.12 and is invalid here.
 // build-embed.mjs itemises the corrected sequence.
 const SEEDED_MAX_BUNDLE_GZ = 45801;

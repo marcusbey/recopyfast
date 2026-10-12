@@ -396,9 +396,10 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *
  * A mapped parent now yields text owned by a descendant whose copy was applied
  * in this page view, through one reader/writer shared by discovery, hydration,
- * observer repair, realtime, variants and editing. Route restoration keeps the
- * prior whole-element behavior. Funding removes no discovery spacing, trailing
- * report, per-page cap or shadow-root coverage.
+ * observer repair, realtime, variants and editing. Complete originals keep the
+ * prior whole-element route restore; late parents whose discovery read pruned
+ * an applied child restore only their captured owned text. Funding removes no
+ * discovery spacing, trailing report, per-page cap or shadow-root coverage.
  *
  *   45818 / 33059  measured on main at bc6e503, zero headroom
  *   +115 / +106    applied-descendant ownership, whole-route restore, editor
@@ -412,10 +413,19 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *                  unchanged and pinned by the embed suites
  *   +8 / +8        fresh-review fix: whole route restoration compares whole
  *                  text before its writer, plus the incident tombstone
- *   45798 / 33027  corrected final measurement
+ *   45798 / 33027  first reviewed measurement
+ *   +136 / +132    PR #99 repair: explicit partial-capture scope, snapshot all
+ *                  route eligibility, restore descendants before ancestors
+ *                  while mappings remain, then clean up entries
+ *   -145 / -144    equivalent DOM insertion forms and lexical-this callbacks;
+ *                  no insertion return value or connected grouped mutation
+ *                  was changed
+ *   -19 / -22      equivalent string-array membership checks
+ *   -1 / -1        final incident-comment source-hash movement
+ *   45769 / 32992  corrected final measurement
  *
  * The stricter 45801 / 33044 constants from the first pass remain the ceilings,
- * leaving 3 / 17 B headroom under the corrected runtime rather than widening
+ * leaving 32 / 52 B headroom under the corrected runtime rather than widening
  * either one after the runtime error was found.
  */
 const MAX_BUNDLE_GZ = 45801;

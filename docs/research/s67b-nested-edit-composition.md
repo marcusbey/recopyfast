@@ -14,11 +14,13 @@ descendant would duplicate ordinary whole-element rows saved before this feature
 and child must both remain visible, settle without an observer loop, and keep the same rule
 through rescans, host write-backs, realtime updates, A/B variants and editor saves.
 
-The exceptions are also approved. Route restoration continues to write the parent’s complete
-first-seen authored text, because `originalContent` includes the child text; an ownership-aware
-restore would append the authored child twice. Whitespace around an applied descendant is data,
-so the parent editor must read and save its owned text without trimming it. The feature changes
-no UI appearance and needs no story design artifact.
+The exceptions are also approved. A parent whose `originalContent` captured its complete
+first-seen authored text restores in whole-element mode, because an ownership-aware restore would
+append the authored child twice. Follow-up research found a second capture scope: a parent mapped
+after its child applied records only its owned prefix, so that partial original must restore in
+ownership mode. Whitespace around an applied descendant is data, so the parent editor must read
+and save its owned text without trimming it. The feature changes no UI appearance and needs no
+story design artifact.
 
 ## Baseline and generated-file identity
 
@@ -93,8 +95,8 @@ One shared ownership helper must serve these existing paths:
    `sanitizeContent`, save, cancel and AI adapter currently use aggregate `textContent` or the
    old whole-element writer (`:4548-4573`, `:4820-4832`, `:4934-5030`).
 5. Route restoration: `dropEntry` compares the recorded write, then calls the same normal
-   writer with `originalContent` (`:3785-3809`). This call needs an explicit complete-text mode;
-   it is the approved exception to ownership-aware writes.
+   writer with `originalContent` (`:3785-3809`). Complete captures need explicit whole-text mode;
+   late parents whose discovery read pruned an applied child need owned-text mode instead.
 
 The element entry already has the required state signal: `data.written` is set by every
 successful content application and by editor saves. Variants and realtime use the same writer,
@@ -114,9 +116,9 @@ not affect the next scan.
   a separately applied child does not regress the s67 host-node guarantee.
 - `src/__tests__/embed/build-size-gate.test.ts` and `scripts/build-embed.mjs` carry the paired
   ratchet. They change only if the final official output is below the current ceilings.
-- `e2e/embed-spa.spec.ts` already exercises the generated artifact in Chromium. A nested fixture
-  case is useful only if the jsdom and React suites cannot prove a browser-specific part; the
-  ownership algorithm itself has no browser-only API.
+- `e2e/embed-fixture/nested-composition.spec.ts` exercises the generated artifact in Chromium.
+  Its strict seven-test inventory now includes nested convergence, alternating write-backs and
+  route restoration for both late-parent record orders and a retained shared child.
 
 The red phase must prove at least: at most three widget writes at boot, zero writes on a rescan,
 both edits visible, 12 alternating parent/child host write-backs repaired without exhausting the
@@ -134,8 +136,9 @@ applied-state predicate is deliberately removed.
   remove a host node.
 - Preserve exact owned whitespace. A parent row `Shop ` plus child row `today` must render
   `Shop today`, never `Shoptoday`; the outer editor save must send the trailing space.
-- `dropEntry` must restore the whole authored parent, not owned text. It must also compare in the
-  same mode as the recorded value so navigation restoration still fires.
+- `dropEntry` must restore in the scope discovery captured. Complete originals use whole mode;
+  partial originals use owned mode. Route eligibility must be snapshotted before any restore so
+  one write cannot change another entry's decision.
 - Discovery coalescing, its trailing report, the per-page report cap and open-shadow-root
   observation are protected funding lines. The feature cannot delete or weaken them.
 - The current observer deliberately processes only the closest mapped ancestor per record. A
@@ -144,12 +147,41 @@ applied-state predicate is deliberately removed.
 - Comments change the generated banner hash and therefore gzip. The required tombstone should be
   concise and byte measurements must come after all source comments are final.
 
+## Review repair research — late-discovered ancestors (PR #99)
+
+The first implementation and re-review repaired the whole-mode equality check, but PR #99 exposed
+a different premise error. The following local sequence uses only the real source IIFE:
+
+1. map `<span>now</span>` and apply `today`;
+2. let the host wrap it in a newly discoverable `<h1>Buy <span>today</span></h1>`;
+3. discover the `h1`, whose ownership read records only `"Buy "` as `originalContent`;
+4. apply `"Shop "` to the parent and navigate.
+
+Sequential `dropEntry` cleanup treated `"Buy "` as a complete original. Child-first insertion
+finished at `"Shop now"`; forcing parent-first insertion finished at `"Buy "`. A shared-id child
+could remain visibly correct only after being blanked and rewritten twice, which still violated
+the retained-child contract. An applied empty child reproduced the scope error even though owned
+and aggregate text equality could not reveal it.
+
+The smallest correct distinction is an explicit capture-scope bit set by the ownership walk when
+it actually prunes an applied exact-identity descendant. Route cleanup must snapshot every page
+entry's eligibility, restore entries in descendant-first total document order while all mappings
+remain present, and remove entries only afterward. A containment-only comparator is insufficient:
+`[parent, unrelated, child]` can remain in that order because the adjacent comparisons are equal.
+Reverse document order supplies a total order and keeps every descendant before its ancestor.
+
+The bounded repair preserves ADR 066 for a complete parent discovered before a shared child later
+applies: whole restoration can still blank that retained child. The test suite characterizes that
+existing result instead of claiming a broader authored-tree snapshot model. ADR 068 records this
+scope distinction.
+
 ## Open questions
 
-No product or architecture question blocks implementation. The only unresolved implementation
-fact is final compressed size after the complete test-backed patch. If the official build exceeds
-either fixed ceiling after real behavior-preserving simplification attempts, the story must stop
-with the measured blocker rather than changing the accepted rule or protections.
+No product or architecture question blocks implementation. The corrected Node 24 build finishes at
+45,769 B bundle / 32,992 B widget / 13,141 B transport under unchanged ceilings of 45,801 / 33,044.
+Funding uses equivalent DOM insertion forms, bounded lexical callbacks and equivalent array
+membership checks; discovery coalescing, its trailing report, the page cap and shadow observation
+remain intact.
 
 ## Complexity re-score
 

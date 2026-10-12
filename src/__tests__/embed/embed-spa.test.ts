@@ -718,6 +718,296 @@ describe("s67b — nested edited elements compose by applied-descendant ownershi
     }
   });
 
+  it.each(["child-first", "parent-first"])(
+    "restores a late-discovered parent's owned original and its page-scoped child independent of %s record order",
+    async (order) => {
+      const navigation = new EventTarget();
+      Object.defineProperty(window, "navigation", {
+        configurable: true,
+        value: navigation,
+      });
+      try {
+        document.body.innerHTML = '<div id="mount"><span>now</span></div>';
+        const child = document.querySelector("span") as HTMLElement;
+        await boot({
+          rows: (pagePath) =>
+            pagePath === "/"
+              ? [
+                  {
+                    element_id: child.getAttribute("data-rcf-id")!,
+                    original_content: "now",
+                    current_content: "today",
+                  },
+                ]
+              : [],
+        });
+        expect(child.textContent).toBe("today");
+
+        const parent = document.createElement("h1");
+        parent.append("Buy ", child);
+        document.getElementById("mount")!.replaceChildren(parent);
+        widget().rescan();
+        await flushMicrotasks();
+        const parentId = parent.getAttribute("data-rcf-id")!;
+
+        if (order === "parent-first") {
+          child.remove();
+          widget().rescan();
+          const unrelated = document.createElement("p");
+          unrelated.textContent = "Aside";
+          document.getElementById("mount")!.appendChild(unrelated);
+          widget().rescan();
+          parent.appendChild(child);
+          widget().rescan();
+          widget().handleContentUpdate({
+            elementId: child.getAttribute("data-rcf-id")!,
+            content: "today",
+          });
+          await flushMicrotasks();
+        }
+
+        widget().handleContentUpdate({
+          elementId: parentId,
+          content: "Shop ",
+        });
+        await flushMicrotasks();
+        expect(parent.textContent).toBe("Shop today");
+
+        history.pushState(null, "", "/next");
+        navigation.dispatchEvent(new Event("currententrychange"));
+        await flushMicrotasks();
+
+        expect(parent.textContent).toBe("Buy now");
+        expect(child.textContent).toBe("now");
+        if (order === "parent-first") {
+          expect(document.querySelector("p")?.textContent).toBe("Aside");
+        }
+      } finally {
+        delete (window as unknown as Record<string, unknown>).navigation;
+      }
+    },
+  );
+
+  it("restores a late-discovered parent's owned original without blanking or resetting a shared-id child", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML =
+        '<div id="mount"><span data-rcf-id="shared-child">now</span></div>';
+      const child = byId("shared-child");
+      await boot({
+        rows: {
+          "*": [
+            {
+              element_id: "shared-child",
+              original_content: "now",
+              current_content: "today",
+            },
+          ],
+        },
+      });
+      expect(child.textContent).toBe("today");
+
+      const parent = document.createElement("h1");
+      parent.append("Buy ", child);
+      document.getElementById("mount")!.replaceChildren(parent);
+      widget().rescan();
+      await flushMicrotasks();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop ",
+      });
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop today");
+
+      const childMutations: MutationRecord[] = [];
+      const childObserver = new MutationObserver((records) =>
+        childMutations.push(...records),
+      );
+      childObserver.observe(child, {
+        characterData: true,
+        subtree: true,
+      });
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy today");
+      expect(child.textContent).toBe("today");
+      expect(child.getAttribute("data-rcf-id")).toBe("shared-child");
+      expect(childMutations).toHaveLength(0);
+      childObserver.disconnect();
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("keeps ADR 066's complete-parent restore behavior when a shared child applies after discovery", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML =
+        '<h1>Buy <span data-rcf-id="shared-child">now</span></h1>';
+      const parent = document.querySelector("h1") as HTMLElement;
+      const child = byId("shared-child");
+      await boot();
+
+      widget().handleContentUpdate({
+        elementId: "shared-child",
+        content: "today",
+      });
+      await flushMicrotasks();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop ",
+      });
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop today");
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("");
+      expect(child.getAttribute("data-rcf-id")).toBe("shared-child");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("restores a complete parent after its page child when an unrelated entry separates their record order", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML =
+        '<main><h1>Buy <span>now</span></h1><div id="aside"></div></main>';
+      const parent = document.querySelector("h1") as HTMLElement;
+      const child = document.querySelector("span") as HTMLElement;
+      await boot();
+
+      child.remove();
+      widget().rescan();
+      const unrelated = document.createElement("p");
+      unrelated.textContent = "Aside";
+      document.getElementById("aside")!.appendChild(unrelated);
+      widget().rescan();
+      parent.appendChild(child);
+      widget().rescan();
+
+      widget().handleContentUpdate({
+        elementId: child.getAttribute("data-rcf-id")!,
+        content: "today",
+      });
+      await flushMicrotasks();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop ",
+      });
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop today");
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("");
+      expect(unrelated.textContent).toBe("Aside");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("records a late parent's partial original even when the applied child's text is empty", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML = '<div id="mount"><span>now</span></div>';
+      const child = document.querySelector("span") as HTMLElement;
+      await boot();
+      widget().handleContentUpdate({
+        elementId: child.getAttribute("data-rcf-id")!,
+        content: "",
+      });
+      await flushMicrotasks();
+      expect(child.textContent).toBe("");
+
+      const parent = document.createElement("h1");
+      parent.append("Buy ", child);
+      document.getElementById("mount")!.replaceChildren(parent);
+      widget().rescan();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop ",
+      });
+      await flushMicrotasks();
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("now");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("restores a three-level late ancestor around an applied leaf", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML = '<div id="mount"><span>now</span></div>';
+      const child = document.querySelector("span") as HTMLElement;
+      await boot();
+      widget().handleContentUpdate({
+        elementId: child.getAttribute("data-rcf-id")!,
+        content: "today",
+      });
+      await flushMicrotasks();
+
+      const middle = document.createElement("em");
+      middle.append("right ", child);
+      const parent = document.createElement("h1");
+      parent.append("Buy ", middle);
+      document.getElementById("mount")!.replaceChildren(parent);
+      widget().rescan();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop right ",
+      });
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop right today");
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy right now");
+      expect(middle.textContent).toBe("now");
+      expect(child.textContent).toBe("now");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
   it("saves only the outer element's owned text and preserves the separating space", async () => {
     const { parent, child } = nestedMarkup();
     const recorded = await boot({ rows: { "*": editedRows() } });

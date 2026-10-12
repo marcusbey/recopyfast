@@ -43,9 +43,10 @@ it above the then-current bundle/widget ceilings. D2 and D3 shipped; D1 was deli
 
 Use the recorded **applied-descendant ownership** rule from `docs/stories.md`: a parent owns text
 nodes beneath it except those inside a descendant whose own copy was applied in this page view.
-Discovery, reads, writes and reapply comparisons use the same owned text. Route restoration keeps
-its full-element behavior documented by the story, and editor saves preserve surrounding
-whitespace.
+Discovery, reads, writes and reapply comparisons use the same owned text. Route restoration uses
+the scope discovery captured: a complete original keeps the story's full-element behavior, while
+a late parent's partial owned original preserves mapped descendants. Editor saves preserve
+surrounding whitespace.
 
 Fund the implementation only through behavior-preserving simplification or a smaller equivalent
 encoding found during research. If it does not fit under the ceilings in force on the story branch,
@@ -75,45 +76,68 @@ or shadow-root coverage.
    - Run `npm run build:embed`, verify the generated artifact comes only from the source, and run
      `node scripts/build-embed.mjs --check` plus the size-gate tests. Ratchet a ceiling down if the
      final output is smaller; never up.
-5. [ ] **Verify the permanent widget contract.**
+5. [x] **Repair the review-found late-ancestor restoration defect.**
+   - Capture an explicit partial-original bit when discovery actually prunes an applied exact-
+     identity descendant, including an applied empty child.
+   - Snapshot all route-restore eligibility before writing, restore in descendant-first total
+     document order while mappings remain present, then clean up entries.
+   - Pin both record insertion orders, an unrelated interleaved entry, three-level nesting and a
+     retained shared child with zero text mutations. Characterize ADR 066's existing complete-
+     parent/shared-child result without broadening the snapshot model.
+   - Record the amended lifecycle rule in ADR 068.
+6. [x] **Verify the permanent widget contract.**
    - [x] Run targeted embed unit tests, built fixture, `e2e/embed-spa.spec.ts`, type-check, lint,
          full Jest and build.
-   - [ ] Run the independent `/ks-review` gate after the implementation commit.
+   - [x] Run the independent `/ks-review` gate after the implementation commit.
 
 ### Implementation evidence (2026-10-12)
 
 - Baseline source/artifact SHA-256:
   `15681873057b682dbbb9246d13e4903b33d1d8be3a9e3727b2fda3726f156c6f` /
   `9b604b94dfe37fe26bda7605ade8152aa9cf5d7e0e31c7b6be53563af5af5317`;
-  final: `e5db5753bac608dce5478f330e67a9e9b47d90f12419b1499dbe65c3c6b5dec9` /
-  `c89ebefecdbb137ed5214b7eb9da3184a2538b443bb72bbfeac358343e5d10b5`.
+  final: `e012083864740b670b010b735c515e579d54bb6dbb1c56d63aa85b17312f096d` /
+  `cefe75e9ba9ffde17ba4555f658a6b6c354f79d983617f48d3a5f826342bcf65`.
 - Runtime correction: the first byte evidence came from Node 25.6.1 / zlib 1.2.12 and was
   invalid for this Node 24 repository. Node 24.14.0 / zlib 1.3.1-e00f703 measures baseline
-  45,818 / 33,059, the unfunded implementation 45,933 / 33,165 and final 45,798 / 33,027.
+  45,818 / 33,059, the first unfunded implementation 45,933 / 33,165 and final
+  45,769 / 32,992.
   The already-lowered ceilings stay 45,801 / 33,044; transport is 13,141.
 - Funding is behavior-equivalent: the feature itself is +115 / +106; shorter private helper
   naming is -4 / -4; existing `Element.remove()`, direct NodeList iteration and a lexical polling
   callback are -65 / -60; lexical collection/A-B callbacks and removal of redundant `self`
-  aliases are -74 / -82; the fresh-review whole-restore comparison and tombstone are +8 / +8.
-  Net against main: -20 / -32.
+  aliases are -74 / -82; the first fresh-review whole-restore comparison and tombstone are
+  +8 / +8. The PR #99 capture-scope and staged route repair then costs +136 / +132; equivalent
+  `append` forms and four bounded lexical callback clusters recover -145 / -144; equivalent
+  array membership checks recover -19 / -22; the final source tombstone's banner-hash movement
+  recovers -1 / -1. Net against main: -49 / -67.
 - Red phase: 30 boot mutations, failed realtime/variant repairs, partial navigation restore,
   aggregate `"Sell today"` outer save and the same 30-mutation loop in React. Green phase:
   targeted source/React/size/inventory suites 80/80.
 - Mutation checks turned the targeted tests red when (1) applied-descendant exclusion was
   disabled, (2) every mapped descendant was excluded, (3) whole-element route restoration was
-  removed and (4) exact element identity was removed from ownership.
+  removed, (4) exact element identity was removed from ownership, (5) partial originals were
+  forced back through the whole writer and (6) the total document-order sort was replaced with a
+  containment-only comparator around an unrelated interleaved entry.
 - Fresh review regression: with only the child published, a later parent update equal to the
   parent's aggregate authored copy produced `"Buy nownow"` on navigation. The new Jest case and
   generated-artifact Chromium step both failed with that exact value before the mode-aware
   equality guard and pass with `"Buy now"` / blank child after it.
+- PR #99 regression: a late parent around an already-applied child restored from a partial
+  `originalContent`. Before the repair, the two insertion orders ended at `"Shop now"` and
+  `"Buy "`; the interleaved complete-parent mutation ended at `"Buy nownow"`. The explicit scope,
+  snapshot, descendant-first restore and delayed cleanup pass all new Jest cases, including empty
+  child, three levels and zero retained shared-child mutations.
 - Chromium: credential-free generated-artifact fixture 7/7 (strict inventory), including nested
-  visible copy, zero rescan churn and 12 alternating repairs; existing SPA E1–E5 5/5 on the owned
-  local host. No production host or API was called.
+  visible copy, zero rescan churn, 12 alternating repairs, both late-parent insertion orders and a
+  retained shared child with zero text mutations; existing SPA E1–E5 5/5 on the owned local host.
+  No production host or API was called.
 - Repository gates: lint 0 errors / 34 inherited warnings; format, type-check and
-  type-check:build green; full Jest 484 suites / 6,957 tests passed with 2 database-gated suites /
-  38 tests skipped; the corrected Node 24 embed suites pass 28 suites / 363 tests and the
+  type-check:build green; full Jest 484 suites / 6,964 tests passed with 2 database-gated suites /
+  38 tests skipped; the affected Node 24 embed scope passes 9 suites / 155 tests and the
   generated-artifact Chromium fixture passes 7/7; SPA/React E1-E5 pass 5/5; the Node 24
-  production build is green with placeholder environment values.
+  production build is green with placeholder environment values. Independent repair review
+  reproduced the 5/60 partial-mode mutation, restored the exact source hash, passed the same
+  155-test scope, passed artifact check and passed Chromium 7/7.
 
 ### Expected files
 
