@@ -206,7 +206,7 @@ test.describe("s107 Google Analytics: a visitor outside the EEA", () => {
     expect(await violations()).toEqual([]);
   });
 
-  test("never gets Google Analytics on the auth and editor pages, even after consenting", async ({
+  test("never gets Google Analytics on the auth and editor pages or a free-tool report, even after consenting", async ({
     baseURL,
     context,
     page,
@@ -222,7 +222,15 @@ test.describe("s107 Google Analytics: a visitor outside the EEA", () => {
     const fetched: string[] = [];
     page.on("request", (request) => fetched.push(request.url()));
 
-    for (const path of ["/login", "/signup", "/edit"]) {
+    // A free-tool report (s96) is a capability URL under the nonce policy:
+    // no analytics there, by the architect's decision on the s96 merge (ADR
+    // 063). An unknown id answers its per-request not-found, same document.
+    for (const path of [
+      "/login",
+      "/signup",
+      "/edit",
+      "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+    ]) {
       const response = await page.goto(path, { waitUntil: "networkidle" });
       expect(response?.headers()["content-security-policy"]).not.toContain(
         "google",

@@ -19,6 +19,7 @@ import {
   rateLimiter,
   createRateLimitConfig,
   RATE_LIMIT_CONFIGS,
+  type RateLimitIdentifierType,
 } from "@/lib/security/rate-limiter";
 
 /**
@@ -49,7 +50,7 @@ export interface EnforceRateLimitOptions {
    * isolate would count into a different bucket and the limit would not hold.
    */
   identifier?: string;
-  identifierType?: "user" | "ip" | "api_key";
+  identifierType?: RateLimitIdentifierType;
   /** Defaults to "deny" — the safe choice; opt into "allow" deliberately. */
   onStoreFailure?: RateLimitFailureMode;
   /**

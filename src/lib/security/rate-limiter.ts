@@ -45,11 +45,23 @@ export function isProductionLikeEnvironment(): boolean {
   return !DEVELOPER_ENVIRONMENTS.has(environment);
 }
 
+/**
+ * What a bucket's identifier names. `global` (one bucket for every caller)
+ * and `host` (a scanned site's host name) were added by s96 for the free
+ * tools' scan caps; the Redis key format is unchanged.
+ */
+export type RateLimitIdentifierType =
+  | "user"
+  | "ip"
+  | "api_key"
+  | "global"
+  | "host";
+
 export interface RateLimitConfig {
   windowMs: number;
   maxRequests: number;
   identifier: string;
-  identifierType: "user" | "ip" | "api_key";
+  identifierType: RateLimitIdentifierType;
   endpoint?: string;
 }
 
@@ -147,7 +159,17 @@ export class MemoryRateLimiter {
 const REDIS_CONNECT_TIMEOUT_MS = 2000;
 
 /** Max time to wait for a single rate-limit command round trip. */
-const REDIS_COMMAND_TIMEOUT_MS = 1500;
+export const REDIS_COMMAND_TIMEOUT_MS = 1500;
+
+/**
+ * How long a window's key outlives the window (s96 review round 2, minor 1).
+ * PEXPIREAT with a past timestamp DELETES the key, so an expiry of exactly
+ * `windowEnd` let a MULTI that reached Redis late — latency, or clock skew
+ * between this instance and Redis — wipe the count near every window's end.
+ * The key names its window, so the grace never merges two windows' counts.
+ * It must exceed the command timeout; 10 s also covers ordinary clock skew.
+ */
+export const EXPIRY_GRACE_MS = 10_000;
 
 /**
  * Reject a promise if it has not settled within `timeoutMs`.
@@ -310,21 +332,33 @@ export class RedisRateLimiter {
     /**
      * Two commands, not three.
      *
-     * The key is already scoped to a fixed window, so it expires exactly at
-     * `windowEnd` — the TTL round-trip that used to be here only re-derived a
-     * number this function had already computed. It was also less accurate:
-     * `now + ttl * 1000` measures the TTL forward from the CURRENT request, so
-     * the first request of a window reported a reset up to a full window late
-     * and clients got an inflated Retry-After.
+     * The key is already scoped to a fixed window, so its expiry is known
+     * here — `windowEnd` plus EXPIRY_GRACE_MS — and the reset time reported is
+     * `windowEnd` itself. The TTL round-trip that used to be here only
+     * re-derived a number this function had already computed. It was also
+     * less accurate: `now + ttl * 1000` measures the TTL forward from the
+     * CURRENT request, so the first request of a window reported a reset up
+     * to a full window late and clients got an inflated Retry-After.
      *
      * The third of the traffic this removes matters on a metered store: the
      * auth endpoints fail closed, so exhausting a command quota takes down
      * editor login exactly the way a dead instance does.
+     *
+     * The expiry is ABSOLUTE: PEXPIREAT at `windowEnd + EXPIRY_GRACE_MS`
+     * (s96 review, minor 4; the grace since round 2, minor 1). It was
+     * `EXPIRE key <windowMs>`, re-sent with every increment, which
+     * pushed the expiry forward each time — a key last touched near its
+     * window's end outlived the window by almost a whole window. For the free
+     * tools' daily buckets that kept a client address ~48 h while /privacy
+     * says 24. The count is unchanged (the key was always window-scoped), and
+     * PEXPIREAT is Redis 2.6, so every store this runs on speaks it. The
+     * timestamp is `windowEnd + EXPIRY_GRACE_MS`, never `windowEnd` itself: a
+     * past timestamp deletes the key (see EXPIRY_GRACE_MS).
      */
     const pipeline = this.client!.multi();
 
     pipeline.incr(key);
-    pipeline.expire(key, Math.ceil(config.windowMs / 1000));
+    pipeline.pExpireAt(key, windowEnd + EXPIRY_GRACE_MS);
 
     let results: unknown[] | null;
     try {
@@ -440,6 +474,16 @@ export const RATE_LIMIT_CONFIGS = {
   // for why this number can never meet an uptime monitor.
   IP_HEALTH: { windowMs: 60 * 1000, maxRequests: 60 },
 
+  // Free tools' scan (s96, src/app/api/tools/scan/route.ts). Every one fails
+  // closed: a scan spends outbound fetches, function seconds and a row, with
+  // no authorization behind it. The burst bucket is checked before the body is
+  // read; the daily, /48, global and per-target buckets only on a cache miss.
+  TOOLS_SCAN_BURST: { windowMs: 60 * 1000, maxRequests: 5 }, // 5 per minute per /64 or IPv4
+  TOOLS_SCAN_DAILY: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 5 }, // 5 scans a day per /64 or IPv4
+  TOOLS_SCAN_DAILY_48: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 20 }, // 20 a day per IPv6 /48
+  TOOLS_SCAN_GLOBAL_DAILY: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 500 }, // 500 a day, everyone together
+  TOOLS_SCAN_TARGET_HOURLY: { windowMs: 60 * 60 * 1000, maxRequests: 20 }, // 20 an hour per scanned host
+
   // API key-based limits
   API_KEY_DEFAULT: { windowMs: 60 * 1000, maxRequests: 1000 }, // 1000 requests per minute
   API_KEY_PREMIUM: { windowMs: 60 * 1000, maxRequests: 5000 }, // 5000 requests per minute
@@ -451,7 +495,7 @@ export const RATE_LIMIT_CONFIGS = {
  */
 export function createRateLimitConfig(
   identifier: string,
-  identifierType: "user" | "ip" | "api_key",
+  identifierType: RateLimitIdentifierType,
   limitType: keyof typeof RATE_LIMIT_CONFIGS,
   endpoint?: string,
 ): RateLimitConfig {

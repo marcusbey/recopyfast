@@ -13,6 +13,7 @@
  */
 
 import { isAnalyticsRoute } from "@/lib/analytics/google-analytics/routes";
+import { usesNoncePolicy } from "@/lib/security/content-security-policy";
 
 describe("isAnalyticsRoute", () => {
   it.each([
@@ -26,14 +27,64 @@ describe("isAnalyticsRoute", () => {
     "/compare/webflow-editor",
     "/tools",
     "/tools/website-maintenance-cost",
-    // s96's report pages, `/tools/<slug>/r/<id>`.
-    "/tools/broken-links/r/0b1f3c2e-1111-4111-8111-111111111111",
     "/blog",
     "/blog/some-post",
     "/docs",
     "/docs/install",
   ])("is true for the public marketing page %s", (pathname) => {
     expect(isAnalyticsRoute(pathname)).toBe(true);
+  });
+
+  /**
+   * s96's free-tool reports, `/tools/<slug>/r/<id>`: architect decision on
+   * the s96 merge, 2026-10-12 (ADR 063 §Consequences). A report renders text
+   * scraped off a stranger's site, its URL is a capability (anyone holding it
+   * reads the report), and it runs under the nonce policy (s96's ADR 062),
+   * whose CSP names no Google host. No analytics there, nor on anything below
+   * a tool's `r` segment. The scan itself is measured on the tool page.
+   */
+  it.each([
+    "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+    "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c/",
+    "/tools/website-spell-checker/r",
+    "/tools/website-spell-checker/r/",
+    "/tools/website-spell-checker/r/not-a-uuid/deeper",
+  ])("is false for the free-tool report path %s", (pathname) => {
+    expect(isAnalyticsRoute(pathname)).toBe(false);
+  });
+
+  it.each([
+    "/tools/website-spell-checker",
+    "/tools/website-spell-checker/",
+    "/tools/report",
+    "/tools/r",
+  ])("still covers the tool pages: %s", (pathname) => {
+    expect(isAnalyticsRoute(pathname)).toBe(true);
+  });
+
+  it("never overlaps the nonce (app) policy", () => {
+    const samples = [
+      "/",
+      "/dashboard",
+      "/dashboard/sites",
+      "/login",
+      "/signup",
+      "/edit",
+      "/tools",
+      "/tools/website-spell-checker",
+      "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+      "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c/",
+      "/compare/webflow-editor",
+      "/blog/post",
+      "/docs/install",
+      "/try",
+    ];
+    for (const pathname of samples) {
+      expect([
+        pathname,
+        isAnalyticsRoute(pathname) && usesNoncePolicy(pathname),
+      ]).toEqual([pathname, false]);
+    }
   });
 
   it.each(["/blog/", "/privacy/", "/compare/webflow-editor/"])(

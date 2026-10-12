@@ -107,6 +107,15 @@ async function isUnentitled(
  * A prefix, because the site id is a path segment; the sibling `/api/published`
  * and every other `/api/*` path keep the session-aware path.
  *
+ * `/tools` and below, and `/api/tools/` (s96): the free tools are public
+ * pages and a public scan endpoint. No response there depends on a session —
+ * the hub and tool pages are static, a report is read by id through the
+ * service role, the scan is metered per IP — so a GoTrue round trip would buy
+ * nothing, and a visitor signed in to ReCopyFast must not have a rotated
+ * session cookie land on a report. Segment-exact (`/toolsx` is not here).
+ * A report's nonce is still issued: the policy is chosen above, before this
+ * check returns.
+ *
  * `/analytics/gtag-init.js` (s107, ADR 063) is Google Analytics' first-party
  * init script, requested on every marketing page view. Its answer depends on
  * Vercel's country hint and nothing else; a GoTrue round trip per page view
@@ -129,6 +138,9 @@ function isSessionlessPath(pathname: string): boolean {
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
     pathname === "/llms.txt" ||
+    pathname === "/tools" ||
+    pathname.startsWith("/tools/") ||
+    pathname.startsWith("/api/tools/") ||
     pathname === "/analytics/gtag-init.js" ||
     isSentryTunnelPath(pathname)
   );

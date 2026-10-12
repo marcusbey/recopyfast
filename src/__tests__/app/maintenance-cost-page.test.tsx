@@ -84,14 +84,24 @@ describe("structured data", () => {
     expect(app).not.toHaveProperty("review");
   });
 
-  it("crumbs Home then the page, with no /tools crumb until that route exists", () => {
-    const { container } = renderPage();
+  // s96 shipped /tools, so the "Free tools" crumb s98 deferred joins, in
+  // the JSON-LD and in the visible breadcrumb.
+  it("crumbs Home, Free tools, then the page", () => {
+    const { container, getByRole } = renderPage();
     const crumbs = jsonLd(container)[1].itemListElement as {
       position: number;
       item: string;
     }[];
 
-    expect(crumbs.map((crumb) => crumb.item)).toEqual([siteUrl, PAGE_URL]);
+    expect(crumbs.map((crumb) => crumb.item)).toEqual([
+      siteUrl,
+      `${siteUrl}/tools`,
+      PAGE_URL,
+    ]);
+    const breadcrumb = getByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumb.querySelector('a[href="/tools"]')?.textContent).toBe(
+      "Free tools",
+    );
   });
 
   it("states in FAQPage exactly the FAQ the page shows", () => {

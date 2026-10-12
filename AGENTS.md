@@ -171,6 +171,12 @@ path. See [ADR 002](./docs/decisions/002-rls-tenant-boundary.md).
 `GET /api/published/[siteId]` is a named unauthenticated exception: no `authorize*` call, a
 fail-open per-IP limiter and a fixed public projection, by
 [ADR 046](./docs/decisions/046-unauthenticated-published-copy-snapshot.md) — not a pattern to copy.
+The free tools are the second: `POST /api/tools/scan` writes one `tool_reports` row through the
+service role only after its same-origin guard and fail-closed per-IP, global and per-target
+limiters, and the report page reads ONE row by validated id with a fixed projection. No web
+principal holds any privilege on `tool_reports`, by
+[ADR 062](./docs/decisions/062-free-tool-reports-are-service-role-reads-under-the-nonce-csp.md) —
+not a pattern to copy either.
 
 Two non-tenant blog principals may reach the service role for `blog_posts` and the private
 `blog_generation_claims` ledger only: the daily cron after the fail-closed `CRON_SECRET` bearer
@@ -234,8 +240,9 @@ the asset. When you fix something subtle, leave the tombstone.
 Jest + Testing Library, colocated in `__tests__/`. Playwright in `e2e/`.
 
 - Coverage thresholds in `jest.config.js` are a **ratchet, not a target**: they are the floor
-  last measured (69% lines, 2026-10-09), and CI enforces them. Raise them as tests are added;
-  never lower them. 80% remains the goal and cannot be declared before it is earned.
+  last measured (74% lines, from 75.4% measured by s96 on 2026-10-11), and CI enforces them.
+  Raise them as tests are added; never lower them. 80% remains the goal and cannot be declared
+  before it is earned.
 - `jest.setup.js:177-182` mocks `IntersectionObserver` globally with a no-op `observe`. Any
   test that depends on intersection behaviour must supply its own controllable mock or it
   passes vacuously.

@@ -5,7 +5,8 @@
 - Scope: story `s107-google-analytics`
 - Related: [ADR 059](./059-nonce-csp-on-the-app-surface.md) (the two CSPs),
   [ADR 061](./061-lighthouse-comparison-gate-uses-applied-mobile-throttling.md) (the gate this
-  story must keep green). Numbering: s96's open branch holds 062.
+  story must keep green), [ADR 062](./062-free-tool-reports-are-service-role-reads-under-the-nonce-csp.md)
+  (free-tool reports under the nonce CSP).
 
 ## Context
 
@@ -26,8 +27,9 @@ at all (launch kit §12). Four constraints shaped the integration:
 ## Decision
 
 1. **One route allowlist** (`isAnalyticsRoute`) decides where GA may run: `/`, `/try`, `/pricing`,
-   `/privacy`, `/terms`, `/demo`, and `/compare`, `/tools`, `/blog`, `/docs` with their subpaths.
-   Both the client component and the middleware (CSP) ask it.
+   `/privacy`, `/terms`, `/demo`, and `/compare`, `/tools`, `/blog`, `/docs` with their subpaths,
+   except the free-tool scan reports (`/tools/<slug>/r/…`, see Consequences). Both the client
+   component and the middleware (CSP) ask it; it never overlaps the nonce policy.
 2. **No inline script.** A first-party route handler, `/analytics/gtag-init.js`, returns the gtag
    queue and the Consent Mode v2 defaults. It reads `x-vercel-ip-country` per request, reduces it to
    one boolean (consent required: EEA + UK + CH, fail-closed when missing), never echoes it, and is
@@ -67,8 +69,12 @@ at all (launch kit §12). Four constraints shaped the integration:
 - New marketing pages are unmeasured until added to the allowlist — by design.
 - `/signup` is unmeasured client-side; `sign_up` needs a server-side Measurement Protocol call
   (documented follow-up, `docs/operations/analytics.md`).
-- s96's report pages (nonce policy under its ADR 062) get no GA hosts in their CSP. Measuring them
-  needs an amendment to this ADR for that one path.
+- **Free-tool scan reports carry no analytics** (architect decision on merging s96, 2026-10-12).
+  `/tools/<slug>/r/<id>` stays on the nonce policy of s96's ADR 062 with no Google host, and the
+  allowlist excludes it: a report renders text scraped off a stranger's site and its URL is a
+  capability, so neither its content nor its address may reach Google. The scan is measured on
+  the tool page instead (`tool_scan_completed` from `ToolScanForm`, slug only). Measuring reports
+  would need a new ADR superseding this point.
 - The CI e2e and Lighthouse jobs build with a fake id (`G-E2ETEST000`), so they test what
   production serves; no request reaches Google in either.
 

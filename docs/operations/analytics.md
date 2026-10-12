@@ -70,8 +70,9 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
 
 - **Pages:** `isAnalyticsRoute` (`src/lib/analytics/google-analytics/routes.ts`): `/`, `/try`,
   `/pricing`, `/privacy`, `/terms`, `/demo`, and `/compare`, `/tools`, `/blog`, `/docs` with
-  everything below them. Never `/dashboard`, `/settings`, `/edit`, `/login`, `/signup`, `/auth/*`,
-  the API, `/embed/*` or `/try/rcf-try.js`.
+  everything below them — **except s96's scan reports, `/tools/<slug>/r/…`**. Never `/dashboard`,
+  `/settings`, `/edit`, `/login`, `/signup`, `/auth/*`, the API, `/embed/*` or `/try/rcf-try.js`.
+  A test pins that no path is both on the allowlist and under the nonce policy.
 - **Loading:** the shell in the root layout fetches the runtime chunk (`import()`) after
   hydration on allowlisted pages only and mounts it in `startTransition`. Then the first-party
   `/analytics/gtag-init.js` (route handler: Consent Mode
@@ -104,7 +105,7 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
 | `generate_lead` | click on a same-origin link to `/signup` | `cta_location` | yes |
 | `begin_checkout` | click on a same-origin link to `/dashboard/billing` (Pricing's "Buy Lifetime Pro", "Buy founding access") | `cta_location` | yes |
 | `try_started` | the `/try` sample preview becomes active | — | no |
-| `tool_scan_completed` | a free tool produced the visitor's own result: the calculator, once per page view, the first time the inputs settle while analytics is active (`track` returns whether it sent; a result before consent does not use the event up) | `tool_slug` | yes |
+| `tool_scan_completed` | a free tool produced the visitor's own result. Scanning tools (s96, `ToolScanForm`): on the tool page, when the scan succeeds, just before the report opens. The calculator: once per page view, the first time the inputs settle while analytics is active (`track` returns whether it sent; a result before consent does not use the event up) | `tool_slug` (never the scanned address) | yes |
 | `sign_up` | **not sent yet** — see below | — | yes |
 
 `cta_location` values: `hero`, `header`, `final_cta`, `founding_offer`, `pricing_plan`,
@@ -113,9 +114,23 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
 `footer`, the enclosing `section` id, or `page`. Every param value must match
 `^[a-z0-9][a-z0-9_-]{0,63}$` or it is dropped.
 
-### Hook for s96 (free-tools platform)
+### Free tools (s96): the tool page is measured, the report is not
 
-When a scan report is ready on a tool page, call:
+Architect decision on merging s96 (2026-10-12), recorded in ADR 063:
+
+- **Scan reports, `/tools/<slug>/r/<id>`, carry no analytics.** They stay on the strict nonce
+  policy (s96's ADR 062) with no Google host, and `isAnalyticsRoute` excludes them (and anything
+  below a tool's `r` segment), so the runtime is not even fetched there. A report renders text
+  scraped off a stranger's site and its URL is a capability: neither may reach Google.
+- **The scan is measured where it starts.** `ToolScanForm`, on the tool page (marketing policy,
+  allowlisted), sends `tool_scan_completed` with the tool's slug when the scan API answers with a
+  valid report path, just before the report opens as a new document. gtag.js flushes queued
+  events with `sendBeacon` as the page unloads. Refused or failed scans send nothing.
+- The `/tools` hub has no scan of its own; its CTAs and the tool pages' `ToolCta` links
+  (`data-cta-location="tool_cta"`) feed `generate_lead` like every other CTA.
+
+A new scanning tool that uses `ToolScanForm` is measured with no extra code. A tool that
+produces its result differently calls:
 
 ```ts
 import { track } from "@/lib/analytics/google-analytics/gtag";
@@ -123,13 +138,7 @@ track("tool_scan_completed", { tool_slug: TOOL_SLUG });
 ```
 
 It is a no-op unless analytics runs on that page, and returns whether it sent: if the event
-should go once per page view, mark it sent only on `true`. The allowlist already covers `/tools/**`, and
-UUID report ids are replaced by `[id]` before anything is sent (a report URL is a capability).
-**Rebase note:** s96's ADR 062 puts `/tools/<slug>/r/<id>` under the nonce policy. The CSP builder
-ignores `analytics` under a nonce (this story's brief: nothing on the app policy), so on report
-pages `connect-src` would refuse Google's hosts. s96 decides: keep reports unmeasured (the tool
-page measures the scan), or amend ADR 063 for that one path. Report pages also render text
-scraped off a stranger's site in their title, which GA would record as `page_title`.
+should go once per page view, mark it sent only on `true`.
 
 ### `sign_up`: Measurement Protocol follow-up (not built)
 

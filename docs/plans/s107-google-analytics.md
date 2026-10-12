@@ -7,8 +7,9 @@ validated: yes (architect: pre-approved scope 2026-10-12)
 > perfectly fine". Architect brief: GA4 on marketing routes only, Consent Mode v2 privacy-first,
 > no inline script, nothing on the app (nonce) policy, Lighthouse gate kept green.
 
-Branch: `feature/s107-google-analytics` from `main` `9541589`. s96 (free-tools platform) rebases
-on this branch.
+Branch: `feature/s107-google-analytics` from `main` `9541589`; `main` merged in after s96
+(free-tools platform, `c905292`) landed first. Architect decision at that merge: s96's scan reports
+carry no analytics; the scan is measured on the tool page.
 
 ## Where the brief met the code
 
@@ -21,7 +22,7 @@ on this branch.
 | `sign_up` on the signup success screen "if marketing-scope" | `/signup` is on the nonce policy (ADR 059), off the allowlist | Not tracked client-side. Documented Measurement Protocol follow-up in `docs/operations/analytics.md` |
 | `begin_checkout` "if a marketing page links into checkout" | `Pricing.tsx` links "Buy Lifetime Pro" and "Buy founding access" to `/dashboard/billing` | `begin_checkout` fires on a click of any same-origin anchor to `/dashboard/billing` from a tracked page |
 | `tool_scan_completed` | s96 is unmerged; s98's calculator has no scan | Fired once per page view when the visitor's own inputs produce a settled result (the calculator's debounced URL sync); `tool_slug` from `TOOL_SLUG`. Documented hook for s96 |
-| s96 report pages `/tools/<slug>/r/<id>` | On s96's branch they move to the nonce policy (its ADR 062) | The allowlist covers `/tools/**`; the CSP additions stay off the nonce policy as briefed. Report ids are UUID path segments and are replaced by `[id]` in every `page_location` (a report URL is a capability). Rebase note for s96 in the analytics doc |
+| s96 report pages `/tools/<slug>/r/<id>` | Nonce policy (s96's ADR 062, merged) | Architect decision at the merge: no analytics on reports — the allowlist excludes `/tools/<slug>/r/…`, and a test pins that it never overlaps the nonce policy. `tool_scan_completed` fires from `ToolScanForm` on the tool page when a scan succeeds. UUID path segments are still redacted as a second line |
 | Analytics doc says "No visitor analytics" | Launch kit §10 and §12 | Updated in the same commit |
 
 ## CTO decisions

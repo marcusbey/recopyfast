@@ -67,6 +67,11 @@ const REPLAY_SUITES = [
   // records a "[gated]" pass.
   "src/__tests__/db/blog-daily-draft.test.ts",
   "src/__tests__/db/blog-generation-claim.test.ts",
+  // s96 (ADR 062): tool_reports is service-role only, its CHECKs hold the
+  // largest report the app serialises, and prune_tool_reports trims expired
+  // rows then the ceiling. Plain Postgres is enough for all but the PostgREST
+  // half, which the e2e job's PostgREST step runs.
+  "src/__tests__/db/tool-reports-privileges.test.ts",
 ];
 
 function run(command, args, options = {}) {

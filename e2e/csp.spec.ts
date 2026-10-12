@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { THEME_INIT_SCRIPT } from "../src/lib/theme/theme-init-script";
+import { isHydrated, watchScriptViolations } from "./support/csp-violations";
 import { createLocalServiceRoleClient } from "./support/local-supabase";
 import {
   createLayoutOwnerFixture,
@@ -30,48 +31,6 @@ import {
  */
 
 const NONCE_SOURCE = /'nonce-([A-Za-z0-9+/_-]+={0,2})'/;
-const SCRIPT_DIRECTIVE = /script-src/;
-
-async function watchScriptViolations(
-  page: Page,
-): Promise<() => Promise<string[]>> {
-  const fromConsole: string[] = [];
-  page.on("console", (message) => {
-    const text = message.text();
-    if (/Content Security Policy/i.test(text) && SCRIPT_DIRECTIVE.test(text)) {
-      fromConsole.push(text);
-    }
-  });
-  await page.addInitScript(() => {
-    const store: string[] = [];
-    (window as unknown as { __cspViolations: string[] }).__cspViolations =
-      store;
-    document.addEventListener("securitypolicyviolation", (event) => {
-      store.push(`${event.violatedDirective} ${event.blockedURI}`);
-    });
-  });
-  return async () => {
-    const fromDocument = await page.evaluate(
-      () =>
-        (window as unknown as { __cspViolations?: string[] }).__cspViolations ??
-        [],
-    );
-    return [
-      ...fromConsole,
-      ...fromDocument.filter((entry) => SCRIPT_DIRECTIVE.test(entry)),
-    ];
-  };
-}
-
-/** React attaches a fiber to every node it hydrates; none means no hydration. */
-async function isHydrated(page: Page): Promise<boolean> {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll("body *")).some((element) =>
-      Object.keys(element).some((key) => key.startsWith("__reactFiber$")),
-    ),
-  );
-}
-
 /**
  * A harmless stand-in for an injected inline event handler. The marketing
  * document deliberately allows it today; a nonce app document must block it.

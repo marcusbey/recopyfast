@@ -38,10 +38,33 @@ export const NONCE_POLICY_PATH_PREFIXES = [
   "/edit",
 ] as const;
 
-/** Segment-exact: `/login` and `/login/x`, never `/loginx` or `/editor`. */
+/**
+ * Exact paths served under the nonce policy, beyond the prefixes above (s96,
+ * ADR 062): a free-tool report, `/tools/<slug>/r/<id>` with an optional
+ * trailing slash and NOTHING deeper. A report renders text scraped off a
+ * stranger's page, the same reason the dashboard joined the nonce policy in
+ * s79; the hub and the tool pages stay static under the marketing policy.
+ *
+ * Exactly this depth, on purpose: `/tools/x/r` and `/tools/x/r/<id>/y` match
+ * no route and get Next's static `/_not-found` — which has no nonce, so it
+ * must stay under the static policy. The report segment's layout awaits
+ * `connection()` and owns a per-request `not-found.tsx` (pinned by
+ * `nonce-routes-render-dynamically.test.tsx`). Widening this to `/tools`
+ * would break every static tool page in production builds only.
+ */
+export const NONCE_POLICY_PATH_PATTERNS: readonly RegExp[] = [
+  /^\/tools\/[^/]+\/r\/[^/]+\/?$/,
+];
+
+/**
+ * Segment-exact for the prefixes: `/login` and `/login/x`, never `/loginx`
+ * or `/editor`; exact for the patterns.
+ */
 export function usesNoncePolicy(pathname: string): boolean {
-  return NONCE_POLICY_PATH_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  return (
+    NONCE_POLICY_PATH_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    ) || NONCE_POLICY_PATH_PATTERNS.some((pattern) => pattern.test(pathname))
   );
 }
 

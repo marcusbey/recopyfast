@@ -22,8 +22,18 @@ const EXACT_PATHS = new Set([
   "/demo",
 ]);
 
-/** Sections: the index and everything below it (s96's /tools reports too). */
+/** Sections: the index and everything below it, but see `FREE_TOOL_REPORT`. */
 const SECTION_PREFIXES = ["/compare", "/tools", "/blog", "/docs"] as const;
+
+/**
+ * s96's free-tool reports, `/tools/<slug>/r/<id>`, and anything below a
+ * tool's `r` segment: never measured (architect decision on the s96 merge,
+ * 2026-10-12, ADR 063). A report renders text scraped off a stranger's site,
+ * its URL is a capability — anyone holding it reads the report — and it runs
+ * under the nonce policy (s96's ADR 062), which names no Google host. The
+ * scan is measured where it starts, on the tool page (`ToolScanForm`).
+ */
+const FREE_TOOL_REPORT = /^\/tools\/[^/]+\/r(\/|$)/;
 
 export function isAnalyticsRoute(pathname: string | null | undefined): boolean {
   if (!pathname || !pathname.startsWith("/") || pathname.startsWith("//")) {
@@ -40,6 +50,7 @@ export function isAnalyticsRoute(pathname: string | null | undefined): boolean {
       : pathname;
 
   if (EXACT_PATHS.has(path)) return true;
+  if (FREE_TOOL_REPORT.test(path)) return false;
   return SECTION_PREFIXES.some(
     (prefix) => path === prefix || path.startsWith(`${prefix}/`),
   );

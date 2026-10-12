@@ -70,8 +70,11 @@ reviewer, not the gate.
    segments redacted (s96 report URLs are capabilities); landing-only `utm_*`.
 5. **Fail-closed hint.** No `x-vercel-ip-country` = consent required. Every CI spec except the GA
    spec therefore runs with the banner showing (and no gtag.js) — that is deliberate coverage.
-6. **s96 rebase:** its report pages are nonce-policy (its ADR 062) and get no GA hosts. Hook and
-   options in `docs/operations/analytics.md`. ADR numbering: s96 holds 062, this is 063.
+6. **Merged with s96 (`c905292`).** Architect decision: s96's scan reports carry no analytics.
+   `isAnalyticsRoute` excludes `/tools/<slug>/r/…` (test: no path is both allowlisted and
+   nonce-policy); `ToolScanForm` sends `tool_scan_completed` (slug only) on the tool page when a
+   scan succeeds, before the report opens; `ToolCta` is tagged `tool_cta`. /privacy says reports
+   are not measured. Playwright count 97 (main) + 5 = 102.
 7. **Design system gap:** no banner/toast primitive (gap 1). The banner composes `Button` and card
    tokens, pinned light, `shadow-md` because it floats. Not added to `docs/design-system.md`.
 

@@ -47,6 +47,9 @@ describe("/privacy — Google Analytics", () => {
     expect(text).toMatch(/dashboard/);
     expect(text).toMatch(/sign-in and sign-up pages/);
     expect(text).toMatch(/ReCopyFast script on your website/);
+    // s96's scan reports: no analytics (ADR 063, architect decision).
+    expect(text).toMatch(/free tool.s scan\s+report/);
+    expect(text).toMatch(/never the address you scanned/);
   });
 
   it("says what is collected, without query strings or fragments", () => {

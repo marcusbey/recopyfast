@@ -19,7 +19,7 @@ export default defineConfig({
         [
           "./e2e/support/strict-reporter.ts",
           {
-            expected: 99,
+            expected: 102,
             outputFile: "test-results/playwright-summary.json",
           },
         ],

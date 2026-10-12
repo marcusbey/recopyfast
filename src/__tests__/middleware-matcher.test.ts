@@ -170,6 +170,17 @@ const PUBLISHED_SNAPSHOT_PATH =
   "/api/published/6f1c2b9e-3d4a-4b5c-8d6e-7f8091a2b3c4";
 
 /**
+ * s96: the free tools — the hub, a tool page, a report (which still gets its
+ * nonce: the policy is chosen before the sessionless return) and the scan.
+ */
+const FREE_TOOL_PATHS = [
+  "/tools",
+  "/tools/website-spell-checker",
+  "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+  "/api/tools/scan",
+];
+
+/**
  * s107's Google Analytics init script. Its answer depends on the visitor's
  * country hint only, never on a session, and it is fetched on every marketing
  * page view — a GoTrue round trip each time would buy nothing.
@@ -178,6 +189,7 @@ const ANALYTICS_INIT_SCRIPT = "/analytics/gtag-init.js";
 
 const SESSIONLESS_PATHS = [
   ...EMBED_ASSETS,
+  ...FREE_TOOL_PATHS,
   ...CRAWLER_ASSETS,
   ...TRY_ASSETS,
   ...INSTALLATION_DOCS,
@@ -237,6 +249,27 @@ describe("a request whose response does not depend on a session", () => {
 
     expect(asMock(createServerClient)).toHaveBeenCalled();
     expect(getUser).toHaveBeenCalled();
+  });
+
+  it.each(["/toolsx", "/toolshed/a", "/api/toolsx"])(
+    "does not broaden the free-tools bypass to %s",
+    async (pathname) => {
+      await run(pathname);
+
+      expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
+      expect(getUser).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("still gives a sessionless report its own nonce policy", async () => {
+    const response = await run(
+      "/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
+    );
+
+    expect(getUser).not.toHaveBeenCalled();
+    expect(response.headers.get("Content-Security-Policy")).toMatch(
+      /'nonce-[A-Za-z0-9+/=]+' 'strict-dynamic'/,
+    );
   });
 
   it("does not broaden the try bypass to sibling paths", async () => {

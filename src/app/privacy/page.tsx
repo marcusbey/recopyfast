@@ -155,6 +155,36 @@ export default function Privacy() {
               <li>Edit session tokens and authentication data</li>
               <li>Script integration status and configuration</li>
             </ul>
+
+            {/* s96 (architect decision 9, 2026-10-11): factual wording only,
+                each line backed by the scan route and its migration —
+                src/app/api/tools/scan/route.ts, src/lib/tools/scan/*,
+                supabase/migrations/20261011120000_tool_reports.sql. */}
+            <h3 className="text-lg font-medium text-slate-800 mb-3 mt-6">
+              1.4 Free Website Tools
+            </h3>
+            <ul className="list-disc pl-6 text-slate-600 space-y-2">
+              <li>
+                When you run a free tool, we process the website address you
+                enter, without anything after a ? or #, and the public text of
+                the pages we read from that site.
+              </li>
+              <li>
+                Your IP address is used only to limit how many scans can be run
+                from it. Our rate limiter holds it for about 24 hours, and it is
+                never stored with a report.
+              </li>
+              <li>
+                The report is stored with short excerpts of that public page
+                text. It is public to anyone with its link and is kept for up to
+                30 days.
+              </li>
+              <li>
+                A site owner can keep our scanner, RecopyFastToolsBot, off their
+                site with a robots.txt rule; the scanner checks robots.txt
+                before reading a page.
+              </li>
+            </ul>
           </section>
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
@@ -436,8 +466,8 @@ export default function Privacy() {
                 these legal pages — we use Google Analytics 4, provided by
                 Google LLC, to count visits and see which pages and links are
                 used. It never runs in your dashboard, on our sign-in and
-                sign-up pages, in the editor, or in the ReCopyFast script on
-                your website.
+                sign-up pages, in the editor, on a free tool&apos;s scan report,
+                or in the ReCopyFast script on your website.
               </p>
               <ul className="list-disc pl-6 mb-4 text-slate-600 space-y-2">
                 <li>
@@ -445,13 +475,14 @@ export default function Privacy() {
                   address without the query string — campaign tags such as
                   utm_source are kept on the page you arrive on — and never the
                   part after #), the page you came from, clicks on sign-up and
-                  checkout links, use of a free tool or of the /try sample,
-                  scrolling to the end of a page, links to other sites and file
-                  downloads. Google adds your browser and device type and an
-                  approximate location it derives from your IP address. In the
-                  European Economic Area, the United Kingdom and Switzerland,
-                  city-level location and detailed device data are not
-                  collected.
+                  checkout links, that a free tool scan or calculation completed
+                  (which tool, never the address you scanned), use of the /try
+                  sample, scrolling to the end of a page, links to other sites
+                  and file downloads. Google adds your browser and device type
+                  and an approximate location it derives from your IP address.
+                  In the European Economic Area, the United Kingdom and
+                  Switzerland, city-level location and detailed device data are
+                  not collected.
                 </li>
                 <li>
                   <strong>Your choice:</strong> in the European Economic Area,
@@ -511,6 +542,9 @@ export default function Privacy() {
               <li>
                 <strong>Content Data:</strong> Retained as long as needed for
                 service delivery
+              </li>
+              <li>
+                <strong>Free tool reports:</strong> Kept for up to 30 days
               </li>
             </ul>
           </section>
