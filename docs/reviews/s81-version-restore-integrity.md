@@ -76,3 +76,52 @@ No open findings.
 
 Max severity: none
 Ship allowed: yes
+
+## PR #98 follow-up re-review — nullable row versions
+
+Fresh independent review of follow-up `38c6d61` against the reviewed report commit `9ae09ba`,
+including the original s81 CAS contract. Devin thread `PRRT_kwDOPc_I2s6reyUs` identified a valid
+direct-RPC bypass: PostgreSQL considers `NULL IS NOT DISTINCT FROM NULL` true, so a legacy row with
+`content_elements.updated_at = NULL` and a service-role caller supplying a NULL expectation entered
+the update path even though neither value represented a version.
+
+### Follow-up findings
+
+No open findings. The reported nullable-version defect is resolved.
+
+- The save branch now requires both the stored token and expected token to be non-null before
+  ordinary timestamp equality can succeed.
+- The conflict branch is the exact three-valued-logic complement: either token is null, or two
+  non-null tokens differ. Every existing locked row therefore still returns one typed outcome;
+  NULL/NULL cannot save and cannot fall through to a zero-row response.
+- The new PostgreSQL matrix covers NULL/NULL, NULL/value and value/NULL. Each case compares the
+  complete stored draft, metadata, version and history count before and after the call, so a
+  nominal `conflict` without state preservation would fail.
+- The HTTP boundary remains stricter: explicit null is still a 400, while omission alone retains
+  the legacy last-write-wins path. No route, hook, authorization, grant, view or UI behavior changed
+  in this follow-up.
+
+### Follow-up verification
+
+- Required Node 24.14.0 wrapper: the staging HTTP concurrency and ISO timestamp suites passed
+  18/18.
+- Fresh owned PostgreSQL 17 replay, ordered s65b then s81: server `170011`, zero retired revision
+  triggers, and the complete s81 CAS suite passed 11/11. This includes row locking, ACLs,
+  monotonic/legacy token behavior and all three nullable combinations.
+- Negative database mutation, without touching source: the reviewed pre-fix `9ae09ba` migration
+  was reapplied over a disposable current schema. The CAS suite went red exactly where expected:
+  NULL/NULL returned `saved` instead of `conflict` (1 failed, 10 passed). Destroying that database
+  removed the mutation; the current migration's preceding 11/11 run is the final behavior.
+- `git diff --check 9ae09ba..38c6d61` passed. The follow-up changes only the CAS predicate,
+  its real-PostgreSQL regressions and the research/plan evidence. No source was edited during this
+  re-review.
+
+### Follow-up evidence boundary
+
+- The author's broader PostgreSQL replay result (133 passed, one unrelated skip) was not repeated;
+  this re-review ran the bounded real-database suite that directly proves the nullable repair.
+- No production/provider database, merge, push or deployment was performed. No browser or
+  PostgREST/GoTrue stack is needed to distinguish these direct SQL outcomes.
+
+Max severity: none
+Ship allowed: yes
