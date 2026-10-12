@@ -52,7 +52,7 @@ export default function Privacy() {
             </span>
             <span className="hidden sm:inline">|</span>
             <span>
-              <strong>Last Updated:</strong> September 28, 2026
+              <strong>Last Updated:</strong> October 11, 2026
             </span>
           </div>
         </div>
@@ -154,6 +154,36 @@ export default function Privacy() {
               </li>
               <li>Edit session tokens and authentication data</li>
               <li>Script integration status and configuration</li>
+            </ul>
+
+            {/* s96 (architect decision 9, 2026-10-11): factual wording only,
+                each line backed by the scan route and its migration —
+                src/app/api/tools/scan/route.ts, src/lib/tools/scan/*,
+                supabase/migrations/20261011120000_tool_reports.sql. */}
+            <h3 className="text-lg font-medium text-slate-800 mb-3 mt-6">
+              1.4 Free Website Tools
+            </h3>
+            <ul className="list-disc pl-6 text-slate-600 space-y-2">
+              <li>
+                When you run a free tool, we process the website address you
+                enter, without anything after a ? or #, and the public text of
+                the pages we read from that site.
+              </li>
+              <li>
+                Your IP address is used only to limit how many scans can be run
+                from it. Our rate limiter holds it for about 24 hours, and it is
+                never stored with a report.
+              </li>
+              <li>
+                The report is stored with short excerpts of that public page
+                text. It is public to anyone with its link and is kept for up to
+                30 days.
+              </li>
+              <li>
+                A site owner can keep our scanner, RecopyFastToolsBot, off their
+                site with a robots.txt rule; the scanner checks robots.txt
+                before reading a page.
+              </li>
             </ul>
           </section>
 
@@ -420,6 +450,9 @@ export default function Privacy() {
               <li>
                 <strong>Content Data:</strong> Retained as long as needed for
                 service delivery
+              </li>
+              <li>
+                <strong>Free tool reports:</strong> Kept for up to 30 days
               </li>
             </ul>
           </section>

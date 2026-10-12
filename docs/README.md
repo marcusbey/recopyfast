@@ -137,11 +137,14 @@ Subordinate to [`architecture.md`](./architecture.md) above.
 | [`stripe-setup.md`](./operations/stripe-setup.md)                 | Stripe products, prices and webhook configuration                                                                 |
 | [`founding-offer.md`](./operations/founding-offer.md)             | Founding offer (first 20 accounts): migration-first deploy, live proof, releasing a QA spot, inspection, rollback |
 | [`edit-needs-a-plan.md`](./operations/edit-needs-a-plan.md)       | Before deploying s51: list paid credits-only accounts to comp or refund                                           |
+| [`blog.md`](./operations/blog.md)                                 | Blog: the cron drafts, an admin reviews and publishes (s89) — `ADMIN_EMAILS`, migration-first, publish/unpublish  |
+| [`free-tools.md`](./operations/free-tools.md)                     | Free tools (s96): scan limits, kill switch, global-cap override, denylist and robots.txt opt-out, storage budget, usage SQL |
 
 ### [`gtm/`](./gtm/README.md) — how we sell it
 | File | Contents |
 |---|---|
 | [`launch-2026-09-28.md`](./gtm/launch-2026-09-28.md) | Launch-day kit: first-20 Pro offer (live) with a 14-day-trial fallback, owner copy decisions, ready-to-post copy, checklist, metrics |
+| [`search-and-tools.md`](./gtm/search-and-tools.md) | What people search, and the free tools that answer it (2026-10-11 research behind s96–s101) |
 
 ### `quality/` — how we keep it working
 

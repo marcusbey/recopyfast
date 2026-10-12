@@ -7,10 +7,12 @@ import {
   comparisonList,
   COMPETITOR_FACTS_CHECKED_AS_OF,
   getComparisonRow,
+  type Comparison,
 } from "@/lib/compare/comparisons";
+import { buildFAQPageLd, serializeJsonLd } from "@/lib/seo/json-ld";
 
 const DESCRIPTION =
-  "Compare ReCopyFast with Webflow, Duda, TinaCMS, and CloudCannon by workflow, client access, publishing, integration, and pricing model.";
+  "Compare ReCopyFast with seven website editing and content platforms by workflow, client access, publishing, integration, and pricing model.";
 
 export const metadata: Metadata = {
   title: "Compare website editing tools",
@@ -33,24 +35,11 @@ export const metadata: Metadata = {
   },
 };
 
-const cardDescriptions: Record<
-  (typeof comparisonList)[number]["slug"],
-  string
-> = {
-  "webflow-editor":
-    "For visual site building, CMS, hosting, and today's content-editor workflow.",
-  duda: "For agencies comparing an all-in-one visual builder with an editing layer for existing sites.",
-  tinacms:
-    "For teams weighing Git-backed structured content against script-based copy editing.",
-  cloudcannon:
-    "For static-site teams comparing repository sync and visual editing workflows.",
-};
-
 const indexFaqs = [
   {
     question: "Which comparison should I read first?",
     answer:
-      "Start with the platform closest to your current workflow: Webflow or Duda for visual builders, TinaCMS for structured Git-backed content, and CloudCannon for a Git-based visual CMS.",
+      "Start with the platform closest to your current workflow: Webflow or Duda for visual builders, Contentful or Storyblok for structured API content, and TinaCMS, CloudCannon, or Decap CMS for Git-backed workflows.",
   },
   {
     question: "Does ReCopyFast replace a website builder?",
@@ -63,17 +52,13 @@ const indexFaqs = [
   },
 ] as const;
 
-const indexFaqSchema = {
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: indexFaqs.map((faq) => ({
-    "@type": "Question",
-    name: faq.question,
-    acceptedAnswer: { "@type": "Answer", text: faq.answer },
-  })),
+const indexFaqSchema = buildFAQPageLd(indexFaqs);
+
+type CompareIndexContentProps = {
+  comparisons: readonly Comparison[];
 };
 
-export default function CompareIndexPage() {
+export function CompareIndexContent({ comparisons }: CompareIndexContentProps) {
   return (
     <div data-theme="light" className="min-h-screen bg-slate-50">
       <Header />
@@ -88,9 +73,10 @@ export default function CompareIndexPage() {
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-xl leading-relaxed text-slate-600">
               Start with the workflow you need to preserve. Choose Webflow or
-              Duda for visual site building, TinaCMS or CloudCannon for
-              Git-backed content workflows, and ReCopyFast for adding client
-              copy editing to an existing site without migration.
+              Duda for visual site building, Contentful or Storyblok for
+              structured API content, TinaCMS, CloudCannon, or Decap CMS for
+              Git-backed workflows, and ReCopyFast for adding client copy
+              editing to an existing site without migration.
             </p>
             <p className="mt-5 text-sm text-slate-500">
               Competitor product information checked as of{" "}
@@ -102,7 +88,7 @@ export default function CompareIndexPage() {
 
         <section className="px-6 py-12 sm:py-16">
           <div className="mx-auto grid max-w-5xl gap-5 sm:grid-cols-2">
-            {comparisonList.map((comparison) => (
+            {comparisons.map((comparison) => (
               <article
                 key={comparison.slug}
                 className="min-w-0 rounded-2xl border border-sky-100 bg-white p-7 shadow-sm sm:p-8"
@@ -111,7 +97,7 @@ export default function CompareIndexPage() {
                   {comparison.competitor}
                 </h2>
                 <p className="mt-3 leading-relaxed text-slate-600">
-                  {cardDescriptions[comparison.slug]}
+                  {comparison.hubDescription}
                 </p>
                 <Link
                   className="mt-6 inline-flex items-center gap-2 font-semibold text-sky-700 hover:text-sky-800"
@@ -158,7 +144,7 @@ export default function CompareIndexPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {comparisonList.map((comparison) => {
+                  {comparisons.map((comparison) => {
                     const bestAt = getComparisonRow(comparison, "Best at");
                     const installation = getComparisonRow(
                       comparison,
@@ -221,14 +207,15 @@ export default function CompareIndexPage() {
               </h2>
               <p className="mt-5 leading-relaxed text-slate-600">
                 Choose a full platform when you need its wider system: visual
-                layout and hosting from Webflow or Duda, structured Git content
-                from TinaCMS, or a Git-based visual CMS and repository sync from
-                CloudCannon. For Git-backed tools, whether an edit appears in
-                served HTML depends on the site&apos;s build and deployment.
-                ReCopyFast applies published edits in the visitor&apos;s browser
-                after the page loads, so no-JavaScript visitors and crawlers
-                that do not render JavaScript see the original HTML; put
-                SEO-critical copy in the site&apos;s source as well.
+                layout and hosting from Webflow or Duda, structured API content
+                from Contentful or Storyblok, or Git-backed workflows from
+                TinaCMS, CloudCannon, or Decap CMS. Whether a headless or
+                Git-backed edit appears in served HTML depends on the
+                site&apos;s rendering, build, and deployment. ReCopyFast applies
+                published edits in the visitor&apos;s browser after the page
+                loads, so no-JavaScript visitors and crawlers that do not render
+                JavaScript see the original HTML; put SEO-critical copy in the
+                site&apos;s source as well.
               </p>
             </article>
             <article className="min-w-0 rounded-2xl border border-sky-200 bg-sky-50 p-7 sm:p-9">
@@ -267,7 +254,7 @@ export default function CompareIndexPage() {
             <script
               type="application/ld+json"
               dangerouslySetInnerHTML={{
-                __html: JSON.stringify(indexFaqSchema).replace(/</g, "\\u003c"),
+                __html: serializeJsonLd(indexFaqSchema),
               }}
             />
           </div>
@@ -279,13 +266,16 @@ export default function CompareIndexPage() {
               Add client editing without rebuilding the site
             </h2>
             <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link
+              {/* Keep attribution intact while establishing /signup's nonce
+                  policy through a full document request. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a
                 href="/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_index"
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast
                 <ArrowRight aria-hidden="true" className="h-5 w-5" />
-              </Link>
+              </a>
               <Link
                 href="/try"
                 className="pressable inline-flex items-center rounded-full border border-slate-300 bg-white px-7 py-3.5 font-semibold text-slate-900 hover:border-slate-400"
@@ -299,4 +289,8 @@ export default function CompareIndexPage() {
       <Footer />
     </div>
   );
+}
+
+export default function CompareIndexPage() {
+  return <CompareIndexContent comparisons={comparisonList} />;
 }

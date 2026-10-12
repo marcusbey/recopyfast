@@ -37,6 +37,7 @@ import { createAnonClient } from "@/lib/supabase/anon";
 import { createClient as createCookieClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { comparisonList } from "@/lib/compare/comparisons";
+import { TOOL_CATALOGUE } from "@/lib/tools/catalogue";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 type Row = {
@@ -114,6 +115,9 @@ const INDEXABLE_STATIC = [
   "/try",
   "/compare",
   ...comparisonList.map((comparison) => `/compare/${comparison.slug}`),
+  // s96: the free tools, from their catalogue. Never a report (noindex).
+  "/tools",
+  ...TOOL_CATALOGUE.map((tool) => `/tools/${tool.slug}`),
   "/blog",
   "/privacy",
   "/terms",
@@ -319,5 +323,17 @@ describe("freshness", () => {
     expect(typeof revalidate).toBe("number");
     expect(revalidate).toBeGreaterThan(0);
     expect(revalidate).toBeLessThanOrEqual(24 * 60 * 60);
+  });
+});
+
+describe("the free tools (s96)", () => {
+  it("lists /tools and every catalogue tool page, and never a report", async () => {
+    const submitted = paths(await sitemap());
+
+    expect(submitted).toContain("/tools");
+    for (const tool of TOOL_CATALOGUE) {
+      expect(submitted).toContain(`/tools/${tool.slug}`);
+    }
+    expect(submitted.filter((path) => /\/r\//.test(path))).toEqual([]);
   });
 });

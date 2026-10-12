@@ -18,16 +18,20 @@
  * - a read or filter on an unknown column → 42703 "column t.c does not exist";
  * - a write payload with an unknown column → PGRST204;
  * - a table no migration creates → 42P01;
- * - `.single()` without exactly one row, `.maybeSingle()` with several → PGRST116.
+ * - `.single()` without exactly one row, `.maybeSingle()` with several → PGRST116;
+ * - an insert or update duplicating a declared unique key → 23505 (s89). Keys
+ *   are opt-in per table (`uniqueKeys`), NULLs distinct as in PostgreSQL, and a
+ *   refused write changes nothing.
  *
  * Supported: `select` (column lists and `*`, `{ count, head }`), `insert`,
  * `update`, `delete`, `eq/neq/gt/gte/lt/lte/is/in`, `order`, `limit`, `single`,
- * `maybeSingle`, and awaiting the builder. Anything else throws, so a test can
+ * `maybeSingle`, the bounded `or(simple,and(simple,simple))` form used by cursor
+ * pagination, and awaiting the builder. Anything else throws, so a test can
  * never pass by the double silently ignoring what the code asked.
  */
 
 import { randomUUID } from "node:crypto";
-import { migrationColumns } from "./migration-columns";
+import { migrationColumns, migrationFunctionExists } from "./migration-columns";
 
 export type Row = Record<string, unknown>;
 
@@ -62,11 +66,21 @@ export interface RecordedQuery {
   error: DoubleError | null;
 }
 
-interface QueryResult {
+export interface QueryResult {
   data: unknown;
   error: DoubleError | null;
   count: number | null;
 }
+
+export interface RecordedRpc {
+  name: string;
+  args: Record<string, unknown>;
+  error: DoubleError | null;
+}
+
+export type RpcHandler = (
+  args: Record<string, unknown>,
+) => QueryResult | Promise<QueryResult>;
 
 function doubleError(code: string, message: string): DoubleError {
   return { code, message, details: null, hint: null };
@@ -85,6 +99,11 @@ function parseColumnList(list: string): string[] {
       }
       return column;
     });
+}
+
+function keyValue(row: Row, key: readonly string[]): string | null {
+  const values = key.map((column) => row[column] ?? null);
+  return values.includes(null) ? null : JSON.stringify(values);
 }
 
 function compare(
@@ -113,12 +132,76 @@ function compare(
   }
 }
 
+function splitTopLevel(expression: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index];
+    if (character === "(") depth += 1;
+    if (character === ")") depth -= 1;
+    if (character === "," && depth === 0) {
+      parts.push(expression.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(expression.slice(start));
+  return parts;
+}
+
+function parseOrFilter(expression: string): RecordedFilter[][] {
+  function simple(value: string): RecordedFilter {
+    const match = value.match(/^(\w+)\.(eq|neq|gt|gte|lt|lte|is)\.(.+)$/);
+    if (!match) {
+      throw new Error(
+        `schema-strict double: unsupported or() filter "${value}" — extend the double`,
+      );
+    }
+    const [, column, operator, raw] = match;
+    return {
+      column,
+      operator: operator as FilterOperator,
+      value: operator === "is" && raw === "null" ? null : raw,
+    };
+  }
+
+  return splitTopLevel(expression).map((arm) => {
+    if (arm.startsWith("and(") && arm.endsWith(")")) {
+      return splitTopLevel(arm.slice(4, -1)).map(simple);
+    }
+    return [simple(arm)];
+  });
+}
+
 class Table {
   constructor(
     readonly name: string,
     readonly columns: ReadonlySet<string> | undefined,
     readonly rows: Row[],
+    readonly uniqueKeys: ReadonlyArray<readonly string[]> = [],
   ) {}
+
+  /**
+   * The first unique key `candidates` would duplicate — against the rows they
+   * do not replace, or each other. A key with any NULL column never collides.
+   */
+  duplicateKey(candidates: Row[], replaced: Row[] = []): string | undefined {
+    const others = this.rows.filter((row) => !replaced.includes(row));
+    for (const key of this.uniqueKeys) {
+      const seen = new Set(
+        others
+          .map((row) => keyValue(row, key))
+          .filter((value): value is string => value !== null),
+      );
+      for (const candidate of candidates) {
+        const value = keyValue(candidate, key);
+        if (value === null) continue;
+        if (seen.has(value)) return `${this.name}_${key.join("_")}_key`;
+        seen.add(value);
+      }
+    }
+    return undefined;
+  }
 
   unknownColumn(names: Iterable<string>): string | undefined {
     if (!this.columns) return undefined;
@@ -134,6 +217,7 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   private projection: string[] | null = null;
   private payload: Row[] = [];
   private filters: RecordedFilter[] = [];
+  private disjunctions: RecordedFilter[][][] = [];
   private rowLimit: number | null = null;
   private isHead = false;
   private isCounted = false;
@@ -208,6 +292,10 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   }
   in(column: string, values: unknown[]): this {
     return this.filter("in", column, values);
+  }
+  or(expression: string): this {
+    this.disjunctions.push(parseOrFilter(expression));
+    return this;
   }
 
   /**
@@ -301,6 +389,7 @@ class QueryBuilder implements PromiseLike<QueryResult> {
     const readColumn = table.unknownColumn([
       ...(this.projection ?? []),
       ...this.filters.map((filter) => filter.column),
+      ...this.disjunctions.flat(2).map((filter) => filter.column),
       ...this.orderings.map((ordering) => ordering.column),
     ]);
     if (readColumn) {
@@ -314,8 +403,17 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   }
 
   private matches(row: Row): boolean {
-    return this.filters.every((filter) =>
-      compare(filter.operator, row[filter.column], filter.value),
+    return (
+      this.filters.every((filter) =>
+        compare(filter.operator, row[filter.column], filter.value),
+      ) &&
+      this.disjunctions.every((arms) =>
+        arms.some((conjunction) =>
+          conjunction.every((filter) =>
+            compare(filter.operator, row[filter.column], filter.value),
+          ),
+        ),
+      )
     );
   }
 
@@ -335,7 +433,7 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   }
 
   private execute(): QueryResult {
-    const error = this.violation();
+    const error = this.violation() ?? this.conflict();
     this.record({
       table: this.table.name,
       operation: this.operation,
@@ -368,6 +466,26 @@ class QueryBuilder implements PromiseLike<QueryResult> {
       error: null,
       count: this.isCounted ? affected.length : null,
     };
+  }
+
+  /** A write that would duplicate a unique key, refused before anything is written. */
+  private conflict(): DoubleError | null {
+    let duplicate: string | undefined;
+    if (this.operation === "insert") {
+      duplicate = this.table.duplicateKey(this.payload);
+    } else if (this.operation === "update") {
+      const matched = this.table.rows.filter((row) => this.matches(row));
+      duplicate = this.table.duplicateKey(
+        matched.map((row) => ({ ...row, ...this.payload[0] })),
+        matched,
+      );
+    }
+    return duplicate
+      ? doubleError(
+          "23505",
+          `duplicate key value violates unique constraint "${duplicate}"`,
+        )
+      : null;
   }
 
   /** Mutates the table for writes; returns the rows the query touched. */
@@ -431,7 +549,10 @@ class QueryBuilder implements PromiseLike<QueryResult> {
 
 export interface SchemaStrictDatabase {
   /** Pass this wherever the code expects a Supabase client. */
-  client: { from: (table: string) => QueryBuilder };
+  client: {
+    from: (table: string) => QueryBuilder;
+    rpc: (name: string, args?: Record<string, unknown>) => Promise<QueryResult>;
+  };
   /** Add rows. Throws on a column the table does not have: fixtures lie too. */
   seed: (table: string, rows: Row[]) => void;
   /** A copy of the table's current rows. */
@@ -439,23 +560,46 @@ export interface SchemaStrictDatabase {
   /** Every query executed, in order. */
   queries: RecordedQuery[];
   queriesOn: (table: string) => RecordedQuery[];
+  /** Every RPC call executed, including an unknown migration function. */
+  rpcCalls: RecordedRpc[];
 }
 
-/**
- * `maxRows` models PostgREST's `max_rows` (supabase/config.toml): no response
- * carries more rows than that, whatever `limit` or `range` asked for.
- */
+export interface SchemaStrictOptions {
+  /**
+   * `maxRows` models PostgREST's `max_rows` (supabase/config.toml): no response
+   * carries more rows than that, whatever `limit` or `range` asked for.
+   */
+  maxRows?: number;
+  /**
+   * Unique keys to enforce, per table — each an array of columns. Opt-in: the
+   * double does not read indexes out of the migrations.
+   */
+  uniqueKeys?: Record<string, ReadonlyArray<readonly string[]>>;
+  /**
+   * Behavior for migration-defined RPCs used by the subject under test. A name
+   * absent from the migration ledger returns 42883; a real function without a
+   * handler throws instead of silently inventing database behavior.
+   */
+  rpcHandlers?: Record<string, RpcHandler>;
+}
+
 export function createSchemaStrictDatabase(
-  options: { maxRows?: number } = {},
+  options: SchemaStrictOptions = {},
 ): SchemaStrictDatabase {
   const maxRows = options.maxRows ?? null;
   const tables = new Map<string, Table>();
   const queries: RecordedQuery[] = [];
+  const rpcCalls: RecordedRpc[] = [];
 
   function table(name: string): Table {
     let existing = tables.get(name);
     if (!existing) {
-      existing = new Table(name, migrationColumns(name), []);
+      existing = new Table(
+        name,
+        migrationColumns(name),
+        [],
+        options.uniqueKeys?.[name] ?? [],
+      );
       tables.set(name, existing);
     }
     return existing;
@@ -465,6 +609,26 @@ export function createSchemaStrictDatabase(
     client: {
       from: (name: string) =>
         new QueryBuilder(table(name), (query) => queries.push(query), maxRows),
+      async rpc(name: string, args: Record<string, unknown> = {}) {
+        if (!migrationFunctionExists(name)) {
+          const error = doubleError(
+            "42883",
+            `function public.${name} does not exist`,
+          );
+          rpcCalls.push({ name, args: { ...args }, error });
+          return { data: null, error, count: null };
+        }
+
+        const handler = options.rpcHandlers?.[name];
+        if (!handler) {
+          throw new Error(
+            `schema-strict double: migration defines RPC "${name}", but this test supplied no handler`,
+          );
+        }
+        const result = await handler({ ...args });
+        rpcCalls.push({ name, args: { ...args }, error: result.error });
+        return result;
+      },
     },
     seed(name, rows) {
       const target = table(name);
@@ -484,5 +648,6 @@ export function createSchemaStrictDatabase(
     rows: (name) => table(name).rows.map((row) => ({ ...row })),
     queries,
     queriesOn: (name) => queries.filter((query) => query.table === name),
+    rpcCalls,
   };
 }

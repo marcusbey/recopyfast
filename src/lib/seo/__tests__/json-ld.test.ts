@@ -1,5 +1,8 @@
 import {
+  buildBreadcrumbListLd,
+  buildFAQPageLd,
   buildSoftwareApplicationLd,
+  buildWebApplicationLd,
   serializeJsonLd,
   type MonthlyOffer,
 } from "../json-ld";
@@ -99,5 +102,92 @@ describe("serializeJsonLd", () => {
     expect(JSON.parse(text)).toEqual({
       name: "</script><script>alert(1)</script>",
     });
+  });
+});
+
+describe("shared page schemas", () => {
+  it("numbers breadcrumb items in rendered order", () => {
+    expect(
+      buildBreadcrumbListLd([
+        { name: "Comparisons", url: "https://recopyfa.st/compare" },
+        {
+          name: "Contentful",
+          url: "https://recopyfa.st/compare/contentful",
+        },
+      ]),
+    ).toEqual({
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        {
+          "@type": "ListItem",
+          position: 1,
+          name: "Comparisons",
+          item: "https://recopyfa.st/compare",
+        },
+        {
+          "@type": "ListItem",
+          position: 2,
+          name: "Contentful",
+          item: "https://recopyfa.st/compare/contentful",
+        },
+      ],
+    });
+  });
+
+  it("uses the same FAQ questions and answers as the visible content", () => {
+    const faqs = [
+      { question: "Where does content live?", answer: "In the source system." },
+      {
+        question: "Can clients edit?",
+        answer: "Yes, with product-specific access.",
+      },
+    ];
+
+    expect(buildFAQPageLd(faqs)).toEqual({
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: [
+        {
+          "@type": "Question",
+          name: faqs[0].question,
+          acceptedAnswer: { "@type": "Answer", text: faqs[0].answer },
+        },
+        {
+          "@type": "Question",
+          name: faqs[1].question,
+          acceptedAnswer: { "@type": "Answer", text: faqs[1].answer },
+        },
+      ],
+    });
+  });
+});
+
+describe("buildWebApplicationLd", () => {
+  const tool = {
+    url: "https://recopyfa.st/tools/website-maintenance-cost",
+    name: "Website maintenance cost calculator",
+    description: "Work out what free copy changes cost you.",
+  };
+
+  it("states a free web utility with a zero-dollar offer", () => {
+    expect(buildWebApplicationLd(tool)).toEqual({
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      name: tool.name,
+      description: tool.description,
+      url: tool.url,
+      applicationCategory: "UtilitiesApplication",
+      operatingSystem: "Web",
+      isAccessibleForFree: true,
+      offers: { "@type": "Offer", price: 0, priceCurrency: "USD" },
+    });
+  });
+
+  it("invents no rating or review (ADR 032 section 5)", () => {
+    const ld = buildWebApplicationLd(tool);
+
+    expect(ld).not.toHaveProperty("aggregateRating");
+    expect(ld).not.toHaveProperty("review");
   });
 });

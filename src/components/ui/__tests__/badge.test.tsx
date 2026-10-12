@@ -468,7 +468,7 @@ describe("Badge Component", () => {
     it("should work in navigation or menu contexts", () => {
       render(
         <nav>
-          <a href="/dashboard">
+          <a href="#dashboard">
             Dashboard
             <Badge variant="destructive" className="ml-2">
               2

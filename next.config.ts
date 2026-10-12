@@ -21,6 +21,20 @@ const nextConfig: NextConfig = {
   // Turbopack configuration (required in Next.js 16 when webpack config is present)
   turbopack: {},
 
+  // s96 — the Typo Finder's dictionary. `wordlist-english` reads its JSON
+  // through a `__dirname` trick a bundler cannot follow, so it stays a runtime
+  // require and its data files (and SCOWL's notice) are traced into the scan
+  // function explicitly. Bundled, the function would ship without the word
+  // lists and fail in production only
+  // (src/__tests__/next-config-tools-packaging.test.ts).
+  serverExternalPackages: ["wordlist-english"],
+  outputFileTracingIncludes: {
+    "/api/tools/scan": [
+      "./node_modules/wordlist-english/*.json",
+      "./node_modules/wordlist-english/Copyright",
+    ],
+  },
+
   // Configure webpack for Node.js compatibility
   webpack: (config, { isServer }) => {
     // Handle Node.js modules that don't work in browser
@@ -115,6 +129,18 @@ const nextConfig: NextConfig = {
           {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=()',
+          },
+          {
+            // s79 (s69 L19). Vercel's custom-domain default is
+            // `max-age=63072000` for the one host only; this adds its
+            // subdomains. Here and nowhere else: this block also reaches
+            // `_next/static`, which the middleware matcher skips, and a browser
+            // keeps the LAST policy it saw — one response without
+            // includeSubDomains switches it off again. No `preload`: that is a
+            // submission to browser vendors nobody has decided to make, and it
+            // cannot be quickly undone (src/__tests__/next-config-hsts.test.ts).
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains',
           },
         ],
       },

@@ -6,6 +6,7 @@ with the live product, the product wins and the doc is fixed.
 | File | Contents |
 |---|---|
 | [`launch-2026-09-28.md`](./launch-2026-09-28.md) | Launch-day kit built around the first-20 Pro offer (s47, live), with a 14-day-trial version of every asset for when the 20 spots are gone. The one open gate: the support and privacy mailboxes must receive mail. Holds the owner's copy decisions of 2026-09-28, plus: positioning, offer block, X thread and single post, founder DM/email, Show HN and Indie Hackers posts, objection replies, launch-day checklist, metrics with read-only queries, claims ledger |
+| [`search-and-tools.md`](./search-and-tools.md) | 2026-10-11 research: the search demand behind the free tools (s96–s101), a keyword map and ten candidate tools ranked. Where it differs from the s96–s101 plans, the plans win |
 
 Rules that apply to anything added here:
 

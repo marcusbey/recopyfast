@@ -125,6 +125,10 @@ describe("sites source-read projections", () => {
     expect(actual).toEqual(
       [
         "server/index.js: id, domain, api_key",
+        // s79: the revalidation sweep re-verifies open sockets' tokens against
+        // the CURRENT key, so a rotated key closes them (ADR 027 follow-up).
+        // Service role, verification only, never returned to a client.
+        "server/index.js: id, api_key",
         "src/app/api/sites/[siteId]/regenerate-snippet/route.ts: id, api_key",
         "src/app/api/sites/register/route.ts: id, domain, name, created_at, api_key",
         "src/app/api/sites/route.ts: id, domain, name, created_at, updated_at, api_key, status, live_at, last_reported_at, last_mismatch_domain, last_mismatch_at",
@@ -176,10 +180,11 @@ describe("sites source-read projections", () => {
         projection.includes("api_key"),
       ),
     ).toHaveLength(2);
+    // The handshake's verification, then the revalidation sweep's (s79).
     expect(
       directSiteProjections(websocketServer).filter((projection) =>
         projection.includes("api_key"),
       ),
-    ).toEqual(["id, domain, api_key"]);
+    ).toEqual(["id, api_key", "id, domain, api_key"]);
   });
 });

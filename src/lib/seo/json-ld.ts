@@ -2,9 +2,10 @@
  * Shared JSON-LD builders (ADR 012 §3). Plain inputs, no page- or
  * cluster-specific types, so every page states structured data the same way.
  *
- * s88 adds the first two. The comparison pages still build their FAQPage and
- * BreadcrumbList inline (`components/compare/ComparisonPage.tsx`); moving them
- * here is s17's work, as is SoftwareApplication on those pages (ADR 032 §5).
+ * s88 added SoftwareApplication and safe serialization. s17 moved FAQPage and
+ * BreadcrumbList here after the first comparison implementation built and
+ * escaped them separately; one builder and one serializer keep visible copy
+ * and machine-readable copy on the same contract (ADR 032 §5).
  */
 
 /** One recurring price, stated per month. `currency` is ISO 4217. */
@@ -20,6 +21,22 @@ type SoftwareApplicationInput = {
   name: string;
   description: string;
   offers: readonly MonthlyOffer[];
+};
+
+type WebApplicationInput = {
+  url: string;
+  name: string;
+  description: string;
+};
+
+type BreadcrumbItem = {
+  readonly name: string;
+  readonly url: string;
+};
+
+type FAQItem = {
+  readonly question: string;
+  readonly answer: string;
 };
 
 /**
@@ -69,6 +86,56 @@ function toMonthlyOfferLd(offer: MonthlyOffer) {
         unitCode: "MON",
       },
     },
+  };
+}
+
+/**
+ * schema.org `WebApplication` for a free in-browser tool (s96 decision 12,
+ * first used by s98).
+ *
+ * The one price is the truth: the tool is free, so `offers` is a $0 `Offer`
+ * and `isAccessibleForFree` is true. As with `SoftwareApplication`, ADR 032 §5
+ * applies: no `aggregateRating` and no `review`, so no star snippet.
+ */
+export function buildWebApplicationLd(input: WebApplicationInput) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    name: input.name,
+    description: input.description,
+    url: input.url,
+    applicationCategory: "UtilitiesApplication",
+    operatingSystem: "Web",
+    isAccessibleForFree: true,
+    offers: { "@type": "Offer", price: 0, priceCurrency: "USD" },
+  };
+}
+
+export function buildBreadcrumbListLd(items: readonly BreadcrumbItem[]) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: item.url,
+    })),
+  };
+}
+
+export function buildFAQPageLd(items: readonly FAQItem[]) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: items.map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.answer,
+      },
+    })),
   };
 }
 

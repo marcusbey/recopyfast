@@ -1406,9 +1406,12 @@ covers site-wide themes only.
 
 **PRD SEO/GTM items with no story, by choice:** the "Edited with RecopyFast" badge (PRD open
 decision 8, unresolved); the public embed perf-budget page (write it once `s06` produces a
-number worth publishing); the two free public tools (content extractor, translate preview);
-the agency partner directory and affiliate program. All are post-launch marketing, none
-blocks a story.
+number worth publishing); the content extractor and translate preview free tools; the agency
+partner directory and affiliate program. All are post-launch marketing, none blocks a story.
+**Amended 2026-10-11:** the free public tools are now planned as s96–s101 (a scan platform with
+the Website Typo Finder, then the CSP checker, the maintenance cost calculator, the outdated
+website checker, the AI slop checker and the alt text checker). The content extractor and the
+translate preview stay unplanned.
 
 **WordPress plugin.** The PRD's first post-launch investment. Belongs to the launch that
 follows this backlog, not to it.
@@ -3501,7 +3504,7 @@ each; no research or plan until the owner schedules it.
 at that commit, to be re-verified at research time):
 
 - [ ] L1 — Production CSP is `script-src 'self' 'unsafe-inline'` (`src/middleware.ts:247`, live);
-  no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`.
+  no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`. → s79
 - [ ] L2 — Bulk CSV export has no formula-injection guard (`src/lib/bulk/csv.ts:21-25`); the
   analytics export has one.
 - [x] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
@@ -3519,7 +3522,7 @@ at that commit, to be re-verified at research time):
   `staging/validate`, `edit-sessions/{validate,extend}`. → s77 closes the A/B and
   `staging/{content,publish}` part; `staging/validate` and `edit-sessions/*` → s77b.
 - [ ] L8 — `public/embed/__fidelity__/index.html` test harness is served in production (live
-  200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`.
+  200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`. → s79
 - [ ] L9 — `analytics/track` is a service-role write with `onStoreFailure:"allow"` (`:91-97`); a
   site-token caller can forge `login`/`content_edit` activity rows.
 - [ ] L10 — `upload/image` reachable with only the public site token (`:124-136`): image hosting
@@ -3529,9 +3532,9 @@ at that commit, to be re-verified at research time):
 - [x] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
   content routes pin the exact host. → closed by s76.
 - [ ] L13 — WS server: no helmet, `x-powered-by: Express`, `ACAO:*` and the live connection count
-  on `/health` (`server/index.js:78,125-136`; live).
+  on `/health` (`server/index.js:78,125-136`; live). → s79
 - [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
-  121 bare handshakes/min lock real editors out of realtime.
+  121 bare handshakes/min lock real editors out of realtime. → s79
 - [x] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
   (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`. → closed by s72.
 - [x] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
@@ -3547,8 +3550,8 @@ at that commit, to be re-verified at research time):
 - [ ] L19 — CI/header hygiene: `ci.yml` has no top-level `permissions:` and actions are pinned by
   tag, not SHA; HSTS lacks `includeSubDomains`; legacy `X-XSS-Protection` still set;
   `docs/operations/deployment-checklist.md:24` carries a truncated live-key account prefix.
-  → CI half closed by s75 (`contents: read`, every action SHA-pinned); the header and doc halves
-  remain.
+  → CI half closed by s75 (`contents: read`, every action SHA-pinned); the header half and the
+  checklist prefix: s79.
 - [ ] L20 — Dev-only dependency advisories: critical `shell-quote` via `concurrently` 9.2.0
   (GHSA-pqg4-j6r4-53mv, fixed args only), high brace-expansion/braces/micromatch via
   `eslint-config-next`, `@typescript-eslint`, jest, and server `nodemon`. `npm audit fix` clears
@@ -3956,118 +3959,6 @@ Complexity: 3. Dependencies: none (PR #77, s70b, adds a view gated on `server_ve
 — with a 17 replay it is created; nothing to do here beyond not breaking it). Branch
 `feature/s75-ci-release-gates`.
 
-## Story s82-billing-lifetime-guards — a lifetime owner is never billed again for what they own, and billing says only what is true
-
-Follow-ups of s71 (PR #74) and s45, plus s69 L5, scheduled by the orchestrator on 2026-10-09 under
-the owner's directive. Research: `docs/research/s82-billing-lifetime-guards.md`. Design:
-`docs/designs/s82-billing-lifetime-guards.md` (no new screen). Plan:
-`docs/plans/s82-billing-lifetime-guards.md`.
-
-Cause (verified on `origin/main` `72f4cff`):
-- `POST /api/billing/subscription/reactivate` (`route.ts:9-37`) calls `reactivateSubscription`
-  (`src/lib/stripe/subscription.ts:477-527`), which has no lifetime check: a lifetime owner whose
-  subscription the Stripe webhook set to cancel (`stopBillingForLifetimeOwner`,
-  `webhooks/stripe/route.ts:941-1000`) can restart monthly billing for a plan the grant replaced.
-  The card hides the button since s71 (`SubscriptionCard.tsx:221-227`); the endpoint does not.
-- (Found by the review, fix pass.) Reactivation is not the only door: Checkout's subscription
-  intent (`checkout/route.ts:209-237`) and the plan change (`updateSubscription`,
-  `subscription.ts:313-410`) never read grants, so a lifetime owner can buy or switch into a plan
-  the grant already includes, billed monthly; the webhook stops billing only when a lifetime is
-  bought. The grant reader the guards share (`readGrantedPlanIds`) ignores `expires_at`, while the
-  entitlement resolver honours it — production holds one dated non-trial grant
-  (`qa_recovery_20260919`).
-- (Found by the second review, fix pass 2, on `84d7b0c`.) Checkout's catch answers
-  `error.message` (`checkout/route.ts:811-821`), so a grant read failure reaches the browser as
-  "Failed to read plan entitlements: <database text>". The plan dialog says "Included for life" and
-  "Included in your lifetime <plan>" for a plan included only by a dated grant
-  (`UpgradeDialog.tsx:127-130,340-345`), and its naming of the highest grant is unpinned.
-- (Found by Devin Review on PR #81, on `d08b967`.) A subscription Checkout Session opened before a
-  lifetime grant lands stays payable: `stopBillingForLifetimeOwner`
-  (`webhooks/stripe/route.ts:941-1002`) only cancels subscriptions already live, and
-  `handleSubscriptionCreated` (`:486-534`) records a later one without reading grants — open Pro
-  Checkout, buy Lifetime Pro in another tab, pay the old session, and Pro bills monthly for a plan
-  owned. An allowed plan change on a subscription set to cancel (`subscription.ts:378,399-413`)
-  charges the proration and still cancels at period end. The plan in force held only through a
-  dated grant reads "Lifetime" / "Lifetime access" / "for life" on the card and its dialog tile
-  (`SubscriptionCard.tsx:52-55,194-195`, `BillingDashboard.tsx:378`) — the queued follow-up **s96,
-  folded into s82** (it has no story of its own).
-- A Founding Agency owner still running out an Agency subscription reads "1,000 AI credits /
-  month" with nothing saying it drops to 250 when the subscription ends (s71 review N-1;
-  `SubscriptionCard.tsx:102-128`, ADR 038).
-- The card finds the allowance bullet by its exact text (`SubscriptionCard.tsx:38-40,61-63`, s45
-  review #2). Pro's live bullet is "AI rewrite suggestions, 500 credits a month"
-  (`20260928130000_catalogue_copy_truth.sql:56`), which "500 AI credits" never matches, so a
-  founding-offer holder metered at 100 reads 500.
-- The plan dialog marks a lifetime owner's plan "Current" at "$49/month" with the catalogue's
-  allowance (`UpgradeDialog.tsx:234-285`, s45 review #1).
-- `POST /api/ai/suggest` answers "You were not charged" even when the refund failed
-  (`src/app/api/ai/suggest/route.ts:153-162,333-341`); the failure reaches only `console.error`,
-  which nothing forwards to Sentry.
-- `POST /api/ai/translate` charges the caller (`route.ts:261`), against ADR 035 (the site owner
-  pays).
-- Billing routes return raw exception text, Stripe's included, to the client
-  (`payment-methods/route.ts:119-122,204-207`; `subscription/route.ts:104-107,141-144`;
-  `subscription/reactivate/route.ts:28-33`), and a missing payment-method id answers 500 with
-  Stripe's "No such PaymentMethod" while a foreign one answers 404 — an existence oracle.
-  `payment-methods` has no limiter (s69 L5).
-
-Acceptance criteria:
-- [ ] Reactivating a subscription whose plan a non-trial permanent grant covers (same plan or a
-  higher one) answers 409 with a clear message and never reaches Stripe. A Founding Agency owner
-  cannot restart an Agency subscription either (CTO decision, plan). A subscription above every
-  grant (Lifetime Pro + Agency subscription), a trial-only account and an account with no grant
-  reactivate exactly as before.
-- [ ] Starting a subscription through Checkout, or switching a subscription (plan change), to a
-  plan a live grant covers answers 409 with a clear message before any Stripe call, and fails
-  closed when grants cannot be read; an Agency subscription beside Lifetime Pro stays on sale. The
-  plan dialog marks such a plan "Included" and refuses it, naming the lifetime plan that includes
-  it (fix pass) — the highest undated grant; a plan included only by dated grants reads "Included
-  until <date>" and its submit "Included in your plan until <date>", never "for life" (fix pass 2).
-- [ ] A grant whose `expires_at` has passed is not held, for every reader (billing page, dashboard,
-  entitlement badge, checkout, plan change, reactivation), exactly as the entitlement resolver
-  already says; an unexpired dated grant is held (fix pass).
-- [ ] Under a plan held for life, the running-out row and the cancel confirmation say what the
-  monthly AI-credit allowance becomes without the subscription, when the subscription is what
-  raises it (resolved server-side). Every other state's copy is unchanged.
-- [ ] The plan card restates the allowance bullet found from the plan's own
-  `limits.monthlyCredits`, not one spelling of it: Pro's real wording is restated, a reworded
-  bullet is restated, unrelated numbers are untouched, no resolved allowance drops it.
-- [ ] The plan dialog shows a plan held for life as "Lifetime" with "Lifetime access" and the
-  account's own allowance — no price, no "Current", no annual line, not purchasable.
-- [ ] `ai/suggest` says "You were not charged" only when the refund succeeded in full; otherwise a
-  truthful message, and the failure is logged through `@/lib/monitoring/logger` (Sentry in
-  production) with ids only, no secrets.
-- [ ] `ai/translate` charges the site owner's wallet through the service client (ADR 035), for the
-  owner and for a non-owner editor alike; a non-owner editor's refusal tells them to ask the owner.
-- [ ] Subscription, reactivate, payment-method and checkout (fix pass 2) routes answer a generic
-  message for anything that is not a deliberate billing refusal and log the detail — a failed subscription read
-  included, which is never told as "No active subscription found" (fix pass); a missing and a
-  foreign payment method answer the same 404; `payment-methods` is rate limited per IP before
-  authorisation, and the card shows the limiter's sentence and when to try again (fix pass).
-- [ ] (Devin fix pass) When a lifetime grant lands, the customer's open subscription Checkouts for a
-  plan it covers are expired (an Agency Checkout beside Lifetime Pro stays open); a failure keeps
-  the grant and is reported to Sentry.
-- [ ] (Devin fix pass) A subscription that starts while an undated, non-trial grant covers its plan
-  is cancelled at once without proration, what its first invoice collected is refunded in full, it
-  is recorded cancelled (never live), and the refusal is reported to Sentry — whether its event
-  arrives after the grant's or before it (then only when Stripe created it after the lifetime was
-  paid; an older subscription keeps the period-end cancellation). Replays and retries refund once;
-  a failure is retried or reported, never silent. An Agency subscription beside Lifetime Pro, a
-  dated grant and a trial never trigger it.
-- [ ] (Devin fix pass) A plan change on a subscription scheduled to cancel clears the scheduled
-  cancellation, and the dialog says before the click that the subscription will renew.
-- [ ] (Devin fix pass, s96 folded in) The plan in force held only through a dated grant reads
-  "Included" and "Included until <date>" on the card and in its dialog tile — never "Lifetime" or
-  "for life", and the running-out row never calls the subscription beside it unneeded; it stays
-  unbuyable and Reactivate stays hidden while the grant is live.
-- [ ] Every non-lifetime billing behaviour is unchanged, pinned by regression tests.
-
-Complexity: 3. Dependencies: s71 (merged, #74). Branch `feature/s82-billing-lifetime-guards`.
-Folds in s96 (dated grant on the plan in force), which was queued from this story's review and has
-no entry of its own.
-
-Embed allocation: 0 bytes (ceilings only go down).
-
 ## Story s88-seo-canonicals-sitemap — every public page names its own URL to search engines
 
 CTO decision under the owner's 2026-10-09 directive ("implement everything that is left … get the
@@ -4210,6 +4101,144 @@ front of `edit-board/*`), listed in the plan.
 
 Embed allocation: 0 bytes.
 
+## Story s89-blog-drafts-only — the blog cron drafts, a human publishes
+
+CTO decision under the owner's 2026-10-09 directive. Source: the PRD's SEO "Publishing discipline"
+(`docs/prd.md:320-322`: *"it drafts, a human publishes … Gate it."*) and the live finding recorded in
+s17's agentic notes (this file, "`cron/generate-blog-post` already auto-publishes, today, daily").
+Research: `docs/research/s89-blog-drafts-only.md`. Decisions: [ADR 057](./decisions/057-ai-blog-posts-are-drafts-platform-admin-publishes.md)
+and its concurrency correction [ADR 060](./decisions/060-daily-blog-generation-is-a-durable-claim.md).
+No new screen, so no Design step (recorded in `docs/designs/README.md`).
+
+Cause (verified on `origin/main` `c0c40bf`): `vercel.json:3-5` runs `/api/cron/generate-blog-post`
+daily at 14:00 UTC. That route self-fetches `POST /api/blog/generate` with the cron bearer
+(`src/app/api/cron/generate-blog-post/route.ts:27-41`), which asks OpenAI for a post and inserts it
+with `status: "published"` and `published_at: now()` (`src/app/api/blog/generate/route.ts:273-283`) —
+no human anywhere in the path. The insert goes through the RLS client (`:270`), which in the cron
+path has no session, so since the schema repair it runs as `anon` and RLS refuses it
+(`supabase/migrations/20260818000000_repair_aborted_migrations.sql:1169-1173`, "ACTION REQUIRED") —
+after OpenAI has already been called and billed (`:210-242`). The interactive admin path accepts
+`ADMIN_EMAILS` (`generate/route.ts:35-43`) but the only write policy keys on `app_metadata.role`
+(`20260818000000…sql:1174-1180`), so an allow-listed owner is refused by the database too. There is no publish path
+and no blog admin tooling at all. A retried or duplicated cron run would write a second post.
+
+Acceptance criteria:
+- [ ] The daily cron writes `status = 'draft'` with `published_at` null, never `published` — even
+  when the model's output carries `status: published` front matter and the request carries
+  publish-shaped parameters. Tests: `src/lib/blog/__tests__/drafts.test.ts`,
+  `src/__tests__/api/cron/generate-blog-post.test.ts`.
+- [ ] The cron is idempotent per UTC day: a second retried, duplicated **or overlapping concurrent**
+  run returns the same draft with `created: false` and does not call OpenAI. A durable database claim
+  is won before generation, so exactly one concurrent caller reaches the provider; followers only
+  wait a bounded interval for its atomic draft/claim finalization. Pending timeout or failed claims
+  return a generic error and never generate until explicit operator recovery. The defensive unique
+  `blog_posts.generated_on` key still refuses a second cron row. The response identifies the draft
+  created or found (`{ created, draft: { id, title, slug, category, status, generated_on } }`). Tests:
+  the two above and `src/__tests__/db/blog-daily-draft.test.ts` (named in the CI database step).
+- [ ] `POST /api/blog/generate` (on-demand generation) is platform-admin only — the cron bearer no
+  longer opens it — and it too writes drafts only. Test: `src/__tests__/api/blog/generate.test.ts`.
+- [ ] A platform admin (`ADMIN_EMAILS` allow-list or server-managed `app_metadata.role = "admin"`;
+  never `user_metadata`) lists drafts or published posts (`GET /api/admin/blog/posts`) and publishes
+  or unpublishes one (`POST /api/admin/blog/posts/<id>`, `{ "action": "publish" | "unpublish" }`),
+  which sets or clears `published_at`. Anyone else gets 401/403 and changes nothing; a cross-origin or
+  Origin-less POST gets 403 before authentication. Test: `src/__tests__/api/admin/blog-posts.test.ts`.
+- [ ] Published read paths show `status = 'published'` only: `/blog/<slug>` 404s on a draft even for a
+  session that RLS lets read drafts. Test: `src/app/blog/[slug]/__tests__/page.test.tsx`.
+  `src/app/sitemap.ts` already filters (`:53-57`) and is owned by s88 — not edited here.
+- [ ] `docs/operations/blog.md` documents how drafts are created, reviewed and published, and that
+  `ADMIN_EMAILS` must hold the owner's address in Vercel.
+- [ ] Orchestrator, before ship: a read-only production count of `blog_posts` by `status` (and the
+  published rows' titles/`created_at`) — any post that went live without review is reviewed by the
+  owner and unpublished through the new route if it fails review. Then the migration is applied
+  (migration-first: it only adds a nullable column and an index), then `ADMIN_EMAILS` is set.
+
+Complexity: 3. Dependencies: none; coordinate with s88 (`src/app/sitemap.ts`, untouched here).
+Branch `feature/s89-blog-drafts-only`. Follow-up: the `/blog` index is a hardcoded list
+(`src/app/blog/page.tsx:8-42`), not the published posts — a published draft is reachable at its URL
+and in the sitemap but not listed there (separate story).
+
+Embed allocation: 0 bytes (ceilings only go down).
+
+## Story s79-headers-csp-ws — security headers that hold, and a realtime server that verifies before it counts
+
+Owner directive, 2026-10-09: **"don't ask me questions; take CTO-level decisions; implement
+everything left; test everything."** Scope: s69 L1, L8, L13, L14, the header half of L19, and the
+follow-up ADR 027 left open (rotation must close live sockets). No new screen, so no Design step.
+Research: `docs/research/s79-headers-csp-ws.md`. Decision: ADR 059.
+
+Cause (verified on `origin/main` `fc5968b`, and against production with read-only GETs):
+
+- **L1.** `src/middleware.ts:245-247` sends `script-src 'self' 'unsafe-inline'` in production on
+  every page (live header confirmed). An injected inline script or `javascript:` handler runs on
+  the dashboard, which renders text scraped off customers' pages.
+- **L8.** `public/embed/__fidelity__/index.html` is a manual measurement harness; `public/` is
+  served verbatim, so `https://www.recopyfa.st/embed/__fidelity__/index.html` answers 200, and
+  `:366-409` turns `?widget=<url>` into a `<script src>` on the app's own origin.
+- **L13.** `server/index.js:125` `app.use(cors())` answers `Access-Control-Allow-Origin: *`;
+  Express adds `X-Powered-By: Express`; `:129-136` `/health` returns the live connection count
+  (production: `{"status":"ok","connections":1,…}`). No security headers at all.
+- **L14.** `server/index.js:231-234` spends the per-site bucket (`rate-limit.js`
+  `checkConnection`, 120/min) before the token is even present-checked (`:241`) or verified
+  (`:247-265`): 121 handshakes with no token lock every real editor of that site out for a minute.
+- **Rotation.** ADR 027 ("WebSocket boundary"): rotating `sites.api_key` refuses reconnects but
+  an open socket keeps its handshake token — `revalidateSocket` (`:158-181`) returns early for a
+  non-staging socket, the sweep (`:195-204`) visits staging sockets only, and the message
+  handlers compare the echoed token with the handshake one (`:389`, `:429`), never with the key.
+- **L19 (headers).** `src/middleware.ts:234` still sends the legacy `X-XSS-Protection`; HSTS is
+  Vercel's custom-domain default `max-age=63072000` with no `includeSubDomains` (live);
+  `docs/operations/deployment-checklist.md:24-25` carries the live Stripe account prefix.
+
+Acceptance criteria:
+
+- [x] Every page under `/dashboard`, `/login`, `/signup` and `/edit` is served with a per-request
+  nonce policy: `script-src` (and `script-src-elem`) `'nonce-<fresh>' 'strict-dynamic'`, the
+  root layout's theme script by its SHA-256, and `'self' 'unsafe-inline'` as the CSP1/CSP2
+  fallback that CSP3 browsers ignore; the same policy reaches Next on the request so every Next
+  script and script preload carries the nonce; two requests never share a nonce; those segments
+  render dynamically. Tests: `src/lib/security/__tests__/content-security-policy.test.ts`,
+  `src/__tests__/middleware-csp.test.ts`, `src/__tests__/security/nonce-routes-render-dynamically.test.tsx`.
+- [x] Marketing pages (`/`, `/compare/*`, `/blog`, `/docs/install`, `/privacy`, `/terms`, `/demo`,
+  `/try`) stay statically prerendered with today's `script-src 'self' 'unsafe-inline'` — ADR 059.
+- [x] A normal marketing CTA, comparison/blog/demo/try/docs entry, auth-error/not-found recovery,
+  or signed-in marketing menu entry into `/login`, `/signup`, `/edit` or `/dashboard` loads a new
+  nonce document; the Header collects no owner credentials under the marketing policy. Internal
+  app navigation remains client-side. Tests: `app-document-boundary-links.test.ts`,
+  `Header.test.tsx`, and the existing production-build case in `e2e/csp.spec.ts`.
+- [ ] A production build loads `/`, `/pricing` (→ `/#pricing`), `/login`, `/signup`, `/edit` and a
+  signed-in `/dashboard` with no CSP violation and hydrated, and the nonce pages' served HTML
+  carries the header's nonce on every script but the hashed theme script. Test: `e2e/csp.spec.ts`
+  (+5; integrated Playwright contract 86 → 91). The four public cases pass locally against `next build` +
+  `next start`; the signed-in case needs CI's disposable Supabase stack and has not run yet.
+- [x] Every response sends `Strict-Transport-Security: max-age=63072000; includeSubDomains`
+  (no `preload`); no response sends `X-XSS-Protection`. Tests: `src/__tests__/next-config-hsts.test.ts`,
+  `middleware-csp.test.ts`, `e2e/csp.spec.ts`.
+- [x] The fidelity harness lives in `e2e/fixtures/embed-fidelity/`, served only by the local
+  `scripts/serve-embed-fidelity.mjs` (loopback); nothing under `public/` is named `__fidelity__`.
+  Test: `src/__tests__/embed/fidelity-harness-not-public.test.ts`.
+- [x] The realtime service sends no `X-Powered-By` and no `Access-Control-Allow-Origin` on its HTTP
+  surface, sends `nosniff`, `X-Frame-Options: DENY`, `default-src 'none'`, `no-referrer`, HSTS and
+  `Cross-Origin-Resource-Policy: same-origin`, and `/health` answers `200 {"status":"ok"}` with
+  `no-store` and no connection count. Test: `src/__tests__/websocket/server.integration.test.ts`.
+- [x] The app's realtime health probe treats that status-only response as liveness and exposes
+  status plus measured latency, without inventing retired connection or Supabase details. Test:
+  `src/__tests__/api/health/realtime-check.test.ts`.
+- [x] A handshake is metered per client address before any database work, and spends the per-site
+  bucket only once its token and origin verified: unauthenticated handshakes beyond the per-site
+  cap leave a real editor's connection admitted; the per-address cap bounds the `sites` lookups;
+  `Fly-Client-IP` keys the address only on Fly. Test: `server.integration.test.ts`.
+- [x] Rotating a site's key closes every open socket holding the old token within one sweep, at
+  the next `content-update`/`content-map`/`join-dashboard`, and a socket signed with the new key
+  connects; one `sites` read per site per sweep. Test: `server.integration.test.ts`.
+- [x] No live-key account prefix in the repository. Test: `src/__tests__/security/no-live-key-prefixes.test.ts`.
+- [x] Docs: ADR 059, `docs/architecture.md` (security headers), `server/README.md`. Required gates
+  pass; docs commit plus one story commit.
+
+Complexity: 4. Dependencies: none. Coordination: s84 drops the app's relay of the realtime
+`/health` body (`src/app/api/health/route.ts` `details`) and touches `server/index.js`
+(crash handlers); s88 makes the same `dashboard/layout.tsx` → `DashboardFrame.tsx` split and adds
+`login`/`signup` layouts — merge-time conflicts, resolved by keeping both. Branch
+`feature/s79-headers-csp-ws`. Embed allocation: 0 bytes.
+
 ## Story s76-grant-and-edit-token-hardening — the Edit website link carries no reusable credential, and editor access ends when it should
 
 Owner directive 2026-10-09 ("take CTO-level decisions; get the product ready for production"),
@@ -4299,3 +4328,497 @@ Follow-ups (not s76): the widget's own API reads still carry `?rcf_edit_token=` 
 exactly as the six names s76 now reaches through `window.` (plan, review fix pass 2).
 
 Embed allocation: ≤ 0 bytes (ceilings only go down; research measured −3 / −4 for the whole edit).
+
+## Story s96-free-tools-platform — a free Website Typo Finder shows each typo in its sentence, on a scan platform the next tools reuse
+
+> CTO decision under the owner's GTM direction, 2026-10-11. Marketing/GTM perimeter: `docs/prd.md`
+> § Link acquisition ("Free public tools as link bait"). UI story, so a Design step:
+> `docs/designs/s96-free-tools-platform.md`. GTM source: `docs/gtm/search-and-tools.md` (committed
+> from the 2026-10-11 research). Research: `docs/research/s96-free-tools-platform.md`. Plan:
+> `docs/plans/s96-free-tools-platform.md`. Decision: ADR 062 (next free number; re-check at execution).
+> This story's docs commit also adds the s97–s101 entries below.
+
+As a small-business owner, or an agency looking at a prospect's site, I paste a homepage address
+into `/tools/website-spell-checker`. Without an account I get a report of the likely typos on up
+to ten of its pages, each shown in the sentence it sits in. The report has a link I can share, and
+it tells me honestly how I can fix the line on the page.
+
+Context (verified on `origin/main` `7185da5`):
+- No free tool exists. `/try` (`src/app/try/page.tsx`) is the only no-account surface. It is a
+  bookmarklet preview: desktop only, nothing saved, no `?fixes=` parameter
+  (`src/components/try/TryExperience.tsx`).
+- The only SSRF guard is the webhook one. `assertSafeWebhookUrl`
+  (`src/lib/security/webhook-url-safety.ts:129`) returns webhook-worded errors. Its own header
+  (`:19-27`) also records a DNS-rebinding window: `fetch()` resolves again after the check. A public
+  anonymous scanner hands control of that window to anyone.
+- Turnstile is not in the repository: no import under `src/` and no entry in `package.json`. The
+  marketing CSP also sends `frame-src 'none'` (`src/lib/security/content-security-policy.ts:165`).
+- There is no visitor analytics, and UTMs are not stored at sign-up
+  (`docs/gtm/launch-2026-09-28.md` §12).
+- There are no server actions (AGENTS.md § Stack), so the scan is a `route.ts`.
+- `parse5` 7.3.0 (MIT) is installed through `jsdom` 26.1.0. It is not a direct dependency.
+
+Acceptance criteria:
+- [ ] One catalogue (`src/lib/tools/catalogue.ts`) drives `/tools`, the sitemap and `/llms.txt`.
+  `/tools` lists every live tool. The sitemap and `/llms.txt` list `/tools` and every live tool
+  page, and no report page. Tests: `src/__tests__/app/tools-discovery.test.ts`,
+  `src/__tests__/app/sitemap.test.ts`, `src/__tests__/app/llms-txt.test.ts`.
+- [ ] `/tools` and `/tools/website-spell-checker` meet the SEO bar:
+  - They are statically prerendered under the marketing CSP.
+  - Each resolves a canonical to itself, carries its own Open Graph image and is `index, follow`.
+  - Each carries `WebApplication` and `BreadcrumbList` JSON-LD, plus `FAQPage` matching a visible FAQ.
+  - The JSON-LD has no rating, review or price beyond `0`.
+  - Tests: `src/__tests__/app/tools-pages.test.tsx` and `src/__tests__/app/seo-canonicals.test.ts`.
+- [ ] `POST /api/tools/scan` refuses cross-site callers before using any store:
+  - non-JSON → 415;
+  - `Sec-Fetch-Site` other than `same-origin`, or a foreign `Origin` → 403.
+
+  So no third-party page can spend the caps from its visitors' browsers. It then meters the caller,
+  failing closed:
+  - The client key: IPv4, or IPv6 by /64 after unwrapping IPv4-mapped addresses. An unknown
+    address is refused.
+  - 5 a minute, checked before the body is read.
+  - Then validation, the host denylist (`TOOLS_SCAN_DENYLIST`) and the 24 h cache lookup.
+  - On a cache miss only:
+    - 5 a day per client key;
+    - 20 a day per IPv6 /48;
+    - 500 a day across all callers (an env override; its own message; logged);
+    - 20 an hour per target host.
+  - A refused or failed scan stores nothing. A cache hit returns the existing report and spends no
+    daily allowance.
+  - Errors use fixed text that never echoes an exception or a resolved address. The route sends no
+    CORS header.
+  - Test: `src/__tests__/api/tools/scan-route.test.ts`.
+- [ ] A scanned address is normalised before anything else:
+  - Only `http`/`https` on ports 80/443. No user info.
+  - Query string and fragment are dropped (the page tells the visitor).
+  - Lower-case punycode host with no trailing dot, at most 2,048 characters.
+  - Test: `src/lib/tools/scan/__tests__/normalize-url.test.ts`.
+- [ ] The fetcher's guard holds on every connection, every redirect hop (≤ 3) and every page
+  (≤ 24 requests per scan):
+  - An IP-literal host (including `2130706433`, `0x7f.1`, `[::ffff:7f00:1]`) is classified before
+    any socket opens.
+  - A hostname connects only to an address its own lookup validated. A hostname that rebinds to a
+    private, loopback, link-local, CGNAT, NAT64, 6to4/Teredo or IPv4-mapped address is refused.
+  - No environment proxy applies, including `NODE_USE_ENV_PROXY`.
+  - Per-request timeout 8 s. Whole-scan deadline 20 s.
+  - 2 MB cap on decompressed bytes, enforced while streaming (a gzip bomb stops at the cap).
+  - `text/html` only (XML or `.gz` for the sitemap). Keeps TLS verification. Sends no cookie and no
+    Referer.
+  - The webhook guard's behaviour and tests are unchanged.
+  - Tests: `src/lib/tools/fetch/__tests__/safe-fetch.test.ts` (real sockets: literal IPs open 0
+    connections), `src/lib/security/__tests__/public-address.test.ts`, existing webhook suites.
+- [ ] Visible text is extracted by block with `parse5`, and no script ever runs:
+  - Excluded: script, style, template, code/pre, hidden and `aria-hidden` content.
+  - Bidi-control and zero-width characters are stripped.
+  - Images, meta tags, script sources and an allowlist of response headers are kept for later lenses.
+  - Malformed or 2 MB input never throws.
+  - Test: `src/lib/tools/extract/__tests__/extract-page.test.ts`.
+- [ ] The Typo Finder checks the homepage plus up to 9 same-host pages: from `sitemap.xml` (one
+  index level), else from same-host homepage links.
+  - It flags a word only when the dictionary has a one-edit suggestion for it.
+  - It never flags these, each pinned by a fixture:
+    - capitalised words mid-sentence, CamelCase or all-caps;
+    - words in the page title, site name or hostname;
+    - words used 3+ times on the site;
+    - URLs, emails, numbers, contractions or hyphen parts that are words.
+  - It also reports repeated words ("the the").
+  - A non-English page (`lang`, or more than 40% unknown words) is reported as not checked, never
+    as full of typos.
+  - Tests: `src/lib/tools/lenses/typos/__tests__/*.test.ts`.
+- [ ] Reports live in `public.tool_reports`:
+  - RLS is on, with one policy, `TO service_role`. PUBLIC, `anon` and `authenticated` hold no table,
+    column or function privilege, so the public anon key cannot list reports.
+  - The app caps compact JSON at 12 KB; the DB caps `report::text` at 16 KB, and the largest app
+    report fits.
+  - Rows expire after 30 days, with at most 5,000 rows kept (≤ 80 MB on Supabase Free).
+  - Tests: `src/__tests__/db/tool-reports-privileges.test.ts`, named in
+    `scripts/run-db-invariants.mjs` and the PostgREST step. `rls-policies` and `column-privileges`
+    stay green.
+- [ ] `/tools/<slug>/r/<id>` (only that exact depth) is served under the nonce CSP, rendered per
+  request, and entered as a new document:
+  - Every piece of page text is rendered as text.
+  - The typo sits in its sentence in a `<mark>`, with screen-reader text.
+  - Links to scanned pages are `http(s)` only, with `rel="nofollow ugc noopener noreferrer"`.
+  - A scanned image is a "View image" link, never an `<img>`.
+  - The page is `noindex, nofollow`.
+  - A malformed id, unknown id, expired row, slug mismatch or invalid stored JSON is a 404 that
+    offers a new scan. A malformed id never reaches the database.
+  - Tests: `src/__tests__/app/tool-report-page.test.tsx`,
+    `src/components/tools/__tests__/{FindingInSentence,FindingList}.test.tsx`,
+    `src/lib/security/__tests__/content-security-policy.test.ts`.
+- [ ] Each finding's CTA "Fix it on your live page" opens `/try`, carrying UTMs.
+  - Its pinned copy says the fix is previewed in your own tab, on desktop, with nothing saved.
+  - It says installing ReCopyFast keeps the change, and visitors see it on their next page load.
+  - It says crawlers that don't run JavaScript keep the original text.
+  - Sign-up links are native anchors.
+  - Tests: `src/components/tools/__tests__/ToolCta.test.tsx`,
+    `src/__tests__/security/app-document-boundary-links.test.ts`.
+- [ ] `/tools`, `/tools/*` and `/api/tools/*` are sessionless in the middleware: security headers
+  are applied, and there is no GoTrue round trip.
+  - A daily cron (`isAuthorizedCronRequest`) deletes expired rows and trims to the row ceiling,
+    through one `SECURITY INVOKER` function only the service role executes.
+  - `TOOLS_SCAN_DISABLED=1` makes the scan answer 503 without fetching.
+  - Tests: `src/__tests__/middleware-matcher.test.ts`,
+    `src/__tests__/api/cron/tool-reports-cleanup.test.ts`.
+- [ ] `/privacy` says what the tools store and for how long:
+  - Stored: the address without its query string, plus page excerpts, for 30 days.
+  - The client address is used only as a rate-limit key that expires within 24 h.
+  - How a site owner opts out.
+  - Owner-approved wording, pinned by `legal-pages-truth.test.tsx`.
+- [ ] `/tools` has an "About our scanner" section:
+  - what is fetched (≤ 12 public pages per scan, once per 24 h per address);
+  - the user agent;
+  - what is stored;
+  - the opt-out.
+- [ ] Scanned sites never receive Sentry trace headers. If research confirms SDK v10 propagates by
+  default, `tracePropagationTargets` is limited to our own origins. Test:
+  `src/__tests__/sentry-trace-propagation.test.ts`.
+- [ ] Playwright, +3 in `e2e/tools.spec.ts`, so the strict count goes 93 → 96 in
+  `playwright.config.ts`, `ci.yml` and the contract test. The tests prove:
+  - The hub and tool page render with no CSP violation.
+  - A mocked scan lands, as a nonce document, on a seeded report with the typo in its sentence and
+    the CTA.
+  - A report seeded with hostile page text renders it inert: no dialog, no violation.
+- [ ] Measured before review:
+  - One real scan on a Vercel preview (dictionary loaded, duration recorded).
+  - The Typo Finder on 20 live homepages averages ≤ 1 false positive per site, with 0 on at least 15.
+  - Lighthouse mobile on `/tools` and the tool page ≥ 0.9.
+- [ ] `docs/stories.md`'s "PRD SEO/GTM items with no story" paragraph (`:1408-1410`) is amended:
+  free tools are s96–s101.
+- [ ] ADR 062 is written. `AGENTS.md` and `docs/architecture.md` record the `tool_reports` exception
+  and the "Free tools" integration row. `docs/operations/free-tools.md` covers limits, the storage
+  budget, the kill switch and read-only usage SQL.
+- [ ] New dependencies:
+  - `parse5` ^7.3.0: MIT, already in the lockfile.
+  - `wordlist-english` 1.2.1: MIT, SCOWL data, 1.49 MB, no dependencies, server-only through
+    `serverExternalPackages`, and traced into the scan function, checked in the build output.
+  - `audit:prod` clean.
+- [ ] Required gates pass, and the coverage floors are raised to the new measurement. Commits: a docs
+  commit, a migration commit and one story commit.
+
+Complexity: 5. Dependencies: none. Branch `feature/s96-free-tools-platform`. One migration
+(`20261011120000_tool_reports.sql`), in its own commit.
+
+Embed allocation: 0 bytes.
+
+## Story s97-csp-checker — "Will a script run on my site?" answers yes or no, names the platform, and gives the exact lines to add
+
+> CTO decision, 2026-10-11. Answers launch-kit objection 5 ("Will it work on my site?",
+> `docs/gtm/launch-2026-09-28.md` §8). UI story. Plan: `docs/plans/s97-csp-checker.md`. Entry added
+> by s96's docs commit; this PR does not edit `docs/stories.md`.
+
+As an owner or developer deciding whether to install ReCopyFast, I enter my site's address at
+`/tools/csp-checker`. I learn which platform it appears to run on and whether my site's Content
+Security Policy lets ReCopyFast's script load and connect. If it does not, I get the exact
+directive lines to add and a link to the install guide.
+
+Acceptance criteria:
+- [ ] The lens reads every enforced policy: from headers (several per header, comma-separated) and
+  from `<meta http-equiv>` (meta ignores `frame-ancestors`, `report-uri` and `sandbox`).
+  - Report-only policies are reported as "logs, does not block".
+  - Test: `src/lib/tools/lenses/csp/__tests__/parse-csp.test.ts`.
+- [ ] Source matching follows CSP Level 3 for:
+  - scheme, host and wildcard sources, ports and paths;
+  - `'self'` against the scanned origin, `'none'` and `*`;
+  - nonces, hashes, `'strict-dynamic'`;
+  - the fallbacks `script-src-elem` → `script-src` → `default-src` and `connect-src` →
+    `default-src`.
+  - Test: `src/lib/tools/lenses/csp/__tests__/source-match.test.ts`, at least 40 rows.
+- [ ] The verdict covers what the snippet really needs, derived from
+  `INSTALLATION_EXAMPLE`/`buildEmbedScript` and never hard-coded:
+  - the script `https://www.recopyfa.st/embed/recopyfast.js`;
+  - the API `connect-src https://www.recopyfa.st`;
+  - realtime `connect-src wss://recopyfast-ws.fly.dev` (the embed is WebSocket-only,
+    `recopyfast.src.js:3127`).
+  - For editing, it says what the editor's `<style>` elements need. It never recommends
+    `'unsafe-inline'` (`installation-content.ts:220`).
+  - Test: `src/lib/tools/lenses/csp/__tests__/verdict.test.ts`.
+- [ ] A blocked requirement gets the full replacement directive line for each blocking policy.
+  When `default-src` was the fallback, the line copies `default-src`'s sources so the site's own
+  resources keep loading. A nonce + `'strict-dynamic'` policy is explained, not "fixed".
+- [ ] Platform detection: WordPress, Webflow, Wix, Squarespace, Shopify, Framer, Next.js, else
+  "plain or unrecognised", from headers and markup.
+  - Each result lists the evidence it used. An ambiguous page names nothing.
+  - Test: `src/lib/tools/lenses/csp/__tests__/detect-platform.test.ts`, one fixture per platform
+    plus ambiguous and plain cases.
+- [ ] The report says three things, using `CodeBlock`:
+  - the verdict in plain English;
+  - the lines to add;
+  - the platform, with a link to `/docs/install#add-snippet`.
+  - It promises no per-platform recipe for a stack `src/lib/sites/install-recipes.ts` does not cover,
+    and never says "works on any site".
+- [ ] Playwright +2 (count +2 over main at rebase):
+  - The tool page and a seeded report render with no CSP violation.
+  - A differential test: real Chromium and the matcher agree on at least 10 policies, for the
+    script and the `wss:` connect (`page.route`/`routeWebSocket`, no network).
+- [ ] The catalogue entry, the lens registry line and SEO (canonical, JSON-LD, OG, sitemap through
+  the catalogue) are done. Required gates pass. One story commit.
+
+Complexity: 3. Dependencies: s96. Branch `feature/s97-csp-checker`. No migration.
+
+Embed allocation: 0 bytes.
+
+## Story s98-maintenance-cost-calculator — an agency sees what free copy changes cost it a year, from its own numbers
+
+> CTO decision, 2026-10-11. The PRD wedge "Stop doing free copy changes for your clients"
+> (`docs/prd.md` § GTM strategy). Client-side only, with no API, no storage and no dependency on
+> s96, so it can ship in parallel. UI story. Plan: `docs/plans/s98-maintenance-cost-calculator.md`.
+> Entry added by s96's docs commit.
+
+As an agency owner or freelancer, I enter at `/tools/website-maintenance-cost`:
+- how many client sites I look after;
+- how many copy changes each asks for a month;
+- the minutes each change takes;
+- my hourly rate;
+- the share of changes I bill.
+
+I see the unbilled hours and money per month and per year, with the formula. I get a link that
+reproduces my result and an HTML card I can paste into my own site.
+
+Acceptance criteria:
+- [ ] The calculation is a pure function:
+  - Inputs are clamped: sites 1–500, changes 0–50, minutes 1–240, rate 0–10,000, billed 0–100%,
+    currency USD/EUR/GBP (a symbol, never a conversion).
+  - It returns hours and money per month and per year plus the formula.
+  - It never produces NaN or Infinity.
+  - Test: `src/lib/tools/maintenance-cost/__tests__/calculate.test.ts`.
+- [ ] The result is reproducible from the URL (`?sites=&changes=&minutes=&rate=&currency=&billed=`).
+  - Junk, negative, huge or prototype-shaped parameters fall back to defaults or clamp.
+  - The canonical stays the bare URL, and the page stays statically prerendered.
+  - Test: `src/lib/tools/maintenance-cost/__tests__/params.test.ts`.
+- [ ] The embeddable card is copyable HTML, built only from validated numbers and enums.
+  - Inline styles, no script, no event attribute, one link back with UTMs, shown in `CodeBlock`.
+  - The on-page preview renders the same text through React.
+  - No iframe: the site sends `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+  - Test: `src/lib/tools/maintenance-cost/__tests__/embed-snippet.test.ts`.
+- [ ] Copy stays inside the claims ledger:
+  - "Your numbers, not ours".
+  - No ReCopyFast time-saved figure, no testimonial, no "free plan" (§11).
+  - The CTAs are `/try` (preview, desktop) and `/signup` (native anchor).
+  - Tests: `src/components/tools/maintenance-cost/__tests__/CostCalculator.test.tsx`,
+    `src/__tests__/app/maintenance-cost-page.test.tsx`.
+- [ ] Accessibility: labelled inputs with `inputMode`, inline errors per field, the result in a
+  polite live region, and no horizontal scroll at 390 px.
+- [ ] SEO: canonical, `WebApplication` + `BreadcrumbList` + `FAQPage` JSON-LD, its own OG image, and a
+  sitemap/llms.txt entry.
+  - If s96 has merged, these come through the catalogue. If not, through one row each in
+    `buildStaticSitemapRoutes` and `buildLlmsTxt`, which s96 then moves into the catalogue.
+- [ ] Playwright +1 at 390 px (count +1 over main at rebase):
+  - Enter values, see the result, reload from the URL, find the card snippet.
+  - No CSP violation.
+- [ ] Required gates pass. One story commit. No migration, no dependency, no API route.
+
+Complexity: 2. Dependencies: none (s96 optional). Branch `feature/s98-maintenance-cost-calculator`.
+
+Embed allocation: 0 bytes.
+
+## Story s99-outdated-website-checker — "Is your website out of date?" finds stale years, past dates and expired promos
+
+> CTO decision, 2026-10-11. The PRD's core pain: hours, prices and promos go stale. A lens on s96's
+> pipeline; no LLM. Plan: `docs/plans/s99-outdated-website-checker.md`. Entry added by s96's docs
+> commit.
+
+As a business owner, or an agency prospecting for clients, I enter an address at
+`/tools/outdated-website-checker` and see the lines on up to ten pages that read as out of date:
+- a © year behind this year;
+- a date that has passed but is still worded as upcoming or as a deadline;
+- a seasonal promo from a past year or out of season;
+- "2023 prices";
+- "coming in <past year>".
+
+Each line is shown in its sentence, with the reason.
+
+Acceptance criteria:
+- [ ] The rules are deterministic against an injected reference date (UTC). Each rule has positive,
+  negative and boundary fixtures. Test: `src/lib/tools/lenses/outdated/__tests__/rules.test.ts`.
+- [ ] A past date is flagged only when upcoming or deadline wording sits within 60 characters.
+  Blog dates, "since 2015" and "founded in" are never flagged.
+  - Numeric slash dates (`03/04/2025`) are ignored in v1.
+  - © years from 1 to 31 January are "info", not "stale".
+- [ ] The summary has counts by kind, a verdict and the pages checked. Findings are bounded and use
+  the s96 generic shape.
+- [ ] Tool page, catalogue entry and lens registry line are added, with SEO as s96 sets it.
+  Playwright +1: the tool page plus a seeded report, with no CSP violation.
+- [ ] Required gates pass. One story commit. No migration, no dependency.
+
+Complexity: 2. Dependencies: s96. Branch `feature/s99-outdated-website-checker`.
+
+Embed allocation: 0 bytes.
+
+## Story s100-ai-slop-checker — "Does your homepage sound like AI?" highlights the stock phrases and scores their density
+
+> CTO decision, 2026-10-11. A lens on s96's pipeline. Deterministic phrase list, no LLM, no
+> "written by AI" verdict. Plan: `docs/plans/s100-ai-slop-checker.md`. Entry added by s96's docs
+> commit.
+
+As a founder or marketer, I enter my homepage at `/tools/ai-slop-checker` and see the stock phrases
+common in AI-written copy ("seamless", "elevate", "in today's fast-paced world"…). Each phrase is
+highlighted in its sentence with why it reads as generic, plus a density score I can share.
+
+Acceptance criteria:
+- [ ] The phrase list (`src/lib/tools/lenses/ai-slop/phrases.ts`) is data with tests:
+  - Each entry has a pattern, a category, a weight and a plain-English "why".
+  - Entries are lowercase, unique and word-bounded.
+  - The list matches nothing in a fixture of plain, specific copy.
+- [ ] Matching is case-insensitive on word boundaries, covering inflections.
+  - A match inside a capitalised multi-word name mid-sentence (a brand) is skipped.
+  - Density = weighted matches per 100 words of homepage text. The bands are pinned by tests.
+- [ ] The copy says "phrases common in AI-written copy". It never says the page was written by AI,
+  and never gives a probability.
+- [ ] Tool page, catalogue entry and lens registry line are added, with SEO as s96 sets it. The
+  report shows the score in its summary. Playwright +1. Required gates pass. One story commit.
+
+Complexity: 2. Dependencies: s96. Branch `feature/s100-ai-slop-checker`.
+
+Embed allocation: 0 bytes.
+
+## Story s101-alt-text-checker — the Alt Text Checker lists missing, empty and filename alts and the coverage, and claims no compliance
+
+> CTO decision, 2026-10-11. A lens on s96's pipeline; no LLM in v1. Plan:
+> `docs/plans/s101-alt-text-checker.md`. Entry added by s96's docs commit.
+
+As an owner or agency facing accessibility questions, I enter an address at
+`/tools/alt-text-checker`. For up to ten pages I see:
+- each image with a missing alt, a filename-like alt or a generic alt;
+- an empty alt on a linked image;
+- the alt-text coverage percentage.
+
+I also see a clear statement that this is not an accessibility audit.
+
+Acceptance criteria:
+- [ ] Each image is classified as one of: missing, decorative (empty or presentational), filename,
+  generic, linked-and-empty, too long, or fine.
+  - Tracking pixels (≤ 2 px) and `data:` images are skipped.
+  - Coverage = meaningful alts / non-decorative images.
+  - Test: `src/lib/tools/lenses/alt-text/__tests__/classify.test.ts`.
+- [ ] No hotlinked thumbnails: each image is listed by filename with a "View image" link (`https`
+  only, `rel="noopener noreferrer nofollow ugc"`). A report viewer's address never reaches the
+  scanned site. An `http:` or `data:` source shows its filename only.
+- [ ] The tool page and every report state: "This checks alt text only. It is not an accessibility
+  audit and does not show WCAG, ADA or EAA compliance."
+  - A test proves no rendered string claims compliance.
+- [ ] The fix CTA says only what is true. The embed edits alt text (`recopyfast.src.js:3692`,
+  `:5176`, `:5365`); the `/try` preview does not (`public/try/rcf-try.js` reads only `altKey`).
+  - So the CTA uses s96's `"alt-text"` variant: "Fix alt text on your live page", linking to
+    `/signup` and `/docs/install`, with no `/try` link.
+  - A claims-ledger row (launch kit §12) with that evidence is proposed in the PR before it is
+    marked ready.
+- [ ] Tool page, catalogue entry and lens registry line are added, with SEO as s96 sets it.
+  Playwright +1. Required gates pass. One story commit.
+
+Complexity: 2. Dependencies: s96. Branch `feature/s101-alt-text-checker`.
+
+Embed allocation: 0 bytes.
+
+## Story s82-billing-lifetime-guards — a lifetime owner is never billed again for what they own, and billing says only what is true
+
+Follow-ups of s71 (PR #74) and s45, plus s69 L5, scheduled by the orchestrator on 2026-10-09 under
+the owner's directive. Research: `docs/research/s82-billing-lifetime-guards.md`. Design:
+`docs/designs/s82-billing-lifetime-guards.md` (no new screen). Plan:
+`docs/plans/s82-billing-lifetime-guards.md`.
+
+Cause (verified on `origin/main` `72f4cff`):
+- `POST /api/billing/subscription/reactivate` (`route.ts:9-37`) calls `reactivateSubscription`
+  (`src/lib/stripe/subscription.ts:477-527`), which has no lifetime check: a lifetime owner whose
+  subscription the Stripe webhook set to cancel (`stopBillingForLifetimeOwner`,
+  `webhooks/stripe/route.ts:941-1000`) can restart monthly billing for a plan the grant replaced.
+  The card hides the button since s71 (`SubscriptionCard.tsx:221-227`); the endpoint does not.
+- (Found by the review, fix pass.) Reactivation is not the only door: Checkout's subscription
+  intent (`checkout/route.ts:209-237`) and the plan change (`updateSubscription`,
+  `subscription.ts:313-410`) never read grants, so a lifetime owner can buy or switch into a plan
+  the grant already includes, billed monthly; the webhook stops billing only when a lifetime is
+  bought. The grant reader the guards share (`readGrantedPlanIds`) ignores `expires_at`, while the
+  entitlement resolver honours it — production holds one dated non-trial grant
+  (`qa_recovery_20260919`).
+- (Found by the second review, fix pass 2, on `84d7b0c`.) Checkout's catch answers
+  `error.message` (`checkout/route.ts:811-821`), so a grant read failure reaches the browser as
+  "Failed to read plan entitlements: <database text>". The plan dialog says "Included for life" and
+  "Included in your lifetime <plan>" for a plan included only by a dated grant
+  (`UpgradeDialog.tsx:127-130,340-345`), and its naming of the highest grant is unpinned.
+- (Found by Devin Review on PR #81, on `d08b967`.) A subscription Checkout Session opened before a
+  lifetime grant lands stays payable: `stopBillingForLifetimeOwner`
+  (`webhooks/stripe/route.ts:941-1002`) only cancels subscriptions already live, and
+  `handleSubscriptionCreated` (`:486-534`) records a later one without reading grants — open Pro
+  Checkout, buy Lifetime Pro in another tab, pay the old session, and Pro bills monthly for a plan
+  owned. An allowed plan change on a subscription set to cancel (`subscription.ts:378,399-413`)
+  charges the proration and still cancels at period end. The plan in force held only through a
+  dated grant reads "Lifetime" / "Lifetime access" / "for life" on the card and its dialog tile
+  (`SubscriptionCard.tsx:52-55,194-195`, `BillingDashboard.tsx:378`) — the queued follow-up **s96,
+  folded into s82** (it has no story of its own).
+- A Founding Agency owner still running out an Agency subscription reads "1,000 AI credits /
+  month" with nothing saying it drops to 250 when the subscription ends (s71 review N-1;
+  `SubscriptionCard.tsx:102-128`, ADR 038).
+- The card finds the allowance bullet by its exact text (`SubscriptionCard.tsx:38-40,61-63`, s45
+  review #2). Pro's live bullet is "AI rewrite suggestions, 500 credits a month"
+  (`20260928130000_catalogue_copy_truth.sql:56`), which "500 AI credits" never matches, so a
+  founding-offer holder metered at 100 reads 500.
+- The plan dialog marks a lifetime owner's plan "Current" at "$49/month" with the catalogue's
+  allowance (`UpgradeDialog.tsx:234-285`, s45 review #1).
+- `POST /api/ai/suggest` answers "You were not charged" even when the refund failed
+  (`src/app/api/ai/suggest/route.ts:153-162,333-341`); the failure reaches only `console.error`,
+  which nothing forwards to Sentry.
+- `POST /api/ai/translate` charges the caller (`route.ts:261`), against ADR 035 (the site owner
+  pays).
+- Billing routes return raw exception text, Stripe's included, to the client
+  (`payment-methods/route.ts:119-122,204-207`; `subscription/route.ts:104-107,141-144`;
+  `subscription/reactivate/route.ts:28-33`), and a missing payment-method id answers 500 with
+  Stripe's "No such PaymentMethod" while a foreign one answers 404 — an existence oracle.
+  `payment-methods` has no limiter (s69 L5).
+
+Acceptance criteria:
+- [ ] Reactivating a subscription whose plan a non-trial permanent grant covers (same plan or a
+  higher one) answers 409 with a clear message and never reaches Stripe. A Founding Agency owner
+  cannot restart an Agency subscription either (CTO decision, plan). A subscription above every
+  grant (Lifetime Pro + Agency subscription), a trial-only account and an account with no grant
+  reactivate exactly as before.
+- [ ] Starting a subscription through Checkout, or switching a subscription (plan change), to a
+  plan a live grant covers answers 409 with a clear message before any Stripe call, and fails
+  closed when grants cannot be read; an Agency subscription beside Lifetime Pro stays on sale. The
+  plan dialog marks such a plan "Included" and refuses it, naming the lifetime plan that includes
+  it (fix pass) — the highest undated grant; a plan included only by dated grants reads "Included
+  until <date>" and its submit "Included in your plan until <date>", never "for life" (fix pass 2).
+- [ ] A grant whose `expires_at` has passed is not held, for every reader (billing page, dashboard,
+  entitlement badge, checkout, plan change, reactivation), exactly as the entitlement resolver
+  already says; an unexpired dated grant is held (fix pass).
+- [ ] Under a plan held for life, the running-out row and the cancel confirmation say what the
+  monthly AI-credit allowance becomes without the subscription, when the subscription is what
+  raises it (resolved server-side). Every other state's copy is unchanged.
+- [ ] The plan card restates the allowance bullet found from the plan's own
+  `limits.monthlyCredits`, not one spelling of it: Pro's real wording is restated, a reworded
+  bullet is restated, unrelated numbers are untouched, no resolved allowance drops it.
+- [ ] The plan dialog shows a plan held for life as "Lifetime" with "Lifetime access" and the
+  account's own allowance — no price, no "Current", no annual line, not purchasable.
+- [ ] `ai/suggest` says "You were not charged" only when the refund succeeded in full; otherwise a
+  truthful message, and the failure is logged through `@/lib/monitoring/logger` (Sentry in
+  production) with ids only, no secrets.
+- [ ] `ai/translate` charges the site owner's wallet through the service client (ADR 035), for the
+  owner and for a non-owner editor alike; a non-owner editor's refusal tells them to ask the owner.
+- [ ] Subscription, reactivate, payment-method and checkout (fix pass 2) routes answer a generic
+  message for anything that is not a deliberate billing refusal and log the detail — a failed subscription read
+  included, which is never told as "No active subscription found" (fix pass); a missing and a
+  foreign payment method answer the same 404; `payment-methods` is rate limited per IP before
+  authorisation, and the card shows the limiter's sentence and when to try again (fix pass).
+- [ ] (Devin fix pass) When a lifetime grant lands, the customer's open subscription Checkouts for a
+  plan it covers are expired (an Agency Checkout beside Lifetime Pro stays open); a failure keeps
+  the grant and is reported to Sentry.
+- [ ] (Devin fix pass) A subscription that starts while an undated, non-trial grant covers its plan
+  is cancelled at once without proration, what its first invoice collected is refunded in full, it
+  is recorded cancelled (never live), and the refusal is reported to Sentry — whether its event
+  arrives after the grant's or before it (then only when Stripe created it after the lifetime was
+  paid; an older subscription keeps the period-end cancellation). Replays and retries refund once;
+  a failure is retried or reported, never silent. An Agency subscription beside Lifetime Pro, a
+  dated grant and a trial never trigger it.
+- [ ] (Devin fix pass) A plan change on a subscription scheduled to cancel clears the scheduled
+  cancellation, and the dialog says before the click that the subscription will renew.
+- [ ] (Devin fix pass, s96 folded in) The plan in force held only through a dated grant reads
+  "Included" and "Included until <date>" on the card and in its dialog tile — never "Lifetime" or
+  "for life", and the running-out row never calls the subscription beside it unneeded; it stays
+  unbuyable and Reactivate stays hidden while the grant is live.
+- [ ] Every non-lifetime billing behaviour is unchanged, pinned by regression tests.
+
+Complexity: 3. Dependencies: s71 (merged, #74). Branch `feature/s82-billing-lifetime-guards`.
+Folds in s96 (dated grant on the plan in force), which was queued from this story's review and has
+no entry of its own.
+
+Embed allocation: 0 bytes (ceilings only go down).

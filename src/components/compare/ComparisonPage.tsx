@@ -6,50 +6,22 @@ import type { ComparisonPricing } from "@/lib/compare/comparison-pricing";
 import {
   comparisonList,
   comparisonSiteUrl,
-  COMPETITOR_FACTS_CHECKED_AS_OF,
   type Comparison,
 } from "@/lib/compare/comparisons";
+import {
+  buildBreadcrumbListLd,
+  buildFAQPageLd,
+  buildSoftwareApplicationLd,
+  serializeJsonLd,
+  type MonthlyOffer,
+} from "@/lib/seo/json-ld";
+import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/seo/site-identity";
 
 type ComparisonPageProps = {
   comparison: Comparison;
   pricing: ComparisonPricing;
+  offers: readonly MonthlyOffer[];
 };
-
-function faqSchema(comparison: Comparison) {
-  return {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: comparison.faqs.map((faq) => ({
-      "@type": "Question",
-      name: faq.question,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: faq.answer,
-      },
-    })),
-  };
-}
-
-function breadcrumbSchema(comparison: Comparison) {
-  return {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      {
-        "@type": "ListItem",
-        position: 1,
-        name: "Comparisons",
-        item: comparisonSiteUrl("/compare"),
-      },
-      {
-        "@type": "ListItem",
-        position: 2,
-        name: comparison.competitor,
-        item: comparisonSiteUrl(`/compare/${comparison.slug}`),
-      },
-    ],
-  };
-}
 
 function formatUsd(amount: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -105,9 +77,25 @@ function BestFitList({ items }: { items: readonly string[] }) {
   );
 }
 
-export function ComparisonPage({ comparison, pricing }: ComparisonPageProps) {
-  const schema = faqSchema(comparison);
-  const breadcrumbs = breadcrumbSchema(comparison);
+export function ComparisonPage({
+  comparison,
+  pricing,
+  offers,
+}: ComparisonPageProps) {
+  const schema = buildFAQPageLd(comparison.faqs);
+  const breadcrumbs = buildBreadcrumbListLd([
+    { name: "Comparisons", url: comparisonSiteUrl("/compare") },
+    {
+      name: comparison.competitor,
+      url: comparisonSiteUrl(`/compare/${comparison.slug}`),
+    },
+  ]);
+  const softwareApplication = buildSoftwareApplicationLd({
+    name: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    url: comparisonSiteUrl(`/compare/${comparison.slug}`),
+    offers,
+  });
   const currentPricing = pricingCopy(pricing);
 
   return (
@@ -136,8 +124,7 @@ export function ComparisonPage({ comparison, pricing }: ComparisonPageProps) {
             </p>
             <p className="mt-5 text-sm text-slate-500">
               Competitor product information checked as of{" "}
-              {COMPETITOR_FACTS_CHECKED_AS_OF}. Official sources are linked
-              below.
+              {comparison.factsCheckedAsOf}. Official sources are linked below.
             </p>
           </div>
         </section>
@@ -283,13 +270,19 @@ export function ComparisonPage({ comparison, pricing }: ComparisonPageProps) {
             <script
               type="application/ld+json"
               dangerouslySetInnerHTML={{
-                __html: JSON.stringify(schema).replace(/</g, "\\u003c"),
+                __html: serializeJsonLd(schema),
               }}
             />
             <script
               type="application/ld+json"
               dangerouslySetInnerHTML={{
-                __html: JSON.stringify(breadcrumbs).replace(/</g, "\\u003c"),
+                __html: serializeJsonLd(breadcrumbs),
+              }}
+            />
+            <script
+              type="application/ld+json"
+              dangerouslySetInnerHTML={{
+                __html: serializeJsonLd(softwareApplication),
               }}
             />
           </div>
@@ -301,7 +294,7 @@ export function ComparisonPage({ comparison, pricing }: ComparisonPageProps) {
               Official sources
             </h2>
             <p className="mt-3 text-sm text-slate-500">
-              Competitor facts checked as of {COMPETITOR_FACTS_CHECKED_AS_OF}.
+              Competitor facts checked as of {comparison.factsCheckedAsOf}.
             </p>
             <ul aria-label="Official sources" className="mt-5 space-y-3">
               {comparison.sources.map((source) => (
@@ -327,13 +320,15 @@ export function ComparisonPage({ comparison, pricing }: ComparisonPageProps) {
               Keep the site. Give clients a simpler editing path.
             </h2>
             <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link
+              {/* Preserve the campaign query while replacing the static
+                  comparison document with /signup's nonce document. */}
+              <a
                 href={`/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_${comparison.slug}`}
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast
                 <ArrowRight aria-hidden="true" className="h-5 w-5" />
-              </Link>
+              </a>
               <Link
                 href="/try"
                 className="pressable inline-flex items-center rounded-full border border-slate-300 bg-white px-7 py-3.5 font-semibold text-slate-900 hover:border-slate-400"

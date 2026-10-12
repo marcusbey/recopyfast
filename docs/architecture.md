@@ -46,10 +46,14 @@ plus custom fetch hooks. See [ADR 005](./decisions/005-client-state-context-and-
 
 ### Two deploy targets
 
-- **Vercel** — the Next.js app. One cron in `vercel.json` (`/api/cron/generate-blog-post`, daily 14:00).
+- **Vercel** — the Next.js app. Crons in `vercel.json`: `/api/cron/generate-blog-post` (daily 14:00),
+  `/api/cron/webhook-dispatch` (every 5 min) and `/api/cron/tool-reports-cleanup` (daily 03:15, s96).
 - **Fly.io** — `server/index.js`, an Express + Socket.io process, deployed 2026-08-17 as
   `recopyfast-ws` in `iad`, **one** `shared-cpu-1x@512MB` machine.
-  `https://recopyfast-ws.fly.dev/health` returns `status: ok`, `supabase: connected`.
+  `https://recopyfast-ws.fly.dev/health` returns `{"status":"ok"}` — liveness only since s79: no
+  connection count, no CORS, security headers on every **Express** response
+  (`server/security-headers.js`). Engine.IO answers `/socket.io/` before Express and keeps its own
+  response headers and CORS; s79 did not change that surface.
   Vercel cannot host a long-lived process, which is why it is here.
   **Live since `s07b`:** `NEXT_PUBLIC_WS_URL = wss://recopyfast-ws.fly.dev`, set in the Vercel
   **production** environment only — a preview pointed at it would share `site:{id}` rooms with
@@ -337,6 +341,11 @@ noise; a comment that says *what broke last time* is the asset.
 **Integrations**
 `webhooks` · `webhook_deliveries` · `api_keys` · `blog_posts` · `bulk_operations`
 
+**Free tools (s96)**
+`tool_reports` — free-tool scan reports and the 24 h scan cache. Not tenant-scoped: service role
+only, no web-principal privilege of any kind, 30-day expiry and a 5,000-row ceiling
+([ADR 062](./decisions/062-free-tool-reports-are-service-role-reads-under-the-nonce-csp.md)).
+
 **Graveyard — frozen, not deleted** (PRD)
 `teams` · `team_members` · `team_invitations` · `team_activity` · `team_activity_log` ·
 `collaboration_sessions` · `collaboration_notifications` · `compliance_reports` ·
@@ -375,17 +384,49 @@ noise; a comment that says *what broke last time* is the asset.
 | **AI** | `src/lib/ai/`, `/api/ai/suggest`, `/api/ai/translate` | OpenAI, credit-metered. Credits cover **AI only**, and only once the site owner holds a plan — a wallet balance is never a quota, and credits are sold to plan holders only ([ADR 041](./decisions/041-editing-needs-the-site-owners-plan.md)). `/api/ai/suggest` is the widget's: authorised by editor credentials (`validateEditorTokenFromRequest`, graded `edit`), never the site token, and charged to the site owner through the service role ([ADR 035](./decisions/035-widget-ai-charged-to-site-owner.md)). `/api/ai/translate` has no widget caller |
 | **Email** | `src/lib/email/resend.ts` | Resend |
 | **Images** | `src/lib/images/`, `src/lib/storage/`, `/api/upload/image` | Supabase Storage, `20260801000000_storage_assets_bucket.sql`. Replace an existing `<img>` only |
-| **Realtime** | `server/index.js` (Socket.io) on Fly, one machine | `NEXT_PUBLIC_WS_URL` set in production ⇒ new snippets carry `data-ws-url` ⇒ the widget connects **in an editing session only**. HTTP stays authoritative and realtime is additive: unset the variable and redeploy and the product is its pre-`s07b` self. Reported as a `realtime` check in `GET /api/health` that can degrade the app but never make it unhealthy (ADR 004 "Watch"). See [ADR 004](./decisions/004-embed-transport-split.md), [ADR 022](./decisions/022-realtime-parity-is-editors-only.md), [`server/README.md`](../server/README.md) |
+| **Realtime** | `server/index.js` (Socket.io) on Fly, one machine | `NEXT_PUBLIC_WS_URL` set in production ⇒ new snippets carry `data-ws-url` ⇒ the widget connects for **every visitor** to that page; staging rooms additionally require an editor grant. HTTP stays authoritative and realtime is additive: unset the variable and redeploy and the product is its pre-`s07b` self. Reported as a `realtime` check in `GET /api/health` that can degrade the app but never make it unhealthy (ADR 004 "Watch"). A handshake is metered per client address (`Fly-Client-IP`) before any database read, with IPv6 grouped by `/64`, and spends the per-site bucket only once verified; rotating a site's key closes its old-token sockets within one 60 s sweep and message paths re-check before fan-out (s79, `server/README.md`). See [ADR 004](./decisions/004-embed-transport-split.md), [ADR 022](./decisions/022-realtime-parity-is-editors-only.md), [`server/README.md`](../server/README.md) |
 | **Rate limit / cache** | Redis via `src/lib/api/rate-limit.ts` | `npm run check:redis` |
 | **Errors** | Sentry. Browser: `src/instrumentation-client.ts`. Server: `src/instrumentation.ts` loads `sentry.server.config.ts` (Node) or `sentry.edge.config.ts` (Edge) and exports `onRequestError`. Browser events post same-origin to the `/monitoring` tunnel (`src/lib/monitoring/sentry-tunnel.ts`), rewritten to Sentry's ingest | `next.config.ts` only wraps when the DSN is set, so CI builds without it. No root `instrumentation.ts` or `sentry.client.config.ts`: under Turbopack a root copy shadows `src/`, and the client config is never bundled (s46) |
 | **Cron** | `vercel.json` → `/api/cron/generate-blog-post`; `/api/cron/ab-test-lifecycle` exists but is unscheduled | Cron platforms retry — every job must be idempotent |
-| **Outbound webhooks** | `src/lib/webhooks/`, `/api/webhooks` | Distinct from Stripe's inbound `/api/webhooks/stripe`. SSRF check needs `ipaddr.js` at config **and** delivery time |
+| **Outbound webhooks** | `src/lib/webhooks/`, `/api/webhooks` | Distinct from Stripe's inbound `/api/webhooks/stripe`. SSRF check needs `ipaddr.js` at config **and** delivery time; the address classifier is `src/lib/security/public-address.ts`, shared with the free tools |
+| **Free tools** | `/tools`, `/tools/<slug>`, `/tools/<slug>/r/<id>`, `POST /api/tools/scan`, `src/lib/tools/` | Anonymous public scans of a URL a stranger names (s96). Every fetch goes through `src/lib/tools/fetch/safe-fetch.ts`: IP literals classified before connect, a validating `lookup` so the address checked is the address dialled (no DNS-rebinding window), `agent: false`, ports 80/443, ≤ 3 redirects re-guarded, a 2 MB decompressed cap, robots.txt obeyed for `RecopyFastToolsBot`. Same-origin guard plus fail-closed burst, daily, /48, global and per-target limiters. Reports in `tool_reports` through the service role, rendered under the nonce CSP ([ADR 062](./decisions/062-free-tool-reports-are-service-role-reads-under-the-nonce-csp.md)); ops: [`operations/free-tools.md`](./operations/free-tools.md) |
 
 ### CSP is a first-class constraint, in both directions
 
-Ours (`middleware.ts:196-256`) derives `connect-src` from env rather than widening to
-`https:`/`wss:`. Adding an outbound origin means adding it there or the browser blocks it
-silently.
+**Ours is two policies** ([ADR 059](./decisions/059-nonce-csp-on-the-app-surface.md)), built in
+`src/lib/security/content-security-policy.ts` and chosen per request by `src/middleware.ts`:
+
+- **App surface** — `/dashboard`, `/login`, `/signup`, `/edit` and below
+  (`NONCE_POLICY_PATH_PREFIXES`), plus exactly `/tools/<slug>/r/<id>` — a free-tool report, which
+  renders a stranger's page text (`NONCE_POLICY_PATH_PATTERNS`, s96, ADR 062): a fresh nonce per request, `script-src 'nonce-…'
+  'strict-dynamic' '<theme script hash>' 'self' 'unsafe-inline'` (the last two are the CSP1/CSP2
+  fallback CSP3 browsers ignore). The middleware puts the same policy on the forwarded request,
+  which is where Next reads the nonce it stamps on its scripts. Each of those segments has a server
+  layout that awaits `connection()`, so every page below it renders per request — a prerendered
+  page has no nonce and does not hydrate under this policy. Each segment also owns a
+  `[...missing]/page.tsx` catch-all so an unknown URL renders the 404 below that dynamic layout,
+  rather than serving Next's static `/_not-found` under a nonce it never received. The root
+  layout's theme script (`src/lib/theme/theme-init-script.ts`) is allowed by its hash.
+- **Everything else** — the static marketing pages, `/blog`, `/docs/install`, `/try`, `/tools` and
+  the tool pages, the embed, the API — keeps `script-src 'self' 'unsafe-inline'` and stays prerendered. Never add a nonce or
+  hash to it: either makes browsers ignore `'unsafe-inline'`, which is what lets a prerendered
+  page's inline scripts run.
+
+The policy belongs to the current **document**, not merely to React's current route. Every
+transition from a static/marketing document into `/login`, `/signup`, `/edit`, `/dashboard` or the
+`/settings` redirect alias therefore uses a native anchor and loads a new document; otherwise a
+Next client transition would render the app route while retaining marketing's `'unsafe-inline'`
+policy. App-internal navigation stays on `Link`/the router and retains the nonce document already
+installed. The shared marketing header sends Sign in and Get started to `/login` and `/signup`
+rather than mounting credential forms inside the static document. The source guard in
+`app-document-boundary-links.test.ts` and the production-browser transition in `e2e/csp.spec.ts`
+pin that boundary. ADR 059 itself remains immutable; this enforces its app-surface decision.
+
+Both derive `connect-src` from env rather than widening to `https:`/`wss:`. Adding an outbound
+origin means adding it there or the browser blocks it silently. HSTS
+(`max-age=63072000; includeSubDomains`, no `preload`) is set once, in `next.config.ts`
+`headers()`, so `_next/static` sends it too; `X-XSS-Protection` is gone (s79).
+`e2e/csp.spec.ts` loads both surfaces from a production build and fails on any script violation.
 
 **Theirs matters more.** The widget runs under the customer's CSP. `script-src 'self'` on
 their domain forbids fetching anything from our origin — which is why socket.io is compiled
@@ -429,7 +470,7 @@ assert the following. None of it is true, and each was checked:
 | Cloudflare Workers serve the embed at the edge | No Workers. Vercel static + Next middleware |
 | Socket.io with Redis pub/sub, running | Running since `s07b` — but on **one** machine and with **no** Redis pub/sub. A single process keeps rooms coherent without an adapter; adding a second machine is what would make one mandatory |
 | Script size < 30KB gz | 46,781 gz today |
-| Test coverage ≥ 80% | Jest floor is 69% lines (68 / 61 / 65 / 69 statements / branches / functions / lines, measured 2026-10-09), enforced in CI and ratcheted from measured reality |
+| Test coverage ≥ 80% | Jest floor is 74% lines (73 / 67 / 71 / 74 statements / branches / functions / lines, raised by s96 on 2026-10-11 from a 74.7 / 68.2 / 72.2 / 75.4 measurement), enforced in CI and ratcheted from measured reality |
 
 Fixing the first three in `CLAUDE.md` and keeping this table honest is cheaper than the
 alternative: an agent reads the stale claim, writes a Zustand store, and now the assertion is

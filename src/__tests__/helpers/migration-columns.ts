@@ -32,6 +32,11 @@ const ALTER_TABLE = new RegExp(
   "gi",
 );
 
+const CREATE_FUNCTION = new RegExp(
+  String.raw`\bcreate\s+(?:or\s+replace\s+)?function\s+${TABLE_NAME}\s*\(`,
+  "gi",
+);
+
 /** Table-level items in a CREATE TABLE body that are not columns. */
 const TABLE_CONSTRAINT =
   /^(constraint|primary\s+key|unique|check|foreign\s+key|exclude|like)\b/i;
@@ -203,6 +208,7 @@ function buildSchema(): Map<string, Set<string>> {
 }
 
 let cachedSchema: Map<string, Set<string>> | null = null;
+let cachedFunctions: Set<string> | null = null;
 
 /** The table's columns, or `undefined` when no migration creates it. */
 export function migrationColumns(
@@ -210,4 +216,26 @@ export function migrationColumns(
 ): ReadonlySet<string> | undefined {
   cachedSchema ??= buildSchema();
   return cachedSchema.get(table.toLowerCase());
+}
+
+/** Whether a public-schema RPC is created by the migration ledger. */
+export function migrationFunctionExists(functionName: string): boolean {
+  if (!cachedFunctions) {
+    cachedFunctions = new Set<string>();
+    const files = readdirSync(MIGRATIONS_DIR)
+      .filter((name) => name.endsWith(".sql"))
+      .sort();
+
+    for (const file of files) {
+      const sql = stripComments(
+        readFileSync(path.join(MIGRATIONS_DIR, file), "utf8"),
+      );
+      for (const match of sql.matchAll(CREATE_FUNCTION)) {
+        const name = publicTableName(match[1]);
+        if (name) cachedFunctions.add(name);
+      }
+    }
+  }
+
+  return cachedFunctions.has(functionName.toLowerCase());
 }

@@ -147,12 +147,14 @@ describe("Header", () => {
 
     render(<Header />);
 
-    expect(
-      screen.getByRole("button", { name: /^sign in$/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /get started/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^sign in$/i })).toHaveAttribute(
+      "href",
+      "/login",
+    );
+    expect(screen.getByRole("link", { name: /get started/i })).toHaveAttribute(
+      "href",
+      "/signup",
+    );
   });
 
   it("shows UserMenu when user is authenticated", () => {
@@ -175,8 +177,7 @@ describe("Header", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("opens AuthModal when Sign In button is clicked", async () => {
-    const user = userEvent.setup();
+  it("does not collect credentials inside the static marketing document", () => {
     (useAuth as jest.Mock).mockReturnValue({
       user: null,
       loading: false,
@@ -188,11 +189,10 @@ describe("Header", () => {
 
     render(<Header />);
 
-    const signInButton = screen.getByRole("button", { name: /^sign in$/i });
-    await user.click(signInButton);
-
-    // Check if modal is opened
-    expect(screen.getByText("Welcome to ReCopyFast")).toBeInTheDocument();
+    expect(screen.queryByText("Welcome to ReCopyFast")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^sign in$/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("pins the header to the top of the viewport", () => {
@@ -314,10 +314,9 @@ describe("Header", () => {
     }
 
     await user.tab();
-    expect(screen.getByRole("button", { name: /^sign in$/i })).toHaveFocus();
+    expect(screen.getByRole("link", { name: /^sign in$/i })).toHaveFocus();
 
-    // Open modal with Enter key
-    await user.keyboard("{Enter}");
-    expect(screen.getByText("Welcome to ReCopyFast")).toBeInTheDocument();
+    await user.tab();
+    expect(screen.getByRole("link", { name: /get started/i })).toHaveFocus();
   });
 });

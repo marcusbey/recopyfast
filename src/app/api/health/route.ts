@@ -116,7 +116,7 @@ async function checkStorage(): Promise<ServiceCheck> {
  * limiters fail CLOSED on it — so the outage that refuses every editor showed
  * here as a green probe. Nothing paged and nothing was routed around.
  *
- * A real `checkLimit` rather than a PING: it exercises the exact INCR+EXPIRE
+ * A real `checkLimit` rather than a PING: it exercises the exact INCR+PEXPIREAT
  * pipeline login runs, through the same client, connect timeout and command
  * timeout. The key is fixed and its verdict ignored — this never limits
  * anyone, it only asks whether the store answers. Two Upstash commands.
@@ -267,10 +267,15 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
       return { status: "error", latency };
     }
 
-    // The service's own body (its live connection count, its Supabase state)
-    // is deliberately not relayed: s84 / s69 L3. Reachable and 2xx is the
-    // answer this check gives.
-    return { status: "ok", latency };
+    return {
+      status: "ok",
+      latency,
+      // TOMBSTONE — s79 reduced the realtime `/health` contract to liveness:
+      // a 2xx with `{ status: "ok" }`. Its live connection count and Supabase
+      // mode were removed. Defaulting those absent fields to `0` and
+      // `"unknown"` made this endpoint publish invented measurements, so a
+      // successful probe reports only what this app measured: status + latency.
+    };
   } catch (error) {
     const isTimeout =
       error instanceof Error &&

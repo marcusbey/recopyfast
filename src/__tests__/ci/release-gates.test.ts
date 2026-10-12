@@ -146,10 +146,11 @@ describe("the replay's verdict comes from its tested check, not from the runner"
  * in plain sight of review — the same two-place ratchet as the embed ceilings.
  */
 const COVERAGE_FLOOR: Record<string, number> = {
-  branches: 61,
-  functions: 65,
-  lines: 69,
-  statements: 68,
+  // s96 raised the floor with jest.config.js (from 61/65/69/68).
+  branches: 67,
+  functions: 71,
+  lines: 74,
+  statements: 73,
 };
 
 describe("the coverage ratchet gates CI, not just a local hook", () => {
