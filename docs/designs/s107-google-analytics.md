@@ -6,7 +6,8 @@
 
 The story adds one small interface to the existing Marketing surface: a fixed consent banner and
 a footer control that can reopen it. The rest of GA is deliberately invisible. No route, page
-layout, marketing section or app screen is redesigned.
+layout, marketing section or app screen is redesigned. ADR 063 supplies the accepted analytics
+baseline; ADR 069 governs the later document boundary, report exclusion and effective-state UI.
 
 ## Surfaces and entry points
 
@@ -39,7 +40,7 @@ original route are allowed to run analytics.
 
 It is absent on app/auth/settings documents, on free-tool reports, and on marketing routes reached
 inside one of those documents by client navigation. On those surfaces there is no analytics
-runtime and therefore no setting to open.
+runtime and therefore no setting to open (ADR 069).
 
 ## Mockup
 

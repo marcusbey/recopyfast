@@ -11,6 +11,9 @@ changed or re-read for this retrospective pass. The live-property observations b
 `docs/operations/analytics.md`; the facts below come from the repository and the recorded PR
 evidence.
 
+Decision history: ADR 063 is the first accepted integration baseline. ADR 069 supersedes only its
+later-refined route/document and consent clauses, preserving 063 instead of editing it in place.
+
 ## Target story
 
 `docs/stories.md` defines one cross-cutting marketing story:
@@ -41,7 +44,8 @@ several conversion surfaces, legal copy, Playwright and external GA configuratio
    policy for the original request. A `<Link>` navigation changes `usePathname()` but keeps that
    document and policy. `isAnalyticsPage(pathname, documentPathname)` therefore requires both the
    visible route and the document's first route to be allowlisted. This was a real review defect:
-   `/login` to `/terms` could previously load analytics under the login document's nonce policy.
+   `/login` to `/terms` could previously load analytics under the login document's nonce policy
+   (ADR 069).
 4. **Marketing prerendering and a per-request region hint conflict.** Reading `headers()` in a
    page would make static marketing pages dynamic. `/analytics/gtag-init.js` is the per-request
    boundary: it reads the Vercel country/province headers and emits only a consent-required
@@ -49,7 +53,7 @@ several conversion surfaces, legal copy, Playwright and external GA configuratio
 5. **The scan report is a different security surface from its tool page.** Reports render scraped
    third-party text, their URL is a read capability, and ADR 062 puts them under the nonce policy.
    `isAnalyticsRoute` excludes `/tools/<slug>/r/…`; `ToolScanForm` records a successful scan on
-   the allowlisted tool page before navigation instead.
+   the allowlisted tool page before navigation instead (ADR 069).
 6. **A footer control is useful only where the runtime listens.** The shared footer also appears
    on routes where analytics is absent. It must use the same page-and-document guard as the shell,
    otherwise `openCookieSettings()` dispatches an event with no listener. The current footer does
@@ -127,8 +131,9 @@ allowed: no` until a fresh review supersedes it.
    has no imports.
 8. **A result before analytics is active must not consume its once-per-page event.** `track()`
    returns whether it sent, and calculators mark completion only on `true`.
-9. **Report exclusion is part of the security decision.** Restoring analytics to reports needs a
-   new ADR; hiding the settings button there is the correct current design, not a missing control.
+9. **Report exclusion is part of ADR 069's security decision.** Restoring analytics to reports
+   needs a new ADR; hiding the settings button there is the correct current design, not a missing
+   control.
 
 ## Evidence boundary and open questions
 

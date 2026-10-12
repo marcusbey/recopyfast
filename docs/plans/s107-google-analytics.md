@@ -1,6 +1,7 @@
 ---
 validated: yes (architect: pre-approved scope 2026-10-12)
 ---
+
 # Plan — Story s107-google-analytics
 
 > Owner request, 2026-10-12: Google Analytics 4 on the public marketing site, "with the settings
@@ -11,38 +12,46 @@ Branch: `feature/s107-google-analytics` from `main` `9541589`; `main` merged in 
 (free-tools platform, `c905292`) landed first. Architect decision at that merge: s96's scan reports
 carry no analytics; the scan is measured on the tool page.
 
+Decision record: ADR 063 is the accepted integration baseline. ADR 069 records the later s96-merge
+and independent-review decisions without rewriting that accepted history: report exclusion, the
+document-path guard, assigned-country fail-closed handling and Quebec.
+
 ## Where the brief met the code
 
-| Brief | Code says | Adaptation |
-|---|---|---|
-| Region hint from `x-vercel-ip-country` "passed to the page, never stored" | Every marketing page is prerendered under the static policy (ADR 059); reading `headers()` in a page would turn it dynamic and drop it off the CDN | The hint travels in the first-party init script: `GET /analytics/gtag-init.js` is a route handler that reads the header per request and writes one boolean into the script it returns (`Cache-Control: private, no-store`). The page stays static; the country is never stored, logged or echoed |
-| "Default consent set before gtag loads" | `next/script` `afterInteractive` inserts every external script as an async `<script>` (`node_modules/next/dist/client/script.js`), so two of them run in whichever order they arrive | The gtag.js `<Script>` is rendered only after the init script's `onReady`. Defaults always reach the dataLayer before `config` and before gtag.js exists |
-| Enhanced measurement "page views ON, including browser-history events" | Google: history-based page views are sent "even if you set `send_page_view: false`" and use the raw `location.href`; they would also fire after a client navigation to a page off the allowlist | Code sends every `page_view` itself, with the sanitised URL, only on allowlisted routes. GA admin: page views ON, **"Page changes based on browser history events" OFF** (otherwise every SPA page is counted twice and unsanitised). Client-side navigation is still measured — by our code |
-| Consent banner "shown only where consent is required" | Consent Mode "advanced" loads gtag.js everywhere and sends cookieless pings before consent | Privacy-first: where the hint says consent is required, gtag.js is **not requested at all** until "Allow analytics". The `region` defaults still ship, for visitors Google places in the EEA/UK/CH that the hint did not |
-| `sign_up` on the signup success screen "if marketing-scope" | `/signup` is on the nonce policy (ADR 059), off the allowlist | Not tracked client-side. Documented Measurement Protocol follow-up in `docs/operations/analytics.md` |
-| `begin_checkout` "if a marketing page links into checkout" | `Pricing.tsx` links "Buy Lifetime Pro" and "Buy founding access" to `/dashboard/billing` | `begin_checkout` fires on a click of any same-origin anchor to `/dashboard/billing` from a tracked page |
-| `tool_scan_completed` | s96 is unmerged; s98's calculator has no scan | Fired once per page view when the visitor's own inputs produce a settled result (the calculator's debounced URL sync); `tool_slug` from `TOOL_SLUG`. Documented hook for s96 |
-| s96 report pages `/tools/<slug>/r/<id>` | Nonce policy (s96's ADR 062, merged) | Architect decision at the merge: no analytics on reports — the allowlist excludes `/tools/<slug>/r/…`, and a test pins that it never overlaps the nonce policy. `tool_scan_completed` fires from `ToolScanForm` on the tool page when a scan succeeds. UUID path segments are still redacted as a second line |
-| Analytics doc says "No visitor analytics" | Launch kit §10 and §12 | Updated in the same commit |
+| Brief                                                                     | Code says                                                                                                                                                                                       | Adaptation                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Region hint from `x-vercel-ip-country` "passed to the page, never stored" | Every marketing page is prerendered under the static policy (ADR 059); reading `headers()` in a page would turn it dynamic and drop it off the CDN                                              | The hint travels in the first-party init script: `GET /analytics/gtag-init.js` is a route handler that reads the header per request and writes one boolean into the script it returns (`Cache-Control: private, no-store`). The page stays static; the country is never stored, logged or echoed |
+| "Default consent set before gtag loads"                                   | `next/script` `afterInteractive` inserts every external script as an async `<script>` (`node_modules/next/dist/client/script.js`), so two of them run in whichever order they arrive            | The gtag.js `<Script>` is rendered only after the init script's `onReady`. Defaults always reach the dataLayer before `config` and before gtag.js exists                                                                                                                                         |
+| Enhanced measurement "page views ON, including browser-history events"    | Google: history-based page views are sent "even if you set `send_page_view: false`" and use the raw `location.href`; they would also fire after a client navigation to a page off the allowlist | Code sends every `page_view` itself, with the sanitised URL, only on allowlisted routes. GA admin: page views ON, **"Page changes based on browser history events" OFF** (otherwise every SPA page is counted twice and unsanitised). Client-side navigation is still measured — by our code     |
+| Consent banner "shown only where consent is required"                     | Consent Mode "advanced" loads gtag.js everywhere and sends cookieless pings before consent                                                                                                      | Privacy-first: where the hint says consent is required, gtag.js is **not requested at all** until "Allow analytics". The `region` defaults still ship, for visitors Google places in the EEA/UK/CH that the hint did not                                                                         |
+| `sign_up` on the signup success screen "if marketing-scope"               | `/signup` is on the nonce policy (ADR 059), off the allowlist                                                                                                                                   | Not tracked client-side. Documented Measurement Protocol follow-up in `docs/operations/analytics.md`                                                                                                                                                                                             |
+| `begin_checkout` "if a marketing page links into checkout"                | `Pricing.tsx` links "Buy Lifetime Pro" and "Buy founding access" to `/dashboard/billing`                                                                                                        | `begin_checkout` fires on a click of any same-origin anchor to `/dashboard/billing` from a tracked page                                                                                                                                                                                          |
+| `tool_scan_completed`                                                     | s96 is unmerged; s98's calculator has no scan                                                                                                                                                   | Fired once per page view when the visitor's own inputs produce a settled result (the calculator's debounced URL sync); `tool_slug` from `TOOL_SLUG`. Documented hook for s96                                                                                                                     |
+| s96 report pages `/tools/<slug>/r/<id>`                                   | Nonce policy (s96's ADR 062, merged)                                                                                                                                                            | ADR 069: no analytics on reports — the allowlist excludes `/tools/<slug>/r/…`, and a test pins that it never overlaps the nonce policy. `tool_scan_completed` fires from `ToolScanForm` on the tool page when a scan succeeds. UUID path segments are still redacted as a second line            |
+| Analytics doc says "No visitor analytics"                                 | Launch kit §10 and §12                                                                                                                                                                          | Updated in the same commit                                                                                                                                                                                                                                                                       |
 
 ## CTO decisions
 
 1. **One allowlist**, `src/lib/analytics/google-analytics/routes.ts`: `isAnalyticsRoute(pathname)`.
    Segment-exact (like `usesNoncePolicy`): `/`, `/try` (exact — never `/try/rcf-try.js`),
    `/pricing`, `/privacy`, `/terms`, `/demo`, and `/compare`, `/tools`, `/blog`, `/docs` with
-   everything below them. Everything else is false. Used by the client component and the
-   middleware (CSP), nowhere duplicated.
+   everything below them except `/tools/<slug>/r/…`. Everything else is false. Middleware asks
+   this helper for the incoming document; the shell, runtime and footer ask
+   `isAnalyticsPage(currentPath, documentPath)`, which applies the same helper to both paths
+   (ADR 069).
 2. **Measurement id** `NEXT_PUBLIC_GA_MEASUREMENT_ID`, Production only on Vercel. Validated
    against `^G-[A-Z0-9]{4,20}$`; anything else means "GA off". Off → no script, no CSP change,
    no banner, no footer link.
 3. **Consent** (`consent.ts`):
    - `CONSENT_REQUIRED_REGIONS`: EU 27 + IS, LI, NO + the EU outermost regions that geolocate
      under their own ISO code (AX, GF, GP, MF, MQ, RE, YT) + GB + CH.
-   - `isConsentRequiredCountry(code)`: true for those, and for a missing or malformed code (fail
-     closed: local, CI and any non-Vercel host behave as the EEA).
+   - `CONSENT_REQUIRED_SUBDIVISIONS`: `CA-QC` (ADR 069).
+   - `isConsentRequiredCountry(code, region)`: true for those countries, Quebec, an unknown
+     Canadian province, and a missing, malformed or unassigned country code (fail closed: local,
+     CI and any non-Vercel host ask first).
    - Defaults: `{ad_storage, ad_user_data, ad_personalization, analytics_storage: denied,
-     region: [...]}` then the visitor's own `{ads: denied, analytics_storage: hint ? denied :
-     granted}`. Ads are denied everywhere, always.
+region: [...]}` then the visitor's own `{ads: denied, analytics_storage: hint ? denied :
+granted}`. Ads are denied everywhere, always.
    - `url_passthrough: false`, `ads_data_redaction: true`.
    - Choice cookie `rcf_analytics_consent=granted|denied`, first-party, `Max-Age=15552000`
      (180 days), `Path=/`, `SameSite=Lax`, `Secure` on https. Read client-side.
@@ -58,7 +67,7 @@ carry no analytics; the scan is measured on the tool page.
    - after mount, loads the init script; on `onReady` decides: load gtag.js now (no consent
      needed, or granted) or show the banner (consent needed, no choice);
    - `gtag('config', id, { send_page_view: false, allow_google_signals: false,
-     allow_ad_personalization_signals: false })`, then one `page_view` per allowlisted pathname;
+allow_ad_personalization_signals: false })`, then one `page_view` per allowlisted pathname;
    - leaving the allowlist by client navigation sets `window['ga-disable-<id>'] = true` (Google's
      documented opt-out flag), returning clears it;
    - Decline after Allow: consent update denied, the disable flag, `_ga`/`_ga_*` cookies deleted.
@@ -95,16 +104,16 @@ carry no analytics; the scan is measured on the tool page.
 - [x] T2 Unit tests then code: routes, measurement id, consent, init script, page location, gtag.
 - [x] T3 Route handler + middleware sessionless entry, tests.
 - [x] T4 CSP builder + middleware wiring, tests (`content-security-policy.test.ts`,
-  `middleware-csp.test.ts`).
+      `middleware-csp.test.ts`).
 - [x] T5 `GoogleAnalytics` + `ConsentBanner` + footer button, component tests (keyboard, screen
-  reader).
+      reader).
 - [x] T6 Events: CTA attributes, `/try`, calculator.
 - [x] T7 Privacy page, legal tests.
 - [x] T8 Playwright `e2e/google-analytics.spec.ts` (googletagmanager stubbed), `csp.spec.ts`
-  updated; CI e2e and Lighthouse jobs build with a fake id; strict count recomputed.
+      updated; CI e2e and Lighthouse jobs build with a fake id; strict count recomputed.
 - [x] T9 Lighthouse before/after on the 8 comparison routes. Before: main's CI run 38194772674 (TBT 172–185 ms). First PR run 38217319595 failed TBT (187–210 ms); after the fix, run 38220513115 passes (TBT 92–103 ms). Local runs were meaningless at a load average of 100–400 from other agents.
-- [x] T10 Docs: `docs/operations/analytics.md`, ADR 063, launch kit §10/§12, stories entry,
-  review self-check.
+- [x] T10 Docs: `docs/operations/analytics.md`, ADR 063 + superseding ADR 069, launch kit §10/§12,
+      stories entry, review self-check.
 
 ## Out of scope
 

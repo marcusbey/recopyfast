@@ -474,3 +474,57 @@ through GitHub and could not be independently classified here.
 
 Max severity: none
 Ship allowed: yes
+
+## Bounded documentation follow-up — 2026-10-12
+
+Fresh docs-only review of the uncommitted ADR-history repair at `0e36c1a`. The prior blocked review
+and independent re-review above remain unchanged. This follow-up reviewed only the restoration of
+accepted ADR 063, new superseding ADR 069, and the research/plan/design cross-references. No
+product source was changed.
+
+### Findings and disposition
+
+No open findings.
+
+- **ADR 063 is restored exactly.** The working file and the first accepted blob at
+  `8bb01734349817a9aaf03036814d5ab531aa53a3` both hash to
+  `20d4668a56b084a0684649a083f09eb3063e71565abb421e9e1bf97764908b64`; byte comparison exited
+  zero. The later report, document and consent decisions no longer rewrite accepted history.
+- **ADR 069 supersedes only the implemented later decisions.** Its scope matches current source:
+  report-route exclusion and tool-page completion event; the current-path plus document-path
+  guard; assigned-country fail-closed behavior, Quebec and unknown Canadian province handling;
+  `CA-QC` in the regional denied default; and effective-state consent UI/footer behavior. It
+  preserves ADR 063's remaining decisions.
+- **No new legal conclusion was accepted.** ADR 069 attributes Quebec to the recorded owner
+  decision and explicitly describes the jurisdiction list as a product/legal decision. This
+  review confirms documentation-to-code agreement; it does not independently determine which
+  jurisdictions legally require consent.
+- **Lifecycle wording corrected during review.** The first draft said every analytics resource
+  was absent whenever either guarded path was excluded. That overstated an allowed document that
+  already loaded analytics before a client transition. ADR 069 now distinguishes initial
+  exclusion from allowed-to-excluded navigation: the latter prevents new loads, unmounts the
+  runtime, raises the disable flag, sends no further events and hides Cookie settings, while
+  acknowledging previously fetched resources may remain in the document or browser cache. This
+  matches `GoogleAnalytics.tsx` and `GoogleAnalyticsRuntime.tsx` without adding behavior.
+- The plan initially failed Prettier; the author formatted that document only. All five touched
+  documents now pass the repository formatter.
+
+### Evidence
+
+- Node 24.14.0 focused source validation passed 7 suites / 263 tests: route allowlisting,
+  country/province consent, init route, analytics shell/runtime, footer and tool-scan navigation.
+- Node 24.14.0 Prettier check passed ADR 063, ADR 069, research, plan and design.
+- `git diff --check` passed. Working changes outside this review report are documentation only.
+- Source inspection confirmed the report regex, scan event before `location.assign`, two-path
+  guards, one-boolean init response with no country/province reflection, effective-state banner,
+  and guarded Cookie settings control described by ADR 069.
+
+### Evidence boundary
+
+- No full suite, build, browser run, provider operation, commit, push or deployment was performed;
+  this follow-up is limited to decision-history integrity and documentation/source agreement.
+- Existing external GA-property and real-cookie checks remain as recorded in the prior re-review;
+  this documentation repair does not change or re-prove them.
+
+Max severity: none
+Ship allowed: yes
