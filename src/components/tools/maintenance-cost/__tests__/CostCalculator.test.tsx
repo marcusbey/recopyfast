@@ -27,7 +27,15 @@ function setup() {
   return user;
 }
 
-const result = () => screen.getByRole("status", { name: "Result" });
+/** The live region: announces the headline figure, debounced. */
+const live = () => screen.getByRole("status", { name: "Result" });
+/** The visible result panel, which is not a live region. */
+const panel = () => screen.getByTestId("result-panel");
+const LIVE_DEBOUNCE_MS = 500;
+const flushLive = () =>
+  act(() => {
+    jest.advanceTimersByTime(LIVE_DEBOUNCE_MS);
+  });
 
 async function replaceField(
   user: ReturnType<typeof userEvent.setup>,
@@ -83,10 +91,11 @@ describe("CostCalculator", () => {
   it("shows the pinned default result in a polite live region", () => {
     setup();
 
-    expect(result()).toHaveAttribute("aria-live", "polite");
-    expect(within(result()).getByText("$4,800")).toBeInTheDocument();
+    expect(live()).toHaveAttribute("aria-live", "polite");
+    expect(live()).toHaveTextContent("$4,800");
+    expect(within(panel()).getByText("$4,800")).toBeInTheDocument();
     expect(
-      within(result()).getByText(calculateCost(DEFAULT_INPUTS).formula),
+      within(panel()).getByText(calculateCost(DEFAULT_INPUTS).formula),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Unbilled copy changes, per year"),
@@ -106,10 +115,12 @@ describe("CostCalculator", () => {
     await replaceField(user, "Copy changes per site, per month", "3");
     await user.selectOptions(screen.getByLabelText("Currency"), "EUR");
 
-    expect(within(result()).getByText("€8,640")).toBeInTheDocument();
-    expect(result()).toHaveTextContent(
+    expect(within(panel()).getByText("€8,640")).toBeInTheDocument();
+    expect(panel()).toHaveTextContent(
       "12 sites × 3 changes a month × 20 minutes = 12.0 hours a month.",
     );
+    flushLive();
+    expect(live()).toHaveTextContent("€8,640");
   });
 
   it("shows a field message and uses the clamped value when out of range", async () => {
@@ -120,11 +131,11 @@ describe("CostCalculator", () => {
     const sites = screen.getByLabelText("Sites you maintain");
     expect(sites).toHaveAttribute("aria-invalid", "true");
     expect(sites).toHaveAccessibleDescription(/Between 1 and 500/);
-    expect(result()).toHaveTextContent("500 sites");
-    expect(result()).not.toHaveTextContent("NaN");
+    expect(panel()).toHaveTextContent("500 sites");
+    expect(panel()).not.toHaveTextContent("NaN");
   });
 
-  it("never shows NaN when a field is emptied", async () => {
+  it("shows a neutral placeholder, not a default figure, when a field is emptied", async () => {
     const user = setup();
 
     await user.clear(screen.getByLabelText("Hourly rate"));
@@ -132,8 +143,97 @@ describe("CostCalculator", () => {
     expect(screen.getByLabelText("Hourly rate")).toHaveAccessibleDescription(
       /Between 0 and 10,000/,
     );
-    expect(result()).not.toHaveTextContent("NaN");
-    expect(within(result()).getByText("$4,800")).toBeInTheDocument();
+    expect(
+      within(panel()).getByText("Fill in all fields to see your number"),
+    ).toBeInTheDocument();
+    expect(panel()).not.toHaveTextContent("$");
+    expect(panel()).not.toHaveTextContent("NaN");
+    flushLive();
+    expect(live()).toHaveTextContent("Fill in all fields to see your number");
+  });
+
+  it("hides the card and its HTML while a field is empty, and restores them", async () => {
+    const user = setup();
+
+    await user.clear(screen.getByLabelText("Minutes per change"));
+    expect(screen.queryByRole("group", { name: "Card preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy card HTML" })).toBeNull();
+
+    await user.type(screen.getByLabelText("Minutes per change"), "30");
+    expect(
+      screen.getByRole("group", { name: "Card preview" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not write an incomplete form to the URL", async () => {
+    const user = setup();
+
+    await user.clear(screen.getByLabelText("Sites you maintain"));
+    act(() => {
+      jest.advanceTimersByTime(1_000);
+    });
+
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("announces once, after typing stops, and only the headline figure", async () => {
+    const user = setup();
+    expect(live()).toHaveTextContent("$4,800");
+
+    const rate = screen.getByLabelText("Hourly rate");
+    await user.clear(rate);
+    await user.type(rate, "1200");
+
+    // Mid-burst nothing new is announced, although the panel already shows it.
+    expect(live()).toHaveTextContent("$4,800");
+    expect(within(panel()).getByText("$96,000")).toBeInTheDocument();
+
+    flushLive();
+    expect(live()).toHaveTextContent("$96,000");
+    expect(live()).not.toHaveTextContent("hours a month");
+    expect(live()).not.toHaveTextContent("$4,800");
+  });
+
+  it("does not make the visible result panel a live region", () => {
+    setup();
+
+    expect(panel().closest("[aria-live]")).toBeNull();
+    expect(panel()).not.toHaveAttribute("aria-live");
+  });
+
+  it("allows cents in the hourly rate", async () => {
+    const user = setup();
+
+    await replaceField(user, "Hourly rate", "59.5");
+
+    expect(screen.getByLabelText("Hourly rate")).toHaveAttribute(
+      "step",
+      "0.01",
+    );
+    expect(panel()).toHaveTextContent("At $59.50 an hour");
+    expect(screen.queryByText(/^Rounded to/)).not.toBeInTheDocument();
+  });
+
+  it("says when a typed value was rounded", async () => {
+    const user = setup();
+
+    await replaceField(user, "Sites you maintain", "2.3");
+    expect(screen.getByText("Rounded to 2")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Sites you maintain"),
+    ).toHaveAccessibleDescription(/Rounded to 2/);
+    expect(screen.getByLabelText("Sites you maintain")).not.toHaveAttribute(
+      "aria-invalid",
+    );
+
+    await replaceField(user, "Copy changes per site, per month", "0.2");
+    expect(screen.getByText("Rounded to 0")).toBeInTheDocument();
+
+    await replaceField(user, "Copy changes per site, per month", "2.3");
+    expect(screen.getByText("Rounded to 2.5")).toBeInTheDocument();
+
+    await replaceField(user, "Hourly rate", "59.556");
+    expect(screen.getByText("Rounded to 59.56")).toBeInTheDocument();
   });
 
   it("calls router.replace once after the debounce with the canonical params", async () => {
@@ -173,7 +273,7 @@ describe("CostCalculator", () => {
 
     expect(screen.getByLabelText("Sites you maintain")).toHaveValue(12);
     expect(screen.getByLabelText("Currency")).toHaveValue("EUR");
-    expect(within(result()).getByText("€8,640")).toBeInTheDocument();
+    expect(within(panel()).getByText("€8,640")).toBeInTheDocument();
   });
 
   it("clamps junk in the URL instead of showing it", () => {

@@ -44,7 +44,8 @@ export const INPUT_LIMITS: Record<NumericField, Limit> = {
   sites: { min: 1, max: 500, step: 1 },
   changesPerSiteMonthly: { min: 0, max: 50, step: 0.5 },
   minutesPerChange: { min: 1, max: 240, step: 1 },
-  hourlyRate: { min: 0, max: 10_000, step: 1 },
+  // Cents: a rate of 59.50 is ordinary, and snapping it to 60 changed the sum.
+  hourlyRate: { min: 0, max: 10_000, step: 0.01 },
   billedPercent: { min: 0, max: 100, step: 1 },
 };
 
@@ -84,9 +85,10 @@ function clampField(field: NumericField, value: unknown): number {
   const number = toFiniteNumber(value);
   if (!Number.isFinite(number)) return DEFAULT_INPUTS[field];
   const clamped = Math.min(max, Math.max(min, number));
-  // Snap to the field's step (whole numbers, or halves for changes). Limits
-  // are multiples of the step, so snapping cannot leave the range.
-  return Math.round(clamped / step) * step;
+  // Snap to the field's step (whole numbers, halves for changes, cents for the
+  // rate). Limits are multiples of the step, so snapping cannot leave the
+  // range. `toFixed` drops float noise such as 0.30000000000000004.
+  return Number((Math.round(clamped / step) * step).toFixed(2));
 }
 
 function isCurrency(value: unknown): value is Currency {
@@ -120,12 +122,20 @@ const hoursFormat = new Intl.NumberFormat(LOCALE, {
   maximumFractionDigits: 1,
 });
 const wholeFormat = new Intl.NumberFormat(LOCALE);
+const roundedFormat = new Intl.NumberFormat(LOCALE, {
+  maximumFractionDigits: 2,
+});
 
-export function formatMoney(amount: number, currency: Currency): string {
+export function formatMoney(
+  amount: number,
+  currency: Currency,
+  fractionDigits = 0,
+): string {
   return new Intl.NumberFormat(LOCALE, {
     style: "currency",
     currency,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
   }).format(amount);
 }
 
@@ -156,7 +166,12 @@ export function calculateCost(raw: CostInputs): CostResult {
     unbilledHoursMonthly: hoursFormat.format(unbilledHoursMonthly),
     unbilledMonthly: formatMoney(unbilledMonthly, inputs.currency),
     unbilledYearly: formatMoney(unbilledYearly, inputs.currency),
-    hourlyRate: formatMoney(inputs.hourlyRate, inputs.currency),
+    // Cents only when the rate has them: "$60", but "$59.50".
+    hourlyRate: formatMoney(
+      inputs.hourlyRate,
+      inputs.currency,
+      Number.isInteger(inputs.hourlyRate) ? 0 : 2,
+    ),
   };
 
   const formula =
@@ -190,4 +205,21 @@ export function describeFieldIssue(
   const number = toFiniteNumber(rawText);
   if (Number.isFinite(number) && number >= min && number <= max) return null;
   return `Between ${wholeFormat.format(min)} and ${wholeFormat.format(max)}`;
+}
+
+/**
+ * The note for a number in range that the calculation does not use as typed:
+ * 2.3 sites is computed as 2, and until s98's review nothing said so. Range
+ * problems stay with `describeFieldIssue`; this is for a value that is fine
+ * but off its step.
+ */
+export function describeFieldRounding(
+  field: NumericField,
+  rawText: string,
+): string | null {
+  if (describeFieldIssue(field, rawText) !== null) return null;
+  const typed = Number(rawText);
+  const used = clampField(field, typed);
+  if (Math.abs(used - typed) < 1e-9) return null;
+  return `Rounded to ${roundedFormat.format(used)}`;
 }

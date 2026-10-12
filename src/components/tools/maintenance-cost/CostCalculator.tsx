@@ -11,12 +11,14 @@ import {
   calculateCost,
   clampInputs,
   describeFieldIssue,
+  describeFieldRounding,
   type Currency,
   type NumericField,
 } from "@/lib/tools/maintenance-cost/calculate";
 import {
   CARD_BODY,
   CARD_HEADING,
+  EMPTY_RESULT,
   HONESTY_LINE,
   RESULT_LABEL,
 } from "@/lib/tools/maintenance-cost/copy";
@@ -29,6 +31,13 @@ import { EmbedSnippet } from "./EmbedSnippet";
 
 /** How long typing must pause before the address bar follows. */
 const URL_SYNC_DEBOUNCE_MS = 300;
+
+/**
+ * How long typing must pause before a screen reader hears the new figure.
+ * Announcing on every keystroke queued a long sentence per digit while typing
+ * "1200" (s98 review).
+ */
+const ANNOUNCE_DEBOUNCE_MS = 500;
 
 type FieldSpec = {
   field: NumericField;
@@ -60,7 +69,7 @@ const FIELDS: readonly FieldSpec[] = [
     field: "hourlyRate",
     label: "Hourly rate",
     hint: "What an hour of your time is worth, in the currency below.",
-    inputMode: "numeric",
+    inputMode: "decimal",
   },
   {
     field: "billedPercent",
@@ -93,15 +102,32 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
   const result = calculateCost(clampInputs({ ...texts, currency }));
   const query = serializeParams(result.inputs);
 
+  // An emptied box would otherwise fall back to its default and the page would
+  // keep showing a figure for numbers nobody entered (s98 review). While any
+  // field is empty there is no result, no card and no URL update.
+  const isComplete = FIELDS.every(({ field }) => texts[field].trim() !== "");
+
+  const headline = isComplete
+    ? `${RESULT_LABEL}: ${result.formatted.unbilledYearly}`
+    : EMPTY_RESULT;
+  const [announcement, setAnnouncement] = React.useState(headline);
+  React.useEffect(() => {
+    const timer = setTimeout(
+      () => setAnnouncement(headline),
+      ANNOUNCE_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [headline]);
+
   const syncedQuery = React.useRef(serializeParams(initial));
   React.useEffect(() => {
-    if (query === syncedQuery.current) return;
+    if (!isComplete || query === syncedQuery.current) return;
     const timer = setTimeout(() => {
       syncedQuery.current = query;
       router.replace(`${pathname}?${query}`, { scroll: false });
     }, URL_SYNC_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [query, pathname, router]);
+  }, [isComplete, query, pathname, router]);
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-10">
@@ -113,6 +139,7 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
         {FIELDS.map(({ field, label, hint, inputMode }) => {
           const limit = INPUT_LIMITS[field];
           const issue = describeFieldIssue(field, texts[field]);
+          const rounding = describeFieldRounding(field, texts[field]);
           const hintId = `${field}-hint`;
           const issueId = `${field}-issue`;
           return (
@@ -127,7 +154,9 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
                 step={limit.step}
                 value={texts[field]}
                 aria-invalid={issue ? true : undefined}
-                aria-describedby={issue ? `${hintId} ${issueId}` : hintId}
+                aria-describedby={
+                  issue || rounding ? `${hintId} ${issueId}` : hintId
+                }
                 onChange={(event) => {
                   const value = event.target.value;
                   setTexts((current) => ({ ...current, [field]: value }));
@@ -142,6 +171,10 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
                   className="text-sm font-medium text-destructive"
                 >
                   {issue}
+                </p>
+              ) : rounding ? (
+                <p id={issueId} className="text-sm text-muted-foreground">
+                  {rounding}
                 </p>
               ) : null}
             </div>
@@ -169,31 +202,47 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
           <h2 id="result-heading" className="text-eyebrow">
             Your numbers
           </h2>
-          <div
+          {/* The one live region: the headline only, debounced. The panel
+              below changes on every keystroke and is deliberately not live. */}
+          <p
             role="status"
             aria-live="polite"
             aria-label="Result"
+            className="sr-only"
+          >
+            {announcement}
+          </p>
+          <div
+            data-testid="result-panel"
             className="rounded-container border border-border bg-card p-5 sm:p-6"
           >
-            <p className="text-sm text-muted-foreground">{RESULT_LABEL}</p>
-            <p className="mt-1 break-words font-display text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
-              {result.formatted.unbilledYearly}
-            </p>
-            <p className="mt-4 text-sm leading-relaxed text-foreground">
-              {result.formula}
-            </p>
+            {isComplete ? (
+              <>
+                <p className="text-sm text-muted-foreground">{RESULT_LABEL}</p>
+                <p className="mt-1 break-words font-display text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
+                  {result.formatted.unbilledYearly}
+                </p>
+                <p className="mt-4 text-sm leading-relaxed text-foreground">
+                  {result.formula}
+                </p>
+              </>
+            ) : (
+              <p className="text-base text-muted-foreground">{EMPTY_RESULT}</p>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">{HONESTY_LINE}</p>
         </section>
 
-        <section aria-labelledby="card-heading" className="space-y-4">
-          <h2 id="card-heading" className="text-lg font-semibold">
-            {CARD_HEADING}
-          </h2>
-          <p className="text-sm text-muted-foreground">{CARD_BODY}</p>
-          <CostResultCard result={result} />
-          <EmbedSnippet result={result} siteOrigin={siteOrigin} />
-        </section>
+        {isComplete ? (
+          <section aria-labelledby="card-heading" className="space-y-4">
+            <h2 id="card-heading" className="text-lg font-semibold">
+              {CARD_HEADING}
+            </h2>
+            <p className="text-sm text-muted-foreground">{CARD_BODY}</p>
+            <CostResultCard result={result} />
+            <EmbedSnippet result={result} siteOrigin={siteOrigin} />
+          </section>
+        ) : null}
       </div>
     </div>
   );

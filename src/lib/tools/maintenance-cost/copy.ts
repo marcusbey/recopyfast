@@ -26,6 +26,9 @@ export const INTRO =
 
 export const RESULT_LABEL = "Unbilled copy changes, per year";
 
+/** Shown instead of a figure while any field is empty. */
+export const EMPTY_RESULT = "Fill in all fields to see your number";
+
 /**
  * The honesty line. The page's claims test forbids the phrase used in the
  * launch kit's "what not to say" list, so this names what is not published

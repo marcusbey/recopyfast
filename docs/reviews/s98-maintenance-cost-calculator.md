@@ -49,5 +49,19 @@ reviewer, not the gate.
 Drop a clamp; remove `escapeHtml`; read `window.location.origin` for the snippet; remove `Suspense`
 (the build turns the route dynamic); route `/signup` through `Link`.
 
-Max severity: pending
-Ship allowed: pending
+## Independent review findings and fixes
+
+The independent review allowed ship at max severity minor, on condition that three minors were
+fixed first. Each was fixed test-first on the same branch.
+
+| # | Finding (minor) | Fix | Tests |
+|---|---|---|---|
+| 1 | `role="status"` wrapped the whole result, which changes on every keystroke, so typing "1200" queued several long announcements | The only live region is now a screen-reader-only line holding the headline figure, updated 500 ms after typing stops. The visible result panel is no longer live | Live text is unchanged mid-burst and equals the final figure after 500 ms; it carries no formula; the panel has no `aria-live` ancestor |
+| 2 | Values were snapped to each field's step with no hint (59.50 became 60, 2.3 sites became 2, 0.2 changes became 0) | The hourly rate keeps cents (step 0.01, shown as "$59.50" only when it has cents). A new `describeFieldRounding` shows a neutral "Rounded to N" note under any in-range value that is off its step; range errors keep `aria-invalid`, the rounding note does not | `calculate.test.ts` for cents and `describeFieldRounding`; component tests for "Rounded to 2", "0", "2.5", "59.56" and for 59.5 passing silently |
+| 3 | An emptied field fell back to the default, so the result read $4,800 over an empty box | While any field is empty the panel shows "Fill in all fields to see your number"; the card, its HTML and the URL update are suppressed until the form is complete | Placeholder text with no money in the panel; card and copy button hidden then restored; no `router.replace` while incomplete |
+
+Local re-check after the fixes: Jest for the touched areas, a fresh `npm run build` (route still
+static) and the Playwright spec against `next start` all pass.
+
+Max severity: minor
+Ship allowed: yes

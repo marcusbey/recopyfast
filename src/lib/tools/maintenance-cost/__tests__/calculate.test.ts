@@ -5,6 +5,7 @@ import {
   calculateCost,
   clampInputs,
   describeFieldIssue,
+  describeFieldRounding,
 } from "../calculate";
 
 describe("calculateCost, defaults", () => {
@@ -280,5 +281,52 @@ describe("describeFieldIssue", () => {
       "minutesPerChange",
       "sites",
     ]);
+  });
+});
+
+describe("cents in the hourly rate", () => {
+  it("keeps the rate to the cent instead of snapping to a whole unit", () => {
+    expect(clampInputs({ hourlyRate: 59.5 }).hourlyRate).toBe(59.5);
+    expect(clampInputs({ hourlyRate: "59.55" }).hourlyRate).toBe(59.55);
+    expect(clampInputs({ hourlyRate: 59.556 }).hourlyRate).toBe(59.56);
+    expect(clampInputs({ hourlyRate: 0.1 + 0.2 }).hourlyRate).toBe(0.3);
+  });
+
+  it("shows cents in the rate and the formula only when there are any", () => {
+    const cents = calculateCost({ ...DEFAULT_INPUTS, hourlyRate: 59.5 });
+    expect(cents.formatted.hourlyRate).toBe("$59.50");
+    expect(cents.formula).toContain("At $59.50 an hour");
+    expect(calculateCost(DEFAULT_INPUTS).formatted.hourlyRate).toBe("$60");
+  });
+});
+
+describe("describeFieldRounding", () => {
+  it("is silent for a value that is already on its step", () => {
+    expect(describeFieldRounding("sites", "12")).toBeNull();
+    expect(describeFieldRounding("changesPerSiteMonthly", "2.5")).toBeNull();
+    expect(describeFieldRounding("hourlyRate", "59.5")).toBeNull();
+    expect(describeFieldRounding("hourlyRate", "59.55")).toBeNull();
+  });
+
+  it("names the value an off-step number becomes", () => {
+    expect(describeFieldRounding("sites", "2.3")).toBe("Rounded to 2");
+    expect(describeFieldRounding("minutesPerChange", "19.6")).toBe(
+      "Rounded to 20",
+    );
+    expect(describeFieldRounding("changesPerSiteMonthly", "0.2")).toBe(
+      "Rounded to 0",
+    );
+    expect(describeFieldRounding("changesPerSiteMonthly", "2.3")).toBe(
+      "Rounded to 2.5",
+    );
+    expect(describeFieldRounding("hourlyRate", "59.556")).toBe(
+      "Rounded to 59.56",
+    );
+  });
+
+  it("leaves out-of-range, empty and non-numeric text to describeFieldIssue", () => {
+    expect(describeFieldRounding("sites", "999.5")).toBeNull();
+    expect(describeFieldRounding("sites", "")).toBeNull();
+    expect(describeFieldRounding("sites", "abc")).toBeNull();
   });
 });
