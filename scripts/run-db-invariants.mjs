@@ -67,6 +67,10 @@ const REPLAY_SUITES = [
   // records a "[gated]" pass.
   "src/__tests__/db/blog-daily-draft.test.ts",
   "src/__tests__/db/blog-generation-claim.test.ts",
+  // s69a: the route's conversion pre-read is only an optimization. The partial
+  // unique index and service-only RPC are the race arbiter, exercised here on
+  // two real connections so a mock can never make the invariant look atomic.
+  "src/__tests__/db/ab-conversion-dedupe.test.ts",
   // s96 (ADR 062): tool_reports is service-role only, its CHECKs hold the
   // largest report the app serialises, and prune_tool_reports trims expired
   // rows then the ceiling. Plain Postgres is enough for all but the PostgREST
