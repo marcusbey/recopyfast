@@ -62,3 +62,44 @@ Additional self-review race: a Google get callback arriving after successful sig
 Scoped re-review also reproduced signout during an older pending-revocation await. The generation snapshot now precedes every await; its failing regression observed `revoke,capture` and now allows only the revocation.
 
 The same synchronous invalidation now handles Supabase SIGNED_OUT notifications, including another tab. A failing deferred-get notification test observed a capture after logout; the guard now cancels it without calling Supabase or fetch inside the notification.
+
+## PR102 Devin follow-up repair
+
+Reproduced the dropped newer withdrawal/signout generations, non-renewed capability
+cookie, and denied-click spam with five failing assertions. The older pre-await
+regression's expectation also mistakenly allowed the dropped signout; it now
+requires both revoke and signout. Use two bounded durable action-generation slots,
+acknowledge only the sent generation, retry only real pending work, and renew an
+existing capability on actual eligible captures. Migration bytes remain unchanged.
+
+Independent security triage classified the writable consent timestamp as an expiry
+integrity defect, not a proven remote human-consent bypass. The plan-consistent
+repair adds a dedicated signed HttpOnly receipt issued only by explicit Allow,
+with server issuance/expiry, a purpose/version-bound HMAC and separately provisioned
+64-hex server key. Capture/bind never issue or renew receipts; denial and pending
+work override grants. No new DB table, GA identifier or account identifier is stored
+in the receipt. Tests cover tamper, future/expired values, key/version mismatch,
+180-day cap, forged old timestamps, delayed grant versus denial/signout, pending
+retry and actual refresh expiry. Backlog session wording now matches the validated
+conservative omission. The review remains blocked until independent re-review.
+
+The old-head Lighthouse run exposed the root AuthContext importing the GA capture
+module eagerly. A module-evaluation regression rejected loading gtag or the
+geography consent catalog from root authentication before the repair. Shared
+synchronous cancellation and first-party actions now live in `context-control`,
+with lightweight cookie helpers in `consent-choice`; GA capture stays behind the
+existing deferred runtime. All race tests are preserved. New-head Lighthouse
+validation remains required with unchanged thresholds.
+
+Fresh review corrected an over-conservative signout change: preserving the granted
+readable choice while clearing its receipt silently disabled later public capture.
+Two observed failing route regressions now require signout to clear only identifier
+capability, retain the identifier-free receipt, and allow a fresh public capture.
+Actual consent revoke still clears the receipt.
+
+Repair verification: fresh independent review passed with no unresolved findings;
+generation-acknowledgement and signature-verification mutants were killed and all
+34 source manifest entries were restored. PostgreSQL17 replay stayed124 passing;
+the migration SHA is unchanged. The repaired build passed and the public browser
+subset passed7/7 with zero retries (`devin-public-browser.log`). Full105-case hosted
+E2E, the unchanged40-sample Lighthouse gate and production acceptance remain pending.

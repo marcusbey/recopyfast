@@ -502,7 +502,11 @@ export default function Privacy() {
                   domain, only once analytics is allowed. They expire after 13
                   months unless you visit again. We set{" "}
                   <code>{"rcf_analytics_consent"}</code> to remember your answer
-                  for 6 months, alongside the time of that choice.
+                  for 6 months. After Allow, a separate secure cookie records
+                  when our server received that choice and its expiry, for at
+                  most 180 days. This receipt contains no account or Analytics
+                  identifier and is cleared when you withdraw consent. Signing
+                  out clears the separate identifier context.
                 </li>
                 <li>
                   <strong>First-party conversion attribution:</strong> while

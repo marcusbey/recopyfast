@@ -92,7 +92,12 @@ it("revoke uses verified account and clears cookie only after success", async ()
   rpc.mockResolvedValue({ error: { message: "private" } });
   const response = await POST(req({ action: "revoke" }));
   expect(response.status).toBe(503);
-  expect(response.headers.get("set-cookie")).toBeNull();
+  expect(response.headers.get("set-cookie")).toContain(
+    "__Host-rcf_analytics_consent=;",
+  );
+  expect(response.headers.get("set-cookie")).not.toContain(
+    "__Host-rcf_analytics_context=",
+  );
 });
 
 it.each(["returned", "thrown"])(
@@ -111,7 +116,12 @@ it.each(["returned", "thrown"])(
       p_user_id: null,
     });
     expect(response.status).toBe(503);
-    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("set-cookie")).toContain(
+      "__Host-rcf_analytics_consent=;",
+    );
+    expect(response.headers.get("set-cookie")).not.toContain(
+      "__Host-rcf_analytics_context=",
+    );
     expect(JSON.stringify(await response.json())).not.toContain(
       "private auth detail",
     );
@@ -132,4 +142,110 @@ it("a genuine missing session can revoke anonymously", async () => {
     error: new AuthSessionMissingError(),
   });
   expect((await POST(req({ action: "revoke" }))).status).toBe(204);
+});
+
+it("refresh renews the existing browser capability through the new capture expiry", async () => {
+  const capability = "a".repeat(43);
+  const response = await POST(
+    req(
+      { action: "capture", clientId: "1.2" },
+      { cookie: `__Host-rcf_analytics_context=${capability}` },
+    ),
+  );
+  expect(response.status).toBe(204);
+  const cookie = response.headers.get("set-cookie");
+  expect(cookie).toContain(`__Host-rcf_analytics_context=${capability}`);
+  expect(cookie).toMatch(/Max-Age=259199[89]|Max-Age=2592000/);
+});
+
+it("issues an identifier-free signed receipt only for an explicit grant action", async () => {
+  process.env.ANALYTICS_CONSENT_SIGNING_KEY = "ab".repeat(32);
+  const response = await POST(
+    req({ action: "grant" }, { cookie: "rcf_analytics_consent=granted" }),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("set-cookie")).toContain(
+    "__Host-rcf_analytics_consent=",
+  );
+  expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+  expect(await response.json()).toEqual({ expiresAt: expect.any(Number) });
+  expect(rpc).not.toHaveBeenCalled();
+  delete process.env.ANALYTICS_CONSENT_SIGNING_KEY;
+});
+it("does not turn a writable granted/time cookie into explicit context, even in US", async () => {
+  const response = await POST(
+    req(
+      { action: "capture", clientId: "1.2" },
+      {
+        cookie: `rcf_analytics_consent=granted; rcf_analytics_consent_at=${Date.now()}`,
+      },
+    ),
+  );
+  expect(response.status).toBe(204);
+  expect(rpc).not.toHaveBeenCalled();
+  expect(response.headers.get("set-cookie")).toBeNull();
+});
+
+it("capture uses verified receipt expiry, ignores a rewritten issuance hint, and never renews receipt", async () => {
+  process.env.ANALYTICS_CONSENT_SIGNING_KEY = "ab".repeat(32);
+  const { issueConsentReceipt } = await import(
+    "@/lib/analytics/google-analytics/consent-receipt"
+  );
+  const receipt = issueConsentReceipt(Date.now() - 179 * 86400000)!;
+  const response = await POST(
+    req(
+      { action: "capture", clientId: "1.2" },
+      {
+        cookie: `rcf_analytics_consent=granted; rcf_analytics_consent_at=${Date.now()}; __Host-rcf_analytics_consent=${receipt.value}`,
+      },
+    ),
+  );
+  expect(rpc).toHaveBeenCalledWith(
+    "capture_analytics_context",
+    expect.objectContaining({
+      p_basis: "explicit",
+      p_consent_expires_at: new Date(receipt.expiresAt).toISOString(),
+    }),
+  );
+  expect(response.headers.get("set-cookie")).not.toContain(
+    "__Host-rcf_analytics_consent=",
+  );
+  const age = Number(
+    /Max-Age=(\d+)/.exec(response.headers.get("set-cookie")!)?.[1],
+  );
+  expect(age).toBeGreaterThan(86390);
+  expect(age).toBeLessThanOrEqual(86400);
+  delete process.env.ANALYTICS_CONSENT_SIGNING_KEY;
+});
+
+it("signout revokes identifiers but preserves consent receipt for a fresh public capture", async () => {
+  process.env.ANALYTICS_CONSENT_SIGNING_KEY = "ab".repeat(32);
+  const { issueConsentReceipt } = await import(
+    "@/lib/analytics/google-analytics/consent-receipt"
+  );
+  const receipt = issueConsentReceipt()!;
+  const choice = `rcf_analytics_consent=granted; __Host-rcf_analytics_consent=${receipt.value}`;
+  const response = await POST(
+    req(
+      { action: "signout" },
+      { cookie: `${choice}; __Host-rcf_analytics_context=${"a".repeat(43)}` },
+    ),
+  );
+  expect(response.headers.get("set-cookie")).toContain(
+    "__Host-rcf_analytics_context=;",
+  );
+  expect(response.headers.get("set-cookie")).not.toContain(
+    "__Host-rcf_analytics_consent=",
+  );
+  rpc.mockClear();
+  await POST(req({ action: "capture", clientId: "9.8" }, { cookie: choice }));
+  expect(rpc).toHaveBeenCalledWith(
+    "capture_analytics_context",
+    expect.objectContaining({
+      p_existing: false,
+      p_basis: "explicit",
+      p_client_id: "9.8",
+    }),
+  );
+  delete process.env.ANALYTICS_CONSENT_SIGNING_KEY;
 });

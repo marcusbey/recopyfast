@@ -1,13 +1,12 @@
+import {
+  CONSENT_RECEIPT_COOKIE_NAME,
+  verifyConsentReceipt,
+} from "./consent-receipt";
 import { createHash } from "node:crypto";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import {
-  CONSENT_COOKIE_MAX_AGE_SECONDS,
-  isConsentRequiredCountry,
-  readConsentChoice,
-} from "./consent";
+import { isConsentRequiredCountry, readConsentChoice } from "./consent";
 
 export const CONTEXT_COOKIE_NAME = "__Host-rcf_analytics_context";
-export const CONSENT_TIME_COOKIE_NAME = "rcf_analytics_consent_at";
 export const CONTEXT_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 export function cookieValue(request: Request, name: string): string | null {
@@ -31,12 +30,11 @@ export function contextConsent(
   if (choice === "denied" || cookieValue(request, "rcf_analytics_pending"))
     return null;
   if (choice === "granted") {
-    const raw = cookieValue(request, CONSENT_TIME_COOKIE_NAME);
-    const at = raw && /^\d{13}$/.test(raw) ? Number(raw) : NaN;
-    const expiresAt = at + CONSENT_COOKIE_MAX_AGE_SECONDS * 1000;
-    return Number.isSafeInteger(at) && at <= now && expiresAt > now
-      ? { basis: "explicit", expiresAt }
-      : null;
+    const receipt = verifyConsentReceipt(
+      cookieValue(request, CONSENT_RECEIPT_COOKIE_NAME),
+      now,
+    );
+    return receipt ? { basis: "explicit", expiresAt: receipt.expiresAt } : null;
   }
   // Headers are trusted only at Vercel's edge, as in the existing init route.
   return isConsentRequiredCountry(

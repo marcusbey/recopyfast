@@ -24,7 +24,15 @@
  * into a response.
  */
 
-export type ConsentChoice = "granted" | "denied";
+// Lightweight first-party cookie controls stay independent of the geography
+// catalog so root authentication does not load the deferred Google runtime.
+export {
+  readConsentChoice,
+  serializeConsentCookie,
+  CONSENT_COOKIE_NAME,
+  CONSENT_COOKIE_MAX_AGE_SECONDS,
+} from "./consent-choice";
+export type { ConsentChoice } from "./consent-choice";
 type ConsentState = "granted" | "denied";
 
 /**
@@ -191,39 +199,4 @@ export function consentDefaults({
       analytics_storage: consentRequired ? "denied" : "granted",
     },
   ];
-}
-
-/** The visitor's choice. First-party, this host only, read by our own code. */
-export const CONSENT_COOKIE_NAME = "rcf_analytics_consent";
-
-/** Six months (180 days): long enough not to nag, short enough to re-ask. */
-export const CONSENT_COOKIE_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
-
-/** `document.cookie` value that records a choice. */
-export function serializeConsentCookie(
-  choice: ConsentChoice,
-  { isSecure }: { isSecure: boolean },
-): string {
-  const attributes = [
-    `${CONSENT_COOKIE_NAME}=${choice}`,
-    `Max-Age=${CONSENT_COOKIE_MAX_AGE_SECONDS}`,
-    "Path=/",
-    "SameSite=Lax",
-  ];
-  if (isSecure) attributes.push("Secure");
-  return attributes.join("; ");
-}
-
-/** The stored choice in a `Cookie` header / `document.cookie`, or null. */
-export function readConsentChoice(
-  cookieHeader: string | null | undefined,
-): ConsentChoice | null {
-  for (const part of (cookieHeader ?? "").split(";")) {
-    const separator = part.indexOf("=");
-    if (separator === -1) continue;
-    if (part.slice(0, separator).trim() !== CONSENT_COOKIE_NAME) continue;
-    const value = part.slice(separator + 1).trim();
-    return value === "granted" || value === "denied" ? value : null;
-  }
-  return null;
 }

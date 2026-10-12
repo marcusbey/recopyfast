@@ -20,6 +20,7 @@ import { getDocumentPathname } from "@/lib/analytics/google-analytics/document-p
 import { isAnalyticsPage } from "@/lib/analytics/google-analytics/routes";
 import {
   captureAnalyticsContext,
+  grantAnalyticsConsent,
   revokeAnalyticsContext,
   retryAnalyticsRevocation,
 } from "@/lib/analytics/google-analytics/context";
@@ -142,6 +143,10 @@ export function GoogleAnalyticsRuntime({
   const choose = (next: ConsentChoice) => {
     applyConsentChoice(measurementId, next);
     if (next === "denied") void revokeAnalyticsContext();
+    else
+      void grantAnalyticsConsent().then(() =>
+        captureAnalyticsContext(measurementId),
+      );
     setChoice(next);
     setIsSettingsOpen(false);
   };

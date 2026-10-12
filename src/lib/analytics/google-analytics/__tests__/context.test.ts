@@ -2,6 +2,8 @@ import {
   captureAnalyticsContext,
   revokeAnalyticsContext,
   signOutAnalyticsContext,
+  retryAnalyticsRevocation,
+  grantAnalyticsConsent,
 } from "../context";
 import { setAnalyticsActive } from "../gtag";
 
@@ -175,5 +177,118 @@ it("a capture waiting on older withdrawal cannot absorb a newer sign-out generat
     (fetch as jest.Mock).mock.calls.map(
       (call) => JSON.parse(call[1].body).action,
     ),
-  ).toEqual(["revoke"]);
+  ).toEqual(["revoke", "signout"]);
+});
+
+describe("Devin withdrawal intent regressions", () => {
+  beforeEach(() => {
+    document.cookie = "rcf_analytics_pending=; Max-Age=0; Path=/";
+    document.cookie = "rcf_analytics_consent=granted; Path=/";
+    global.fetch = jest.fn().mockResolvedValue({ ok: true });
+  });
+  it.each(["signout", "revoke"])(
+    "does not discard a newer %s intent while an older revoke is in flight",
+    async (action) => {
+      let finish: ((value: { ok: boolean }) => void) | undefined;
+      (fetch as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const first = revokeAnalyticsContext();
+      const second =
+        action === "signout"
+          ? signOutAnalyticsContext()
+          : revokeAnalyticsContext();
+      finish?.({ ok: true });
+      await first;
+      await second;
+      expect(
+        (fetch as jest.Mock).mock.calls.map(
+          (call) => JSON.parse(call[1].body).action,
+        ),
+      ).toEqual(["revoke", action]);
+    },
+  );
+  it("settled denial does not spend a revoke request on every click", async () => {
+    document.cookie = "rcf_analytics_consent=denied; Path=/";
+    await retryAnalyticsRevocation();
+    await retryAnalyticsRevocation();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("explicit consent receipt ordering", () => {
+  beforeEach(() => {
+    document.cookie = "rcf_analytics_pending=; Max-Age=0; Path=/";
+    document.cookie = "rcf_analytics_consent=granted; Path=/";
+    setAnalyticsActive("G-TEST", true);
+    (window as unknown as { gtag: jest.Mock }).gtag = jest.fn(
+      (_cmd, _id, _field, cb) => cb("1.2"),
+    );
+  });
+  it.each(["revoke", "signout"])(
+    "a delayed grant cannot overwrite a newer %s or survive its clearing request",
+    async (action) => {
+      let finish: ((response: Response) => void) | undefined;
+      global.fetch = jest.fn().mockImplementation((_url, init) =>
+        JSON.parse(init.body).action === "grant"
+          ? new Promise((resolve) => {
+              finish = resolve;
+            })
+          : Promise.resolve({ ok: true }),
+      );
+      const grant = grantAnalyticsConsent();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      if (action === "revoke")
+        document.cookie = "rcf_analytics_consent=denied; Path=/";
+      const withdrawal =
+        action === "revoke"
+          ? revokeAnalyticsContext()
+          : signOutAnalyticsContext();
+      expect(
+        (fetch as jest.Mock).mock.calls.map(
+          (call) => JSON.parse(call[1].body).action,
+        ),
+      ).toEqual(["grant"]);
+      finish?.({
+        ok: true,
+        json: async () => ({ expiresAt: Date.now() + 180 * 86400000 }),
+      } as Response);
+      await grant;
+      await withdrawal;
+      expect(
+        (fetch as jest.Mock).mock.calls.map(
+          (call) => JSON.parse(call[1].body).action,
+        ),
+      ).toEqual(["grant", action]);
+      if (action === "revoke")
+        expect(document.cookie).toContain("rcf_analytics_consent=denied");
+    },
+  );
+  it("ordinary capture never automatically issues a receipt", async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true });
+    await captureAnalyticsContext("G-TEST");
+    expect(
+      (fetch as jest.Mock).mock.calls.map(
+        (call) => JSON.parse(call[1].body).action,
+      ),
+    ).toEqual(["capture"]);
+  });
+  it("failed withdrawal remains pending until a successful retry, then settles without spam", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValue({ ok: true });
+    document.cookie = "rcf_analytics_consent=denied; Path=/";
+    await revokeAnalyticsContext();
+    expect(document.cookie).toContain("rcf_analytics_pending=");
+    await retryAnalyticsRevocation();
+    await retryAnalyticsRevocation();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(document.cookie).not.toContain("rcf_analytics_pending=");
+  });
 });

@@ -1,3 +1,11 @@
+import {
+  CONSENT_RECEIPT_COOKIE_NAME,
+  issueConsentReceipt,
+} from "@/lib/analytics/google-analytics/consent-receipt";
+import {
+  CONSENT_COOKIE_MAX_AGE_SECONDS,
+  readConsentChoice,
+} from "@/lib/analytics/google-analytics/consent";
 import { isAuthSessionMissingError } from "@supabase/supabase-js";
 import { createHash, randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -7,6 +15,7 @@ import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 import { readBoundedJson } from "@/lib/api/validation";
 import {
   contextConsent,
+  cookieValue,
   contextCapabilityHash,
   CONTEXT_COOKIE_NAME,
   CONTEXT_MAX_AGE_SECONDS,
@@ -58,7 +67,7 @@ export async function POST(request: NextRequest) {
   const value = body.value as Record<string, unknown>;
   if (
     typeof value.action !== "string" ||
-    !["capture", "revoke", "signout"].includes(value.action) ||
+    !["capture", "revoke", "signout", "grant"].includes(value.action) ||
     Object.keys(value).some((k) => !["action", "clientId"].includes(k))
   )
     return json("Invalid request", 400);
@@ -75,7 +84,39 @@ export async function POST(request: NextRequest) {
     headers: { "Cache-Control": "private, no-store" },
   });
   const oldHash = contextCapabilityHash(request);
+  const clearReceipt = (target: NextResponse) => {
+    target.cookies.set(CONSENT_RECEIPT_COOKIE_NAME, "", {
+      ...cookieOptions,
+      maxAge: 0,
+    });
+    return target;
+  };
   try {
+    if (value.action === "grant") {
+      if (
+        process.env.ANALYTICS_CONTEXT_DISABLED === "1" ||
+        readConsentChoice(request.headers.get("cookie")) !== "granted" ||
+        cookieValue(request, "rcf_analytics_pending")
+      )
+        return json("Consent unavailable", 409);
+      const receipt = issueConsentReceipt();
+      if (!receipt) {
+        console.warn("[analytics/context] consent issuance unavailable");
+        return json("Consent unavailable", 503);
+      }
+      // Never Set-Cookie the readable choice here: a delayed grant response
+      // must not overwrite a newer Decline. The client synchronizes its expiry
+      // only while this exact Allow interaction is still current.
+      const granted = NextResponse.json(
+        { expiresAt: receipt.expiresAt },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+      granted.cookies.set(CONSENT_RECEIPT_COOKIE_NAME, receipt.value, {
+        ...cookieOptions,
+        maxAge: CONSENT_COOKIE_MAX_AGE_SECONDS,
+      });
+      return granted;
+    }
     const client = createServiceRoleClient();
     if (value.action !== "capture") {
       // A capability alone can erase its captures. getUser additionally permits
@@ -104,8 +145,9 @@ export async function POST(request: NextRequest) {
         console.warn(
           "[analytics/context] authenticated withdrawal unavailable",
         );
-        return json("Analytics unavailable", 503);
+        return clearReceipt(json("Analytics unavailable", 503));
       }
+      if (value.action === "revoke") clearReceipt(response);
       response.cookies.set(CONTEXT_COOKIE_NAME, "", {
         ...cookieOptions,
         maxAge: 0,
@@ -115,9 +157,15 @@ export async function POST(request: NextRequest) {
     if (process.env.ANALYTICS_CONTEXT_DISABLED === "1") return response;
     const consent = contextConsent(request);
     if (!consent) return response;
-    const capability = oldHash ? null : randomBytes(32).toString("base64url");
+    const capability = oldHash
+      ? cookieValue(request, CONTEXT_COOKIE_NAME)!
+      : randomBytes(32).toString("base64url");
     const hash =
-      oldHash ?? createHash("sha256").update(capability!).digest("hex");
+      oldHash ?? createHash("sha256").update(capability).digest("hex");
+    const cookieExpiresAt = Math.min(
+      Date.now() + CONTEXT_MAX_AGE_SECONDS * 1000,
+      consent.expiresAt,
+    );
     const { data, error } = await client.rpc("capture_analytics_context", {
       p_hash: hash,
       p_client_id: value.clientId,
@@ -133,17 +181,17 @@ export async function POST(request: NextRequest) {
       });
       return response;
     }
-    if (capability)
-      response.cookies.set(CONTEXT_COOKIE_NAME, capability, {
-        ...cookieOptions,
-        maxAge: Math.min(
-          CONTEXT_MAX_AGE_SECONDS,
-          Math.floor((consent.expiresAt - Date.now()) / 1000),
-        ),
-      });
+    response.cookies.set(CONTEXT_COOKIE_NAME, capability, {
+      ...cookieOptions,
+      maxAge: Math.min(
+        CONTEXT_MAX_AGE_SECONDS,
+        Math.floor((cookieExpiresAt - Date.now()) / 1000),
+      ),
+    });
     return response;
   } catch {
     console.warn("[analytics/context] operation unavailable");
-    return json("Analytics unavailable", 503);
+    const failure = json("Analytics unavailable", 503);
+    return value.action === "revoke" ? clearReceipt(failure) : failure;
   }
 }

@@ -24,10 +24,18 @@ test("context capture follows consent; withdrawal retries without private Google
   await context.route("**/api/analytics/context", async (route) => {
     const action = route.request().postDataJSON().action;
     actions.push(action);
-    await route.fulfill({
-      status: action === "revoke" && shouldFailRevoke ? 503 : 204,
-      body: "",
-    });
+    await route.fulfill(
+      action === "grant"
+        ? {
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ expiresAt: Date.now() + 180 * 86400000 }),
+          }
+        : {
+            status: action === "revoke" && shouldFailRevoke ? 503 : 204,
+            body: "",
+          },
+    );
   });
   await page.goto("/");
   await expect(
@@ -39,6 +47,7 @@ test("context capture follows consent; withdrawal retries without private Google
     .getByRole("button", { name: "Allow analytics", exact: true })
     .click();
   await expect.poll(() => actions.includes("capture")).toBe(true);
+  expect(actions.indexOf("grant")).toBeLessThan(actions.indexOf("capture"));
   await page
     .getByRole("button", { name: "Cookie settings", exact: true })
     .click();

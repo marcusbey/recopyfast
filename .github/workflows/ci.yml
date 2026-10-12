@@ -279,6 +279,8 @@ jobs:
       # spec answers every Google host by route interception, and without a
       # country header every other spec sees the consent banner and no gtag.js.
       NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-E2ETEST000"
+      # Public test fixture only; production uses a separately provisioned random key.
+      ANALYTICS_CONSENT_SIGNING_KEY: "abababababababababababababababababababababababababababababababab"
       CI: "true"
 
     steps:

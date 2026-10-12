@@ -1,3 +1,4 @@
+import { issueConsentReceipt } from "../consent-receipt";
 /** @jest-environment node */
 import {
   contextConsent,
@@ -5,6 +6,12 @@ import {
   CONTEXT_COOKIE_NAME,
 } from "../context-server";
 const rpc = jest.fn();
+beforeEach(() => {
+  process.env.ANALYTICS_CONSENT_SIGNING_KEY = "ab".repeat(32);
+});
+afterEach(() => {
+  delete process.env.ANALYTICS_CONSENT_SIGNING_KEY;
+});
 jest.mock("@/lib/supabase/service", () => ({
   createServiceRoleClient: () => ({ rpc }),
 }));
@@ -20,8 +27,11 @@ it("default grant requires trusted settled edge geography; denial always wins", 
 it("legacy explicit grant without known expiry fails closed; new choice expiry is capped", () => {
   expect(contextConsent(req("rcf_analytics_consent=granted"))).toBeNull();
   const at = Date.now() - 179 * 86400000;
+  const proof = issueConsentReceipt(at)!;
   const consent = contextConsent(
-    req(`rcf_analytics_consent=granted; rcf_analytics_consent_at=${at}`),
+    req(
+      `rcf_analytics_consent=granted; __Host-rcf_analytics_consent=${proof.value}`,
+    ),
   );
   expect(consent?.expiresAt).toBe(at + 180 * 86400000);
 });

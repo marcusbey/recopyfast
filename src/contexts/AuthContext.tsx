@@ -8,7 +8,7 @@ import {
   signOutAnalyticsContext,
   invalidateAnalyticsCapture,
   retryAnalyticsRevocation,
-} from "@/lib/analytics/google-analytics/context";
+} from "@/lib/analytics/google-analytics/context-control";
 import { useRouter } from "next/navigation";
 
 /** Optional extras callers can attach to a magic-link request. */
