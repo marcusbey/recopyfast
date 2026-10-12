@@ -4710,3 +4710,38 @@ Acceptance criteria:
 Complexity: 2. Dependencies: s96. Branch `feature/s101-alt-text-checker`.
 
 Embed allocation: 0 bytes.
+
+## Story s96c-streamed-html — the Typo Finder reads the page a Next.js site streams, not its loading screen
+
+> Hotfix, 2026-10-12. Found in production right after s96 shipped: the Typo Finder said our own
+> `https://www.recopyfa.st/terms` "shows almost no text in its HTML". Architect decision by the
+> orchestrator. No screen changes, so there is no Design step. Research:
+> `docs/research/s96c-streamed-html.md`. Plan: `docs/plans/s96c-streamed-html.md`.
+
+As an owner of a Next.js App Router site, I paste its address into `/tools/website-spell-checker`.
+I get the typos on my pages. I am not told "almost no text" because a page streams its content
+behind a loading screen.
+
+Acceptance criteria:
+- [ ] A React streaming segment is read as visible content, in document order. A segment is an
+  element with a `hidden` attribute and an `id` of `S:<hex>`.
+  - A table counts too: React's `<table hidden><tbody id="S:<hex>">` and
+    `<table hidden><tr id="S:<hex>">` (review of d513552).
+  - Ordinary `hidden` elements stay excluded, and so do `<template>`, `<script>`, `<style>` and
+    `<noscript>`.
+  - Only `hidden` is waived: `aria-hidden` or an inline `display:none` still hide a segment.
+- [ ] The fallback of a pending boundary is not read and does not count toward "has text". The
+  fallback runs from `<!--$?--><template id="B:<hex>">` to the matching `<!--/$-->`.
+- [ ] A trimmed copy of the live `/terms` page, with "recieve" planted, passes these checks:
+  - the extractor returns its text without "Loading…";
+  - the lens finds "recieve", and the "almost no text" notice does not fire;
+  - a run-scan test covers it end to end.
+- [ ] No JavaScript runs, and every size, depth, element and time cap is unchanged.
+- [ ] Mutation checks: removing segment inclusion turns tests red, and so does removing the
+  fallback exclusion.
+- [ ] Required gates pass, and the Playwright `--list` count stays at 97. One story commit.
+
+Complexity: 1. Dependencies: s96. Branch `fix/s96c-streamed-html`. No migration, no new
+dependency.
+
+Embed allocation: 0 bytes.

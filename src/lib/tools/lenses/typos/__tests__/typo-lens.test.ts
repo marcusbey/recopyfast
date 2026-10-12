@@ -12,6 +12,7 @@ import {
   extractPage,
   type ExtractedPage,
 } from "@/lib/tools/extract/extract-page";
+import { NEXT_STREAMED_PAGE } from "@/lib/tools/extract/__tests__/next-streamed-page";
 import type { LensContext } from "@/lib/tools/lens";
 import {
   analyzeTypos,
@@ -465,6 +466,53 @@ describe("the lens", () => {
       id: "typos",
       tool: "website-spell-checker",
       pages: { max: 10, sample: "sitemap" },
+    });
+  });
+});
+
+/**
+ * s96c — in production, https://www.recopyfa.st/terms was reported as "almost
+ * no text in its HTML": a Next.js page streamed through a Suspense boundary
+ * keeps its real content in `<div hidden id="S:0">`, and the only visible text
+ * was the loading fallback. The fixture is that page, trimmed, with one typo
+ * planted.
+ */
+describe("a Next.js page streamed through a Suspense boundary (s96c)", () => {
+  const TERMS_URL = "https://www.recopyfa.st/terms";
+
+  it("is checked, and its typo is found", () => {
+    const streamed = extractPage(NEXT_STREAMED_PAGE, {
+      url: TERMS_URL,
+      headers: {},
+    });
+    if (!streamed.ok) throw new Error("fixture refused");
+
+    const result = analyzeTypos([streamed.page], {
+      now: CONTEXT.now,
+      finalUrl: TERMS_URL,
+      hostname: "www.recopyfa.st",
+    });
+
+    expect(result.summary.headline).not.toBe(NO_TEXT_MESSAGE);
+    expect(result.skippedPages).toEqual([]);
+    expect(
+      result.findings.map(({ page, match, suggestion }) => [
+        page,
+        match,
+        suggestion,
+      ]),
+    ).toEqual([[TERMS_URL, "recieve", "receive"]]);
+  });
+
+  it("still says 'almost no text' when the only text is a loading fallback", () => {
+    // The fallback is loading UI, not the page's copy: it never counts.
+    const shell = page(
+      `<!--$?--><template id="B:0"></template><div role="status"><p>${FILLER}</p></div><!--/$-->`,
+    );
+
+    expect(run([shell]).summary).toMatchObject({
+      verdict: "skipped",
+      headline: NO_TEXT_MESSAGE,
     });
   });
 });

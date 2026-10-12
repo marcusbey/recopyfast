@@ -12,6 +12,7 @@
 import http from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 
+import { NEXT_STREAMED_PAGE } from "@/lib/tools/extract/__tests__/next-streamed-page";
 import { compressedBomb } from "@/lib/tools/fetch/__tests__/bombs";
 import type { FetchPolicy } from "@/lib/tools/fetch/safe-fetch";
 import { typoLens } from "@/lib/tools/lenses/typos/typo-lens";
@@ -239,6 +240,34 @@ describe("runScan", () => {
     const result = await scan();
 
     expect(result.ok && result.report.truncated).toBe(false);
+  });
+
+  /**
+   * s96c — in production, https://www.recopyfa.st/terms was skipped as "almost
+   * no text in its HTML": a Next.js page streamed through a Suspense boundary
+   * keeps its content in `<div hidden id="S:0">`. The homepage here serves that
+   * page, trimmed, with one typo planted; the links it samples sit inside the
+   * segment too.
+   */
+  it("checks a Next.js page streamed through a Suspense boundary", async () => {
+    const origin = `http://bakery.test:${port}`;
+    routes.set("/", (_req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(NEXT_STREAMED_PAGE);
+    });
+
+    const result = await scan();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.report.pages).toContainEqual({
+      url: `${origin}/`,
+      status: "checked",
+    });
+    expect(
+      result.report.findings.map((finding) => [finding.page, finding.match]),
+    ).toEqual([[`${origin}/`, "recieve"]]);
+    expect(requested).toContain("/privacy");
   });
 
   it("refuses the whole scan when robots.txt disallows the homepage", async () => {
