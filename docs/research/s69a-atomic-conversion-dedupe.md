@@ -36,9 +36,10 @@ production-repair definition is the same ten-column table and the same four inde
   a uniqueness constraint.
 - The accepted request maximum is 50 events and 64 KiB. The RPC input is therefore a bounded JSON
   array, not an unbounded table-wide operation.
-- `ab_test_results` has no `site_id`; the route's ownership query is the tenant boundary. The RPC
-  must be `SECURITY INVOKER`, callable only as `service_role`, so it inherits the existing
-  service-role-only insert policy instead of bypassing it.
+- `ab_test_results` has no `site_id`; the route's ownership query is the tenant boundary because
+  `service_role` intentionally bypasses RLS. The RPC must be `SECURITY INVOKER` and callable only
+  as `service_role`; if `anon` or `authenticated` accidentally regained `EXECUTE`, invoker security
+  would still leave that caller subject to its own table ACLs and RLS rather than elevating it.
 - Results and lifecycle consumers count rows in `ab_test_results`; no consumer needs duplicate
   conversions preserved. The approved cleanup keeps the earliest `recorded_at`, then the smallest
   `id` as the deterministic tie-breaker.

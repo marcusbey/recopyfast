@@ -61,12 +61,12 @@ $$;
 -- derives `recorded` and `deduplicated` from these returned rows, so a loser is
 -- a truthful 200 dedupe rather than the 23505/500 this incident used to cause.
 --
--- This is SECURITY INVOKER on purpose. The function is not an authorization
--- boundary and must inherit the existing service-role-only INSERT policy on
--- ab_test_results. A definer function here would turn any accidental EXECUTE
--- grant into a tenant-spanning write path. The route remains responsible for
--- body bounds, site-token authorization, rate limits, test/variant ownership
--- and exposure proof before it calls this function.
+-- This is SECURITY INVOKER on purpose. An accidental EXECUTE grant to `anon`
+-- or `authenticated` would still leave that caller subject to its own table
+-- ACLs and RLS instead of elevating it to the function owner's privileges.
+-- `service_role` intentionally bypasses RLS, so the HTTP route remains the
+-- tenant-authorization boundary: it enforces body bounds, site-token auth,
+-- rate limits, test/variant ownership and exposure proof before calling here.
 CREATE OR REPLACE FUNCTION public.insert_ab_test_events(p_events JSONB)
 RETURNS TABLE (
   id UUID,
@@ -139,9 +139,10 @@ END;
 $$;
 
 -- PostgreSQL grants function EXECUTE to PUBLIC by default. Revoke the wildcard
--- and both web roles explicitly, then opt in only the backend role that already
--- holds the table's INSERT policy. Repeating this migration converges because
--- CREATE OR REPLACE preserves ACLs and these statements restate the end state.
+-- and both web roles explicitly, then opt in only the trusted backend role.
+-- SECURITY INVOKER would still apply a mistakenly exposed web caller's ACLs and
+-- RLS; these revokes additionally keep the RPC off the public PostgREST surface.
+-- Repeating the migration converges because CREATE OR REPLACE preserves ACLs.
 REVOKE ALL ON FUNCTION public.insert_ab_test_events(JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.insert_ab_test_events(JSONB) FROM anon;
 REVOKE ALL ON FUNCTION public.insert_ab_test_events(JSONB) FROM authenticated;

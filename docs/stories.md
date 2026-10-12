@@ -4759,6 +4759,6 @@ this chat.
 - [x] Research confirms the current premise and records consumers and compatibility boundaries.
 - [x] All approved plan tasks and their regression/concurrency checks pass.
 - [x] No applied migration is changed; no dependency is added.
-- [ ] Independent review passes and normal repository checks pass before a draft PR.
+- [x] Independent review passes and normal repository checks pass before a draft PR.
 
 Branch: `feature/s69a-atomic-conversion-dedupe`. Embed allocation: 0 bytes.
