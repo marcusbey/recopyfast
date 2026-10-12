@@ -4745,3 +4745,20 @@ Complexity: 1. Dependencies: s96. Branch `fix/s96c-streamed-html`. No migration,
 dependency.
 
 Embed allocation: 0 bytes.
+
+## Story s81-version-restore-integrity — Discard refuses a changed row
+
+As an owner, Discard applies only to the exact version I just reviewed. If another writer changes
+that row after the read, I see a conflict and refreshed content instead of losing their edit.
+
+The full plan `docs/plans/s81-version-restore-integrity.md` was human validated on 2026-10-12.
+
+- [ ] Discard carries the precise authoritative row version from the same content snapshot.
+- [ ] A service-only atomic conditional save returns a conflict without content/history changes.
+- [ ] HTTP 409 refreshes the row and requires another deliberate Discard; no automatic retry.
+- [ ] Existing callers omitting the optional precondition keep last-write-wins behavior.
+- [ ] Real PostgreSQL concurrent, privilege and replay checks and normal repository gates pass.
+- [ ] Fresh independent review passes. Production migrations and merge remain manual.
+
+Branch: `feature/s81-version-restore-integrity`. Dependency: s65b verification/deployment first.
+Embed allocation: 0 bytes.

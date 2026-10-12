@@ -30,6 +30,8 @@
  *   staging GET's `has_staging_changes` (point 1).
  * - `changed_at`: the draft's time for pending, else `published_at`, else
  *   `updated_at`.
+ * - `updated_at` itself is projected from that same view snapshot, as the
+ *   authoritative compare-and-set token for s81 Discard.
  * - Tenancy: `edit` and `admin` members of site A, an admin of site B, and
  *   `anon`.
  * - The security mode and the grants, read from the catalogue, and the
@@ -125,6 +127,7 @@ const VIEW_COLUMNS = [
   "changed_by",
   "last_action",
   "search_text",
+  "updated_at",
 ] as const;
 
 const PASSWORD = `S70b-${crypto.randomUUID()}-Aa1!`;
@@ -142,6 +145,7 @@ const T = {
   equalDraft: "2026-10-07T09:00:00.000Z",
   olderHistory: "2026-10-05T15:00:00.000Z",
   newestHistory: "2026-10-05T15:30:00.000Z",
+  casVersion: "2026-10-08T10:00:00.654321+00:00",
 } as const;
 
 interface SeedRow {
@@ -168,6 +172,7 @@ const SITE_A_ROWS: SeedRow[] = [
     published: "Start free trial",
     staging: "Start your 14-day trial",
     stagingUpdatedAt: T.draft,
+    updatedAt: T.casVersion,
   },
   {
     // A draft saved with the live text: "Discard draft" lands here.
@@ -267,6 +272,7 @@ interface ViewRow {
   element_id: string;
   change_state: string;
   changed_at: string | null;
+  updated_at: string;
   changed_by: string | null;
 }
 
@@ -300,7 +306,7 @@ async function readView(
   const url = new URL(`${POSTGREST_BASE_URL}/rest/v1/content_changes`);
   url.searchParams.set(
     "select",
-    "id,site_id,element_id,change_state,changed_at,changed_by",
+    "id,site_id,element_id,change_state,changed_at,updated_at,changed_by",
   );
   for (const [key, value] of Object.entries(filters)) {
     url.searchParams.set(key, value);
@@ -515,6 +521,18 @@ describeDb(
           ]),
         );
         expect(changedAt).toEqual(EXPECTED_CHANGED_AT);
+      });
+
+      test("updated_at preserves the authoritative PostgREST microsecond string for compare-and-set", async () => {
+        const response = await readView(fixture.adminA.accessToken, {
+          site_id: `eq.${fixture.siteA}`,
+          element_id: "eq.s70b-draft",
+        });
+
+        expect(response.status).toBe(200);
+        expect(byElement(response.body)["s70b-draft"].updated_at).toBe(
+          T.casVersion,
+        );
       });
 
       test("pending is exactly what the publish RPC would publish (attribute drafts included)", async () => {

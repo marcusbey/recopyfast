@@ -5,6 +5,7 @@ import {
   CHANGES_LIST_CEILING,
   CHANGES_PAGE_SIZE,
 } from "@/lib/content/changes-paging";
+import { optionalIsoTimestamp } from "@/lib/api/validation";
 import { timeoutSignal } from "@/lib/utils/timeout-signal";
 
 /**
@@ -85,6 +86,8 @@ export interface ContentChange {
   hasLiveText: boolean;
   state: ChangeState;
   changedAt: string | null;
+  /** Exact content_elements.updated_at string for conditional Discard writes. */
+  updatedAt: string | null;
   changedBy: string | null;
   createdAt: string;
 }
@@ -146,6 +149,12 @@ function knownAttributes(value: unknown): DraftAttribute[] | null {
   return Array.isArray(value) && value.every(isDraftAttribute) ? value : null;
 }
 
+/** Preserve a valid PostgREST version string exactly; invalid means unknown. */
+function knownUpdatedAt(value: unknown): string | null {
+  const parsed = optionalIsoTimestamp({ updatedAt: value }, "updatedAt");
+  return parsed.ok ? (parsed.value ?? null) : null;
+}
+
 /** A list read: the page's filters, or one element of one site. */
 interface ChangesRead extends ChangesFilters {
   element?: string;
@@ -198,6 +207,7 @@ async function fetchChanges(
       ...row,
       draftAttributes: knownAttributes(row.draftAttributes),
       hasLiveText: row.hasLiveText === true,
+      updatedAt: knownUpdatedAt(row.updatedAt),
     })),
   };
 }

@@ -51,7 +51,7 @@ export interface ActionOutcome {
   applied: ChangeAction | null;
   /**
    * Nothing was written because the server's row is not the one on screen
-   * (Discard's re-read): the row is read again so the owner can review it.
+   * (Discard's re-read or CAS conflict): the row is read again for review.
    */
   isStale?: boolean;
   /**
@@ -116,6 +116,7 @@ const WRITE_TIMEOUT_MS = 30_000;
 interface WriteFailure {
   error: string;
   isUncertain: boolean;
+  isStale: boolean;
 }
 
 const refusal = (error: string): ActionOutcome => ({ error, applied: null });
@@ -124,6 +125,9 @@ const outcomeOf = (
   failure: WriteFailure | null,
 ): ActionOutcome => {
   if (!failure) return { error: null, applied: action };
+  if (failure.isStale) {
+    return { error: failure.error, applied: null, isStale: true };
+  }
   return failure.isUncertain
     ? { error: failure.error, applied: null, isUncertain: true }
     : refusal(failure.error);
@@ -250,10 +254,14 @@ async function send(
       signal: timeoutSignal(WRITE_TIMEOUT_MS),
     });
   } catch {
-    return { error: lostMessage, isUncertain: true };
+    return { error: lostMessage, isUncertain: true, isStale: false };
   }
   if (response.ok) return null;
-  return { error: await refusalMessage(response, refused), isUncertain: false };
+  return {
+    error: await refusalMessage(response, refused),
+    isUncertain: false,
+    isStale: response.status === 409,
+  };
 }
 
 /**
@@ -266,6 +274,7 @@ const saveDraft = (
   content: string,
   lostMessage: string,
   attributes: ContentAttributePatch = {},
+  expectedUpdatedAt?: string,
 ): Promise<WriteFailure | null> =>
   send(
     `/api/staging/content/${row.siteId}`,
@@ -276,6 +285,7 @@ const saveDraft = (
       language: row.language,
       variant: row.variant,
       ...attributes,
+      ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }),
     },
     { refused: DRAFT_FAILED, lostMessage },
   );
@@ -444,20 +454,14 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
   // as the page had loaded them, so a view gone stale (a second tab, an
   // editor publishing from the live page) staged the old copy again, and the
   // next Publish put it back live. When the draft is no longer the one the
-  // owner was shown, nothing is sent. Residual: a write from elsewhere (a
-  // second tab, the editor on the live page) landing between this read and
-  // the save RPC is not seen. That window is not milliseconds: it is this
-  // read's way back, then everything the staging PUT does before its RPC
-  // (`authorizeFirstPartyEditorAccess`, `enforceRateLimit`,
-  // `checkOwnerCanEdit`, each a round trip), so hundreds of milliseconds or
-  // more. This page's writes cannot land there while it stays mounted (one
-  // write at a time per element, above), but the lock lives in the mounted
-  // page, not the tab. Correction (verification of d381b7b, minor 2): this
-  // said "This page's own writes cannot land there". Leaving the page while
-  // a write is still out and coming back mounts a new, unlocked page, and
-  // that write, still running, can land in this window too. Closing it needs
-  // a compare-and-set in the staging PUT, an existing route this story does
-  // not change (follow-up: s81-version-restore-integrity).
+  // owner was shown, nothing is sent. s81 closes the remaining interval —
+  // this read's way back, then authorization, rate limiting and the owner-plan
+  // check before the save RPC — by carrying the exact row-wide `updatedAt`
+  // from this same view snapshot. A write from another tab, the live editor or
+  // a previous mounted page changes that token; the RPC returns 409 without a
+  // write/history row, this outcome is marked stale, and `track` refreshes the
+  // row. Never retry automatically: only a new owner review can discard the
+  // new version.
   const discardDraft = useCallback(
     (row: ContentChange) =>
       track(row, "discardDraft", async () => {
@@ -477,10 +481,22 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
         if (!attributes || !canDiscardDraft(fresh)) {
           return { error: discardRefusal(fresh), applied: null, isStale: true };
         }
+        // A missing or malformed version must never turn this conditional
+        // operation into the legacy unconditional save. The route offers LWW
+        // only to callers that intentionally omit the field; Discard does not.
+        if (fresh.updatedAt === null) {
+          return { error: NOT_CHECKED, applied: null, isStale: true };
+        }
         if (fresh.live === null) return refusal(NO_LIVE_TEXT);
         return outcomeOf(
           "discardDraft",
-          await saveDraft(fresh, fresh.live, DISCARD_LOST, attributes),
+          await saveDraft(
+            fresh,
+            fresh.live,
+            DISCARD_LOST,
+            attributes,
+            fresh.updatedAt,
+          ),
         );
       }),
     [track],
