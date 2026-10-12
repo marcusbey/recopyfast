@@ -292,3 +292,107 @@ describe("explicit consent receipt ordering", () => {
     expect(document.cookie).not.toContain("rcf_analytics_pending=");
   });
 });
+
+describe("fresh Allow while a previous Google get is pending", () => {
+  beforeEach(() => {
+    document.cookie = "rcf_analytics_pending=; Max-Age=0; Path=/";
+    document.cookie = "rcf_analytics_consent=granted; Path=/";
+    setAnalyticsActive("G-TEST", true);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ expiresAt: Date.now() + 180 * 86400000 }),
+    });
+  });
+  it("refreshes once using the new grant instead of reusing the invalidated capture", async () => {
+    let firstCallback: ((value: unknown) => void) | undefined;
+    const get = jest
+      .fn()
+      .mockImplementationOnce((_cmd, _id, _field, callback) => {
+        firstCallback = callback;
+      })
+      .mockImplementation((_cmd, _id, _field, callback) => callback("2.2"));
+    (window as unknown as { gtag: jest.Mock }).gtag = get;
+    const previous = captureAnalyticsContext("G-TEST");
+    await grantAnalyticsConsent();
+    const refreshed = captureAnalyticsContext("G-TEST");
+    firstCallback?.("1.1");
+    await previous;
+    await refreshed;
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(
+      (fetch as jest.Mock).mock.calls.map((call) => JSON.parse(call[1].body)),
+    ).toEqual([{ action: "grant" }, { action: "capture", clientId: "2.2" }]);
+  });
+  it("does not refresh an Allow interaction superseded by signout while waiting", async () => {
+    let firstCallback: ((value: unknown) => void) | undefined;
+    const get = jest
+      .fn()
+      .mockImplementationOnce((_cmd, _id, _field, callback) => {
+        firstCallback = callback;
+      })
+      .mockImplementation((_cmd, _id, _field, callback) => callback("2.2"));
+    (window as unknown as { gtag: jest.Mock }).gtag = get;
+    const previous = captureAnalyticsContext("G-TEST");
+    await grantAnalyticsConsent();
+    const refreshed = captureAnalyticsContext("G-TEST");
+    await signOutAnalyticsContext();
+    firstCallback?.("1.1");
+    await previous;
+    await refreshed;
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(
+      (fetch as jest.Mock).mock.calls.map(
+        (call) => JSON.parse(call[1].body).action,
+      ),
+    ).toEqual(["grant", "signout"]);
+  });
+  it("still coalesces two captures from the same interaction generation", async () => {
+    let callback: ((value: unknown) => void) | undefined;
+    const get = jest.fn((_cmd, _id, _field, cb) => {
+      callback = cb;
+    });
+    (window as unknown as { gtag: jest.Mock }).gtag = get;
+    const first = captureAnalyticsContext("G-TEST"),
+      second = captureAnalyticsContext("G-TEST");
+    callback?.("3.3");
+    await first;
+    await second;
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("withdrawal drain handoff", () => {
+  beforeEach(() => {
+    document.cookie = "rcf_analytics_pending=; Max-Age=0; Path=/";
+    document.cookie = "rcf_analytics_consent=granted; Path=/";
+    global.fetch = jest.fn().mockResolvedValue({ ok: true });
+  });
+  it.each(["revoke", "signout"])(
+    "starts a newly queued %s even immediately after an empty retry",
+    async (action) => {
+      const idle = retryAnalyticsRevocation();
+      const requested =
+        action === "revoke"
+          ? revokeAnalyticsContext()
+          : signOutAnalyticsContext();
+      await idle;
+      await requested;
+      expect(
+        (fetch as jest.Mock).mock.calls.map(
+          (call) => JSON.parse(call[1].body).action,
+        ),
+      ).toEqual([action]);
+      expect(document.cookie).not.toContain("rcf_analytics_pending=");
+    },
+  );
+  it("does not turn concurrent waiters into automatic retries after HTTP failure", async () => {
+    (fetch as jest.Mock).mockResolvedValue({ ok: false });
+    const first = revokeAnalyticsContext(),
+      second = retryAnalyticsRevocation();
+    await first;
+    await second;
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(document.cookie).toContain("rcf_analytics_pending=");
+  });
+});

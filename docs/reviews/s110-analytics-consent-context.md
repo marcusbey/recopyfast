@@ -82,5 +82,41 @@ Evidence: /tmp/s110-repair-review-final.log and /tmp/s110-repair-review-db.log.
 This source verdict supersedes the blocked review above. It does not claim final hooks,
 new-head hosted checks, external review, migration, deployment or live acceptance passed.
 
+## Fresh external review of 99b6042
+
+Functional CI passed all105 browser tests with zero skips or flaky cases. Devin's fresh
+analysis reported two new items and retained the original withdrawal thread as Outdated.
+Independent triage confirms the original withdrawal loss is repaired: exact generations and
+both action slots are retained/drained, with regression and neutralization evidence above.
+
+The grant-provenance warning does not demonstrate a violation of the accepted trust boundary.
+The endpoint records a same-origin explicit grant command and server issuance/expiry; it does
+not authenticate a physical human click. Cross-origin victim-browser commands are rejected;
+attacker-controlled same-origin JavaScript already controls the consent UI/state. A nonce on
+another public transition would not establish human action against that actor. The existing
+receipt code and operations documentation explicitly disclaim such proof. Disposition:
+non-actionable under the validated threat model, without expanding consent authority.
+
+One functional finding remains under repair: an Allow interaction during a pending Google
+lookup can reuse the now-invalidated capture promise, losing the requested fresh capture
+until another public interaction. Ship remains blocked until regression, repair and fresh
+independent verification. No migration or release has occurred.
+
+## Second repair independently verified
+
+Fresh Allow now waits for an older capture and starts a new one only if its generation is
+still current. Same-generation calls coalesce; later signout invalidates a waiting refresh.
+An empty-drain handoff processes newly queued withdrawal without looping after failed HTTP
+responses. The pending intent remains durable on failure.
+
+Independent restored run: 92 tests / 7 suites passed. Neutralizing fresh Allow caused one
+failure, neutralizing the later-signout guard caused one, and restoring the old empty drain
+caused two. All mutations were restored byte-for-byte with original diffs preserved; all
+three source manifest entries and git diff --check passed.
+Manifest /tmp/s110-gates/refresh-handoff-manifest.sha256,
+SHA256 bac378008e3a51ee76a0df726b2156374e531c642f8597c90867801f28984a55.
+Log /tmp/s110-refresh-handoff-restored.log. No unresolved source findings remain. Final
+normal hooks, exact-head hosted checks, migration and deployment proof remain separate.
+
 Max severity: none
 Ship allowed: yes

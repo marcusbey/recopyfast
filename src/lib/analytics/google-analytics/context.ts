@@ -18,17 +18,29 @@ export {
 export function isAnalyticsClientId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9]{1,32}\.[0-9]{1,32}$/.test(value);
 }
-let captureInFlight: Promise<void> | null = null;
+let captureInFlight: { generation: number; promise: Promise<void> } | null =
+  null;
 
 export async function captureAnalyticsContext(
   measurementId: string,
 ): Promise<void> {
-  if (captureInFlight) return captureInFlight;
-  captureInFlight = performCapture(measurementId);
+  const generation = analyticsCaptureGeneration();
+  const previous = captureInFlight;
+  if (previous) {
+    if (previous.generation === generation) return previous.promise;
+    // An Allow interaction may replace consent while Google's earlier get is
+    // pending. Coalesce within one generation only; the old task will discard
+    // its stale result and the still-current new interaction needs its own get.
+    await previous.promise;
+    if (generation !== analyticsCaptureGeneration()) return;
+    return captureAnalyticsContext(measurementId);
+  }
+  const promise = performCapture(measurementId);
+  captureInFlight = { generation, promise };
   try {
-    await captureInFlight;
+    await promise;
   } finally {
-    captureInFlight = null;
+    if (captureInFlight?.promise === promise) captureInFlight = null;
   }
 }
 async function performCapture(measurementId: string): Promise<void> {

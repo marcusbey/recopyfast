@@ -80,20 +80,27 @@ export async function signOutAnalyticsContext(): Promise<void> {
   enqueueIntent("signout");
   await retryAnalyticsRevocation();
 }
-let revocationInFlight: Promise<void> | null = null;
+let revocationInFlight: Promise<boolean> | null = null;
 let captureRequest: Promise<Response | null> | null = null;
 let grantRequest: Promise<Response | null> | null = null;
 let grantTask: Promise<void> | null = null;
 export async function retryAnalyticsRevocation(): Promise<void> {
-  if (revocationInFlight) return revocationInFlight;
-  revocationInFlight = performPendingRevocation();
-  try {
-    await revocationInFlight;
-  } finally {
-    revocationInFlight = null;
+  // An empty drain must not leave a resolved singleton that swallows a new
+  // intent queued in the same turn. After a successful flight, check durable
+  // work again; after failure, leave it pending for the next real interaction.
+  while (revocationInFlight || Object.keys(readPending()).length) {
+    let flight = revocationInFlight;
+    if (!flight) revocationInFlight = flight = performPendingRevocation();
+    let completed: boolean;
+    try {
+      completed = await flight;
+    } finally {
+      if (revocationInFlight === flight) revocationInFlight = null;
+    }
+    if (!completed) return;
   }
 }
-async function performPendingRevocation(): Promise<void> {
+async function performPendingRevocation(): Promise<boolean> {
   // Finish responses that can install HttpOnly material before clearing it.
   // Never synthesize work from a settled denied choice: that exhausted the
   // shared IP allowance on every ordinary click in the original PR review.
@@ -106,10 +113,10 @@ async function performPendingRevocation(): Promise<void> {
       : pending.signout
         ? "signout"
         : null;
-    if (!action) return;
+    if (!action) return true;
     const generation = pending[action];
     const response = await requestContext({ action });
-    if (!response?.ok) return;
+    if (!response?.ok) return false;
     const latest = readPending();
     if (latest[action] === generation) delete latest[action];
     writePending(latest);
