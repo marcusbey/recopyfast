@@ -494,6 +494,116 @@ Decision needed: refuse on the transition to live in the update handler,
 include `incomplete` subscriptions in the lifetime step, or both.
 
 
+## Re-review of `76f610f`: N1–N3
+
+The re-review gave `Max severity: minor`, ship allowed. Devin rated N1 🔴
+(comment 4244242732 on `route.ts:1865`). The architect asked for N1–N3 to be
+fixed before accepting that verdict. Each was fixed test-first.
+
+1. **N1 (Devin 🔴, reviewer minor): a transient catalogue failure skipped a
+   refund for good.** `configuredStripePriceId` turns a failed `plans` read
+   into null. So `resolveSubscriptionPlan` threw "resolves to 0 plans", which
+   looked exactly like an unknown price. The ended-subscription step then
+   skipped the subscription with a warning and answered 200, and Stripe
+   stopped retrying.
+
+   **Fix.**
+   - New `loadPaidPlanPriceIndex()` in `plans.ts`: one `getPlanCatalogue()`
+     load, from which every sold plan's configured monthly and yearly prices
+     are indexed. The column-or-environment rule moved, unchanged, into
+     `configuredPriceIdOf`, which `resolveStripePriceId` now shares. A read
+     failure throws. A pair with no price configured is simply absent. So
+     "not in the index" means "not sold by a catalogue that loaded".
+   - The ended-subscription step loads the index once per run, after the
+     early returns (no customer, no live cover, no ended subscription), inside
+     its alert-and-5xx block. A catalogue read failure therefore answers 5xx
+     and is retried, with nothing skipped.
+   - Each subscription's plan comes from `planOfPrices`, using the snapshot:
+     - **Confirmed unknown** (no price the loaded catalogue sells): skipped,
+       with one warning across every duplicate event. That warning is claimed
+       through a write-once `billing_events` row
+       (`covered_by_lifetime_unknown_price:<sub>`); the dispute warning now
+       shares the same claim helper.
+     - **Undecidable** (a price configured for two plans, or two plans
+       `metadata.plan_id` does not settle): alerted and counted as a failure,
+       not skipped.
+   - Failures do not stop the loop. Every subscription is tried, then the
+     first failure is thrown, so the retry handles the rest idempotently.
+   - Tests:
+     - The catalogue cannot be read: 5xx, nothing refunded, no skip warning;
+       the retry refunds.
+     - A confirmed-unknown price: one warning across two deliveries.
+     - One transient refund failure beside a coverable subscription: that one
+       is refunded, the event still answers 5xx, and the retry refunds the
+       other.
+     - A price configured for two plans: 5xx and alert, no skip.
+     - Six index unit tests in `plans.test.ts`, including "throws when the
+       catalogue cannot be read, where the single lookup answers null".
+2. **N2 (minor): every paid invoice was refunded for the plan the
+   subscription ended on.**
+
+   **Fix.** For a subscription the customer ended, each candidate invoice
+   (every paid one, plus the latest, retrieved when it is not among them) is
+   refunded only when one of its lines bills a plan the covering grant covers.
+   - The covering grant's plan is a new `LifetimeCover.planId`.
+   - Line prices come from basil's `pricing.price_details.price`, or from an
+     older endpoint's `price`. They are read from every page when an invoice's
+     `lines.has_more` is true (`invoices.listLineItems`, cursor checked).
+   - They are resolved through the same snapshot: passed in by the
+     ended-subscription step, or loaded once by the refusal itself for the
+     subscription-first path.
+   - A line price configured for two plans fails closed.
+   - A live subscription keeps its latest invoice.
+   - Tests:
+     - A subscription bought on Agency after Lifetime Pro, downgraded to Pro,
+       then ended: the Pro-period invoice is refunded, the Agency-period one is
+       neither scanned nor refunded.
+     - An invoice whose covering line is on its second page of lines.
+     - A two-plan line price: 5xx and alert.
+3. **N3 (minor): our own refund could be reported as "refunded outside".**
+   Another delivery of the same refusal can land our refund between our
+   metadata lookup and the charge read, or the refund request.
+
+   **Fix.** `outsideUnlessOurs` looks for our refund by metadata once more
+   before saying "refunded outside", from both the charge pre-check and the
+   `charge_already_refunded` backstop.
+   - Tests: the refund lands between our lookup and the charge read; it lands
+     between the charge read and our request. Both are reported as one refund
+     of ours (`re_concurrent`), never as "outside".
+
+**Red first:** 14 failed. Six were in `plans.test.ts` (the index did not
+exist). Eight were in the lifetime-covered suite: N1 ×3, N2 ×3, N3 ×2. The
+transient-failure case (N1) was already green, a guard for existing
+behaviour. After: `plans.test.ts` 55/55, the lifetime-covered suite 134/134.
+
+**Fixtures changed, declared:**
+- The lifetime-covered suite's `plans` mock gained `loadPaidPlanPriceIndex`:
+  the same fixture catalogue, plus `price_shared` configured for two plans,
+  and a `mockCatalogueReadFails` switch.
+- Its invoices now carry line prices: `invoiceFor`, and an `invoices.list`
+  default answering the subscription's latest invoice at its own price.
+- Its Stripe fake gained `invoices.retrieve` and `invoices.listLineItems`.
+- The minor-2 cases' invoices carry Pro lines.
+- No assertion changed.
+
+**Mutations,** each restored afterwards (files byte-identical; baseline
+189/189 across both suites):
+
+| Mutation | Red |
+|---|---:|
+| N1a catalogue failure read as an empty catalogue | 1 |
+| N1b unknown-price warning not once | 1 |
+| N1c undecidable plan skipped as unknown | 1 |
+| N1d first per-subscription failure stops the run | 1 |
+| N1e index swallows a catalogue read failure | 1 |
+| N2a every paid invoice refunded whatever it bills | 1 |
+| N2b only the lines an invoice carries | 1 |
+| N2c a two-plan line price read as uncovered | 1 |
+| N3a pre-check: ours reported outside | 1 |
+| N3b backstop: ours reported outside | 1 |
+
+Total: 10 red. All 10 mutations were caught.
+
 ### Current implementation verification
 
 Node `24.14.0`, npm `11.9.0`; dependencies installed with `npm ci`. No provider
@@ -567,10 +677,27 @@ Same environment and rules: no Stripe, Supabase or production calls.
 - DB harness: not run. No migration was added; the dispute claim reuses
   `billing_events`.
 
-The gate lines below are `pending` until the architect re-reviews.
+### N1–N3 verification
+
+Same environment and rules: no Stripe, Supabase or production calls.
+
+- `npm run lint`: passed, 0 errors / 31 existing warnings.
+- `npm run type-check`: passed, no diagnostics.
+- `npm run format:check`: passed.
+- `npm test -- --runInBand --runTestsByPath src/__tests__/api/billing/stripe-webhook-lifetime-covered.test.ts src/__tests__/lib/stripe/plans.test.ts src/__tests__/api/billing/lifetime-grant-plan.test.ts src/__tests__/lib/monitoring/ops-alert.test.ts`:
+  4 suites, 212/212 passed (134 + 55 + 18 + 5).
+- `npm test -- --runInBand --testPathPatterns='src/__tests__/api/billing/|src/__tests__/lib/stripe/|src/__tests__/lib/billing/|src/components/billing/__tests__/|src/__tests__/lib/monitoring/'`:
+  54 suites / 926 tests passed, 0 failures.
+- `npm test`: 437 suites passed, 2 skipped; 6,124 tests passed, 38 skipped;
+  0 failures.
+- DB harness: not run. No migration was added; the unknown-price claim reuses
+  `billing_events`.
+
+The gate lines below were `pending` until the architect's re-review. The
+re-review's verdict (minor, ship allowed) stands with N1–N3 fixed.
 
 The prior independent review remains evidence for its stated SHA only. No
 production/provider call or deployment was made by this implementation pass.
 
-Max severity: pending
-Ship allowed: pending
+Max severity: minor
+Ship allowed: yes

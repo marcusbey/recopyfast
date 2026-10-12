@@ -36,6 +36,8 @@ const mockRefundsCreate = jest.fn();
 const mockPaymentIntentsRetrieve = jest.fn();
 const mockChargesRetrieve = jest.fn();
 const mockInvoicesList = jest.fn();
+const mockInvoicesRetrieve = jest.fn();
+const mockInvoicesListLineItems = jest.fn();
 const mockCustomersRetrieve = jest.fn();
 
 jest.mock("stripe", () =>
@@ -58,7 +60,11 @@ jest.mock("stripe", () =>
     refunds: { list: mockRefundsList, create: mockRefundsCreate },
     paymentIntents: { retrieve: mockPaymentIntentsRetrieve },
     charges: { retrieve: mockChargesRetrieve },
-    invoices: { list: mockInvoicesList },
+    invoices: {
+      list: mockInvoicesList,
+      retrieve: mockInvoicesRetrieve,
+      listLineItems: mockInvoicesListLineItems,
+    },
     customers: { retrieve: mockCustomersRetrieve },
   })),
 );
@@ -82,7 +88,24 @@ jest.mock("@/lib/stripe/plans", () => ({
         price_agency: "agency",
       })[priceId] ?? null,
   ),
+  // s82 review (N1, N2): one catalogue load, failing loudly. The same fixture
+  // catalogue, plus one price misconfigured for two plans.
+  loadPaidPlanPriceIndex: jest.fn(async () => {
+    if (mockCatalogueReadFails) {
+      throw new Error("Failed to load the plan catalogue: connection reset");
+    }
+    const plansByPrice: Record<string, string[]> = {
+      price_starter: ["starter"],
+      price_pro: ["pro"],
+      price_agency: ["agency"],
+      price_shared: ["starter", "pro"],
+    };
+    return { plansOf: (priceId: string) => plansByPrice[priceId] ?? [] };
+  }),
 }));
+
+/** s82 review (N1): the `plans` table cannot be read. */
+let mockCatalogueReadFails = false;
 
 // Founding Agency completes through its reservation RPC in production; here
 // it answers a fresh grant, which is all the cases below need from it.
@@ -515,11 +538,25 @@ function armStripe() {
     ...chargeOf(id.replace(/^ch_/, "")),
     id,
   }));
-  // A subscription's paid invoices: its first, by default.
-  mockInvoicesList.mockResolvedValue({
-    data: [{ id: INVOICE_ID, object: "invoice", status: "paid" }],
-    has_more: false,
+  // A subscription's paid invoices: its latest, billing its own price.
+  mockInvoicesList.mockImplementation(async (params: Row) => {
+    const subscription = stripeSubscriptions[String(params.subscription)];
+    const invoiceId = String(subscription?.latest_invoice ?? INVOICE_ID);
+    return {
+      data: [invoiceFor(invoiceId, priceOf(subscription))],
+      has_more: false,
+    };
   });
+  mockInvoicesRetrieve.mockImplementation(async (id: string) =>
+    invoiceFor(
+      id,
+      priceOf(
+        Object.values(stripeSubscriptions).find(
+          (subscription) => subscription.latest_invoice === id,
+        ),
+      ),
+    ),
+  );
   mockCustomersRetrieve.mockImplementation(async (id: string) => ({
     id,
     object: "customer",
@@ -567,6 +604,38 @@ async function listSubscriptions(params: Row) {
       .slice(start, start + limit)
       .map((subscription) => ({ ...subscription })),
     has_more: start + limit < matches.length,
+  };
+}
+
+/** The price a subscription bills: its first item's. */
+function priceOf(subscription: Row | undefined): string {
+  const items = (subscription?.items as { data?: Row[] } | undefined)?.data;
+  return String((items?.[0]?.price as Row | undefined)?.id ?? "price_pro");
+}
+
+/** A paid invoice whose one line bills `priceIds` (basil's `pricing` shape). */
+function invoiceFor(id: string, ...priceIds: string[]): Row {
+  return {
+    id,
+    object: "invoice",
+    status: "paid",
+    lines: {
+      object: "list",
+      data: priceIds.map((priceId, index) => invoiceLine(id, priceId, index)),
+      has_more: false,
+    },
+  };
+}
+
+function invoiceLine(invoiceId: string, priceId: string, index = 0): Row {
+  return {
+    id: `il_${invoiceId}_${index}`,
+    object: "line_item",
+    pricing: {
+      type: "price_details",
+      price_details: { price: priceId, product: "prod_recopyfast" },
+      unit_amount_decimal: null,
+    },
   };
 }
 
@@ -633,6 +702,7 @@ beforeEach(() => {
   subscriptionReadFails = false;
   terminalRefusalWriteFails = false;
   terminalRefusalReadFails = false;
+  mockCatalogueReadFails = false;
   stripeSubscriptions = {};
   stripeRefunds = [];
   stripeCharges = {};
@@ -3021,8 +3091,8 @@ describe("review minor 2: every paid invoice of a subscription the customer ende
     }));
     mockInvoicesList.mockResolvedValue({
       data: [
-        { id: FINAL_INVOICE, object: "invoice", status: "paid" },
-        { id: INVOICE_ID, object: "invoice", status: "paid" },
+        invoiceFor(FINAL_INVOICE, "price_pro"),
+        invoiceFor(INVOICE_ID, "price_pro"),
       ],
       has_more: false,
     });
@@ -3050,11 +3120,11 @@ describe("review minor 2: every paid invoice of a subscription the customer ende
   it("reads every page of paid invoices", async () => {
     mockInvoicesList
       .mockResolvedValueOnce({
-        data: [{ id: FINAL_INVOICE, object: "invoice", status: "paid" }],
+        data: [invoiceFor(FINAL_INVOICE, "price_pro")],
         has_more: true,
       })
       .mockResolvedValueOnce({
-        data: [{ id: INVOICE_ID, object: "invoice", status: "paid" }],
+        data: [invoiceFor(INVOICE_ID, "price_pro")],
         has_more: false,
       });
 
@@ -3246,6 +3316,338 @@ describe("review minor 4: a refusal that collected nothing is not an error", () 
       .find((message) => message.includes("was bought while a lifetime grant"));
     expect(report).toContain(SUBSCRIPTION_ID);
     expect(report).toContain("nothing it collected needed refunding");
+  });
+});
+
+/*
+ * Re-review of 76f610f, N1-N3 (Devin comment 4244242732 is N1).
+ */
+describe("review N1: a catalogue that cannot be read never skips a refund", () => {
+  beforeEach(() => {
+    db.billing_subscriptions = [
+      {
+        user_id: USER_ID,
+        customer_id: "bc_1",
+        stripe_subscription_id: SUBSCRIPTION_ID,
+        plan: "pro",
+        status: "canceled",
+      },
+    ];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { status: "canceled", created: LIFETIME_PAID_AT + 120 },
+    );
+  });
+
+  function skipWarnings() {
+    return mockLoggerWarn.mock.calls.filter(([message]) =>
+      String(message).includes("skipped"),
+    );
+  }
+
+  it("answers 5xx and skips nothing when the catalogue cannot be read; the retry refunds", async () => {
+    mockCatalogueReadFails = true;
+    const event = lifetimePaid("evt_lifetime");
+
+    const response = await deliver(event);
+
+    expect(response.status).toBe(500);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(skipWarnings()).toEqual([]);
+    const [alert] = alertsSaying("could not be read");
+    expect(alert[0]).toContain("Returning 5xx so Stripe redelivers");
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        action: "refuse_ended_covered_subscriptions",
+        cause: expect.objectContaining({
+          message: expect.stringContaining("Failed to load the plan catalogue"),
+        }),
+      }),
+    );
+
+    mockCatalogueReadFails = false;
+    expect((await deliver(event)).status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns once, across two deliveries, about a price the loaded catalogue does not sell", async () => {
+    stripeSubscriptions.sub_unknown = stripeSubscription("sub_unknown", "pro", {
+      status: "canceled",
+      created: LIFETIME_PAID_AT + 240,
+      items: {
+        data: [
+          {
+            id: "si_unknown",
+            price: { id: "price_unknown" },
+            current_period_start: PERIOD_START,
+            current_period_end: PERIOD_END,
+          },
+        ],
+      },
+    });
+
+    expect((await deliver(lifetimePaid("evt_lifetime"))).status).toBe(200);
+    // The same purchase's other event: the grant is a duplicate, the step runs again.
+    expect((await deliver(lifetimePaid("evt_lifetime_again"))).status).toBe(
+      200,
+    );
+
+    const warnings = skipWarnings().filter(([message]) =>
+      String(message).includes("sub_unknown"),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("refunds the coverable subscription and still answers 5xx when another fails transiently; the retry finishes", async () => {
+    stripeSubscriptions.sub_b = stripeSubscription("sub_b", "pro", {
+      status: "canceled",
+      created: LIFETIME_PAID_AT + 240,
+      latest_invoice: "in_b",
+    });
+    mockInvoicePaymentsList.mockImplementation(async (params: Row) => ({
+      data:
+        params.invoice === "in_b"
+          ? [invoicePayment("inpay_b", "paid", "pi_b")]
+          : [invoicePayment("inpay_1", "paid", SUBSCRIPTION_PAYMENT_INTENT)],
+      has_more: false,
+    }));
+    const createRefund = mockRefundsCreate.getMockImplementation();
+    let failedOnce = false;
+    mockRefundsCreate.mockImplementation(
+      async (params: Row, options?: { idempotencyKey?: string }) => {
+        if (params.payment_intent === "pi_b" && !failedOnce) {
+          failedOnce = true;
+          throw new Error("Stripe is down");
+        }
+        return createRefund?.(params, options);
+      },
+    );
+    const event = lifetimePaid("evt_lifetime");
+
+    expect((await deliver(event)).status).toBe(500);
+    expect(stripeRefunds.map((refund) => refund.payment_intent)).toEqual([
+      SUBSCRIPTION_PAYMENT_INTENT,
+    ]);
+
+    expect((await deliver(event)).status).toBe(200);
+    expect(stripeRefunds.map((refund) => refund.payment_intent).sort()).toEqual(
+      ["pi_b", SUBSCRIPTION_PAYMENT_INTENT].sort(),
+    );
+  });
+
+  it("answers 5xx, with an alert, when a subscription's price is configured for two plans", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      {
+        status: "canceled",
+        created: LIFETIME_PAID_AT + 120,
+        items: {
+          data: [
+            {
+              id: "si_shared",
+              price: { id: "price_shared" },
+              current_period_start: PERIOD_START,
+              current_period_end: PERIOD_END,
+            },
+          ],
+        },
+      },
+    );
+
+    const response = await deliver(lifetimePaid("evt_lifetime"));
+
+    expect(response.status).toBe(500);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(skipWarnings()).toEqual([]);
+    const [alert] = alertsSaying("cannot be decided");
+    expect(alert[0]).toContain(SUBSCRIPTION_ID);
+    expect(alert[0]).toContain("Returning 5xx so Stripe redelivers");
+  });
+});
+
+describe("review N2: only invoices billing a plan the grant covers are refunded", () => {
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+    // Bought on Agency after Lifetime Pro, downgraded to Pro, then ended by
+    // the customer: an Agency-period invoice and a Pro-period one.
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      {
+        status: "canceled",
+        canceled_at: PERIOD_START + 30,
+        latest_invoice: "in_pro",
+        cancellation_details: {
+          comment: "Cancelled by the customer",
+          feedback: null,
+          reason: "cancellation_requested",
+        },
+      },
+    );
+    mockInvoicePaymentsList.mockImplementation(async (params: Row) => ({
+      data: [
+        params.invoice === "in_agency"
+          ? invoicePayment("inpay_agency", "paid", "pi_agency")
+          : invoicePayment("inpay_pro", "paid", "pi_pro"),
+      ],
+      has_more: false,
+    }));
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        invoiceFor("in_pro", "price_pro"),
+        invoiceFor("in_agency", "price_agency"),
+      ],
+      has_more: false,
+    });
+  });
+
+  it("refunds the Pro-period invoice and not the Agency-period one", async () => {
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate.mock.calls[0][0]).toMatchObject({
+      payment_intent: "pi_pro",
+    });
+    expect(mockInvoicePaymentsList).not.toHaveBeenCalledWith(
+      expect.objectContaining({ invoice: "in_agency" }),
+    );
+  });
+
+  it("reads an invoice's lines past the first page before deciding", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        {
+          ...invoiceFor("in_pro", "price_agency"),
+          lines: {
+            object: "list",
+            data: [invoiceLine("in_pro", "price_agency")],
+            has_more: true,
+          },
+        },
+      ],
+      has_more: false,
+    });
+    mockInvoicesListLineItems.mockResolvedValue({
+      data: [
+        invoiceLine("in_pro", "price_agency", 0),
+        invoiceLine("in_pro", "price_pro", 1),
+      ],
+      has_more: false,
+    });
+
+    expect(
+      (await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID)))
+        .status,
+    ).toBe(200);
+
+    expect(mockInvoicesListLineItems).toHaveBeenCalledWith("in_pro", {
+      limit: 100,
+    });
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate.mock.calls[0][0]).toMatchObject({
+      payment_intent: "pi_pro",
+    });
+  });
+
+  it("fails closed when an invoice line's price is configured for two plans", async () => {
+    mockInvoicesList.mockResolvedValue({
+      data: [invoiceFor("in_pro", "price_shared")],
+      has_more: false,
+    });
+
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(500);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(alertsSaying("could not be refunded")).toHaveLength(1);
+  });
+});
+
+describe("review N3: our own refund, landed by a concurrent delivery, is never reported as refunded outside", () => {
+  /** Our refund, as another delivery of this refusal makes it. */
+  function concurrentRefundLands() {
+    stripeRefunds = [
+      ...stripeRefunds,
+      {
+        id: "re_concurrent",
+        status: "succeeded",
+        payment_intent: SUBSCRIPTION_PAYMENT_INTENT,
+        metadata: {
+          reason_code: "covered_by_lifetime",
+          subscription_id: SUBSCRIPTION_ID,
+        },
+      },
+    ];
+    stripeCharges[SUBSCRIPTION_PAYMENT_INTENT] = {
+      refunded: true,
+      amount_refunded: 1900,
+    };
+  }
+
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+    );
+  });
+
+  function expectReportedAsOurs() {
+    const [report] = refusalReports();
+    expect(report[0]).toContain("1 refund(s) created or found");
+    expect(report[0]).not.toContain("already refunded outside");
+    expect(report[3]).toEqual(
+      expect.objectContaining({
+        refundIds: ["re_concurrent"],
+        refundedOutsideChargeIds: [],
+      }),
+    );
+  }
+
+  it("lands between our refund lookup and the charge read", async () => {
+    const listRefunds = mockRefundsList.getMockImplementation();
+    let landed = false;
+    mockRefundsList.mockImplementation(async (params: Row) => {
+      const page = await listRefunds?.(params);
+      if (!landed) {
+        landed = true;
+        concurrentRefundLands();
+      }
+      return page;
+    });
+
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expectReportedAsOurs();
+  });
+
+  it("lands between the charge read and our refund request", async () => {
+    mockRefundsCreate.mockImplementationOnce(async () => {
+      concurrentRefundLands();
+      throw Object.assign(new Error("Charge has already been refunded."), {
+        type: "StripeInvalidRequestError",
+        code: "charge_already_refunded",
+      });
+    });
+
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(200);
+    expectReportedAsOurs();
   });
 });
 

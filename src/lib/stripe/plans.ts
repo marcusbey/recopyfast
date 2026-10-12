@@ -672,6 +672,27 @@ export async function resolveStripePriceId(
   // Ensures priceIdOverrides is populated even on a cache hit path that has
   // never loaded in this process.
   const plan = await getPaidPlan(planId);
+  const { priceId, name } = configuredPriceIdOf(planId, billingPeriod);
+
+  if (!priceId) {
+    throw new Error(
+      `No Stripe price configured for the ${plan.name} plan (${billingPeriod}). ` +
+        `Set ${name}, or populate the matching column on plans."${planId}".`,
+    );
+  }
+  return priceId;
+}
+
+/**
+ * The price id configured for a plan/period pair, from the loaded catalogue's
+ * column first and the environment second (see `resolveStripePriceId`), or
+ * null; with the variable to name when it is missing. Reads only what a
+ * catalogue load already put in memory.
+ */
+function configuredPriceIdOf(
+  planId: PaidPlanId,
+  billingPeriod: BillingPeriod,
+): { priceId: string | null; name: string } {
   const row = priceIdOverrides.get(planId);
 
   const override =
@@ -691,15 +712,7 @@ export async function resolveStripePriceId(
       : PRICE_ID_ENV_VARS[planId].monthly;
 
   const { name, value } = stripeEnvVar(envPair);
-  const priceId = override || value;
-
-  if (!priceId) {
-    throw new Error(
-      `No Stripe price configured for the ${plan.name} plan (${billingPeriod}). ` +
-        `Set ${name}, or populate the matching column on plans."${planId}".`,
-    );
-  }
-  return priceId;
+  return { priceId: override || value || null, name };
 }
 
 /** The two periods every paid plan can be billed on. */
@@ -780,6 +793,50 @@ export async function findPaidPlanIdByStripePriceId(
   }
 
   return [...claimants][0];
+}
+
+/** Which paid plans each configured Stripe price bills, from one catalogue load. */
+export interface PaidPlanPriceIndex {
+  /**
+   * The paid plans configured with this price: none when the loaded catalogue
+   * sells no such price, one normally, several when the price is configured
+   * for more than one plan (a misconfiguration the caller must not guess past).
+   */
+  plansOf(priceId: string): readonly PaidPlanId[];
+}
+
+/**
+ * Every configured price of every paid plan the catalogue sells, from ONE
+ * catalogue load.
+ *
+ * s82 review (N1): `findPaidPlanIdByStripePriceId` answers null both for a
+ * price the catalogue does not sell and for a catalogue it could not read
+ * (`configuredStripePriceId` downgrades every failure to "not configured").
+ * Deciding to skip a refund on that null made a transient read failure
+ * permanent. Here a read failure throws, so the caller answers 5xx and is
+ * retried; a pair with no price configured is simply absent, so "not in the
+ * index" means "not sold by a catalogue that loaded".
+ */
+export async function loadPaidPlanPriceIndex(): Promise<PaidPlanPriceIndex> {
+  const catalogue = await getPlanCatalogue();
+  const sold = new Set<string>(catalogue.subscriptions.map((plan) => plan.id));
+
+  const plansByPrice = new Map<string, Set<PaidPlanId>>();
+  for (const planId of PAID_PLAN_IDS) {
+    if (!sold.has(planId)) continue;
+    for (const billingPeriod of BILLING_PERIODS) {
+      const { priceId } = configuredPriceIdOf(planId, billingPeriod);
+      if (!priceId) continue;
+      plansByPrice.set(
+        priceId,
+        new Set([...(plansByPrice.get(priceId) ?? []), planId]),
+      );
+    }
+  }
+
+  return {
+    plansOf: (priceId) => [...(plansByPrice.get(priceId) ?? [])],
+  };
 }
 
 /**

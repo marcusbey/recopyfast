@@ -34,6 +34,7 @@ import {
   findPlanById,
   findPurchasedPlanById,
   isPaidPlanId,
+  loadPaidPlanPriceIndex,
   PAID_PLAN_IDS,
   resolveOneTimePriceId,
   resolveStripePriceId,
@@ -588,6 +589,84 @@ describe("plan catalogue loader", () => {
       ).resolves.toBe("pro");
       await expect(
         findPaidPlanIdByStripePriceId("price_starter_yearly"),
+      ).resolves.toBeNull();
+    });
+  });
+
+  /**
+   * s82 review (N1): the lifetime webhook decides whether a subscription's
+   * refund is skipped from what its price bills. `findPaidPlanIdByStripePriceId`
+   * answers null both for a price the catalogue does not sell and for a
+   * catalogue it could not read, so a transient read failure looked like an
+   * unknown price and the refund was skipped for good. The index is one
+   * catalogue load: a read failure throws, an unconfigured pair is just absent.
+   */
+  describe("the paid-plan price index", () => {
+    it("maps every configured price to the plan that bills it, monthly and yearly", async () => {
+      const index = await loadPaidPlanPriceIndex();
+
+      expect(index.plansOf("price_pro_monthly")).toEqual(["pro"]);
+      expect(index.plansOf("price_pro_yearly")).toEqual(["pro"]);
+      expect(index.plansOf("price_starter_yearly")).toEqual(["starter"]);
+      expect(index.plansOf("price_agency_monthly")).toEqual(["agency"]);
+    });
+
+    it("follows a populated column override", async () => {
+      respondWith([
+        FREE_ROW,
+        STARTER_ROW,
+        planRow({ stripe_price_id_test: "price_promo_override" }),
+        AGENCY_ROW,
+        CREDITS_ROW,
+        LIFETIME_ROW,
+        LIFETIME_AGENCY_ROW,
+      ]);
+
+      const index = await loadPaidPlanPriceIndex();
+
+      expect(index.plansOf("price_promo_override")).toEqual(["pro"]);
+      expect(index.plansOf("price_pro_monthly")).toEqual([]);
+    });
+
+    it("answers no plan for a price the loaded catalogue does not sell", async () => {
+      const index = await loadPaidPlanPriceIndex();
+
+      expect(index.plansOf("price_deleted_in_2024")).toEqual([]);
+      // One-time products are not paid plans.
+      expect(index.plansOf("price_lifetime")).toEqual([]);
+    });
+
+    it("answers every plan claiming a price configured twice", async () => {
+      process.env.STRIPE_STARTER_PRICE_ID = "price_pro_monthly";
+
+      const index = await loadPaidPlanPriceIndex();
+
+      expect([...index.plansOf("price_pro_monthly")].sort()).toEqual([
+        "pro",
+        "starter",
+      ]);
+    });
+
+    it("costs only the pair whose price is not configured", async () => {
+      delete process.env.STRIPE_STARTER_YEARLY_PRICE_ID;
+
+      const index = await loadPaidPlanPriceIndex();
+
+      expect(index.plansOf("price_starter_monthly")).toEqual(["starter"]);
+      expect(index.plansOf("price_starter_yearly")).toEqual([]);
+    });
+
+    it("throws when the catalogue cannot be read, where the single lookup answers null", async () => {
+      selectMock.mockResolvedValue({
+        data: null,
+        error: { message: "connection reset" },
+      });
+
+      await expect(loadPaidPlanPriceIndex()).rejects.toThrow(
+        /Failed to load the plan catalogue/,
+      );
+      await expect(
+        findPaidPlanIdByStripePriceId("price_pro_monthly"),
       ).resolves.toBeNull();
     });
   });
