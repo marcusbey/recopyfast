@@ -30,6 +30,7 @@ export async function readPaymentEvidenceAudit(limit = 10) {
     .abortSignal(AbortSignal.timeout(1500));
   if (diagnostics.error) throw new Error("Payment completeness unavailable");
   return {
+    scope: "stored_billing_accounts" as const,
     ...aggregatePaymentEvidence(histories, {
       accountScanComplete: customers.data.length <= limit,
     }),

@@ -37,7 +37,7 @@ later the same day, in a fresh session, unchanged.
 | Enhanced measurement: video engagement | same | **Off** | Brief |
 | Enhanced measurement: file downloads | same | **On** | Brief |
 | Enhanced measurement: form interactions | same | **Off** | Brief: noisy |
-| Key events | Admin → Data display → Events → Key events | **`sign_up`, `generate_lead`, `begin_checkout`, `tool_scan_completed`**, created "with code", no default value, counted once per event | Brief. `close_convert_lead` and `qualify_lead` (added by the "generate leads" objective) were unmarked. `purchase` is Google's built-in key event and cannot be unmarked; nothing sends it |
+| Key events | Admin → Data display → Events → Key events | **`sign_up`, `generate_lead`, `begin_checkout`, `tool_scan_completed`**, created "with code", no default value, counted once per event | Brief. `close_convert_lead` and `qualify_lead` (added by the "generate leads" objective) were unmarked. `purchase` is Google's built-in key event and cannot be unmarked. s112 implements server-side purchase delivery; production activation and provider receipt remain separate release evidence |
 | Custom dimensions | Admin → Data display → Custom definitions | **`tool_slug`** (event scope, parameter `tool_slug`); **`cta_location`** (event scope, parameter `cta_location`) | Brief |
 | Unwanted referrals | Data streams → RecopyFast web → Configure tag settings → List unwanted referrals | Referral domain contains **`checkout.stripe.com`**; contains **`js.stripe.com`** | Brief: a return from Stripe Checkout is not a new referral |
 | User-provided data capabilities (Google tag) | Configure tag settings → Allow user-provided data capabilities | **Off** | It was **on by default, with automatic detection of emails, phone numbers and addresses on the page**. Turned off: the site sends no personal data to Google |
@@ -116,6 +116,10 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
 
 ## Events
 
+This table describes the implemented event contracts. Server-side conversion delivery requires
+the reviewed migration, deployed code and production configuration; implementation alone does
+not establish activation or actual GA receipt. QA fixtures use the separate QA destination.
+
 | Event | Sent when | Params | Key event |
 |---|---|---|---|
 | `page_view` | each allowlisted pathname (client navigations included) | `page_location`, `page_referrer` | — |
@@ -123,13 +127,15 @@ navigation is still measured. To revert, both the GA checkbox and the code must 
 | `begin_checkout` | click on a same-origin link to `/dashboard/billing` (Pricing's "Buy Lifetime Pro", "Buy founding access") | `cta_location` | yes |
 | `try_started` | the `/try` sample preview becomes active | — | no |
 | `tool_scan_completed` | a free tool produced the visitor's own result. Scanning tools (s96, `ToolScanForm`): on the tool page, when the scan succeeds, just before the report opens. The calculator: once per page view, the first time the inputs settle while analytics is active (`track` returns whether it sent; a result before consent does not use the event up) | `tool_slug` (never the scanned address) | yes |
-| `sign_up` | **not sent yet** — see below | — | yes |
+| `sign_up` | the server worker claims an eligible frozen initial signup/invite source after verified authentication; repeat logins and unproven initial confirmations do not qualify (s111) | `method: email` | yes |
+| `purchase` | the server worker claims a canonical, consented source after successfully processed live billing evidence proves a qualifying collected payment (s112) | opaque `transaction_id`, `currency: USD`, `value`, `tax`, catalog `items`; `customer_type` only when history proves it | yes, built-in |
+| `refund` | a successful refund has causal settlement/allocation proof and its purchase has accepted HTTP; the purchase's frozen context must still be eligible at refund occurrence and dispatch (s112) | the purchase's opaque `transaction_id`, `currency: USD`, returned product `value` and `tax`; no inferred item quantities | not configured here |
 
 `cta_location` values: `hero`, `header`, `final_cta`, `founding_offer`, `pricing_plan`,
 `pricing_lifetime_pro`, `pricing_founding_agency`, `comparison_page`, `compare_index`,
 `tool_page`, `try_page`, `demo`, `blog_index` (from `data-cta-location`), else `header`,
-`footer`, the enclosing `section` id, or `page`. Every param value must match
-`^[a-z0-9][a-z0-9_-]{0,63}$` or it is dropped.
+`footer`, the enclosing `section` id, or `page`. Browser custom-event values for
+`cta_location` and `tool_slug` must match `^[a-z0-9][a-z0-9_-]{0,63}$` or they are dropped.
 
 ### Free tools (s96): the tool page is measured, the report is not
 
@@ -157,12 +163,14 @@ track("tool_scan_completed", { tool_slug: TOOL_SLUG });
 It is a no-op unless analytics runs on that page, and returns whether it sent: if the event
 should go once per page view, mark it sent only on `true`.
 
-### `sign_up`: Measurement Protocol follow-up (not built)
+### Server-side conversions: Measurement Protocol (s111/s112)
 
 `/signup` and all private authentication documents stay on the nonce policy, with no Google
 script. s111 freezes the eligible first-party source after verified authentication and delivers
 `sign_up` from the bounded server worker, as specified below. Reading the current `_ga` cookie
-or counting every successful callback is not the signup contract.
+or counting every successful callback is not the signup contract. s112 extends that outbox with
+verified purchases and refunds through the commerce-aware v2 worker. These paths are
+implemented; production activation and provider receipt must be verified for the released head.
 
 ## Checking it in production
 
@@ -298,9 +306,10 @@ uncertain events. Auth success/trial grants do not depend on Google or analytics
 
 Use Node24 and `node scripts/check-analytics-conversions.mjs --mode=validate` with the QA key
 in `GA4_MP_QA_API_SECRET` supplied through a protected child environment. This imports the exact
-application payload/transport module. `--mode=receipt` sends one synthetic signup only to fixed
-`G-JHTG44WQ5W`; there is no arbitrary target, URL, event or production fallback. Purchase/refund
-fixtures are not added until s112. Never use production credentials in tests.
+application payload/transport module. Without `--scenario=payments`, explicitly passing
+`--mode=receipt` sends one synthetic signup only to fixed `G-JHTG44WQ5W`; there is no arbitrary target, URL, event or production
+fallback. s112's `--scenario=payments` adds the fixed purchase, duplicate, renewal and refund
+fixtures described below. Never use production credentials in tests.
 
 Validation uses ENFORCE_RECOMMENDATIONS but neither records an event nor authenticates the
 secret. `accepted_http` means only a2xx response. Actual RecopyFast QA report receipt is separate
@@ -339,9 +348,9 @@ WHERE u.email_confirmed_at IS NOT NULL;
 ROLLBACK;
 ```
 
-These counts cannot determine paying customers; verified live billing reconciliation remains
-s112. A zero GA count never proves zero confirmed accounts, and an HTTP-accepted row is not a
-provider ingestion receipt.
+These counts cannot determine paying customers; the s112 readout below provides verified live
+billing reconciliation independently of signup delivery. A zero GA count never proves zero
+confirmed accounts, and an HTTP-accepted row is not a provider ingestion receipt.
 
 ## Verified purchases and paying accounts (s112)
 
@@ -358,6 +367,10 @@ Refund delivery reuses the purchase's frozen context and requires consent at ref
 ### Bounded first-party readout
 
 `scripts/check-payment-evidence.mjs` bundles and runs the same read-only application normalizer. It loads no `.env` files and never claims, enqueues, sends analytics, charges, refunds or changes billing. Supply provider/database configuration through a deliberately isolated process environment, set `ANALYTICS_AUDIT_READONLY=1`, and run `node scripts/check-payment-evidence.mjs --accounts=10` (maximum 100). Do not run a Vercel env command inside a checkout whose local `.env` can shadow the intended provider mode. The configured mode is not evidence of an individual payment's mode; event and object checks still apply.
+
+The machine-readable `scope` is `stored_billing_accounts`: the report scans retained
+`billing_customers` rows, not the complete Stripe account universe. Account/history completeness
+flags and exact totals are confined to that scope.
 
 Output contains aggregates only: verified live unique paying accounts, canonical transactions, proven first payments, returning payments, gross collected USD minor units, net retained amount or explicit unknown, history completeness and source/delivery reason counts. Accounts outside the bound and unresolved legacy evidence make payer totals lower bounds. The same source can appear through Checkout and PI events without adding a transaction. A genuine full refund can leave a historical payer with net zero; an automatic returned duplicate is excluded from acquisition. Current paid entitlement/trial status is separate and is never substituted for these money measures.
 
@@ -377,3 +390,23 @@ Exact aggregate money totals are null if any scanned history or the account scan
 Current paid-entitlement coverage describes the application's reconciled entitlement snapshot backed by a verified live payment: an active/past-due subscription with a qualifying paid invoice, or a non-trial purchased grant that is unrevoked and unexpired. Trial-only access, TEST payments and support comps are not counted as paid. Missing payment/reference proof or an incomplete account scan makes the total unknown; the verified subset is separately named. This is not a claim that every current Stripe subscription was freshly retrieved.
 
 A complete refund of a taxed invoice has known returned product value and tax. A complete PI return funding several known invoice shares has known per-invoice refund allocations and zero retained principal; these corrections use refund-plus-parent source keys. Unprovable partial mixed/taxed allocations remain unknown. Item quantities remain omitted from refund payloads.
+
+
+### Historical amounts and read bounds
+
+Historical one-off money and quantity come from the original completed, paid Checkout Session
+and its complete line-item list, cross-checked against the successful payment event, captured
+cash and reconciled account/purchase evidence. Original discounts and tax determine product
+value. Today's catalog price or credit-pack size cannot overwrite that history; an archived
+original Stripe Price is valid evidence. Missing, ambiguous or inconsistent original evidence
+remains unknown. No Checkout customer payload is retained in the analytics outbox.
+
+Both refund-list passes enforce at most 100 total rows. The same source-wide 60-read budget
+and 10-second **admission** deadline cover both passes, historical Checkout reads and history
+lookups. Already-admitted Stripe requests have a 1.5-second timeout and no SDK retries; the
+admission deadline is not a claim of hard cancellation at ten seconds.
+
+Equal-second distinct payments do not establish their chronological order. Their per-payment
+`customer_type` stays omitted unless a strictly earlier verified payment proves returning;
+Stripe IDs are never used to invent an order. Unique verified paying-account deduplication is
+separate from that classification.

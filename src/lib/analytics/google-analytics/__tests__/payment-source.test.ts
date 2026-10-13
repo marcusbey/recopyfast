@@ -2,6 +2,7 @@
 import { normalizeBillingConversionSource } from "../payment-source";
 import { normalizePaymentSource } from "../payment-conversions";
 jest.mock("../payment-conversions", () => ({
+  ...jest.requireActual("../payment-conversions"),
   normalizePaymentSource: jest.fn(),
 }));
 const purchase = {
@@ -186,4 +187,42 @@ test("review regression: full split-PI return has provable allocation to both in
   );
   expect(result.state).toBe("normalized");
   expect(result.refunds).toHaveLength(2);
+});
+
+test("the second refund pass enforces the same 100-row total cap", async () => {
+  const f = fixture();
+  const failed = Array.from({ length: 99 }, (_, i) => ({
+    ...f.refund,
+    id: `re_failed_${i}`,
+    status: "failed",
+  }));
+  f.reads.refunds
+    .mockResolvedValueOnce({ data: [f.refund, ...failed], has_more: true })
+    .mockResolvedValueOnce({
+      data: [{ ...f.refund, id: "re_101", status: "failed" }],
+      has_more: false,
+    });
+  expect(
+    await normalizeBillingConversionSource(f.source, f.reads as never),
+  ).toMatchObject({
+    state: "pending",
+    reason: "normalization_limit",
+    refunds: [],
+  });
+  expect(f.reads.refunds).toHaveBeenCalledTimes(2);
+});
+
+test("exhausting the shared budget during refund reread is explicit retryable incompleteness", async () => {
+  const f = fixture();
+  const { PaymentReadBudgetExceeded } = jest.requireActual(
+    "../payment-conversions",
+  );
+  f.reads.refunds.mockRejectedValueOnce(new PaymentReadBudgetExceeded());
+  expect(
+    await normalizeBillingConversionSource(f.source, f.reads as never),
+  ).toMatchObject({
+    state: "pending",
+    reason: "normalization_limit",
+    refunds: [],
+  });
 });

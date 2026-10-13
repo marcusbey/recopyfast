@@ -79,5 +79,50 @@ This is implementation approval. Hosted CI, provider validation and real QA inge
 reviewed production migration/deployment and genuine live-customer observation remain distinct
 release evidence. No fixture or QA purchase may be reported as production traction.
 
+
+## Reopened after fresh Devin review (2026-10-13)
+
+The ebc99e review identified an automatic-return exclusion race before a stale purchase
+insertion, and a historical one-off amount comparison against the current catalogue.
+These concrete findings require reproduced fixes and independent re-review. Equal-second
+customer ordering and combined refund-read bounds require explicit disposition. The prior
+pass does not authorize shipping the current revision while these findings remain open.
+Hosted E2E also reported one retry-passing dashboard navigation timeout; zero-flake final
+head acceptance remains required. No production payment migration has been applied.
+
+## Automatic-return repair independent verification
+
+The scoped SQL repair passed independent PostgreSQL17 replay:168 tests/19 suites, one
+inherited skip. Canonical suppressed tombstones block stale later purchases, owner mismatch
+fails before exclusion, accepted/sending/uncertain rows retain their claim/history semantics,
+and receipt linkage commits atomically. Isolated rollback of the fix caused exactly two
+failures (stale purchase resurrection and cross-account exclusion), then restored byte-for-byte.
+Migration SHA256:17d4d795bf06323876edcdf596e4eee146eb42bca34e28364d58745066c84815.
+Evidence:/tmp/s112-independent-exclusion-green.log and /tmp/s112-independent-exclusion-mutant.log.
+Historical-price and combined-row-cap repairs still require independent review.
+
+## Final Devin repair review
+
+Independent review found no remaining actionable findings. Historical one-off amounts and
+quantities come from original completed and paid Checkout lines/session totals, cross-checked
+against account, payment, currency and provisioning evidence. Current catalogue price or
+pack size cannot rewrite history. Missing or contradictory originals remain unknown. New
+read-only SDK calls share the existing request budget; both refund passes cap total rows at100.
+Equal-second ordering remains conservatively unclassified. The operator report explicitly
+labels its stored-billing-account scope and does not claim a complete external Stripe audit.
+
+Independent446 tests/24 focused suites passed. Isolated current-price/refund-cap mutations
+caused three failures; restored focused tests passed78/78. Prior168 PostgreSQL tests and two
+SQL mutation failures remain applicable to unchanged migration17d4d795bf06323876edcdf596e4eee146eb42bca34e28364d58745066c84815.
+Prettier changed only DB-test formatting; independent AST comparison confirmed identical
+operators, statement order and literals. All35 author files match manifest SHA256
+8da52765677aa3b421f9f3f3f09a8be9574a3d9a7cd1be525a1cf65f632f082a.
+
+Author full typecheck, lint (0 errors/33 inherited warnings), full formatting and production
+build passed. Full normal commit hooks and exact-head hosted CI remain required, as do
+separate QA receipt and production release checks. No synthetic production conversion or
+live charge has been performed. Evidence:/tmp/s112-independent-devin-final-jest.log,
+/tmp/s112-historical-mutant.log and /tmp/s112-historical-restored.log.
+
 Max severity: none
 Ship allowed: yes

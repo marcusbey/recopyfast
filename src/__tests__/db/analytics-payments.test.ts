@@ -507,6 +507,80 @@ describeDb(
           await query("delete from billing_customers where id=$1", [customer]);
         }
       });
+
+      test("automatic exclusion before stale purchase completion persists a canonical tombstone", async () => {
+        const f = await fixture();
+        await context(f.user);
+        const stale = await claimFor(f.event);
+        const p = candidate(f.user);
+        const refundEvent = `evt_${randomUUID().replaceAll("-", "")}`;
+        events.push(refundEvent);
+        await query(
+          "insert into billing_events(user_id,stripe_event_id,event_type,data,processed) values($1,$2,'charge.refunded','{}',true)",
+          [f.user, refundEvent],
+        );
+        const exclusion = await claimFor(refundEvent);
+        await finish(refundEvent, exclusion.claim_token, [
+          { ...p, kind: "exclude_purchase" },
+        ]);
+        await finish(f.event, stale.claim_token, [p]);
+        const rows = (
+          await query(
+            "select state,reason,context_id,frozen_context_id from analytics_delivery_events where source_key=$1",
+            [p.source_key],
+          )
+        ).rows;
+        expect(rows).toEqual([
+          {
+            state: "suppressed",
+            reason: "purchase_unsent",
+            context_id: null,
+            frozen_context_id: null,
+          },
+        ]);
+      });
+      test("an exclusion cannot silently collide with another account's canonical purchase", async () => {
+        const owner = await fixture();
+        const p = candidate(owner.user);
+        const a = await claimFor(owner.event);
+        await finish(owner.event, a.claim_token, [p]);
+        const other = await fixture();
+        const b = await claimFor(other.event);
+        await expect(
+          finish(other.event, b.claim_token, [
+            { ...p, kind: "exclude_purchase", user_id: other.user },
+          ]),
+        ).rejects.toMatchObject({ code: "22023" });
+      });
+      test("an automatic exclusion never recalls an already claimed sending purchase", async () => {
+        const f = await fixture();
+        await context(f.user);
+        const p = candidate(f.user);
+        const a = await claimFor(f.event);
+        await finish(f.event, a.claim_token, [p]);
+        await query(
+          "update analytics_delivery_events set state='sending',claim_token=gen_random_uuid(),claimed_at=now() where source_key=$1",
+          [p.source_key],
+        );
+        const event = `evt_${randomUUID().replaceAll("-", "")}`;
+        events.push(event);
+        await query(
+          "insert into billing_events(user_id,stripe_event_id,event_type,data,processed) values($1,$2,'charge.refunded','{}',true)",
+          [f.user, event],
+        );
+        const b = await claimFor(event);
+        await finish(event, b.claim_token, [
+          { ...p, kind: "exclude_purchase" },
+        ]);
+        expect(
+          (
+            await query(
+              "select state,payload is not null as has_payload,claim_token is not null as has_token from analytics_delivery_events where source_key=$1",
+              [p.source_key],
+            )
+          ).rows[0],
+        ).toEqual({ state: "sending", has_payload: true, has_token: true });
+      });
     });
   },
 );

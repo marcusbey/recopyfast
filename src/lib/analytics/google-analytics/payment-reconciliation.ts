@@ -4,8 +4,9 @@ import { normalizeBillingConversionSource } from "./payment-source";
 import { summarizePaymentHistory } from "./payment-conversions";
 import { classifyAccountPaymentHistory } from "./payment-history";
 
-/** Two sources: one new and one retry slot, each with a 10-second provider
- * deadline. This cron never contacts Google and cannot reclaim a Google send. */
+/** Two sources: one new and one retry slot, each with a 10-second read-admission
+ * deadline and bounded in-flight requests. This cron never contacts Google and
+ * cannot reclaim a Google send. */
 export async function reconcilePaymentAnalytics() {
   const counts = {
     disabled: false,

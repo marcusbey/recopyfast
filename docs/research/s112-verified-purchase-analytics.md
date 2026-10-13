@@ -78,3 +78,42 @@ The payment adapter's read-only ports are connected to the existing billing tabl
 Refund settlement needs causal evidence for each individual refund. `Refund.created` is request time and cannot establish the successful settlement of a formerly pending refund. A later `charge.refunded` event listing several historical refunds does not establish one settlement time for every child. The local refund helper therefore returns accounting snapshots only, without inventing conversion occurrence timestamps. The integrated reconciler verifies causal successful transitions in the original processed charge event before enqueueing each refund. Missing proof remains explicitly unknown. No webhook subscription or monetary handler was changed to manufacture this evidence.
 
 The bounded adapter supports recognized, fully cash-funded single-item subscription invoices and recognized one-time products. Mixed credit, unsupported item/tax shapes, direct-charge allocations without a PI, and unprovable partial refund allocation across multiple invoices remain explicit unknown outcomes. Complete returns preserve provable per-invoice cash/tax allocation and zero retained principal. Whole-PI amounts are never copied into each invoice. Reads are capped at 60 per source attempt, five pages per list, 100 rows per list and 20 invoice/payment fan-outs; exceeding a bound is pending/incomplete, never silent truncation. The integration's provider client must also keep request timeouts bounded.
+
+
+## Fresh Devin review dispositions — 2026-10-13
+
+1. **Automatic-exclusion ordering — actionable, reproduced and repaired.** An UPDATE-only
+   exclusion before a stale purchase completion left no source disposition. The migration now
+   creates a canonical suppressed outbox tombstone under the shared locks, preserves claimed,
+   accepted and uncertain purchases, and rejects conflicting account ownership. Native PostgreSQL
+   regressions failed before the repair and passed afterward. SQL and DB-test verification is
+   separately owned during this repair round.
+2. **Historical one-off price drift — actionable, reproduced and repaired.** The old comparison
+   with today's catalog price erased legitimate lifetime/credit transactions after catalog
+   changes. Original Checkout totals and quantity now govern those amounts. The existing credit
+   ledger stores original `credits_purchased` and `price_cents` (the webhook writes
+   `amount_received`); lifetime evidence retains the granted plan and PI identity. Original
+   success-event metadata, customer/account links, mode, currency and full original cart must
+   agree. No current-price fallback or provider mutation was introduced.
+3. **Equal-second ordering — intentional omission.** Same-second distinct transactions do not
+   prove first/second order. No code change invents order from source IDs; an earlier verified
+   timestamp still proves returning. Explicit regressions cover both cases.
+4. **Refund reread bounds — request/deadline guard confirmed; row-cap discrepancy repaired.**
+   The real read factory's 60-call budget and 10-second admission deadline are shared across both
+   passes and history. Admission61 and post-deadline admission reject before provider access.
+   The second pass previously permitted500 rows while the normalizer permitted100; both now
+   stop at100 total rows with a retryable incomplete outcome. In-flight requests retain their
+   1.5-second timeout; ten seconds is not hard cancellation.
+
+Pinned Stripe SDK18.4.0 types and the official versioned
+[session list reference](https://docs.stripe.com/api/checkout/sessions/list?api-version=2025-07-30.basil)
+confirm `payment_intent` filtering. The
+[line-item reference](https://docs.stripe.com/api/checkout/sessions/line_items?api-version=2025-07-30.basil)
+requires full pagination; the embedded first handful is insufficient. The
+[session object reference](https://docs.stripe.com/api/checkout/sessions/object?api-version=2025-07-30.basil)
+defines original subtotal/total and distinguishes complete from paid. The local CLI lacked
+`stripe docs` and the connector required reauthentication, so these public official pages were
+read directly; no account data or live Stripe request was needed for this documentation check.
+
+Operator output explicitly names `scope: stored_billing_accounts`. Completeness describes the
+stored billing-customer scan and retained evidence, not a complete Stripe-universe reconciliation.

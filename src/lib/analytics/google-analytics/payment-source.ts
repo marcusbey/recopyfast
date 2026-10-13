@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import {
   PaymentEvidenceUnavailable,
+  PaymentReadBudgetExceeded,
   normalizePaymentSource,
   type BillingSource,
   type PaymentReads,
@@ -139,6 +140,13 @@ export async function normalizeBillingConversionSource(
         ...(after ? { starting_after: after } : {}),
       });
       if (batch.data.some((r) => all.some((prior) => prior.id === r.id))) break;
+      if (all.length + batch.data.length > 100)
+        return {
+          ...payment,
+          state: "pending" as const,
+          reason: "normalization_limit",
+          refunds: [],
+        };
       all.push(...batch.data);
       if (!batch.has_more) {
         complete = true;
@@ -231,6 +239,13 @@ export async function normalizeBillingConversionSource(
       refunds,
     };
   } catch (error) {
+    if (error instanceof PaymentReadBudgetExceeded)
+      return {
+        state: "pending" as const,
+        reason: "normalization_limit",
+        purchases: [],
+        refunds: [],
+      };
     if (error instanceof PaymentEvidenceUnavailable)
       return {
         state: "unknown" as const,

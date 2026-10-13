@@ -108,12 +108,52 @@ function fixture() {
     payment: { type: "payment_intent", payment_intent: "pi_1" },
     status_transitions: { paid_at: paidAt },
   } as Stripe.InvoicePayment;
+  const checkout = {
+    id: "cs_1",
+    object: "checkout.session",
+    status: "complete",
+    mode: "payment",
+    payment_status: "paid",
+    payment_intent: "pi_1",
+    customer: "cus_1",
+    client_reference_id: "user_1",
+    livemode: true,
+    currency: "usd",
+    amount_subtotal: 10000,
+    amount_total: 10000,
+    total_details: { amount_discount: 0, amount_tax: 0, amount_shipping: 0 },
+  } as unknown as Stripe.Checkout.Session;
+  const line = {
+    id: "li_1",
+    object: "item",
+    currency: "usd",
+    quantity: 1,
+    amount_subtotal: 10000,
+    amount_total: 10000,
+    amount_discount: 0,
+    amount_tax: 0,
+    price: {
+      id: "price_original",
+      object: "price",
+      currency: "usd",
+      livemode: true,
+      type: "one_time",
+      billing_scheme: "per_unit",
+      active: true,
+      unit_amount: 10000,
+    },
+  } as Stripe.LineItem;
   const reads: PaymentReads = {
     event: jest.fn(async () => event),
     intent: jest.fn(async () => intent),
     charge: jest.fn(async () => charge),
     invoice: jest.fn(async () => invoice),
     session: jest.fn(),
+    checkoutSessions: jest.fn(async () => ({
+      data: [{ ...checkout, metadata: intent.metadata }],
+      has_more: false,
+    })),
+    checkoutLineItems: jest.fn(async () => ({ data: [line], has_more: false })),
     allocations: jest.fn(async () => ({ data: [], has_more: false })),
     refunds: jest.fn(async () => ({ data: [], has_more: false })),
     disputes: jest.fn(async () => ({ data: [], has_more: false })),
@@ -125,7 +165,17 @@ function fixture() {
     })),
     successfulPaymentEvent: jest.fn(async () => "evt_1"),
   };
-  return { intent, charge, event, source, invoice, allocation, reads };
+  return {
+    intent,
+    charge,
+    event,
+    source,
+    invoice,
+    allocation,
+    checkout,
+    line,
+    reads,
+  };
 }
 async function purchase(f = fixture()) {
   return normalizePaymentSource(f.source, f.reads);
@@ -180,6 +230,7 @@ describe("authoritative payment normalization", () => {
   it("separates verified TEST transactions by mode", async () => {
     const f = fixture();
     f.event.livemode = f.intent.livemode = f.charge.livemode = false;
+    f.checkout.livemode = f.line.price!.livemode = false;
     expect(await purchase(f)).toMatchObject({
       state: "normalized",
       purchases: [{ sourceKey: "test:payment_intent:pi_1", mode: "test" }],
@@ -248,6 +299,8 @@ describe("authoritative payment normalization", () => {
   });
   it("validates credit quantity against the current catalog", async () => {
     const f = fixture();
+    f.line.quantity = 10;
+    f.line.price!.unit_amount = 1000;
     f.intent.metadata = {
       type: "credit_purchase",
       user_id: "user_1",
@@ -256,6 +309,8 @@ describe("authoritative payment normalization", () => {
     (f.reads.reconciledOneOff as jest.Mock).mockResolvedValue({
       productId: "credits",
       quantity: 10,
+      creditsPurchased: 1000,
+      paidMinor: 10000,
     });
     expect(await purchase(f)).toMatchObject({
       state: "normalized",
@@ -987,5 +1042,172 @@ test("a partially paid open invoice is incomplete money evidence, not zero colle
   expect(await purchase(f)).toMatchObject({
     state: "unknown",
     reason: "partial_invoice_unknown",
+  });
+});
+
+test("historical lifetime payment survives today's catalog price change", async () => {
+  const f = fixture();
+  jest
+    .requireMock("@/lib/stripe/plans")
+    .getOneTimeProduct.mockResolvedValueOnce({
+      id: "lifetime_pro",
+      price: 200,
+      grantsPlanId: "pro",
+    });
+  expect(await purchase(f)).toMatchObject({
+    state: "normalized",
+    purchases: [{ cashMinor: 10000, value: 100 }],
+  });
+});
+test("historical credit payment survives current pack price and size changes", async () => {
+  const f = fixture();
+  f.line.quantity = 10;
+  f.line.price!.unit_amount = 1000;
+  f.intent.metadata = {
+    type: "credit_purchase",
+    user_id: "user_1",
+    credit_quantity: "1000",
+  };
+  (f.reads.reconciledOneOff as jest.Mock).mockResolvedValue({
+    productId: "credits",
+    quantity: 10,
+    creditsPurchased: 1000,
+    paidMinor: 10000,
+  });
+  jest
+    .requireMock("@/lib/stripe/plans")
+    .getCreditPackConfig.mockResolvedValueOnce({
+      creditsPerPack: 200,
+      pricePerPack: 20,
+    });
+  expect(await purchase(f)).toMatchObject({
+    state: "normalized",
+    purchases: [{ cashMinor: 10000, value: 100, itemId: "credits" }],
+  });
+});
+
+test("original discounted and taxed Checkout totals determine historical product value", async () => {
+  const f = fixture();
+  f.intent.amount_received = f.charge.amount = f.charge.amount_captured = 9900;
+  f.checkout.amount_total = 9900;
+  f.checkout.total_details = {
+    amount_discount: 1000,
+    amount_tax: 900,
+    amount_shipping: 0,
+  };
+  f.line.amount_total = 9900;
+  f.line.amount_discount = 1000;
+  f.line.amount_tax = 900;
+  expect(await purchase(f)).toMatchObject({
+    state: "normalized",
+    purchases: [
+      {
+        cashMinor: 9900,
+        value: 90,
+        taxMinor: 900,
+        discountMinor: 1000,
+        quantity: 1,
+      },
+    ],
+  });
+});
+test("an archived original price remains valid historical evidence", async () => {
+  const f = fixture();
+  f.line.price!.active = false;
+  expect((await purchase(f)).state).toBe("normalized");
+});
+test.each([
+  "no_session",
+  "unpaid",
+  "customer",
+  "line_total",
+  "tax",
+  "quantity",
+  "currency",
+])(
+  "missing or inconsistent original Checkout evidence stays unknown: %s",
+  async (reason) => {
+    const f = fixture();
+    if (reason === "no_session")
+      (f.reads.checkoutSessions as jest.Mock).mockResolvedValue({
+        data: [],
+        has_more: false,
+      });
+    if (reason === "unpaid") f.checkout.payment_status = "unpaid";
+    if (reason === "customer") f.checkout.customer = "cus_other";
+    if (reason === "line_total") f.line.amount_total = 1;
+    if (reason === "tax") f.line.amount_tax = 1;
+    if (reason === "quantity") f.line.quantity = 2;
+    if (reason === "currency") f.line.currency = "cad";
+    expect((await purchase(f)).state).toBe("unknown");
+  },
+);
+test("same-second distinct payments stay unclassified without invented ID chronology", () => {
+  expect(
+    summarizePaymentHistory(
+      "live:payment_intent:pi_z",
+      paidAt,
+      [{ sourceKey: "live:payment_intent:pi_a", occurredAt: paidAt }],
+      true,
+    ),
+  ).toBeUndefined();
+  expect(
+    summarizePaymentHistory(
+      "live:payment_intent:pi_z",
+      paidAt,
+      [
+        { sourceKey: "live:payment_intent:pi_a", occurredAt: paidAt },
+        { sourceKey: "live:invoice:in_prior", occurredAt: paidAt - 1 },
+      ],
+      true,
+    ),
+  ).toBe("returning");
+});
+test("all original Checkout line pages are read before rejecting a multi-item cart", async () => {
+  const f = fixture();
+  (f.reads.checkoutLineItems as jest.Mock)
+    .mockResolvedValueOnce({ data: [f.line], has_more: true })
+    .mockResolvedValueOnce({
+      data: [{ ...f.line, id: "li_2" }],
+      has_more: false,
+    });
+  expect(await purchase(f)).toMatchObject({
+    state: "unknown",
+    reason: "one_off_items_unknown",
+  });
+  expect(f.reads.checkoutLineItems).toHaveBeenLastCalledWith("cs_1", {
+    limit: 100,
+    starting_after: "li_1",
+  });
+});
+test("ambiguous original Checkout sessions cannot be resolved by taking the first", async () => {
+  const f = fixture();
+  (f.reads.checkoutSessions as jest.Mock).mockResolvedValue({
+    data: [f.checkout, { ...f.checkout, id: "cs_other" }],
+    has_more: false,
+  });
+  expect(await purchase(f)).toMatchObject({
+    state: "unknown",
+    reason: "one_off_checkout_unknown",
+  });
+  expect(f.reads.checkoutLineItems).not.toHaveBeenCalled();
+});
+test("original credit ledger amount must agree with collected cash", async () => {
+  const f = fixture();
+  f.line.quantity = 10;
+  f.line.price!.unit_amount = 1000;
+  f.intent.metadata = {
+    type: "credit_purchase",
+    user_id: "user_1",
+    credit_quantity: "1000",
+  };
+  (f.reads.reconciledOneOff as jest.Mock).mockResolvedValue({
+    productId: "credits",
+    creditsPurchased: 1000,
+    paidMinor: 9999,
+  });
+  expect(await purchase(f)).toMatchObject({
+    state: "unknown",
+    reason: "credit_amount_mismatch",
   });
 });

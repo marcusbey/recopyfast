@@ -105,12 +105,22 @@ BEGIN
   IF account IS NULL OR occurred IS NULL OR occurred>clock_timestamp() OR (source_user IS NOT NULL AND account<>source_user) THEN RAISE EXCEPTION 'Invalid payment authority' USING ERRCODE='22023'; END IF;
   PERFORM 1 FROM auth.users u WHERE u.id=account FOR KEY SHARE;
   IF NOT FOUND THEN CONTINUE; END IF;
+  IF EXISTS(SELECT 1 FROM public.analytics_delivery_events e WHERE e.source_key=candidate->>'source_key' AND e.user_id<>account) THEN RAISE EXCEPTION 'Canonical owner mismatch' USING ERRCODE='22023'; END IF;
   IF candidate->>'kind'='exclude_purchase' THEN
-   UPDATE public.analytics_delivery_events e SET state='suppressed',reason='purchase_unsent',payload=NULL
-   WHERE e.source_key=candidate->>'source_key' AND e.kind='purchase' AND e.user_id=account AND e.state='pending';
+   -- A stale purchase normalization can finish after its automatic-return
+   -- source. UPDATE-only recorded nothing when the purchase did not exist,
+   -- allowing that stale source to enqueue acquisition later. Freeze a durable
+   -- absent/suppressed disposition under the same canonical key and locks.
+   -- Already claimed/accepted/uncertain rows are immutable here: their refund
+   -- must preserve the original transaction/context and delivery ordering.
+   INSERT INTO public.analytics_delivery_events(kind,source_key,user_id,occurred_at,state,reason,transaction_id)
+   VALUES('purchase',candidate->>'source_key',account,occurred,'suppressed','purchase_unsent',gen_random_uuid())
+   ON CONFLICT(source_key) DO UPDATE SET state='suppressed',reason='purchase_unsent',payload=NULL
+   WHERE analytics_delivery_events.user_id=EXCLUDED.user_id AND analytics_delivery_events.kind='purchase' AND analytics_delivery_events.state='pending';
+   SELECT e.id INTO entry_id FROM public.analytics_delivery_events e WHERE e.source_key=candidate->>'source_key' AND e.user_id=account;
+   UPDATE public.analytics_delivery_sources SET user_id=account,outbox_id=coalesce(outbox_id,entry_id) WHERE stripe_event_id=p_event_id;
    CONTINUE;
   END IF;
-  IF EXISTS(SELECT 1 FROM public.analytics_delivery_events e WHERE e.source_key=candidate->>'source_key' AND e.user_id<>account) THEN RAISE EXCEPTION 'Canonical owner mismatch' USING ERRCODE='22023'; END IF;
   IF EXISTS(SELECT 1 FROM public.analytics_delivery_events e WHERE e.source_key=candidate->>'source_key') THEN CONTINUE; END IF;
   context:=NULL; frozen:=NULL; parent:=NULL; tx:=gen_random_uuid(); delivery_state:='suppressed'; delivery_reason:='context_unavailable';
   IF candidate->>'kind'='purchase' THEN

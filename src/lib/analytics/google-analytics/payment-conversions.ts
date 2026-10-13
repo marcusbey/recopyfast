@@ -2,7 +2,6 @@ import type Stripe from "stripe";
 import {
   findPaidPlanIdByStripePriceId,
   getOneTimeProduct,
-  getCreditPackConfig,
 } from "@/lib/stripe/plans";
 import { STRIPE_CONFIG } from "@/lib/stripe/config";
 import { COVERED_BY_LIFETIME } from "@/lib/stripe/lifetime-covered-billing";
@@ -62,6 +61,13 @@ export interface PaymentReads {
   charge(id: string): Promise<Stripe.Charge>;
   invoice(id: string): Promise<Stripe.Invoice>;
   session(id: string): Promise<Stripe.Checkout.Session>;
+  checkoutSessions(
+    params: Stripe.Checkout.SessionListParams,
+  ): Promise<Page<Stripe.Checkout.Session>>;
+  checkoutLineItems(
+    id: string,
+    params: Stripe.Checkout.SessionListLineItemsParams,
+  ): Promise<Page<Stripe.LineItem>>;
   allocations(
     params: Stripe.InvoicePaymentListParams,
   ): Promise<Page<Stripe.InvoicePayment>>;
@@ -75,7 +81,12 @@ export interface PaymentReads {
   reconciledOneOff(
     intentId: string,
     accountId: string,
-  ): Promise<{ productId: OneTimeProductId; quantity: number } | null>;
+  ): Promise<{
+    productId: OneTimeProductId;
+    quantity?: number;
+    creditsPurchased?: number;
+    paidMinor?: number | null;
+  } | null>;
   /** ID of a successfully processed PI success event, not an event list guess. */
   successfulPaymentEvent(intentId: string): Promise<string | null>;
 }
@@ -299,6 +310,8 @@ export async function normalizePaymentSource(
     charge: limited(original.charge.bind(original)),
     invoice: limited(original.invoice.bind(original)),
     session: limited(original.session.bind(original)),
+    checkoutSessions: limited(original.checkoutSessions.bind(original)),
+    checkoutLineItems: limited(original.checkoutLineItems.bind(original)),
     allocations: limited(original.allocations.bind(original)),
     refunds: limited(original.refunds.bind(original)),
     disputes: limited(original.disputes.bind(original)),
@@ -704,47 +717,115 @@ export async function normalizePaymentSource(
         purchases.push(await normalizeInvoice(invoiceId!));
       return { state: "normalized", purchases };
     }
-    if (intent.metadata.user_id !== accountId) refuse("account_mismatch");
+    // The successful event preserves the original server-issued purchase
+    // identity. Mutable current catalogue pricing is not historical evidence.
+    const metadata = successfulObject.metadata ?? {};
+    if (metadata.user_id !== accountId) refuse("account_mismatch");
     let reconciled = await reads.reconciledOneOff(intentId, accountId);
-    // Duplicate protection deliberately did not provision a second entitlement.
-    // Its verified succeeded automatic refund is correction authority only;
-    // never turn this metadata fallback into acquisition evidence.
     if (
       !reconciled &&
       automaticallyReturned.has(intentId) &&
-      intent.metadata.type === "lifetime_purchase" &&
-      isLifetimeProductId(intent.metadata.product_id)
+      metadata.type === "lifetime_purchase" &&
+      isLifetimeProductId(metadata.product_id)
     )
-      reconciled = { productId: intent.metadata.product_id, quantity: 1 };
-    if (!reconciled || !positive(reconciled.quantity))
-      refuse("product_unreconciled");
+      reconciled = { productId: metadata.product_id, quantity: 1 };
+    if (!reconciled) refuse("product_unreconciled");
     const productId = reconciled.productId;
-    let price: number;
-    if (productId === "credits" && intent.metadata.type === "credit_purchase") {
-      const pack = await readPaymentCatalogue(getCreditPackConfig());
+    if (productId === "credits" && metadata.type === "credit_purchase") {
       if (
-        Number(intent.metadata.credit_quantity) !==
-        pack.creditsPerPack * reconciled.quantity
+        !positive(reconciled.creditsPurchased) ||
+        !positive(Number(metadata.credit_quantity)) ||
+        Number(metadata.credit_quantity) !== reconciled.creditsPurchased
       )
         refuse("credit_quantity_mismatch");
-      price = pack.pricePerPack;
+      if (
+        reconciled.paidMinor != null &&
+        reconciled.paidMinor !== intent.amount_received
+      )
+        refuse("credit_amount_mismatch");
     } else if (
       isLifetimeProductId(productId) &&
-      intent.metadata.type === "lifetime_purchase" &&
-      intent.metadata.product_id === productId &&
+      metadata.type === "lifetime_purchase" &&
+      metadata.product_id === productId &&
       reconciled.quantity === 1
     ) {
       const product = await readPaymentCatalogue(getOneTimeProduct(productId));
       if (
         !product.grantsPlanId ||
-        product.grantsPlanId !== intent.metadata.grants_plan_id
+        product.grantsPlanId !== metadata.grants_plan_id
       )
         refuse("catalog_grant_mismatch");
-      price = product.price;
-    } else return refuse("catalog_unknown");
+    } else refuse("catalog_unknown");
+    const sessions = await pages((after) =>
+      reads.checkoutSessions({
+        payment_intent: intentId,
+        limit: 100,
+        ...(after ? { starting_after: after } : {}),
+      }),
+    );
+    if (sessions.length !== 1) refuse("one_off_checkout_unknown");
+    const originalCheckout = sessions[0];
+    verifyMode(originalCheckout.livemode, live);
     if (
-      !Number.isFinite(price) ||
-      Math.round(price * 100) * reconciled.quantity !== intent.amount_received
+      originalCheckout.status !== "complete" ||
+      originalCheckout.payment_status !== "paid" ||
+      originalCheckout.mode !== "payment" ||
+      id(originalCheckout.payment_intent) !== intentId ||
+      id(originalCheckout.customer) !== customerId ||
+      originalCheckout.metadata?.user_id !== accountId ||
+      originalCheckout.metadata?.type !== metadata.type ||
+      (originalCheckout.client_reference_id &&
+        originalCheckout.client_reference_id !== accountId) ||
+      (checkoutSession && originalCheckout.id !== checkoutSession.id)
+    )
+      refuse("one_off_checkout_unknown");
+    if (
+      isLifetimeProductId(productId) &&
+      (originalCheckout.metadata?.product_id !== productId ||
+        originalCheckout.metadata?.grants_plan_id !== metadata.grants_plan_id)
+    )
+      refuse("catalog_grant_mismatch");
+    if (originalCheckout.currency !== STRIPE_CONFIG.CURRENCY)
+      refuse("unsupported_currency");
+    const lines = await pages((after) =>
+      reads.checkoutLineItems(originalCheckout.id, {
+        limit: 100,
+        ...(after ? { starting_after: after } : {}),
+      }),
+    );
+    if (lines.length !== 1) refuse("one_off_items_unknown");
+    const line = lines[0],
+      totals = originalCheckout.total_details;
+    verifyCurrency(line.currency);
+    if (!line.price || !line.price.id || line.price.type !== "one_time")
+      refuse("one_off_price_unknown");
+    verifyMode(line.price.livemode, live);
+    verifyCurrency(line.price.currency);
+    const quantity = line.quantity;
+    if (
+      !positive(quantity) ||
+      quantity > 100000 ||
+      (isLifetimeProductId(productId) && quantity !== reconciled.quantity)
+    )
+      refuse("one_off_quantity_unknown");
+    // Finalized Checkout line/session amounts prove the actual historical cart,
+    // including discounts and tax. Do not compare against today's unit price or
+    // pack size, and do not reject an archived original Stripe Price.
+    if (
+      !totals ||
+      totals.amount_shipping !== 0 ||
+      !positive(line.amount_subtotal) ||
+      !nonnegative(line.amount_discount) ||
+      !nonnegative(line.amount_tax) ||
+      !positive(line.amount_total) ||
+      !positive(line.amount_subtotal - line.amount_discount) ||
+      line.amount_subtotal - line.amount_discount + line.amount_tax !==
+        line.amount_total ||
+      originalCheckout.amount_subtotal !== line.amount_subtotal ||
+      originalCheckout.amount_total !== line.amount_total ||
+      totals.amount_discount !== line.amount_discount ||
+      totals.amount_tax !== line.amount_tax ||
+      line.amount_total !== intent.amount_received
     )
       refuse("one_off_totals_unknown");
     if (!positive(settlementEvent.created)) refuse("settlement_unknown");
@@ -760,14 +841,14 @@ export async function normalizePaymentSource(
           mode,
           occurredAt: settlementEvent.created,
           cashMinor: intent.amount_received,
-          value: intent.amount_received / 100,
-          taxMinor: 0,
-          discountMinor: 0,
+          value: (intent.amount_received - line.amount_tax) / 100,
+          taxMinor: line.amount_tax,
+          discountMinor: line.amount_discount,
           netRetainedMinor: accounting.get(intentId)!.net,
           financialState: accounting.get(intentId)!.state,
           currency: "USD",
           itemId: productId,
-          quantity: reconciled.quantity,
+          quantity,
           paymentIntentIds: [intentId],
         },
       ],

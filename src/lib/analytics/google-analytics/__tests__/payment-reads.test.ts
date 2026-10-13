@@ -14,7 +14,13 @@ const provider = {
   paymentIntents: { retrieve: jest.fn() },
   charges: { retrieve: jest.fn() },
   invoices: { retrieve: jest.fn() },
-  checkout: { sessions: { retrieve: jest.fn() } },
+  checkout: {
+    sessions: {
+      retrieve: jest.fn(),
+      list: jest.fn(),
+      listLineItems: jest.fn(),
+    },
+  },
   invoicePayments: { list: jest.fn() },
   refunds: { list: jest.fn() },
   disputes: { list: jest.fn() },
@@ -104,4 +110,59 @@ test("overall read budget prevents slow history from extending the source deadli
   });
   expect(provider.events.retrieve).not.toHaveBeenCalled();
   clock.mockRestore();
+});
+
+test("original Checkout reads use the pinned read-only endpoints and timeout options", async () => {
+  const reads = createPaymentReads();
+  await reads.checkoutSessions({ payment_intent: "pi_original", limit: 100 });
+  await reads.checkoutLineItems("cs_original", {
+    limit: 100,
+    starting_after: "li_previous",
+  });
+  expect(provider.checkout.sessions.list).toHaveBeenCalledWith(
+    { payment_intent: "pi_original", limit: 100 },
+    { timeout: 1500, maxNetworkRetries: 0 },
+  );
+  expect(provider.checkout.sessions.listLineItems).toHaveBeenCalledWith(
+    "cs_original",
+    { limit: 100, starting_after: "li_previous" },
+    { timeout: 1500, maxNetworkRetries: 0 },
+  );
+});
+test("credit history reads original granted credits and paid amount without today's pack arithmetic", async () => {
+  query.maybeSingle.mockResolvedValue({
+    data: { credits_purchased: 1000, price_cents: 10000 },
+    error: null,
+  });
+  expect(await createPaymentReads().reconciledOneOff("pi_1", "u")).toEqual({
+    productId: "credits",
+    creditsPurchased: 1000,
+    paidMinor: 10000,
+  });
+  expect(query.select).toHaveBeenCalledWith("credits_purchased,price_cents");
+});
+test("all reads across both refund passes share one 60-call budget", async () => {
+  const reads = createPaymentReads();
+  for (let i = 0; i < 30; i++)
+    await reads.refunds({ charge: "ch_1", limit: 100 });
+  for (let i = 0; i < 30; i++)
+    await reads.refunds({ charge: "ch_1", limit: 100 });
+  expect(() => reads.refunds({ charge: "ch_1", limit: 100 })).toThrow(
+    "payment evidence budget exhausted",
+  );
+  expect(provider.refunds.list).toHaveBeenCalledTimes(60);
+});
+test("a second refund pass cannot enter after the shared admission deadline", async () => {
+  const clock = jest.spyOn(Date, "now").mockReturnValue(1000);
+  try {
+    const reads = createPaymentReads();
+    await reads.refunds({ charge: "ch_1", limit: 100 });
+    clock.mockReturnValue(11001);
+    expect(() => reads.refunds({ charge: "ch_1", limit: 100 })).toThrow(
+      "payment evidence budget exhausted",
+    );
+    expect(provider.refunds.list).toHaveBeenCalledTimes(1);
+  } finally {
+    clock.mockRestore();
+  }
 });
