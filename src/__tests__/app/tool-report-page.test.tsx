@@ -114,6 +114,72 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe("the report page", () => {
+  it("renders an s99 fail report through the generic summary, finding and CTA", async () => {
+    const outdatedSlug = "outdated-website-checker";
+    const facts = [
+      { label: "Pages checked", value: "1" },
+      { label: "Copyright years", value: "1 stale · 0 January grace" },
+      { label: "Past dates still presented as upcoming", value: "0" },
+      { label: "Dated prices, menus and schedules", value: "0" },
+      { label: "Past-year announcements", value: "0" },
+      { label: "Past-year seasonal promotions", value: "0" },
+      { label: "Out-of-season promotions", value: "0" },
+      { label: "Old update labels", value: "0" },
+    ];
+    serviceClient(
+      row(
+        storedReport({
+          tool: outdatedSlug,
+          summary: {
+            headline: "1 line looks out of date",
+            verdict: "fail",
+            facts,
+          },
+          findings: [
+            createFinding({
+              page: "https://example.com/",
+              kind: "copyright-year",
+              match: "2025",
+              before: "© ",
+              after: " Acme. All rights reserved.",
+              note: "The copyright year ends before 2026.",
+            }),
+          ],
+          pages: [
+            { url: "https://example.com/", status: "checked" },
+            {
+              url: "https://example.com/fr",
+              status: "skipped",
+              reason:
+                "This page doesn't look like it's written in English, so it wasn't checked.",
+            },
+          ],
+        }),
+        outdatedSlug,
+      ),
+    );
+
+    await renderReport(outdatedSlug);
+
+    expect(screen.getByText("1 line looks out of date")).toBeInTheDocument();
+    expect(screen.getByText("Needs fixing")).toBeInTheDocument();
+    expect(document.querySelector("mark")).toHaveTextContent("2025");
+    expect(
+      screen.getByText("The copyright year ends before 2026."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("term")).toHaveLength(8);
+    expect(
+      screen.getByRole("heading", { name: "Pages not checked" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("https://example.com/fr")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /fix it on your live page/i }),
+    ).toHaveAttribute(
+      "href",
+      "/try?utm_source=tools&utm_medium=free_tool&utm_campaign=outdated-website-checker#install",
+    );
+  });
+
   /**
    * Devin review of 0c5c5e4: a report the lens bounded to 40 findings now
    * reaches the page with `truncated` set (runScan carries the lens's flag

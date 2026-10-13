@@ -57,8 +57,9 @@ describe("Playwright CI contract", () => {
   // per client navigation, EEA visitor, no country hint, signed-in dashboard).
   // s110: +1 consented context capture/withdrawal/private-document regression.
   // s111: +1 real disposable signup route/outbox/repeat-login integration.
-  // Combined: 86 + 2 + 5 + 1 + 3 + 7 + 1 + 1 = 106 distinct tests.
-  it("runs all 106 tests and always cleans up and uploads the redacted summary", () => {
+  // s99: +2, the static checker page and seeded nonce report.
+  // Combined: 86 + 2 + 5 + 1 + 3 + 7 + 1 + 1 + 2 = 108 distinct tests.
+  it("runs all 108 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -66,11 +67,11 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":106');
-    expect(workflow).toContain("report.expected !== 106");
-    expect(workflow).toContain("report.total !== 106");
-    expect(workflow).toContain("report.passed !== 106");
-    expect(config).toContain("expected: 106");
+    expect(workflow).toContain('"expected":108');
+    expect(workflow).toContain("report.expected !== 108");
+    expect(workflow).toContain("report.total !== 108");
+    expect(workflow).toContain("report.passed !== 108");
+    expect(config).toContain("expected: 108");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
@@ -84,7 +85,7 @@ describe("Playwright CI contract", () => {
     expect(workflow.match(/NEXT_PUBLIC_GA_MEASUREMENT_ID:/g)).toHaveLength(1);
   });
 
-  it("keeps the credential-free built-embed harness outside the strict 106-test suite", () => {
+  it("keeps the credential-free built-embed harness outside the strict 108-test suite", () => {
     // s06b was recovered after the strict-count reporter became a hard CI contract.
     // Its specs live below e2e/ for shared Playwright conventions, so without an
     // explicit exclusion Playwright recursively collects six extra tests into
