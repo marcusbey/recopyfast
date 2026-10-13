@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { BulkUpdatePayload } from "@/types";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 import {
   checkOwnerCanEdit,
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     const writer = createServiceRoleClient();
 
     // Create bulk operation record
-    const operationId = uuidv4();
+    const operationId = randomUUID();
     const { error: operationError } = await supabase
       .from("bulk_operations")
       .insert({
