@@ -64,8 +64,8 @@ export function buildSignupPayload(
   };
 }
 
-async function postSignup(
-  source: SignupMeasurementSource,
+async function postMeasurement(
+  source: SignupMeasurementSource | CommerceMeasurementSource,
   target: {
     measurementId: string;
     apiSecret: string;
@@ -75,7 +75,10 @@ async function postSignup(
   fetcher: typeof fetch,
   now: number,
 ): Promise<MeasurementResult> {
-  const payload = buildSignupPayload(source, now);
+  const payload =
+    "kind" in source
+      ? buildCommercePayload(source, now)
+      : buildSignupPayload(source, now);
   if (!payload) return { state: "invalid", code: "invalid_source" };
   const body = target.qa
     ? {
@@ -154,7 +157,7 @@ export async function sendSignupMeasurement(
     !config.apiSecret?.trim()
   )
     return { state: "disabled" };
-  return postSignup(
+  return postMeasurement(
     source,
     {
       measurementId: PRODUCTION_MEASUREMENT_ID,
@@ -183,7 +186,149 @@ export async function checkQaSignupMeasurement(
     !["validate", "receipt"].includes(options.mode)
   )
     return { state: "disabled" };
-  return postSignup(
+  return postMeasurement(
+    source,
+    {
+      measurementId: QA_MEASUREMENT_ID,
+      apiSecret: options.apiSecret,
+      validation: options.mode === "validate",
+      qa: true,
+    },
+    options.fetcher ?? fetch,
+    options.now ?? Date.now(),
+  );
+}
+
+export type CommerceMeasurementSource = SignupMeasurementSource &
+  Readonly<{
+    kind: "purchase" | "refund";
+    mode: "live" | "test";
+    transactionId: string;
+    valueMinor: number;
+    taxMinor: number;
+    itemId: string;
+    quantity: number;
+    customerType?: "new" | "returning";
+  }>;
+
+/** Raw Stripe/account ids and arbitrary item names never leave this boundary. */
+export function buildCommercePayload(
+  source: CommerceMeasurementSource,
+  now: number,
+) {
+  const base = buildSignupPayload(source, now);
+  if (
+    !base ||
+    !["purchase", "refund"].includes(source.kind) ||
+    !["live", "test"].includes(source.mode) ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      source.transactionId,
+    ) ||
+    !Number.isSafeInteger(source.valueMinor) ||
+    source.valueMinor <= 0 ||
+    !Number.isSafeInteger(source.taxMinor) ||
+    source.taxMinor < 0 ||
+    !Number.isSafeInteger(source.quantity) ||
+    source.quantity < 1 ||
+    source.quantity > 100000 ||
+    ![
+      "starter",
+      "pro",
+      "agency",
+      "credits",
+      "lifetime_pro",
+      "lifetime_agency",
+    ].includes(source.itemId) ||
+    (source.customerType !== undefined &&
+      !["new", "returning"].includes(source.customerType))
+  )
+    return null;
+  return {
+    ...base,
+    events: [
+      {
+        name: source.kind,
+        params: {
+          transaction_id: source.transactionId,
+          currency: "USD",
+          value: source.valueMinor / 100,
+          tax: source.taxMinor / 100,
+          ...(source.kind === "purchase" && source.customerType
+            ? { customer_type: source.customerType }
+            : {}),
+          // A cash refund proves returned principal, not how many subscription
+          // units or credit packs were returned. Omit item-level refund data
+          // rather than inventing a fractional/refunded quantity from money.
+          ...(source.kind === "purchase"
+            ? {
+                items: [
+                  {
+                    item_id: source.itemId,
+                    price: source.valueMinor / 100 / source.quantity,
+                    quantity: source.quantity,
+                  },
+                ],
+              }
+            : {}),
+        },
+      },
+    ],
+  };
+}
+
+export async function sendCommerceMeasurement(
+  source: CommerceMeasurementSource,
+  options: {
+    config?: MeasurementConfig;
+    fetcher?: typeof fetch;
+    now?: number;
+  } = {},
+): Promise<MeasurementResult> {
+  const config = options.config ?? {
+    enabled: process.env.GA4_MP_ENABLED,
+    environment: process.env.VERCEL_ENV,
+    measurementId: process.env.GA4_MP_MEASUREMENT_ID,
+    apiSecret: process.env.GA4_MP_API_SECRET,
+  };
+  if (
+    typeof window !== "undefined" ||
+    source.mode !== "live" ||
+    config.enabled !== "1" ||
+    config.environment !== "production" ||
+    config.measurementId !== PRODUCTION_MEASUREMENT_ID ||
+    !config.apiSecret?.trim()
+  )
+    return { state: "disabled" };
+  return postMeasurement(
+    source,
+    {
+      measurementId: PRODUCTION_MEASUREMENT_ID,
+      apiSecret: config.apiSecret,
+      validation: false,
+      qa: false,
+    },
+    options.fetcher ?? fetch,
+    options.now ?? Date.now(),
+  );
+}
+
+/** The QA endpoint cannot be configured to send synthetic purchases to production. */
+export async function checkQaCommerceMeasurement(
+  source: CommerceMeasurementSource,
+  options: {
+    mode: "validate" | "receipt";
+    apiSecret?: string;
+    fetcher?: typeof fetch;
+    now?: number;
+  },
+): Promise<MeasurementResult> {
+  if (
+    typeof window !== "undefined" ||
+    !options.apiSecret?.trim() ||
+    !["validate", "receipt"].includes(options.mode)
+  )
+    return { state: "disabled" };
+  return postMeasurement(
     source,
     {
       measurementId: QA_MEASUREMENT_ID,

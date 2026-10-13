@@ -42,6 +42,7 @@ const isPreFixProof = process.argv.includes("--pre-fix-proof");
 // file, registered a placeholder other than the PostgREST one, or skipped
 // everything.
 const REPLAY_SUITES = [
+  "src/__tests__/db/analytics-payments.test.ts",
   "src/__tests__/db/analytics-delivery.test.ts",
   "src/__tests__/db/analytics-context.test.ts",
   "src/__tests__/db/column-privileges.test.ts",

@@ -110,3 +110,28 @@ test("malformed validation response is not accepted and no exception leaks", asy
     code: "invalid_validation_response",
   });
 });
+test("payment scenario validates duplicate, renewal and refund through shared QA core", async () => {
+  const bodies = [];
+  const result = await runCheck(["--scenario=payments"], {
+    env,
+    now,
+    fetcher: async (url, options) => {
+      assert.equal(
+        new URL(url).searchParams.get("measurement_id"),
+        "G-JHTG44WQ5W",
+      );
+      bodies.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ validationMessages: [] }), {
+        status: 200,
+      });
+    },
+  });
+  assert.equal(result.state, "validated");
+  assert.equal(bodies.length, 4);
+  const transactions = bodies.map((b) => b.events[0].params.transaction_id);
+  assert.equal(transactions[0], transactions[1]);
+  assert.notEqual(transactions[0], transactions[2]);
+  assert.equal(transactions[0], transactions[3]);
+  assert.equal(bodies[3].events[0].name, "refund");
+  assert.equal(bodies[2].events[0].params.customer_type, "returning");
+});

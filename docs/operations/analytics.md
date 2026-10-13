@@ -342,3 +342,38 @@ ROLLBACK;
 These counts cannot determine paying customers; verified live billing reconciliation remains
 s112. A zero GA count never proves zero confirmed accounts, and an HTTP-accepted row is not a
 provider ingestion receipt.
+
+## Verified purchases and paying accounts (s112)
+
+Release order is s110 → s111 → s112. Apply the reviewed forward payment migration before the s112 code; keep `GA4_MP_ENABLED=0` during the migration/deployment boundary. Set `ANALYTICS_PAYMENT_NORMALIZATION_ENABLED=1` only after the migration and exact deployed code are verified. The separate `/api/cron/analytics-payments` route uses the same fail-closed cron bearer guard. It performs read-only provider/billing normalization, never Google sends or financial mutations. Disable its flag to pause new normalization; disabling dispatch independently preserves pending source identities.
+
+`analytics_delivery_sources` reserves new/retry slots independently and discovers processed sources without a created-at cutoff. A late-processed old event remains discoverable. An interrupted normalization claim expires after five minutes and can be reclaimed. This does **not** reclaim an outbox `sending`/`uncertain` Google request. The receipt can finish multiple refund children atomically; its optional outbox reference is not a one-refund limit.
+
+Each verified live invoice or one-off PI has one purchase source key and one opaque GA transaction UUID. TEST sources cannot enqueue commerce delivery. Invoice allocations prove cash; customer credits do not become collected revenue. Current support is USD, recognized catalog items and provable payment allocation. Partial/mixed-credit invoices, unavailable events, unsupported currency and ambiguous splits are visible unknowns rather than guessed revenue. No raw Stripe/account IDs, emails, URLs or invented session IDs leave for GA.
+
+Refund payloads carry proven returned money and the opaque transaction ID; they omit item quantities because a cash amount does not prove returned subscription units or credit packs. A refund needs its own causal successful transition. `Refund.created` is request time, and a current list of many refunds does not assign them the latest charge event's time. Pending/requires-action automatic returns hold acquisition; succeeded automatic duplicate returns exclude it. If a purchase was already sent before the later automatic return, the existing frozen context may carry a correction. Known-unsent parents suppress refunds; sending/uncertain parents require reconciliation. Ordinary refunds and lost disputes do not erase historical paid status. Overlap that cannot be reconciled makes net money unknown instead of subtracting principal twice.
+
+Refund delivery reuses the purchase's frozen context and requires consent at refund occurrence and dispatch. Expired/revoked contexts cannot be rescued by a new visit. Thus GA revenue remains a consented subset and may omit later corrections; the first-party readout owns net revenue.
+
+### Bounded first-party readout
+
+`scripts/check-payment-evidence.mjs` bundles and runs the same read-only application normalizer. It loads no `.env` files and never claims, enqueues, sends analytics, charges, refunds or changes billing. Supply provider/database configuration through a deliberately isolated process environment, set `ANALYTICS_AUDIT_READONLY=1`, and run `node scripts/check-payment-evidence.mjs --accounts=10` (maximum 100). Do not run a Vercel env command inside a checkout whose local `.env` can shadow the intended provider mode. The configured mode is not evidence of an individual payment's mode; event and object checks still apply.
+
+Output contains aggregates only: verified live unique paying accounts, canonical transactions, proven first payments, returning payments, gross collected USD minor units, net retained amount or explicit unknown, history completeness and source/delivery reason counts. Accounts outside the bound and unresolved legacy evidence make payer totals lower bounds. The same source can appear through Checkout and PI events without adding a transaction. A genuine full refund can leave a historical payer with net zero; an automatic returned duplicate is excluded from acquisition. Current paid entitlement/trial status is separate and is never substituted for these money measures.
+
+For current confirmed-account stock, use a read-only `SELECT count(*) FROM auth.users WHERE email_confirmed_at IS NOT NULL`; this is not a historical signup-series replacement. For provider-independent pipeline diagnostics, use the service-only read-only `analytics_payment_diagnostics()` function. It reports source states/reasons, commerce delivery states and omitted context without exposing client identifiers.
+
+### Separate QA commerce proof
+
+With the QA secret supplied only through the environment, `node scripts/check-analytics-conversions.mjs --scenario=payments --mode=validate` validates shared production payload construction without ingestion. `--mode=receipt` explicitly submits synthetic TEST fixtures only to RecopyFast QA: purchase, duplicate purchase with the same opaque transaction ID, renewal with a different ID, and partial refund linked to the first ID. Both paths refuse a production measurement ID override. HTTP acceptance is not receipt; independently verify QA ingestion/deduplication and record it. These fixtures are never traction and never evidence of a real live payer.
+
+
+### Compatibility and readout completeness corrections
+
+The migration preserves `claim_analytics_delivery()` as a signup-only four-column RPC for running s111 workers and rollback. New code calls `claim_analytics_delivery_v2()`; shared claim logic remains service-only. Disabling an environment flag is still useful for rollout but is not the compatibility boundary for old processes.
+
+Exact aggregate money totals are null if any scanned history or the account scan is incomplete. `observed_*` amounts describe only the verified subset and are not complete totals. `verified_live_transactions` and paying accounts exclude automatic returned charges; `verified_live_cash_transactions`, gross collected cash and successful refund totals still expose those actual cash movements. Unknown allocation/history counts qualify these numbers. Subscription renewals come specifically from authoritative invoice `billing_reason=subscription_cycle`; returning customers buying another one-off product are not renewals.
+
+Current paid-entitlement coverage describes the application's reconciled entitlement snapshot backed by a verified live payment: an active/past-due subscription with a qualifying paid invoice, or a non-trial purchased grant that is unrevoked and unexpired. Trial-only access, TEST payments and support comps are not counted as paid. Missing payment/reference proof or an incomplete account scan makes the total unknown; the verified subset is separately named. This is not a claim that every current Stripe subscription was freshly retrieved.
+
+A complete refund of a taxed invoice has known returned product value and tax. A complete PI return funding several known invoice shares has known per-invoice refund allocations and zero retained principal; these corrections use refund-plus-parent source keys. Unprovable partial mixed/taxed allocations remain unknown. Item quantities remain omitted from refund payloads.
