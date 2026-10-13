@@ -1,5 +1,8 @@
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { sendSignupMeasurement } from "./measurement-protocol";
+import {
+  sendSignupMeasurement,
+  sendCommerceMeasurement,
+} from "./measurement-protocol";
 
 /** A tick owns at most five 5-second HTTP calls, within the route's 60s budget. */
 export async function dispatchAnalytics() {
@@ -28,7 +31,7 @@ export async function dispatchAnalytics() {
   const deadline = Date.now() + 40000;
   for (let i = 0; i < 5 && Date.now() < deadline; i++) {
     const { data, error } = await db
-      .rpc("claim_analytics_delivery")
+      .rpc("claim_analytics_delivery_v2")
       .abortSignal(AbortSignal.timeout(1500));
     if (error) throw new Error("analytics claim unavailable");
     const row = Array.isArray(data) ? data[0] : null;
@@ -36,10 +39,26 @@ export async function dispatchAnalytics() {
     counts.claimed++;
     // Claim commit is the in-flight boundary. Later withdrawal cannot promise
     // to recall an HTTP request; never hold a database lock during this call.
-    const result = await sendSignupMeasurement({
+    const identity = {
       clientId: row.client_id,
       occurredAt: Date.parse(row.occurred_at),
-    });
+    };
+    const result =
+      row.kind === "purchase" || row.kind === "refund"
+        ? await sendCommerceMeasurement({
+            ...identity,
+            kind: row.kind,
+            mode: row.payload?.mode,
+            transactionId: row.transaction_id,
+            valueMinor: row.payload?.value_minor,
+            taxMinor: row.payload?.tax_minor,
+            itemId: row.payload?.item_id,
+            quantity: row.payload?.quantity,
+            customerType: row.payload?.customer_type,
+          })
+        : row.kind === "signup"
+          ? await sendSignupMeasurement(identity)
+          : { state: "invalid" as const, code: "invalid_source" as const };
     const state =
       result.state === "accepted_http"
         ? "accepted_http"

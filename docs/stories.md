@@ -4992,3 +4992,27 @@ Acceptance criteria:
 
 Complexity: 3. Dependencies: s110. Branch `feature/s111-verified-signup-analytics`.
 No new dependency. Forward-only migration/server configuration required. Embed allocation: 0 bytes.
+
+## Story s112-verified-purchase-analytics — successful live payments and unique paying customers are distinct
+
+Research/plan: `docs/research/s112-verified-purchase-analytics.md` and
+`docs/plans/s112-verified-purchase-analytics.md` (human validated on 2026-10-12).
+
+As the operator, I need successful live purchases measured from verified payment outcomes,
+without counting Stripe TEST activity, free trials, repeated webhooks or renewals as new customers.
+
+Acceptance criteria:
+- [ ] Canonical live invoice/payment identity deduplicates overlapping Checkout/payment events;
+  only recognized, successfully provisioned, positive collected payments qualify.
+- [ ] TEST, unpaid/failed, zero-dollar/trial, setup, forged return and automatic-refund exclusions
+  hold. Existing billing/entitlement/refund behavior remains unchanged.
+- [ ] Purchase transactions, unique first paying accounts, renewals and full/partial refunds
+  remain distinct. Complete first-party totals are not replaced by consented GA totals.
+- [ ] Eligible GA purchase/refund payloads use actual amount/currency and stable opaque
+  transaction IDs; unavailable or expired context remains explicitly unattributed.
+- [ ] Outbox failure/reconciliation never causes another charge or blocks monetary processing.
+- [ ] Independent review, real database/concurrency tests, required gates and separate QA receipt
+  pass. A real live customer payment remains a future operational observation, not a test charge.
+
+Complexity: 3. Dependencies: s111 and released s82. Branch `feature/s112-verified-purchase-analytics`.
+No new dependency. Forward-only migration as required by reviewed design. Embed allocation: 0 bytes.

@@ -7,6 +7,7 @@ jest.mock("@/lib/supabase/service", () => ({
 }));
 jest.mock("../measurement-protocol", () => ({
   sendSignupMeasurement: (...a: unknown[]) => send(...a),
+  sendCommerceMeasurement: (...a: unknown[]) => send(...a),
 }));
 beforeEach(() => {
   jest.clearAllMocks();
@@ -16,7 +17,7 @@ beforeEach(() => {
   process.env.GA4_MP_API_SECRET = "dummy";
   rpc.mockImplementation((name: string) => ({
     abortSignal: async () =>
-      name === "claim_analytics_delivery"
+      name === "claim_analytics_delivery_v2"
         ? { data: [], error: null }
         : { data: [{ changed: 0 }], error: null },
   }));
@@ -45,13 +46,14 @@ test("reconciles only durable candidates, sends a bounded claimed event once and
   rpc.mockImplementation((name: string) => ({
     abortSignal: async () => ({
       data:
-        name === "claim_analytics_delivery"
+        name === "claim_analytics_delivery_v2"
           ? claimed
             ? []
             : ((claimed = true),
               [
                 {
                   id: "id",
+                  kind: "signup",
                   claim_token: "token",
                   client_id: "123.456",
                   occurred_at: "2026-10-12T12:00:00Z",
@@ -80,13 +82,14 @@ test("lost finalization acknowledgement never retries the Google request", async
   rpc.mockImplementation((name: string) => ({
     abortSignal: async () => ({
       data:
-        name === "claim_analytics_delivery"
+        name === "claim_analytics_delivery_v2"
           ? claimed
             ? []
             : ((claimed = true),
               [
                 {
                   id: "id",
+                  kind: "signup",
                   claim_token: "token",
                   client_id: "123.456",
                   occurred_at: "2026-10-12T12:00:00Z",
@@ -104,4 +107,50 @@ test("lost finalization acknowledgement never retries the Google request", async
   });
   expect(send).toHaveBeenCalledTimes(1);
   warn.mockRestore();
+});
+
+test("claimed commerce rows use their frozen payload and stable transaction id", async () => {
+  let claimed = false;
+  rpc.mockImplementation((name: string) => ({
+    abortSignal: async () => ({
+      data:
+        name === "claim_analytics_delivery_v2"
+          ? !claimed
+            ? ((claimed = true),
+              [
+                {
+                  id: "id",
+                  claim_token: "token",
+                  kind: "refund",
+                  client_id: "123.456",
+                  occurred_at: "2026-10-12T12:00:00Z",
+                  transaction_id: "opaque",
+                  payload: {
+                    mode: "live",
+                    value_minor: 500,
+                    tax_minor: 0,
+                    item_id: "pro",
+                    quantity: 1,
+                  },
+                },
+              ])
+            : []
+          : true,
+      error: null,
+    }),
+  }));
+  send.mockResolvedValue({ state: "accepted_http", code: "http_2xx" });
+  await dispatchAnalytics();
+  expect(send).toHaveBeenCalledWith({
+    kind: "refund",
+    mode: "live",
+    clientId: "123.456",
+    occurredAt: Date.parse("2026-10-12T12:00:00Z"),
+    transactionId: "opaque",
+    valueMinor: 500,
+    taxMinor: 0,
+    itemId: "pro",
+    quantity: 1,
+    customerType: undefined,
+  });
 });

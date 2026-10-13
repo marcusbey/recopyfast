@@ -147,10 +147,10 @@ describe("the replay's verdict comes from its tested check, not from the runner"
  */
 const COVERAGE_FLOOR: Record<string, number> = {
   // s96 raised the floor with jest.config.js (from 61/65/69/68).
-  branches: 67,
-  functions: 71,
-  lines: 74,
-  statements: 73,
+  branches: 70,
+  functions: 74,
+  lines: 76,
+  statements: 76,
 };
 
 describe("the coverage ratchet gates CI, not just a local hook", () => {
