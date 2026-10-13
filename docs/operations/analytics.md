@@ -159,12 +159,10 @@ should go once per page view, mark it sent only on `true`.
 
 ### `sign_up`: Measurement Protocol follow-up (not built)
 
-`/signup` is on the nonce policy and off the allowlist, so it is not tracked client-side. The
-follow-up: when `auth/confirm` completes a first sign-in, send `sign_up` server-side through the
-Measurement Protocol (`POST https://region1.google-analytics.com/mp/collect?measurement_id=…&api_secret=…`)
-with the visitor's GA `client_id` (read from `_ga`, only if `rcf_analytics_consent=granted` or the
-visitor is outside the consent regions), no user id, no email. It needs an API secret (Data
-streams → RecopyFast web → Measurement Protocol API secrets) stored as a server-only env var.
+`/signup` and all private authentication documents stay on the nonce policy, with no Google
+script. s111 freezes the eligible first-party source after verified authentication and delivers
+`sign_up` from the bounded server worker, as specified below. Reading the current `_ga` cookie
+or counting every successful callback is not the signup contract.
 
 ## Checking it in production
 
@@ -254,3 +252,93 @@ Root authentication imports only lightweight first-party lifecycle controls; it
 must not import gtag, page-location or the geography catalog. The deferred public
 runtime owns GA capture. Keep the module-boundary regression and the unchanged
 40-sample comparison Lighthouse gate when changing these dependencies.
+
+## Verified signup delivery (s111, ADR071)
+
+The explicit `type=signup` production confirmation template is the supported first-confirmation
+path. A successful provider verification plus `getUser()` precedes the atomic freeze. Explicit
+invite can also qualify. Generic email, magic-link and PKCE successes do not expose a trusted
+initial-confirmation flag; they remain successful sign-ins but cannot invent a GA signup. A
+no-code existing-session callback never creates a candidate. The activation baseline permanently
+suppresses already-confirmed accounts even if their Auth confirmation timestamp later changes.
+
+`freeze_analytics_signup` atomically binds the request capability and saves one immutable source
+selection/absence. The unique `signup:<account>` key survives context cleanup. A later consent
+choice, campaign or login on another device cannot repair absent attribution. If the complete
+freeze transaction fails, the original browser is unknowable; aggregate warnings and the count
+gap below expose possible loss. A lost acknowledgement of a committed transaction can return its
+existing disposition safely. No cron scans current account contexts to reconstruct missing ones.
+
+`/api/cron/analytics-dispatch` uses the existing fail-closed CRON_SECRET gate every five minutes.
+It reconciles up to100 already durable candidates, then claims at most five eligible rows and
+sends one request per claim with a five-second timeout. Maximum route runtime is60 seconds; the
+loop stops taking work after40 seconds. No lock is held over network. A claim committed before
+withdrawal is already in flight; earlier withdrawal suppresses it. Sending claims older than
+five minutes become uncertain, never pending. Maintenance continues with sending disabled.
+Terminal/uncertain payloads are discarded; the private source/state tombstone follows the
+account's retention. The independent s110 cleanup removes context identifiers and reports
+physical deletion overdue by ten minutes. Account deletion cascades outbox rows and replay
+cannot reconstruct a deleted account.
+
+Production server variables:
+
+- `GA4_MP_ENABLED=0` until migrations, exact deployed code and configuration are verified;
+  only the exact value `1` enables sending.
+- `GA4_MP_MEASUREMENT_ID=G-DQ00NEM3WE`, with `VERCEL_ENV=production`.
+- `GA4_MP_API_SECRET` is server-only. Never put it in a URL log, command argument, client bundle
+  or file. Sentry MP fetch instrumentation/breadcrumbs/spans are excluded by exact collector
+  URL; other monitoring remains active.
+
+Migration first, code second, configuration/health verification third, sending enablement last.
+Rollback sets `GA4_MP_ENABLED=0`; capture can separately be disabled with
+`ANALYTICS_CONTEXT_DISABLED=1`. Do not delete source dispositions or automatically replay
+uncertain events. Auth success/trial grants do not depend on Google or analytics persistence.
+
+### QA and evidence boundaries
+
+Use Node24 and `node scripts/check-analytics-conversions.mjs --mode=validate` with the QA key
+in `GA4_MP_QA_API_SECRET` supplied through a protected child environment. This imports the exact
+application payload/transport module. `--mode=receipt` sends one synthetic signup only to fixed
+`G-JHTG44WQ5W`; there is no arbitrary target, URL, event or production fallback. Purchase/refund
+fixtures are not added until s112. Never use production credentials in tests.
+
+Validation uses ENFORCE_RECOMMENDATIONS but neither records an event nor authenticates the
+secret. `accepted_http` means only a2xx response. Actual RecopyFast QA report receipt is separate
+proof. Without a proven session boundary this payload omits session/engagement, so an event
+count with zero active users is expected and is not a reason to fabricate engagement. Parent
+verification recorded exactly one synthetic QA `sign_up` receipt; auth→outbox→dispatch remains
+an additional acceptance gate. No synthetic production signup was sent. Observing a genuine
+eligible production signup after release is separate from local fixtures and QA receipt.
+
+### Current surviving-account completeness query (read only)
+
+Run with an authorized read-only principal. This is current account stock, not a durable
+historical first-signup series. `email_confirmed_at` can reset or clear, so any period filter on
+it must disclose that limitation. Account deletion is excluded equally from every column.
+
+```sql
+BEGIN READ ONLY;
+SELECT
+ count(*) AS current_confirmed_accounts,
+ count(e.id) AS classified_accounts,
+ count(*) FILTER (WHERE e.id IS NULL) AS possible_unattributed_gap,
+ count(*) FILTER (WHERE e.reason='preexisting_confirmed') AS activation_baseline,
+ count(*) FILTER (WHERE e.reason='initial_confirmation_unproven') AS initial_proof_unavailable,
+ count(*) FILTER (WHERE e.frozen_context_id IS NOT NULL) AS initially_attributable,
+ count(*) FILTER (WHERE e.state='pending') AS awaiting_dispatch,
+ count(*) FILTER (WHERE e.state='sending') AS in_flight,
+ count(*) FILTER (WHERE e.state='accepted_http') AS http_accepted_not_proven_ingested,
+ count(*) FILTER (WHERE e.state='uncertain') AS uncertain_delivery,
+ count(*) FILTER (WHERE e.state IN ('expired','invalid')) AS expired_or_invalid,
+ count(*) FILTER (WHERE e.state='suppressed' AND e.reason NOT IN
+   ('preexisting_confirmed','initial_confirmation_unproven')) AS other_suppressed
+FROM auth.users u
+LEFT JOIN public.analytics_delivery_events e
+ ON e.user_id=u.id AND e.kind='signup'
+WHERE u.email_confirmed_at IS NOT NULL;
+ROLLBACK;
+```
+
+These counts cannot determine paying customers; verified live billing reconciliation remains
+s112. A zero GA count never proves zero confirmed accounts, and an HTTP-accepted row is not a
+provider ingestion receipt.

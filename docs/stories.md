@@ -4970,3 +4970,25 @@ Acceptance criteria:
 
 Complexity: 3. Dependencies: s107. Branch `feature/s110-analytics-consent-context`.
 No new dependency. Forward-only migration required. Embed allocation: 0 bytes.
+
+## Story s111-verified-signup-analytics — completed first signups are measured without counting repeat logins
+
+Research/plan: `docs/research/s111-verified-signup-analytics.md` and
+`docs/plans/s111-verified-signup-analytics.md` (human-validated on 2026-10-12).
+
+As the operator, I need completed account creation counted once, and permitted conversions
+attributed in GA without treating an email request, failed OTP or repeat login as a signup.
+
+Acceptance criteria:
+- [ ] Both auth establishment paths freeze a durable source disposition after provider verification. Only explicit signup/invite proof can send; generic email/PKCE remain unproven. Baseline confirmed accounts, repeat/concurrent callbacks, invalid OTPs and existing-session fallback cannot create duplicate signup delivery.
+- [ ] Surviving Auth accounts with `email_confirmed_at` present define current confirmed-account stock. Mutable timestamp period counts are limited, and missing/cross-device context never blocks signup or invents identity. Total freeze failure stays possibly unattributed; reconciliation only completes already frozen sources.
+- [ ] Private durable outbox, atomic claims and bounded authenticated dispatch protect against
+  replay; ambiguous delivery is visible and never blindly retried as another signup.
+- [ ] Only approved payload fields leave for GA; no user IDs, email, tokens or private URLs.
+  Analytics delivery failure cannot break auth. Consent is rechecked before delivery.
+- [ ] Provider validation and separate QA ingestion evidence distinguish payload validity,
+  HTTP acceptance and actual receipt; no synthetic signup inflates production reports.
+- [ ] Independent review and required local/hosted/database/browser gates pass.
+
+Complexity: 3. Dependencies: s110. Branch `feature/s111-verified-signup-analytics`.
+No new dependency. Forward-only migration/server configuration required. Embed allocation: 0 bytes.
