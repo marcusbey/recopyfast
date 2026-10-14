@@ -5016,3 +5016,21 @@ Acceptance criteria:
 
 Complexity: 3. Dependencies: s111 and released s82. Branch `feature/s112-verified-purchase-analytics`.
 No new dependency. Forward-only migration as required by reviewed design. Embed allocation: 0 bytes.
+
+
+## Story s113-social-share-cards — a shared link shows the freelancer benefit and real product
+
+Status: implemented; independent review pending.
+Research: `docs/research/s113-social-share-cards.md`. Design: `docs/designs/s113-social-share-cards.md`.
+
+As a freelance web designer or small-agency owner receiving a ReCopyFast link, I can immediately understand that clients can edit everyday wording while I keep my focus on design work.
+
+Acceptance criteria:
+- [x] The default Open Graph and Twitter card uses approved 1200×630 concept C v2 with accurate alt text, the developer-bottleneck request loop, and readable freelancer benefit copy.
+- [x] `/opengraph-image` and `/twitter-image` remain fetchable PNGs; existing canonical, title, description, robots and route-specific metadata remain coherent.
+- [x] A production build's rendered metadata resolves to accessible images with correct size/type; representative explicit-image routes and the homepage are checked.
+- [x] No invented product UI, savings, customers or product behavior; immutable design/source provenance, prior concepts, both concept C previews, and small-preview visual proof are retained.
+- [ ] Required checks and independent review pass; manual ship strategy is respected before deployment and live verification.
+
+Complexity: 2. Dependencies: released SEO/site-identity baseline (s50/s88).
+Branch: `feature/s113-social-share-cards`. No new dependency or migration. Embed allocation: 0 bytes.

@@ -9,7 +9,8 @@
  * Until s50 the title and description said "Universal CMS Layer" and "Transform
  * any website into an editable platform". Neither is true: a site whose Content
  * Security Policy blocks the script cannot run it, and there is no content model.
- * manifest.ts and opengraph-image.tsx carry the same two lines.
+ * The manifest and metadata readers share these centralized lines. The social
+ * image route carries its separately approved creative and accurate alt text.
  */
 export const SITE_NAME = "ReCopyFast";
 
