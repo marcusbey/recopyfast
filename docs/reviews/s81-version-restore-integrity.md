@@ -161,3 +161,35 @@ migration reviewed here; absence of a fresh private Devin run is not treated as 
 
 Max severity: none
 Ship allowed: yes
+
+## Current-main integration review — 2026-10-16 (`8733f9d`)
+
+Current main advanced through s108 to `8733f9d859284fe500fc5e02c5442c2674d0614f`. Its clean,
+no-commit merge into s81 head `dcbf38bf6340dc7f53a4080332cc7a7ee775533e` has no unmerged
+entries and passes both diff checks. The resulting delta against `MERGE_HEAD` remains exactly the
+reviewed 22-file s81 story. Every conditional-save route, hook, validator, Changes projection,
+real-database test, replay registration and CAS migration file is unchanged.
+
+The CAS migration SHA-256 remains
+`157808f46b033234fd02d30c8aa7d3b23029a549d734ec70685ee5672ca515cf`. Omission alone still selects
+the legacy unconditional `save_staging_content_atomic` path. A valid expected version selects the
+separate compare-and-set RPC; its same-statement lock/update returns saved, missing or conflict,
+and 409 refreshes without retry. The prior Devin repair is intact: either nullable token conflicts,
+while only two non-null equal timestamps may save. No losing write or history row is introduced.
+
+The incoming s108 release is also preserved: both bulk routes use native `randomUUID()`, direct
+`uuid` and `@types/uuid` roots remain removed, only LHCI's nested UUID node remains, and no UUID
+migration exists. The story ledger retains s81, s108 and s113, and the shared database runner keeps
+both the analytics suites and `staging-content-cas`.
+
+Fresh independent Node 24.14.0 verification passed the five s81 route/validator/hook/Changes suites
+and both s108 route suites: **7 suites / 203 tests**. Prior route, hook and PostgreSQL
+neutralizations remain bound to unchanged source/migration hashes. No LSP diagnostic was required
+because this integration delta changes neither s81 nor s108 source.
+
+No new finding was introduced. The ordinary merge commit and normal current-head hooks may
+proceed. Hosted checks, migration application, deployment, the live two-tab Discard gesture and
+fresh private Devin availability remain separate evidence.
+
+Max severity: none
+Ship allowed: yes

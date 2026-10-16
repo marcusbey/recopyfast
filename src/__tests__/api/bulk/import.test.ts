@@ -94,6 +94,8 @@ const mockSupabase = {
 (createServerClient as jest.Mock).mockReturnValue(mockSupabase);
 
 const USER = { id: "user-123" };
+const RFC_4122_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const postRequest = (body: unknown) =>
   new NextRequest("http://localhost/api/bulk/import", {
@@ -140,18 +142,17 @@ describe("/api/bulk/import", () => {
     it("should handle JSON import successfully", async () => {
       resultsByTable.site_permissions = { data: { permission: "admin" } };
 
-      const response = await POST(
-        postRequest({
-          site_id: "site-123",
-          format: "json",
-          data: [jsonElement],
-          options: {
-            overwrite_existing: false,
-            create_missing_elements: true,
-            validate_content: true,
-          },
-        }),
-      );
+      const body = {
+        site_id: "site-123",
+        format: "json",
+        data: [jsonElement],
+        options: {
+          overwrite_existing: false,
+          create_missing_elements: true,
+          validate_content: true,
+        },
+      };
+      const response = await POST(postRequest(body));
       const result = await response.json();
 
       expect(response.status).toBe(200);
@@ -174,9 +175,21 @@ describe("/api/bulk/import", () => {
       // s56: the bulk_operations row stays on the cookie client; the content
       // element is written by the service client.
       expect(insertCalls).toHaveLength(1);
+      const operationRow = insertCalls[0] as Record<string, unknown>;
+      expect(operationRow.id).toEqual(expect.stringMatching(RFC_4122_V4));
+      expect(result.operation_id).toBe(operationRow.id);
       expect(serviceInsertCalls).toHaveLength(1);
       expect(upsertCalls).toHaveLength(0);
       expect(serviceUpsertCalls).toHaveLength(0);
+
+      const secondResponse = await POST(postRequest(body));
+      const secondResult = await secondResponse.json();
+      expect(secondResponse.status).toBe(200);
+      expect(insertCalls).toHaveLength(2);
+      const secondOperationRow = insertCalls[1] as Record<string, unknown>;
+      expect(secondOperationRow.id).toEqual(expect.stringMatching(RFC_4122_V4));
+      expect(secondResult.operation_id).toBe(secondOperationRow.id);
+      expect(secondOperationRow.id).not.toBe(operationRow.id);
     });
 
     it("should upsert when overwrite_existing is set", async () => {

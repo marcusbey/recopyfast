@@ -28,6 +28,8 @@ const SITE_ID = "22222222-2222-4222-8222-222222222222";
 const EVIL_PATTERN = "((a+))+$";
 const REFUSAL =
   "Regex find/replace is not supported; use literal find/replace.";
+const RFC_4122_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const elements: Record<string, { id: string; current_content: string }> = {
   evil: { id: "row-evil", current_content: "a".repeat(30) + "!" },
@@ -36,6 +38,7 @@ const elements: Record<string, { id: string; current_content: string }> = {
 
 /** Each `writer.from().update(...).eq("id", …)` — one per content write. */
 const writes: Array<{ payload: Record<string, unknown>; id?: unknown }> = [];
+const operationInserts: Array<Record<string, unknown>> = [];
 
 function userClient() {
   return {
@@ -46,7 +49,10 @@ function userClient() {
       const filters: Record<string, unknown> = {};
       const chain: Record<string, unknown> = {};
       chain.select = () => chain;
-      chain.insert = () => Promise.resolve({ error: null });
+      chain.insert = (payload: Record<string, unknown>) => {
+        if (table === "bulk_operations") operationInserts.push(payload);
+        return Promise.resolve({ error: null });
+      };
       chain.update = () => chain;
       chain.eq = (column: string, value: unknown) => {
         filters[column] = value;
@@ -92,6 +98,31 @@ function writerClient() {
   };
 }
 
+function literalOnlyRequest() {
+  return new NextRequest("http://localhost/api/bulk/update", {
+    method: "POST",
+    body: JSON.stringify({
+      site_id: SITE_ID,
+      operations: [
+        {
+          element_id: "evil",
+          operation: "find_replace",
+          find: EVIL_PATTERN,
+          replace: "x",
+          useRegex: true,
+        },
+        {
+          element_id: "title",
+          operation: "find_replace",
+          find: "Hello",
+          replace: "Hi",
+        },
+      ],
+    }),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 describe("POST /api/bulk/update — literal only (ADR 048)", () => {
   const OriginalRegExp = global.RegExp;
   const regexSources: unknown[] = [];
@@ -99,6 +130,7 @@ describe("POST /api/bulk/update — literal only (ADR 048)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     writes.length = 0;
+    operationInserts.length = 0;
     regexSources.length = 0;
     (enforceRateLimit as jest.Mock).mockResolvedValue(null);
     (checkOwnerCanEdit as jest.Mock).mockResolvedValue({
@@ -126,31 +158,8 @@ describe("POST /api/bulk/update — literal only (ADR 048)", () => {
   });
 
   it("refuses useRegex per operation, fast, without a RegExp from input; a literal operation still applies", async () => {
-    const request = new NextRequest("http://localhost/api/bulk/update", {
-      method: "POST",
-      body: JSON.stringify({
-        site_id: SITE_ID,
-        operations: [
-          {
-            element_id: "evil",
-            operation: "find_replace",
-            find: EVIL_PATTERN,
-            replace: "x",
-            useRegex: true,
-          },
-          {
-            element_id: "title",
-            operation: "find_replace",
-            find: "Hello",
-            replace: "Hi",
-          },
-        ],
-      }),
-      headers: { "Content-Type": "application/json" },
-    });
-
     const started = Date.now();
-    const response = await POST(request);
+    const response = await POST(literalOnlyRequest());
     const elapsed = Date.now() - started;
     global.RegExp = OriginalRegExp;
 
@@ -162,9 +171,21 @@ describe("POST /api/bulk/update — literal only (ADR 048)", () => {
     expect(body.results.errors).toEqual([`Element evil: ${REFUSAL}`]);
     expect(body.results.updated_elements).toEqual(["title"]);
 
+    expect(operationInserts).toHaveLength(1);
+    expect(operationInserts[0].id).toEqual(expect.stringMatching(RFC_4122_V4));
+    expect(body.operation_id).toBe(operationInserts[0].id);
+
     expect(writes.map((write) => write.id)).toEqual(["row-title"]);
     expect(writes[0].payload).toMatchObject({ current_content: "Hi world" });
 
     expect(regexSources).not.toContain(EVIL_PATTERN);
+
+    const secondResponse = await POST(literalOnlyRequest());
+    const secondBody = await secondResponse.json();
+    expect(secondResponse.status).toBe(200);
+    expect(operationInserts).toHaveLength(2);
+    expect(operationInserts[1].id).toEqual(expect.stringMatching(RFC_4122_V4));
+    expect(secondBody.operation_id).toBe(operationInserts[1].id);
+    expect(operationInserts[1].id).not.toBe(operationInserts[0].id);
   });
 });
