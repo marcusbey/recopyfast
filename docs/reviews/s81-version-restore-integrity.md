@@ -193,3 +193,36 @@ fresh private Devin availability remain separate evidence.
 
 Max severity: none
 Ship allowed: yes
+
+## Dependency-order integration review — 2026-10-16 (`cc6ac07`)
+
+Current main now includes the released s69a dependency at
+`cc6ac07e05af0380c8aea202b768643ec0f424b6`. Its no-commit merge into s81 head
+`0d0762fee0631a9851af76893668b72ebb2553bf` has no unmerged entries and passes both diff checks.
+The sole manual resolution is additive `docs/stories.md`, with s69a preceding s81. The resulting
+delta against `MERGE_HEAD` remains exactly the reviewed 22-file s81 story; every s81 source, test,
+ADR and migration file is byte-identical to `0d0762f`.
+
+The CAS migration SHA-256 remains
+`157808f46b033234fd02d30c8aa7d3b23029a549d734ec70685ee5672ca515cf`. Its conditional and
+unconditional save contracts, same-statement locking, typed outcomes, 409 refresh/no-retry behavior
+and prior Devin nullable-token repair are unchanged. The released s69a route/tests/migration are
+also preserved from main, including migration SHA-256
+`ec048ba9faa41f5aa4e54e61a0d7cbaa56bb06446fe508b32d71ed30a3695812`. The shared replay runner
+retains all analytics, `ab-conversion-dedupe` and `staging-content-cas` suites.
+
+The native UUID cleanup remains intact: both bulk routes use `randomUUID()`, direct `uuid` and
+`@types/uuid` roots are absent, only LHCI's nested UUID node remains, and no UUID migration exists.
+The story ledger retains s69a, s81, s108 and s113 in dependency order.
+
+Fresh independent Node 24.14.0 verification passed the focused s81, s69a and s108 route/hook/
+validation suites: **9 suites / 259 tests**. Prior PostgreSQL and behavior neutralizations remain
+bound to unchanged hashes. No LSP diagnostic was required because this dependency refresh changes
+none of those TypeScript sources.
+
+No new finding was introduced. The ordinary merge commit and normal hooks may proceed. The s81
+production migration remains unapplied; its preflight, application, deployment, live two-tab
+Discard gesture, hosted checks and private Devin availability remain separate release evidence.
+
+Max severity: none
+Ship allowed: yes

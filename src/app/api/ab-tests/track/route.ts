@@ -49,6 +49,15 @@ interface TrackEvent {
   geo_region: string | null;
 }
 
+/** The narrow RETURNING projection from insert_ab_test_events(jsonb). */
+interface InsertedTrackEvent {
+  id: string;
+  test_id: string;
+  variant_id: string;
+  visitor_id: string;
+  event_type: (typeof EVENT_TYPES)[number];
+}
+
 /*
  * s68b M5 — the bounds. This route is opened by a token published in the
  * customer's page markup; it took any number of events, stored `value` and
@@ -574,7 +583,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Insert events
+    // s69a: insert the whole admitted batch in one database statement and use
+    // RETURNING as the truth. This route used to read "no conversion yet" in
+    // countableConversions() and INSERT later; two requests could both finish
+    // that read before either write committed. The partial unique index is now
+    // the arbiter. `ON CONFLICT DO NOTHING` inside the service-only RPC keeps a
+    // raced conversion from aborting valid clicks/views beside it, and a loser
+    // comes back as a normal dedupe rather than a 23505/500.
     const rows = eventsToInsert.map((e) => ({
       test_id: e.test_id,
       variant_id: e.variant_id,
@@ -587,7 +602,9 @@ export async function POST(request: NextRequest) {
       geo_region: e.geo_region,
     }));
 
-    const { error } = await supabase.from("ab_test_results").insert(rows);
+    const { data, error } = await supabase.rpc("insert_ab_test_events", {
+      p_events: rows,
+    });
 
     if (error) {
       console.error("Error recording A/B test events:", error);
@@ -598,6 +615,9 @@ export async function POST(request: NextRequest) {
         ),
       );
     }
+    const insertedEvents = (
+      Array.isArray(data) ? data : []
+    ) as InsertedTrackEvent[];
 
     // Every 50th view event, trigger inline significance check.
     //
@@ -608,15 +628,25 @@ export async function POST(request: NextRequest) {
     // a cross-tenant content write again — the batch would still carry the
     // foreign id, and the first view event is not necessarily one that survived
     // the filter.
-    if (viewEvents.length > 0) {
-      const testId = viewEvents[0].test_id;
+    // s69a: only a view in the RPC's RETURNING set can advance this cadence.
+    // Counting eventsToInsert here made a mixed batch's conflicted conversions
+    // look like new views and could schedule completion work that no inserted
+    // view justified. The database result is the only truthful landed set.
+    const insertedViews = insertedEvents.filter(
+      (event) => event.event_type === "view",
+    );
+    if (insertedViews.length > 0) {
+      const testId = insertedViews[0].test_id;
+      const insertedViewsForTest = insertedViews.filter(
+        (event) => event.test_id === testId,
+      ).length;
       const { count: totalViews } = await supabase
         .from("ab_test_results")
         .select("id", { count: "exact", head: true })
         .eq("test_id", testId)
         .eq("event_type", "view");
 
-      if (totalViews && totalViews % 50 < eventsToInsert.length) {
+      if (totalViews && totalViews % 50 < insertedViewsForTest) {
         // Lazy import to avoid circular deps
         try {
           const { checkTestCompletion } = await import(
@@ -631,8 +661,8 @@ export async function POST(request: NextRequest) {
 
     return withCors(
       NextResponse.json({
-        recorded: eventsToInsert.length,
-        deduplicated: events.length - eventsToInsert.length,
+        recorded: insertedEvents.length,
+        deduplicated: events.length - insertedEvents.length,
       }),
     );
   } catch (error) {
