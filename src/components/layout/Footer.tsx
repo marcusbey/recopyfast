@@ -11,10 +11,12 @@ import { isAnalyticsPage } from "@/lib/analytics/google-analytics/routes";
 
 const footerLinks = {
   Product: [
+    { name: "Product overview", href: "/product" },
     { name: "Features", href: "/#features" },
     { name: "Installation guide", href: "/docs/install" },
     { name: "Pricing", href: "/#pricing" },
     { name: "Demo", href: "/demo" },
+    { name: "Try your site", href: "/try" },
     { name: "Compare tools", href: "/compare" },
     { name: "Free tools", href: "/tools" },
   ],

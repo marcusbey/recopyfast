@@ -27,6 +27,22 @@ describe("Footer", () => {
     ).toHaveAttribute("href", "/docs/install");
   });
 
+  it("keeps the pages removed from the compact header reachable", () => {
+    render(<Footer variant="editorial" />);
+
+    expect(
+      screen.getByRole("link", { name: "Product overview" }),
+    ).toHaveAttribute("href", "/product");
+    expect(screen.getByRole("link", { name: "Try your site" })).toHaveAttribute(
+      "href",
+      "/try",
+    );
+    expect(screen.getByRole("link", { name: "Features" })).toHaveAttribute(
+      "href",
+      "/#features",
+    );
+  });
+
   it("keeps the legacy product anchors on /product", () => {
     mockPathname = "/product";
     render(<Footer />);
