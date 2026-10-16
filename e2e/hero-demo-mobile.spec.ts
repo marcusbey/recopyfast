@@ -51,8 +51,29 @@ async function swipeUpOverDemo(page: Page): Promise<number[]> {
   expect(box, "the demo viewport must be on screen to swipe it").not.toBeNull();
   if (!box) throw new Error("no demo viewport");
 
-  const x = box.x + box.width / 2;
-  const startY = box.y + box.height * 0.75;
+  const viewport = page.viewportSize();
+  expect(
+    viewport,
+    "the mobile context must expose its viewport",
+  ).not.toBeNull();
+  if (!viewport) throw new Error("no mobile viewport");
+
+  const visible = {
+    left: Math.max(0, box.x),
+    right: Math.min(viewport.width, box.x + box.width),
+    top: Math.max(0, box.y),
+    bottom: Math.min(viewport.height, box.y + box.height),
+  };
+  expect(visible.right - visible.left).toBeGreaterThan(0);
+  expect(visible.bottom - visible.top).toBeGreaterThan(SWIPE_DISTANCE_PX + 24);
+
+  const x = visible.left + (visible.right - visible.left) / 2;
+  const startY = visible.bottom - 12;
+  const endY = startY - SWIPE_DISTANCE_PX;
+  expect(startY).toBeGreaterThan(visible.top);
+  expect(startY).toBeLessThan(visible.bottom);
+  expect(endY).toBeGreaterThan(visible.top);
+  expect(endY).toBeLessThan(visible.bottom);
   const samples: number[] = [];
 
   const sample = async () => {
@@ -68,9 +89,7 @@ async function swipeUpOverDemo(page: Page): Promise<number[]> {
   for (let step = 1; step <= SWIPE_STEPS; step++) {
     await client.send("Input.dispatchTouchEvent", {
       type: "touchMove",
-      touchPoints: [
-        { x, y: startY - (SWIPE_DISTANCE_PX * step) / SWIPE_STEPS },
-      ],
+      touchPoints: [{ x, y: startY - ((startY - endY) * step) / SWIPE_STEPS }],
     });
     await page.waitForTimeout(16);
     await sample();
@@ -98,22 +117,28 @@ async function demoScrollTop(page: Page): Promise<number> {
 async function openDemoViewport(page: Page): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   const section = page.getByTestId("real-demo-section");
-  await section.evaluate((element) =>
-    element.scrollIntoView({ block: "center" }),
-  );
-  await expect(section).toBeVisible();
+  const reload = section.getByRole("button", {
+    name: "Reload this site and undo the demo edits",
+  });
+  await expect(reload).toBeVisible();
 
-  const surface = section.locator("[data-demo-surface]");
-  const surfaceBox = await surface.boundingBox();
-  expect(surfaceBox, "the real demo surface must be on screen").not.toBeNull();
-  if (!surfaceBox) throw new Error("no real demo surface");
-
-  // A real touch ends the attract loop before it can replace the keyed site
-  // scroller during the two-swipe sample. The corner is browser chrome, so it
-  // does not open a text editor or activate a site control.
-  await page.touchscreen.tap(surfaceBox.x + 4, surfaceBox.y + 4);
+  // This hydrated, real control gives the component an actual pointer
+  // interaction before any layout measurement, ending the attract loop
+  // without opening an editable field.
+  await reload.tap();
   await expect(page.locator(DEMO_SCROLLER)).toHaveCount(1);
-  await expect(page.locator(DEMO_SCROLLER).first()).toBeVisible();
+
+  const scroller = page.locator(DEMO_SCROLLER).first();
+  await scroller.evaluate((element) =>
+    element.scrollIntoView({ block: "center", inline: "nearest" }),
+  );
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  await expect(scroller).toBeVisible();
 }
 
 test.describe("Hero demo on a phone", () => {
