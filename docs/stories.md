@@ -4946,6 +4946,23 @@ Human validated 2026-10-12. The complete acceptance criteria, tasks and constrai
 
 Branch: `feature/s65b-site-delete-revision-lock-order`. Embed allocation: 0 bytes.
 
+## Story s69a-atomic-conversion-dedupe — approved Devin review remediation
+
+Two concurrent conversion beacons for the same `(test_id, visitor_id)` can create at most one
+conversion result, so a race cannot double-count a conversion or move an A/B test toward a winner
+twice.
+
+Human validated 2026-10-12. The complete acceptance criteria, tasks and constraints are
+`docs/plans/s69a-atomic-conversion-dedupe.md`, materialized from the four-fix proposal approved in
+this chat.
+
+- [x] Research confirms the current premise and records consumers and compatibility boundaries.
+- [x] All approved plan tasks and their regression/concurrency checks pass.
+- [x] No applied migration is changed; no dependency is added.
+- [x] Independent review passes and normal repository checks pass before a draft PR.
+
+Branch: `feature/s69a-atomic-conversion-dedupe`. Embed allocation: 0 bytes.
+
 ## Story s110-analytics-consent-context — consented acquisition context reaches conversion boundaries safely
 
 Owner request 2026-10-12: finish analytics for visitors, completed signups and paying customers.
