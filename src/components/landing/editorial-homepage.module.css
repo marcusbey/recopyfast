@@ -1,0 +1,425 @@
+.page {
+  --paper: #f7f3e9;
+  --ink: #142024;
+  --teal: #287f7c;
+  --line: #d9d3c6;
+  --muted: #4c5552;
+  min-height: 100vh;
+  overflow-x: clip;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.page h1,
+.page h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+}
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  min-height: 720px;
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 0.95fr);
+  align-items: center;
+  overflow: hidden;
+  padding: 118px max(5vw, 32px) 64px;
+  border-bottom: 1px solid var(--line);
+}
+
+.heroArtwork {
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 0 auto;
+  width: 62%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center right;
+}
+
+.hero::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  background: linear-gradient(
+    90deg,
+    var(--paper) 0%,
+    var(--paper) 43%,
+    rgb(247 243 233 / 88%) 55%,
+    transparent 78%
+  );
+}
+
+.heroCopy {
+  position: relative;
+  width: min(680px, 100%);
+  container-type: inline-size;
+  grid-column: 1;
+}
+
+.eyebrow {
+  margin-bottom: 22px;
+  color: var(--teal);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.heroTitle {
+  min-height: 3.24em;
+  /*
+   * This headline used to scale against the viewport even though the artwork
+   * track, rather than the viewport, decides how much room the words receive.
+   * At 901px the completed first line was 376px wide inside a 351px editable
+   * box, and its hidden horizontal scrollbar made "website" look cut off.
+   * Keep the type tied to the real copy container so every authored animation
+   * state fits while visitor-written long copy can still scroll on one line.
+   */
+  font-size: clamp(29px, 11cqw, 68px);
+  line-height: 1.08;
+}
+
+.heroLine {
+  display: block;
+  max-width: 100%;
+  min-height: 1.08em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 2px;
+  outline: 2px dashed transparent;
+  outline-offset: 5px;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.heroLine::-webkit-scrollbar {
+  display: none;
+}
+
+.heroLine:hover,
+.heroLine:focus,
+.payoff [contenteditable]:hover,
+.payoff [contenteditable]:focus {
+  background: rgb(40 127 124 / 6%);
+  outline-color: var(--teal);
+}
+
+.heroLine:focus,
+.payoff [contenteditable]:focus {
+  outline-style: solid;
+}
+
+.editWord {
+  position: relative;
+  display: inline-block;
+  border-radius: 2px;
+  outline: 2px dashed transparent;
+  outline-offset: 7px;
+}
+
+.wordHovered,
+.wordEditing {
+  background: rgb(40 127 124 / 8%);
+  outline-color: var(--teal);
+}
+
+.wordSelected {
+  background: rgb(40 127 124 / 24%);
+}
+
+.wordTyping::after {
+  position: absolute;
+  top: 12%;
+  right: -3px;
+  width: 2px;
+  height: 78%;
+  background: var(--teal);
+  content: "";
+  animation: caretBlink 0.8s step-end infinite;
+}
+
+@keyframes caretBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.demoCursor {
+  position: absolute;
+  z-index: 3;
+  width: 17px;
+  height: 23px;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 24%));
+  transition:
+    opacity 220ms ease,
+    transform 140ms ease;
+}
+
+.cursorVisible {
+  opacity: 1;
+}
+.cursorClick {
+  transform: scale(0.78);
+}
+
+.payoff {
+  max-width: 500px;
+  margin: 26px 0;
+  color: var(--ink);
+  /* The 320px follow-up caught this line clipping behind the same hidden
+   * scrollbar as the headline. Size it from the copy column as well so the
+   * authored two-line payoff is complete without changing custom-text rules. */
+  font:
+    clamp(17px, 6cqw, 24px) / 1.42 Georgia,
+    "Times New Roman",
+    serif;
+}
+
+.payoff [contenteditable] {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 2px;
+  outline: 2px dashed transparent;
+  outline-offset: 5px;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.primaryButton {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: var(--teal);
+  padding: 12px 23px;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.primaryButton:hover {
+  background: #206d6a;
+  transform: translateY(-1px);
+}
+.primaryButton:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 4px;
+}
+
+.realDemo,
+.storySection,
+.finalCta {
+  padding: 88px max(5vw, 32px);
+}
+
+.realDemo {
+  border-bottom: 1px solid var(--line);
+}
+
+.sectionHeading {
+  width: min(760px, 100%);
+  margin: 0 auto 38px;
+  text-align: center;
+}
+
+.sectionHeading h2,
+.storySection h2,
+.finalCta h2 {
+  font-size: clamp(36px, 4.2vw, 58px);
+  line-height: 1.06;
+}
+
+.sectionHeading > p:last-child,
+.storySection > div > p,
+.finalCta > div > p:last-of-type {
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 1.08rem;
+  line-height: 1.65;
+}
+
+.demoFrame {
+  width: min(1664px, calc(100vw - 32px));
+  margin-inline: auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: white;
+}
+
+.storySection {
+  width: min(1400px, 100%);
+  margin-inline: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.twoColumn {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: clamp(36px, 6vw, 88px);
+}
+
+.twoColumn img {
+  width: 100%;
+  height: auto;
+}
+
+.requestList {
+  margin-top: 30px;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.requestList li {
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line);
+  font:
+    21px/1.35 Georgia,
+    "Times New Roman",
+    serif;
+}
+
+.steps {
+  margin-top: 32px;
+}
+.steps p {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 12px;
+  padding: 15px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+.steps span {
+  color: var(--teal);
+  font:
+    italic 20px Georgia,
+    serif;
+}
+
+.pricingFrame {
+  border-bottom: 1px solid var(--line);
+}
+.pricingFrame :global(section#pricing) {
+  background: #f0ecdf;
+  border-color: var(--line);
+}
+
+.finalCta {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-height: 490px;
+  align-items: center;
+  overflow: hidden;
+}
+
+.finalCta > img {
+  z-index: -2;
+  object-fit: cover;
+  object-position: right center;
+}
+.finalCta::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  background: linear-gradient(
+    90deg,
+    var(--paper) 0%,
+    rgb(247 243 233 / 92%) 48%,
+    transparent 82%
+  );
+}
+.finalCta > div {
+  width: min(690px, 72%);
+}
+.finalCta .primaryButton {
+  margin-top: 28px;
+}
+
+@media (max-width: 1024px) {
+  .hero {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 104px 6% 0;
+  }
+  .heroCopy {
+    width: 100%;
+  }
+  .heroArtwork {
+    position: relative;
+    z-index: 0;
+    order: 2;
+    width: calc(100% + 12%);
+    height: auto;
+    margin: 26px -6% 0;
+    object-position: right center;
+  }
+  .hero::after {
+    display: none;
+  }
+  .heroTitle {
+    font-size: clamp(29px, 7vw, 54px);
+  }
+  .realDemo,
+  .storySection,
+  .finalCta {
+    padding: 58px 6%;
+  }
+  .sectionHeading {
+    text-align: left;
+  }
+  .twoColumn {
+    grid-template-columns: 1fr;
+    gap: 34px;
+  }
+  .reverseOnMobile > div {
+    order: -1;
+  }
+  .finalCta {
+    min-height: 560px;
+    align-items: flex-start;
+  }
+  .finalCta > img {
+    object-position: 72% bottom;
+  }
+  .finalCta::after {
+    background: linear-gradient(
+      180deg,
+      var(--paper) 0%,
+      rgb(247 243 233 / 96%) 52%,
+      transparent 94%
+    );
+  }
+  .finalCta > div {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demoCursor {
+    display: none;
+  }
+  .wordTyping::after {
+    animation: none;
+  }
+  .primaryButton {
+    transition: none;
+  }
+}

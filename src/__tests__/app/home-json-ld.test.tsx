@@ -8,7 +8,7 @@ import { render } from "@testing-library/react";
  * because what is under test is the markup the server writes for crawlers.
  */
 
-jest.mock("@/components/landing/HomePage", () => ({
+jest.mock("@/components/landing/EditorialHomePage", () => ({
   __esModule: true,
   default: () => <main data-testid="landing-body" />,
 }));

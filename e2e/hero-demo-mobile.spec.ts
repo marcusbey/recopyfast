@@ -1,5 +1,5 @@
 /**
- * A-32 (touch half) — the pinned hero demo must not fight touch scrolling.
+ * A-32 (touch half) — the homepage demo must not fight touch scrolling.
  *
  * Two things used to own the demo's `scrollTop` at once. The demo viewport was
  * `overflow-y-auto` even while pinned, so a finger over it scrolled it
@@ -11,14 +11,11 @@
  * its top mid-gesture. Two successive swipes are the shortest sequence that
  * shows it — the first ends inside the demo, the second chains.
  *
- * The fix gives page scroll sole ownership wherever it is driving: with a
- * progress MotionValue supplied the viewport is `overflow-y-hidden`, which
- * still scrolls programmatically but is not a scroller a finger can drag. On
- * /demo, where nothing drives it, it stays `overflow-y-auto` and the reader
- * owns it. This spec pins the result on a phone.
- *
- * NOT EXECUTED HERE. It needs a dev server and browser binaries, neither of
- * which was available when the fix landed.
+ * s114 removed the old pinned `HeroDemo` scroll track from the homepage and
+ * placed `InteractiveHero` directly in `real-demo-section`. Nothing drives a
+ * progress MotionValue there now, so the nested viewport is intentionally
+ * `overflow-y-auto`: the reader owns its scroll just as on /demo. This spec
+ * keeps the original two-swipe regression on that current surface.
  *
  * WHY CDP RATHER THAN dispatchEvent. Synthetic `TouchEvent`s are untrusted and
  * produce no scrolling at all, which would make this test measure nothing.
@@ -54,8 +51,29 @@ async function swipeUpOverDemo(page: Page): Promise<number[]> {
   expect(box, "the demo viewport must be on screen to swipe it").not.toBeNull();
   if (!box) throw new Error("no demo viewport");
 
-  const x = box.x + box.width / 2;
-  const startY = box.y + box.height * 0.75;
+  const viewport = page.viewportSize();
+  expect(
+    viewport,
+    "the mobile context must expose its viewport",
+  ).not.toBeNull();
+  if (!viewport) throw new Error("no mobile viewport");
+
+  const visible = {
+    left: Math.max(0, box.x),
+    right: Math.min(viewport.width, box.x + box.width),
+    top: Math.max(0, box.y),
+    bottom: Math.min(viewport.height, box.y + box.height),
+  };
+  expect(visible.right - visible.left).toBeGreaterThan(0);
+  expect(visible.bottom - visible.top).toBeGreaterThan(SWIPE_DISTANCE_PX + 24);
+
+  const x = visible.left + (visible.right - visible.left) / 2;
+  const startY = visible.bottom - 12;
+  const endY = startY - SWIPE_DISTANCE_PX;
+  expect(startY).toBeGreaterThan(visible.top);
+  expect(startY).toBeLessThan(visible.bottom);
+  expect(endY).toBeGreaterThan(visible.top);
+  expect(endY).toBeLessThan(visible.bottom);
   const samples: number[] = [];
 
   const sample = async () => {
@@ -71,9 +89,7 @@ async function swipeUpOverDemo(page: Page): Promise<number[]> {
   for (let step = 1; step <= SWIPE_STEPS; step++) {
     await client.send("Input.dispatchTouchEvent", {
       type: "touchMove",
-      touchPoints: [
-        { x, y: startY - (SWIPE_DISTANCE_PX * step) / SWIPE_STEPS },
-      ],
+      touchPoints: [{ x, y: startY - ((startY - endY) * step) / SWIPE_STEPS }],
     });
     await page.waitForTimeout(16);
     await sample();
@@ -97,65 +113,32 @@ async function demoScrollTop(page: Page): Promise<number> {
     .evaluate((el) => el.scrollTop);
 }
 
-/**
- * How far the top of the demo's sticky track is below the top of the viewport:
- * the page scroll left before the demo pins. 0 or less means it is pinned.
- *
- * Measured from the section, never from the scroller: the scroller is keyed by
- * site, so the attract loop replaces that node every few seconds.
- */
-async function demoTrackOffset(page: Page): Promise<number> {
-  return page
-    .getByRole("region", { name: "Interactive demo" })
-    .evaluate((section) => {
-      const sticky = Array.from(section.querySelectorAll("div")).find(
-        (el) => getComputedStyle(el).position === "sticky",
-      );
-      const track = sticky?.parentElement;
-      if (!track) throw new Error("the demo has no sticky track");
-      return track.getBoundingClientRect().top;
-    });
-}
-
-/**
- * CSS px past the pin. Just over InteractiveHero's SCROLL_ENGAGED_AT (0.01 of
- * the track, about 15 px on this profile): scrolling into the demo is what ends
- * its attract loop, and with it the site swaps that replace the scroller.
- */
-const ENGAGE_PX = 24;
-
-/** Wheel rounds before giving up on pinning the demo; two suffice in practice. */
-const MAX_APPROACH_WHEELS = 6;
-
-/*
- * Scrolls to the MEASURED top of the sticky track, not a fixed offset. It was
- * `mouse.wheel(0, 400)`, which encoded the hero's height at the time — and
- * wheel deltas are device pixels, so on this 3x profile it moved the page
- * about 133 CSS px, well short of the track (514 px). The swipes had to carry
- * the page the rest of the way. The founding-offer pill (s47b) made the hero
- * 62 px taller, the track moved to 576 px, and the swipes sometimes no longer
- * reached it: the demo never moved and the test failed on a layout change,
- * not on the snap-back it guards. Measuring keeps the test about the swipes.
- *
- * A loop, not one wheel: the track's offset drifts while the page scrolls, so
- * a single measured wheel lands short. Each round re-measures.
- */
-async function openPinnedDemo(page: Page): Promise<void> {
+/** Opens the current s114 demo surface and stops its automatic site attract loop. */
+async function openDemoViewport(page: Page): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.locator(DEMO_SCROLLER).first().waitFor({ state: "visible" });
-  const ratio = await page.evaluate(() => window.devicePixelRatio);
+  const section = page.getByTestId("real-demo-section");
+  const reload = section.getByRole("button", {
+    name: "Reload this site and undo the demo edits",
+  });
+  await expect(reload).toBeVisible();
 
-  for (let wheel = 0; ; wheel++) {
-    const remaining = (await demoTrackOffset(page)) + ENGAGE_PX;
-    if (remaining <= 1) break;
-    if (wheel === MAX_APPROACH_WHEELS) throw new Error("the demo never pinned");
-    await page.mouse.wheel(0, remaining * ratio);
-    await page.waitForTimeout(600); // Lenis easing
-  }
-
-  // A site swap the attract loop started before it ended may still be
-  // animating out; the swipes need the one scroller that remains.
+  // This hydrated, real control gives the component an actual pointer
+  // interaction before any layout measurement, ending the attract loop
+  // without opening an editable field.
+  await reload.tap();
   await expect(page.locator(DEMO_SCROLLER)).toHaveCount(1);
+
+  const scroller = page.locator(DEMO_SCROLLER).first();
+  await scroller.evaluate((element) =>
+    element.scrollIntoView({ block: "center", inline: "nearest" }),
+  );
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  await expect(scroller).toBeVisible();
 }
 
 test.describe("Hero demo on a phone", () => {
@@ -164,7 +147,7 @@ test.describe("Hero demo on a phone", () => {
   /* Guards the test below: the swipe measures nothing if the thing being
      swiped is absent or has nothing to scroll through. */
   test("the demo has its own scrolling viewport", async ({ page }) => {
-    await openPinnedDemo(page);
+    await openDemoViewport(page);
 
     const scroller = page.locator(DEMO_SCROLLER).first();
     await expect(scroller).toBeVisible();
@@ -177,7 +160,7 @@ test.describe("Hero demo on a phone", () => {
   });
 
   test("two swipes never scroll the demo backwards", async ({ page }) => {
-    await openPinnedDemo(page);
+    await openDemoViewport(page);
 
     const samples = [
       await demoScrollTop(page),

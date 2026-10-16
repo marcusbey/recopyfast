@@ -1,3 +1,7 @@
+# October 15 editorial website direction
+
+The owner-approved [editorial website guide](design/editorial-website-guide.md) defines the new website direction. It supersedes sky/glass marketing styling for migrated surfaces. Functional app, accessibility, semantic-state and widget contracts below remain binding until explicitly migrated. Status: planned, not yet deployed.
+
 # Design System — RecopyFast
 
 > **Captured, not designed.** Every token, component and rule below is read out of the running

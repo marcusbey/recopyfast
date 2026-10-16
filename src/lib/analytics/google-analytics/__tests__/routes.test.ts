@@ -21,6 +21,7 @@ import { usesNoncePolicy } from "@/lib/security/content-security-policy";
 describe("isAnalyticsRoute", () => {
   it.each([
     "/",
+    "/product",
     "/try",
     "/pricing",
     "/privacy",

@@ -82,12 +82,19 @@ function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-export default function Pricing({ offer }: { offer: FoundingOfferView }) {
+export default function Pricing({
+  offer,
+  variant = "default",
+}: {
+  offer: FoundingOfferView;
+  variant?: "default" | "editorial";
+}) {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, margin: "-100px" });
   const [isYearly, setIsYearly] = useState(false);
   const [pricing, setPricing] = useState<PricingResponse | null>(null);
   const [hasFailed, setHasFailed] = useState(false);
+  const isEditorial = variant === "editorial";
 
   const loadPricing = useCallback(async () => {
     setHasFailed(false);
@@ -129,13 +136,15 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
     <section
       id="pricing"
       ref={ref}
-      className="glass-sheet relative overflow-hidden border-y border-white/40 py-24 sm:py-32 px-6"
+      className={`relative overflow-hidden border-y px-6 py-24 sm:py-32 ${isEditorial ? "border-[#d9d3c6] bg-[#f0ecdf]" : "glass-sheet border-white/40"}`}
     >
       {/* Subtle background */}
-      <div className="absolute inset-0">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-sky-100 rounded-full blur-3xl opacity-30" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-teal-100 rounded-full blur-3xl opacity-30" />
-      </div>
+      {!isEditorial ? (
+        <div className="absolute inset-0">
+          <div className="absolute top-0 left-1/4 w-96 h-96 bg-sky-100 rounded-full blur-3xl opacity-30" />
+          <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-teal-100 rounded-full blur-3xl opacity-30" />
+        </div>
+      ) : null}
 
       <div className="max-w-6xl mx-auto relative z-10">
         {/* Section header */}
@@ -143,15 +152,21 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
           initial={{ opacity: 0, y: 40 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.8 }}
-          className="text-center mb-16"
+          className="mb-16 text-center"
         >
-          <span className="mb-6 inline-block text-sm font-semibold uppercase tracking-[0.075em] text-sky-700">
+          <span
+            className={`mb-6 inline-block text-sm font-semibold uppercase tracking-[0.075em] ${isEditorial ? "text-[#287f7c]" : "text-sky-700"}`}
+          >
             Pricing
           </span>
-          <h2 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-6">
+          <h2
+            className={`mb-6 text-4xl tracking-tight text-slate-900 sm:text-5xl ${isEditorial ? "font-serif font-medium" : "font-display font-bold"}`}
+          >
             Simple pricing,
             <br />
-            <span className="text-slate-400">no surprises</span>
+            <span className={isEditorial ? "text-[#4c5552]" : "text-slate-400"}>
+              no surprises
+            </span>
           </h2>
           <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto mb-8">
             Choose the plan that fits your needs. Upgrade anytime.
@@ -166,16 +181,21 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
               remaining={offer.remaining}
               limit={offer.limit}
               creditPack={creditPack}
+              variant={variant}
             />
           )}
 
           {/* Billing toggle */}
-          <div className="inline-flex items-center gap-4 p-1 bg-white rounded-full border border-sky-200 shadow-sm">
+          <div
+            className={`inline-flex items-center gap-4 border bg-white p-1 ${isEditorial ? "rounded-[3px] border-[#d9d3c6]" : "rounded-full border-sky-200 shadow-sm"}`}
+          >
             <button
               onClick={() => setIsYearly(false)}
-              className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${
+              className={`px-6 py-2 text-sm font-medium transition-all ${isEditorial ? "rounded-[2px]" : "rounded-full"} ${
                 !isYearly
-                  ? "bg-sky-500 text-white shadow-md"
+                  ? isEditorial
+                    ? "bg-[#287f7c] text-white"
+                    : "bg-sky-500 text-white shadow-md"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
@@ -183,14 +203,18 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
             </button>
             <button
               onClick={() => setIsYearly(true)}
-              className={`px-6 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${
+              className={`flex items-center gap-2 px-6 py-2 text-sm font-medium transition-all ${isEditorial ? "rounded-[2px]" : "rounded-full"} ${
                 isYearly
-                  ? "bg-sky-500 text-white shadow-md"
+                  ? isEditorial
+                    ? "bg-[#287f7c] text-white"
+                    : "bg-sky-500 text-white shadow-md"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Yearly
-              <span className="text-xs px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full">
+              <span
+                className={`bg-teal-100 px-2 py-0.5 text-xs text-teal-700 ${isEditorial ? "rounded-[2px]" : "rounded-full"}`}
+              >
                 Save 17%
               </span>
             </button>
@@ -204,7 +228,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
             </p>
             <button
               onClick={() => void loadPricing()}
-              className="pressable rounded-xl bg-sky-600 px-6 py-3 font-semibold text-white hover:bg-sky-700"
+              className={`pressable px-6 py-3 font-semibold text-white ${isEditorial ? "rounded-[3px] bg-[#287f7c] hover:bg-[#206d6a]" : "rounded-xl bg-sky-600 hover:bg-sky-700"}`}
             >
               Try again
             </button>
@@ -220,7 +244,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
             {[0, 1, 2].map((index) => (
               <div
                 key={index}
-                className="h-[32rem] animate-pulse rounded-3xl border border-sky-100 bg-white/60"
+                className={`h-[32rem] animate-pulse border bg-white/60 ${isEditorial ? "rounded-[3px] border-[#d9d3c6]" : "rounded-3xl border-sky-100"}`}
               />
             ))}
           </div>
@@ -247,23 +271,33 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                   initial={{ opacity: 0, y: 40 }}
                   animate={isInView ? { opacity: 1, y: 0 } : {}}
                   transition={{ duration: 0.6, delay: 0.1 * i }}
-                  className={`relative bg-white rounded-3xl p-8 ${
+                  className={`relative bg-white p-8 ${isEditorial ? "rounded-[3px]" : "rounded-3xl"} ${
                     plan.highlight
-                      ? "ring-2 ring-sky-500 shadow-xl shadow-sky-500/10"
-                      : "border border-sky-100"
+                      ? isEditorial
+                        ? "border-2 border-[#287f7c]"
+                        : "ring-2 ring-sky-500 shadow-xl shadow-sky-500/10"
+                      : isEditorial
+                        ? "border border-[#d9d3c6]"
+                        : "border border-sky-100"
                   }`}
                 >
                   {plan.badge && (
                     <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                      <span className="rounded-full bg-teal-700 px-4 py-1.5 text-sm font-semibold text-white">
+                      <span
+                        className={`bg-teal-700 px-4 py-1.5 text-sm font-semibold text-white ${isEditorial ? "rounded-[3px]" : "rounded-full"}`}
+                      >
                         {plan.badge}
                       </span>
                     </div>
                   )}
 
                   <div className="mb-8">
-                    <div className="w-12 h-12 rounded-2xl bg-sky-50 flex items-center justify-center mb-4">
-                      <Icon className="w-6 h-6 text-sky-500" />
+                    <div
+                      className={`mb-4 flex h-12 w-12 items-center justify-center ${isEditorial ? "rounded-[3px] bg-[#ebe7dc]" : "rounded-2xl bg-sky-50"}`}
+                    >
+                      <Icon
+                        className={`h-6 w-6 ${isEditorial ? "text-[#287f7c]" : "text-sky-500"}`}
+                      />
                     </div>
                     <h3 className="text-2xl font-semibold text-slate-900 mb-2">
                       {plan.name}
@@ -303,10 +337,14 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                   <a
                     href="/signup"
                     data-cta-location="pricing_plan"
-                    className={`block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all ${
+                    className={`block w-full px-6 py-3 text-center font-semibold transition-all ${isEditorial ? "rounded-[3px]" : "rounded-xl"} ${
                       plan.highlight
-                        ? "pressable bg-sky-600 text-white hover:bg-sky-700"
-                        : "bg-sky-50 text-sky-700 hover:bg-sky-100"
+                        ? isEditorial
+                          ? "pressable bg-[#287f7c] text-white hover:bg-[#206d6a]"
+                          : "pressable bg-sky-600 text-white hover:bg-sky-700"
+                        : isEditorial
+                          ? "border border-[#287f7c] text-[#287f7c] hover:bg-[#ebe7dc]"
+                          : "bg-sky-50 text-sky-700 hover:bg-sky-100"
                     }`}
                   >
                     {plan.cta}
@@ -324,10 +362,14 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                 initial={{ opacity: 0, y: 40 }}
                 animate={isInView ? { opacity: 1, y: 0 } : {}}
                 transition={{ duration: 0.6, delay: 0.25 }}
-                className="rounded-3xl border border-sky-200 bg-white p-8"
+                className={`border bg-white p-8 ${isEditorial ? "rounded-[3px] border-[#d9d3c6]" : "rounded-3xl border-sky-200"}`}
               >
-                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50">
-                  <InfinityIcon className="h-6 w-6 text-sky-700" />
+                <div
+                  className={`mb-4 flex h-12 w-12 items-center justify-center ${isEditorial ? "rounded-[3px] bg-[#ebe7dc]" : "rounded-2xl bg-sky-50"}`}
+                >
+                  <InfinityIcon
+                    className={`h-6 w-6 ${isEditorial ? "text-[#287f7c]" : "text-sky-700"}`}
+                  />
                 </div>
                 <h3 className="mb-2 text-2xl font-semibold text-slate-900">
                   {lifetimePro.name}
@@ -338,7 +380,9 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                 <ul className="mt-6 space-y-3">
                   {lifetimePro.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-3">
-                      <Check className="mt-0.5 h-5 w-5 shrink-0 text-sky-700" />
+                      <Check
+                        className={`mt-0.5 h-5 w-5 shrink-0 ${isEditorial ? "text-[#287f7c]" : "text-sky-700"}`}
+                      />
                       <span className="text-sm text-slate-700">{feature}</span>
                     </li>
                   ))}
@@ -355,7 +399,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                 <a
                   href="/dashboard/billing"
                   data-cta-location="pricing_lifetime_pro"
-                  className="pressable mt-5 block rounded-xl bg-sky-600 px-6 py-3 text-center font-semibold text-white hover:bg-sky-700"
+                  className={`pressable mt-5 block px-6 py-3 text-center font-semibold text-white ${isEditorial ? "rounded-[3px] bg-[#287f7c] hover:bg-[#206d6a]" : "rounded-xl bg-sky-600 hover:bg-sky-700"}`}
                 >
                   Buy Lifetime Pro
                 </a>
@@ -367,11 +411,13 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                 initial={{ opacity: 0, y: 40 }}
                 animate={isInView ? { opacity: 1, y: 0 } : {}}
                 transition={{ duration: 0.6, delay: 0.3 }}
-                className="rounded-3xl border-2 border-teal-500 bg-gradient-to-br from-teal-50 to-sky-50 p-8 shadow-xl shadow-teal-500/10"
+                className={`border-2 border-teal-500 p-8 ${isEditorial ? "rounded-[3px] bg-white" : "rounded-3xl bg-gradient-to-br from-teal-50 to-sky-50 shadow-xl shadow-teal-500/10"}`}
               >
                 <div className="grid items-center gap-8 md:grid-cols-[1fr_auto]">
                   <div>
-                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white">
+                    <div
+                      className={`mb-4 flex h-12 w-12 items-center justify-center bg-white ${isEditorial ? "rounded-[3px] border border-[#d9d3c6]" : "rounded-2xl"}`}
+                    >
                       <InfinityIcon className="h-6 w-6 text-teal-700" />
                     </div>
                     <h3 className="mb-2 text-2xl font-semibold text-slate-900">
@@ -414,7 +460,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                         <a
                           href="/dashboard/billing"
                           data-cta-location="pricing_founding_agency"
-                          className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800"
+                          className={`pressable mt-5 block bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800 ${isEditorial ? "rounded-[3px]" : "rounded-xl"}`}
                         >
                           Buy founding access
                         </a>
@@ -423,7 +469,7 @@ export default function Pricing({ offer }: { offer: FoundingOfferView }) {
                       <button
                         type="button"
                         disabled
-                        className="mt-5 w-full rounded-xl bg-slate-200 px-6 py-3 font-semibold text-slate-500"
+                        className={`mt-5 w-full bg-slate-200 px-6 py-3 font-semibold text-slate-500 ${isEditorial ? "rounded-[3px]" : "rounded-xl"}`}
                       >
                         {pricing.foundingAgencyAvailability?.soldOut
                           ? "Sold out"

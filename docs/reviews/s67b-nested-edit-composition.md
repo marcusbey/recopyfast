@@ -315,3 +315,34 @@ cross-browser behavior and the public-host 200 ms gesture remain separate eviden
 
 Max severity: none
 Ship allowed: yes
+
+## Editorial-main integration review — 2026-10-16 (`fa269479`)
+
+Current main advanced through the separately reviewed editorial homepage, product/demo and blog
+work to `fa26947933e85a215de20ced55969b76e6acf74e`. Its no-commit merge into s67b head
+`5ad1d7fb2e5d184d1f0252cbfd079acef975ceb9` has no unmerged entries and passes both diff checks.
+The resulting delta against `MERGE_HEAD` remains exactly the reviewed 15-file s67b story. Every
+incoming main file outside the additive story ledger is therefore byte-identical to main; no
+Header, Footer, homepage, product, demo, blog, analytics-route or mobile-E2E change was dropped.
+
+The s67b portion of `docs/stories.md` remains a bounded 34-line net edit (26 insertions, 8
+deletions) against main, without importing main's formatter rewrite into story ownership. The embed
+source/artifact SHA-256 values remain
+`e012083864740b670b010b735c515e579d54bb6dbb1c56d63aa85b17312f096d` and
+`cefe75e9ba9ffde17ba4555f658a6b6c354f79d983617f48d3a5f826342bcf65`. The CI contract still pins
+106 application tests, a fake GA build and seven separate embed-fixture tests.
+
+Fresh independent Node 24.14.0 verification passed the three directly changed embed suites and the
+Playwright CI contract: **4 suites / 89 tests**. The generated artifact remains current at 45,769 /
+32,992 / 13,141 gzipped bytes under unchanged ceilings. Prior nested-edit neutralizations remain
+bound to the unchanged source hash. No LSP diagnostic was required because the integration delta
+does not modify the s67b source beyond the already reviewed story.
+
+No integration defect or test loss was found. This review is limited to preservation of the new
+main state plus the existing s67b delta; it does not re-review the separately authorized editorial
+features. The ordinary merge commit and current-head hooks may proceed. Hosted checks, production
+deployment, fresh private Devin availability, real-customer routers, cross-browser behavior and the
+public-host 200 ms gesture remain separate evidence.
+
+Max severity: none
+Ship allowed: yes

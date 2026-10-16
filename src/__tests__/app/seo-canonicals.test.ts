@@ -26,6 +26,10 @@ jest.mock("@/components/landing/HomePage", () => ({
   __esModule: true,
   default: () => null,
 }));
+jest.mock("@/components/landing/EditorialHomePage", () => ({
+  __esModule: true,
+  default: () => null,
+}));
 
 import type { Metadata } from "next";
 import type { ResolvedMetadata } from "next/dist/lib/metadata/types/metadata-interface";
@@ -110,6 +114,10 @@ const comparisonRoutes: Route[] = comparisonList.map((comparison) => ({
 /** Every page a search engine should index, with its segment chain. */
 const INDEXABLE: Route[] = [
   { path: "/", layers: async () => [layerOf(await import("@/app/page"))] },
+  {
+    path: "/product",
+    layers: async () => [layerOf(await import("@/app/product/page"))],
+  },
   {
     path: "/demo",
     // The page is a client component; its metadata lives in the segment layout.
