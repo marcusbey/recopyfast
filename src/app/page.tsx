@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import HomePage from "@/components/landing/HomePage";
+import EditorialHomePage from "@/components/landing/EditorialHomePage";
 import { loadCatalogueOffers } from "@/lib/seo/catalogue-offers";
 import { buildSoftwareApplicationLd, serializeJsonLd } from "@/lib/seo/json-ld";
 import {
@@ -55,7 +55,7 @@ export default async function Home() {
           __html: serializeJsonLd(softwareApplication),
         }}
       />
-      <HomePage />
+      <EditorialHomePage />
     </>
   );
 }

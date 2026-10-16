@@ -15,6 +15,7 @@
 /** Whole pages, nothing below them. `/try` never includes `/try/rcf-try.js`. */
 const EXACT_PATHS = new Set([
   "/",
+  "/product",
   "/try",
   "/pricing",
   "/privacy",

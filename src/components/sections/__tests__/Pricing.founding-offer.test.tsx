@@ -96,6 +96,64 @@ afterEach(() => {
 });
 
 describe("Pricing founding-offer card", () => {
+  it("isolates the flat editorial treatment from the legacy default", async () => {
+    const legacy = render(<Pricing offer={OPEN} />);
+    await pricingSettled();
+    expect(legacy.container.querySelector("#pricing")).toHaveClass(
+      "glass-sheet",
+    );
+    expect(screen.getByText("Founding offer").closest(".mb-8")).toHaveClass(
+      "rounded-3xl",
+    );
+    legacy.unmount();
+
+    mockFetch({
+      plans: [
+        {
+          id: "starter",
+          name: "Starter",
+          description: "For one site",
+          monthlyPrice: 9,
+          yearlyPrice: 7.5,
+          yearlyTotal: 90,
+          features: ["One site"],
+          highlight: true,
+          badge: "Popular",
+          cta: "Start free",
+        },
+      ],
+      oneTimeProducts: [
+        creditsProduct(),
+        {
+          id: "lifetime_pro",
+          name: "Lifetime Pro",
+          description: "Pay once",
+          price: 299,
+          features: ["Lifetime access"],
+          grantsPlanId: "pro",
+        },
+      ],
+      foundingAgencyAvailability: null,
+    });
+    const editorial = render(<Pricing offer={OPEN} variant="editorial" />);
+    await pricingSettled();
+    expect(editorial.container.querySelector("#pricing")).not.toHaveClass(
+      "glass-sheet",
+    );
+    expect(editorial.container.querySelector("#pricing")).toHaveClass(
+      "bg-[#f0ecdf]",
+    );
+    expect(screen.getByText("Founding offer").closest(".mb-8")).toHaveClass(
+      "rounded-[3px]",
+    );
+    expect(editorial.container.querySelector(".bg-gradient-to-br")).toBeNull();
+    expect(
+      Array.from(editorial.container.querySelectorAll("[class]")).some(
+        (element) => element.getAttribute("class")?.includes("sky-") ?? false,
+      ),
+    ).toBe(false);
+  });
+
   it("shows the offer card between the subtitle and the billing toggle while spots remain", async () => {
     render(<Pricing offer={OPEN} />);
     await pricingSettled();
