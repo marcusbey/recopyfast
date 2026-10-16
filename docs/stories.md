@@ -5016,6 +5016,32 @@ Acceptance criteria:
 
 Complexity: 3. Dependencies: s111 and released s82. Branch `feature/s112-verified-purchase-analytics`.
 No new dependency. Forward-only migration as required by reviewed design. Embed allocation: 0 bytes.
+## Story s108-native-operation-ids — bulk operations keep native UUIDs without an external runtime package
+
+> Maintenance follow-up to Dependabot PR #91, 2026-10-12. Research:
+> `docs/research/s108-native-operation-ids.md`. Plan:
+> `docs/plans/s108-native-operation-ids.md` (`validated: yes`). No UI, so no Design step.
+
+As an operator, I need bulk import and bulk update to keep issuing valid operation identifiers
+without making the production and Jest runtimes disagree about an otherwise unnecessary package.
+
+Acceptance criteria:
+- [ ] `bulk/import` and `bulk/update` create fresh RFC 4122 v4 ids with Node 24's
+  `crypto.randomUUID`; their authorization, rate limits, write order, row shape and responses do
+  not change.
+- [ ] The direct production `uuid` dependency and unused direct `@types/uuid` dependency are gone
+  from the manifest and npm-generated lock. Lighthouse's separate nested UUID stays explicitly
+  outside this story and is not reported fixed.
+- [ ] PR #91's seven failing Jest suites and the real PostgREST content-write preflight pass; the
+  full coverage, PostgreSQL 17, build, embed, Playwright and hosted gates pass unchanged.
+- [ ] A reviewed replacement PR exists before PR #91 is closed as superseded. Closing #91 is
+  authorized only after the replacement head is green; merge and production mutation remain
+  separately gated.
+
+Complexity: 2. Dependencies: none. Branch `feature/s108-native-operation-ids`. No migration, no
+new dependency.
+
+Embed allocation: 0 bytes.
 
 
 ## Story s113-social-share-cards — a shared link shows the freelancer benefit and real product
