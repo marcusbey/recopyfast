@@ -283,103 +283,101 @@ test.describe("Landing Page", () => {
     expect(await starterLink.getAttribute("href")).toBe("/signup");
   });
 
-  // E2E-017: the trust indicators follow the founding-offer count (s47b).
-  // Three phases on one page — loading, open, failed — because the count
-  // decides what every trust row promises, and CI's real count only ever
-  // shows the open state.
-  test("E2E-017: Trust indicators follow the founding offer count", async ({
+  // E2E-017: the founding offer belongs to Pricing. The editorial hero has
+  // one stable trial CTA and problem/solution copy in every availability
+  // state; offer scarcity and fallback terms appear only where a visitor can
+  // inspect the plan.
+  test("E2E-017: Pricing owns open, full and unavailable offer states", async ({
     page,
   }) => {
     const main = page.getByRole("main");
-    const hero = page.locator("#hero");
+    const hero = page.getByTestId("editorial-hero");
     const pricing = pricingSection(page);
 
-    // Loading: the count is held, so the page is caught between first paint
-    // and the answer. It may promise neither the offer nor the 14-day trial.
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const expectStableHero = async () => {
+      await expect(hero).toBeVisible();
+      await expect(hero).toContainText("Let clients edit the words.");
+      await expect(hero).toContainText("Make time for the work that matters.");
+      await expect(
+        hero.getByRole("link", { name: "Start your free trial" }),
+      ).toHaveAttribute("href", "/signup");
+      expect(await hero.textContent()).not.toMatch(
+        /spots left|3 months free|14-day free trial|Claim your spot/,
+      );
+    };
+
+    const expectClosedPricing = async () => {
+      await expect(
+        pricing.getByText("Founding offer", { exact: true }),
+      ).toHaveCount(0);
+      await expect(pricing.getByText("Claim your spot")).toHaveCount(0);
+      await expect(
+        pricing.getByText("14-day free trial", { exact: true }),
+      ).toBeVisible();
+      expect(await pricing.textContent()).not.toMatch(/of 20 spots left/);
+    };
+
+    let offerFixture: {
+      status: number;
+      json: {
+        limit?: number;
+        remaining?: number;
+        soldOut?: boolean;
+        error?: string;
+      };
+    } = {
+      status: 200,
+      json: { limit: 20, remaining: 17, soldOut: false },
+    };
     await page.route("**/api/offers/founding", async (route) => {
-      await held;
-      // Locally `next dev` runs React Strict Mode, whose first request the
-      // hook aborts; fulfilling an aborted request throws. CI serves the
-      // production build, which makes one request.
+      // React Strict Mode aborts its first client request in local `next dev`.
+      // Treat that abort as fixture cleanup so the second request can settle.
       await route
-        .fulfill({ json: { limit: 20, remaining: 17, soldOut: false } })
+        .fulfill({ status: offerFixture.status, json: offerFixture.json })
         .catch(() => {});
     });
 
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
-    await expect(main.getByText("Free trial", { exact: true })).toHaveCount(2, {
-      timeout: 15000,
-    });
-    expect(await hero.textContent()).not.toMatch(
-      /14 days of Pro|spots left|3 months/,
-    );
-    await expect(page.getByText("Claim your spot")).toHaveCount(0);
-
-    // Let the headline's entrance motion finish before measuring it.
-    await page.waitForTimeout(1000);
-    const headlineBefore = await page.locator("#hero h1").boundingBox();
-
-    // Open: the pill fills a slot that was already its height.
-    release();
+    await expectStableHero();
+    await expect(pricing).toBeAttached({ timeout: 15000 });
     await expect(
-      hero.getByRole("link", { name: /17 of 20 spots left/ }),
+      pricing.getByText("17 of 20 spots left", { exact: true }),
     ).toBeVisible({ timeout: 15000 });
-    const headlineAfter = await page.locator("#hero h1").boundingBox();
-    expect(headlineBefore).not.toBeNull();
-    expect(headlineAfter).not.toBeNull();
-    expect(
-      Math.abs((headlineAfter?.y ?? 0) - (headlineBefore?.y ?? 0)),
-    ).toBeLessThanOrEqual(1);
-    await expect(
-      main.getByText("3 months free for the first 20", { exact: true }),
-    ).toHaveCount(2);
 
-    // Plain scrollIntoView — see the note on E2E-012.
     await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     const claim = pricing.getByRole("link", { name: "Claim your spot" });
     await expect(claim).toBeVisible({ timeout: 15000 });
     expect(await claim.getAttribute("href")).toBe("/signup");
-
-    // Scoped to #pricing, not the whole body: these terms only mean anything
-    // in the pricing section.
-    const pricingText = await pricing.textContent();
-    expect(pricingText).toContain("17 of 20 spots left");
-    expect(pricingText).toContain("No credit card required");
-    expect(pricingText).toContain("Cancel anytime");
-    expect(pricingText).not.toContain("14-day free trial");
-
-    // Failed: an unknown count renders exactly as a sold-out one.
-    await page.unroute("**/api/offers/founding");
-    await page.route("**/api/offers/founding", (route) =>
-      route
-        .fulfill({
-          status: 503,
-          json: { error: "Founding offer availability is unavailable" },
-        })
-        .catch(() => {}),
-    );
-    await page.reload({ waitUntil: "load", timeout: 45000 });
-
     await expect(
-      hero.getByRole("link", {
-        name: "Every new account gets 14 days of Pro, free",
-      }),
-    ).toBeVisible({ timeout: 15000 });
-    await expect(
-      main.getByText("14-day free trial", { exact: true }),
-    ).toHaveCount(2);
-    await expect(page.getByText("Claim your spot")).toHaveCount(0);
+      pricing.getByText("3 months free for the first 20", { exact: true }),
+    ).toBeVisible();
 
-    // "of 20", never a bare "spots left": the Founding Agency card says
-    // "N of 50 founding spots left" in every state.
-    const mainText = await main.textContent();
-    expect(mainText).not.toContain("of 20 spots left");
-    expect(mainText).not.toContain("of 20 left");
-    expect(mainText).not.toContain("3 months free");
+    // Full: no scarcity CTA remains, and Pricing truthfully falls back to the
+    // ordinary trial while the editorial hero remains unchanged.
+    offerFixture = {
+      status: 200,
+      json: { limit: 20, remaining: 0, soldOut: true },
+    };
+    await page.goto("/?e2e-offer=full", {
+      waitUntil: "load",
+      timeout: 45000,
+    });
+    await expectStableHero();
+    await expectClosedPricing();
+
+    // Error: an unknown count stays fail-closed to the same fallback. It does
+    // not revive scarcity elsewhere on the page.
+    offerFixture = {
+      status: 503,
+      json: { error: "Founding offer availability is unavailable" },
+    };
+    await page.goto("/?e2e-offer=error", {
+      waitUntil: "load",
+      timeout: 45000,
+    });
+    await expectStableHero();
+    await expectClosedPricing();
+    expect(await main.textContent()).not.toContain("3 months free");
   });
 
   // E2E-018: No unsubstantiated social proof (see removal of fabricated claims)
@@ -453,65 +451,50 @@ test.describe("Landing Page", () => {
     expect(await page.title()).not.toContain("Universal CMS");
   });
 
-  // E2E-019 (s74): the sky's shaders run only on a GPU. Without one, WebGL is
-  // shaded on the CPU, and when the sky drew its shaders there anyway a frame
-  // took 1–2 s and the main thread was busy most of every second. In CI (main,
-  // run 37902163949) E2E-012 waited over 10 s for a Starter card that had not
-  // rendered, and E2E-017 needed 56 s to pass; in the local reproduction
-  // E2E-017's reload never reached `load`. A visitor whose browser draws WebGL
-  // in software gets the same page, so it gets the static sky. See
-  // docs/research/s74-deflake-landing-pricing.md.
-  test("E2E-019: a software WebGL renderer gets the static sky, not the shader", async ({
+  // E2E-019: s114 removed the shader sky entirely. A browser with WebGL
+  // disabled must still receive the approved editorial hero artwork and CTA,
+  // without loading a hidden canvas or a legacy fallback surface.
+  test("E2E-019: the editorial hero needs no WebGL fallback", async ({
     playwright,
     launchOptions,
     baseURL,
   }) => {
-    // This test brings its own browser, told to draw WebGL the way a browser
-    // without a GPU does, so it means the same thing on a runner with a GPU.
-    // `--use-angle=swiftshader-webgl` is SwiftShader as the software fallback,
-    // the one path Chromium reports as a major performance caveat:
-    // `--use-angle=swiftshader` also draws on SwiftShader but reports no
-    // caveat, so the shader sky would mount. Appended last, the flags win over
-    // any GPU backend in the configuration's args. Not `test.use`: launch
-    // options are per worker and Playwright refuses them inside a describe.
     const browser = await playwright.chromium.launch({
-      args: [
-        ...(launchOptions.args ?? []),
-        "--use-gl=angle",
-        "--use-angle=swiftshader-webgl",
-        "--enable-unsafe-swiftshader",
-      ],
+      args: [...(launchOptions.args ?? []), "--disable-webgl"],
     });
 
     try {
       const page = await browser.newPage({ baseURL });
       await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
-      // The sky is a dynamic import: wait for it to mount, or "no canvas"
-      // would also be true of a shader sky whose chunk has not arrived yet.
-      const sky = page.locator("[data-sky]");
-      await expect(sky).toBeAttached({ timeout: 15000 });
-
-      // What this test is about: WebGL2 exists, but only with a major
-      // performance caveat. If this fails, the flags above no longer give a
-      // software renderer and the assertions below test nothing.
-      const webgl = await page.evaluate(() => ({
-        hasWebGL2: Boolean(
-          document.createElement("canvas").getContext("webgl2"),
-        ),
-        hasWebGL2WithoutCaveat: Boolean(
-          document
-            .createElement("canvas")
-            .getContext("webgl2", { failIfMajorPerformanceCaveat: true }),
-        ),
-      }));
       expect(
-        webgl,
-        "E2E-019's browser must draw WebGL2 in software (SwiftShader as the WebGL fallback)",
-      ).toEqual({ hasWebGL2: true, hasWebGL2WithoutCaveat: false });
+        await page.evaluate(() =>
+          Boolean(document.createElement("canvas").getContext("webgl2")),
+        ),
+        "E2E-019 must exercise a browser where WebGL is unavailable",
+      ).toBe(false);
 
-      await expect(sky).toHaveAttribute("data-sky", "static");
+      const hero = page.getByTestId("editorial-hero");
+      await expect(hero).toBeVisible();
+      const artwork = hero.getByRole("img", {
+        name: "A freelancer interrupted by a looping stream of client requests.",
+      });
+      await expect(artwork).toBeVisible();
+      await expect(artwork).toHaveAttribute("src", /hero-request-loop\.webp/);
+      const artworkGeometry = await artwork.evaluate(
+        (image: HTMLImageElement) => ({
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          width: image.getBoundingClientRect().width,
+          height: image.getBoundingClientRect().height,
+        }),
+      );
+      expect(artworkGeometry.complete).toBe(true);
+      expect(artworkGeometry.naturalWidth).toBeGreaterThan(0);
+      expect(artworkGeometry.width).toBeGreaterThan(0);
+      expect(artworkGeometry.height).toBeGreaterThan(0);
       await expect(page.locator("canvas")).toHaveCount(0);
+      await expect(page.locator("[data-sky]")).toHaveCount(0);
     } finally {
       await browser.close();
     }
