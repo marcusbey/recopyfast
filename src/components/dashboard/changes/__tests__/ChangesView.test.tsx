@@ -106,6 +106,7 @@ function row(id: string, overrides: Record<string, unknown>): Row {
     hasLiveText: true,
     state: "published",
     changedAt: ago(2),
+    updatedAt: "2026-10-08T10:00:00.123456+00:00",
     changedBy: null,
     createdAt: "2026-09-28T09:00:00.000Z",
     ...overrides,
@@ -248,10 +249,17 @@ const served = {
     const body = server.list(url);
     return body ? json(body) : json({ error: "Site not found" }, 404);
   },
-  put: (url: URL, body: Body) =>
-    server.put(url.pathname.split("/").pop() ?? "", body)
-      ? json({ success: true })
-      : json({ error: "Content element not found" }, 404),
+  put: (url: URL, body: Body) => {
+    const outcome = server.put(url.pathname.split("/").pop() ?? "", body);
+    if (outcome === "saved") return json({ success: true });
+    if (outcome === "conflict") {
+      return json(
+        { error: "This change was updated elsewhere — review it again." },
+        409,
+      );
+    }
+    return json({ error: "Content element not found" }, 404);
+  },
   publish: (body: Body) => {
     server.publish(body);
     return json({ success: true });
@@ -896,9 +904,10 @@ describe("ChangesView — actions by state and grant", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     const [[, init]] = requests(`/api/staging/content/${ACME}`, "PUT");
-    expect(JSON.parse(String((init as RequestInit).body)).content).toBe(
-      "Start free trial",
-    );
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      content: "Start free trial",
+      expectedUpdatedAt: HERO_BUTTON.updatedAt,
+    });
     expect(screen.getByText("Draft discarded.")).toBeInTheDocument();
   });
 
@@ -933,6 +942,7 @@ describe("ChangesView — actions by state and grant", () => {
       language: "en",
       variant: "default",
       href: "/signup",
+      expectedUpdatedAt: expect.any(String),
     });
     expect(screen.getByText("Draft discarded.")).toBeInTheDocument();
   });
@@ -1094,6 +1104,7 @@ describe("ChangesView — actions by state and grant", () => {
       content: "Start your 14-day trial",
       language: "en",
       variant: "default",
+      expectedUpdatedAt: expect.any(String),
     });
     expect(screen.getByText("Draft discarded.")).toBeInTheDocument();
   });
@@ -1147,6 +1158,7 @@ describe("ChangesView — actions by state and grant", () => {
       content: "Start your 14-day trial",
       language: "en",
       variant: "default",
+      expectedUpdatedAt: expect.any(String),
     });
     expect(requests("/api/staging/publish", "POST")).toHaveLength(2);
   });
@@ -1461,6 +1473,40 @@ describe("ChangesView — after a write, the server is read again (s70b fix pass
       expect(screen.queryByText("Draft discarded.")).not.toBeInTheDocument();
     },
   );
+
+  it("refreshes once after a CAS conflict that lands after the final read, and never retries Discard", async () => {
+    let elementReads = 0;
+    mockApi({
+      rows: [HERO, HERO_BUTTON],
+      list: (url) => {
+        if (url.searchParams.has("element")) elementReads += 1;
+        return served.list(url);
+      },
+      put: () => json({ error: UPDATED_ELSEWHERE }, 409),
+    });
+    const user = await renderLoaded();
+    const button = await expandRow(user, "Start your 14-day trial");
+
+    await user.click(
+      within(button.region()).getByRole("button", { name: "Discard draft" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Discard this draft?",
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Discard draft" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(requests(/^\/api\/staging\/content\//, "PUT")).toHaveLength(1);
+    expect(elementReads).toBe(2);
+    expect(within(button.region()).getByRole("alert")).toHaveTextContent(
+      UPDATED_ELSEWHERE,
+    );
+    expect(screen.queryByText("Draft discarded.")).not.toBeInTheDocument();
+  });
 
   // m1: the status filter changed while Publish was in flight. The reload,
   // read before the publish committed, landed after it and drew the row as

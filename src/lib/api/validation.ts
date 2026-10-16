@@ -154,6 +154,78 @@ export function optionalPlainText(
   return requirePlainText(body, field, options);
 }
 
+const MAX_ISO_TIMESTAMP_LENGTH = 64;
+const ISO_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+
+/**
+ * An optional PostgreSQL `timestamptz` version token, preserved byte for byte.
+ *
+ * s81's Discard path receives the token from PostgREST and sends it back as a
+ * compare-and-set precondition. Rebuilding it through `Date.toISOString()`
+ * would silently truncate PostgreSQL's microseconds and turn a current row into
+ * a false conflict. This validator checks the bounded RFC 3339 shape and the
+ * calendar fields but returns the caller's original string unchanged.
+ *
+ * Only an absent property means "no precondition". Explicit null is invalid:
+ * treating it as omission would let a broken conditional caller fall through
+ * to the legacy last-write-wins RPC and overwrite the row it failed to version.
+ */
+export function optionalIsoTimestamp(
+  body: Record<string, unknown>,
+  field: string,
+): ValidationResult<string | undefined> {
+  if (body[field] === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  const refusal = `Field "${field}" must be a valid ISO timestamp`;
+  const raw = body[field];
+  if (typeof raw !== "string" || raw.length > MAX_ISO_TIMESTAMP_LENGTH) {
+    return fail(refusal);
+  }
+
+  const match = ISO_TIMESTAMP_PATTERN.exec(raw);
+  if (!match) return fail(refusal);
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = match[9] === undefined ? 0 : Number(match[9]);
+  const offsetMinute = match[10] === undefined ? 0 : Number(match[10]);
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    31,
+    isLeapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  const isValid =
+    year > 0 &&
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth[month - 1] &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    offsetHour <= 23 &&
+    offsetMinute <= 59;
+
+  return isValid ? { ok: true, value: raw } : fail(refusal);
+}
+
 /**
  * An optional string bounded in length. Empty is allowed (callers store it as
  * absent); anything that is not a string, null or absent is refused. Control
