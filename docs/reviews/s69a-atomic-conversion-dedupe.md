@@ -104,3 +104,37 @@ availability and deployment remain separate release gates and are not claimed he
 
 Max severity: none
 Ship allowed: yes
+
+## Final current-main integration review — 2026-10-16 (`a58b6fc`)
+
+The final combined tree is materialized as an in-progress merge of current `main`
+`a58b6fc2e63975bef1c0bbe7506360828c49c2b9` into the normally committed intermediate head
+`f973df7151423186a613cf2b7caa4aa4e8e0d070`. It has no unmerged index entries and passes
+`git diff --check` plus `git diff --cached --check`. Compared with `MERGE_HEAD`, the resulting tree
+retains the reviewed ten-file s69a delta. Compared with `f973df7`, every s69a route, API test,
+database test, replay registration and migration file is unchanged; the only incoming files are
+the already merged s113 social-card story and its additive `docs/stories.md` section.
+
+The migration SHA-256 remains
+`ec048ba9faa41f5aa4e54e61a0d7cbaa56bb06446fe508b32d71ed30a3695812`, exactly matching both the
+reviewed story and intermediate heads. The database remains the final conversion-deduplication
+arbiter through the partial unique key and bounded service-role-only RPC. The HTTP route still
+rate-limits before authorization, validates site/test/variant ownership and exposure before the
+RPC, derives `recorded` and `deduplicated` only from returned rows, and advances completion cadence
+only from views that actually landed. No fallback insertion path, broadened grant or swallowed
+failure was introduced.
+
+Fresh independent Node 24.14.0 verification on the combined tree passed the two focused route
+suites: **2 suites / 56 tests**. The normally committed intermediate head already passed lint,
+both type checks, formatting and **8,003 tests**; this review does not recast that evidence as a
+rerun after s113 because s113 touches none of the s69a source or test files. The earlier SQL and
+route neutralizations remain bound to unchanged hashes. No LSP diagnostic was required for the
+final integration delta because it changes no s69a TypeScript source.
+
+No new finding was introduced. This final technical review permits the ordinary merge commit,
+normal hook, push and current-head hosted checks. Production duplicate-probe evidence, migration
+application, PostgREST schema-cache smoke, deployment and a fresh private Devin run remain separate
+release evidence and are not claimed here.
+
+Max severity: none
+Ship allowed: yes
