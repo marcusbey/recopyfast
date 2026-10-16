@@ -197,7 +197,7 @@ jobs:
         run: node --test scripts/__tests__/uptime-check.test.mjs
 
   # This job is intentionally separate from `e2e`. That job owns the strict
-  # 97-test Next/Supabase/Redis/WebSocket stack; collecting this directory there
+  # 106-test Next/Supabase/Redis/WebSocket stack; collecting this directory there
   # would break its reviewed inventory and make a build-artifact safety net wait
   # on providers it does not use. This harness owns both loopback origins and
   # every API response, so credentials must never become a condition for it.
@@ -233,7 +233,7 @@ jobs:
   # constructing a service-role client, so changing only this workflow cannot
   # point them at production. The strict reporter makes skipped/flaky/missing
   # tests a failure and writes the only uploaded artifact: a credential-free
-  # summary with the exact expected 97-test count.
+  # summary with the exact expected 106-test count.
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
@@ -273,6 +273,15 @@ jobs:
       STRIPE_ENTERPRISE_YEARLY_PRICE_ID: "price_local_enterprise_yearly"
       STRIPE_TICKETS_PRICE_ID: "price_local_tickets"
       STRIPE_LIFETIME_AGENCY_PRICE_ID: "price_local_lifetime_agency"
+      # s107 (ADR 063): a fake GA4 id, so the production build this job serves
+      # carries Google Analytics exactly as production does and
+      # e2e/google-analytics.spec.ts tests it. No request reaches Google: that
+      # spec answers every Google host by route interception, and without a
+      # country header every other spec sees the consent banner and no gtag.js.
+      NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-E2ETEST000"
+      GA4_MP_ENABLED: "0"
+      # Public test fixture only; production uses a separately provisioned random key.
+      ANALYTICS_CONSENT_SIGNING_KEY: "abababababababababababababababababababababababababababababababab"
       CI: "true"
 
     steps:
@@ -283,7 +292,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p test-results
-          printf '%s\n' '{"contract":"not-run","expected":97,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
+          printf '%s\n' '{"contract":"not-run","expected":106,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
           chmod 600 test-results/playwright-summary.json
 
       - name: Set up Node.js 24
@@ -440,7 +449,7 @@ jobs:
       - name: Build production app
         run: npm run build
 
-      - name: Run all 97 Playwright tests (blocking)
+      - name: Run all 106 Playwright tests (blocking)
         run: |
           set -euo pipefail
           ws_log="$RUNNER_TEMP/recopyfast-ws.log"
@@ -482,14 +491,14 @@ jobs:
           );
           if (
             report.contract !== "passed" ||
-            report.expected !== 97 ||
-            report.total !== 97 ||
-            report.passed !== 97 ||
+            report.expected !== 106 ||
+            report.total !== 106 ||
+            report.passed !== 106 ||
             report.failed !== 0 ||
             report.skipped !== 0 ||
             report.flaky !== 0
           ) {
-            throw new Error("Playwright did not produce the required clean 97-test summary.");
+            throw new Error("Playwright did not produce the required clean 106-test summary.");
           }
           NODE
 

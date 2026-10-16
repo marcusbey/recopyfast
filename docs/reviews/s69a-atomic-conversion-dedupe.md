@@ -69,3 +69,38 @@ only; executable SQL is unchanged. The prior minor is closed.
 
 Max severity: none
 Ship allowed: yes
+
+## Intermediate integration review — 2026-10-16 (`29fbc9d`)
+
+The preserved in-progress merge of analytics release head
+`29fbc9dfc66fe8fe91954fe07a5ed708db71ecaf` into story head
+`6271d45a06be38ad5965671e124defb54f85d866` has no unmerged index entries and passes both
+`git diff --check` and `git diff --cached --check`. Compared with `MERGE_HEAD`, the resulting tree
+still contains exactly the ten-file s69a story delta described by the validated plan. Compared with
+the already reviewed story head, every s69a route, API test, database test and migration file is
+byte-for-byte unchanged. The shared database runner adds the three analytics replay suites while
+retaining the s69a suite; `docs/stories.md` preserves the canonical s69a section alongside the
+analytics stories.
+
+The migration SHA-256 remains
+`ec048ba9faa41f5aa4e54e61a0d7cbaa56bb06446fe508b32d71ed30a3695812`, exactly matching the
+reviewed story head. The partial conversion key, deterministic cleanup, write-blocking lock,
+bounded `SECURITY INVOKER` RPC, explicit web-role revokes and service-role-only grant are therefore
+unchanged. The route continues to authorize and validate before the RPC, derives accounting from
+the returned rows, and advances lifecycle cadence only from views that actually landed. No
+fallback or alternate insertion path was added.
+
+Fresh Node 24.14.0 verification passed the two focused route suites: **2 suites / 56 tests**. The
+prior SQL and route neutralizations remain bound to unchanged file hashes and were not repeated in
+this no-source-mutation integration pass. No LSP diagnostic was required for this intermediate
+merge delta because it changes no s69a TypeScript source; the only shared JavaScript delta is the
+additive database-suite registration described above.
+
+No new finding was introduced by this intermediate merge. This verdict permits completing the
+ordinary merge commit onto `29fbc9d`; it is not the final current-main integration review. Main has
+since advanced to `a58b6fc`, so a second review is required after that revision is integrated.
+Production duplicate-probe evidence, migration application, hosted checks, private Devin review
+availability and deployment remain separate release gates and are not claimed here.
+
+Max severity: none
+Ship allowed: yes

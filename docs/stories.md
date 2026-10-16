@@ -4711,6 +4711,77 @@ Complexity: 2. Dependencies: s96. Branch `feature/s101-alt-text-checker`.
 
 Embed allocation: 0 bytes.
 
+## Story s107-google-analytics — the marketing site is measured, with consent where the law asks for it
+
+Owner request 2026-10-12: Google Analytics 4 on the public marketing site, "with the settings
+perfectly fine". Architect brief the same day (pre-approved scope). Plan:
+`docs/plans/s107-google-analytics.md`. Decision: ADR 063. Operations record (every GA setting and
+its value): `docs/operations/analytics.md`. Retrospective pipeline records, added after the
+implementation without claiming the missing pre-implementation checkpoints: research
+`docs/research/s107-google-analytics.md`; UI design
+`docs/designs/s107-google-analytics.md` + `.html`.
+
+Before: no visitor analytics at all (launch kit §10 "Channel: nowhere automatic", §12 ledger).
+
+Acceptance criteria:
+
+- [x] A GA4 property "RecopyFast" (America/Toronto, USD) with one web stream for
+  `https://www.recopyfa.st`, configured as recorded in `docs/operations/analytics.md`: 14-month
+  retention (no reset on activity), Google signals off, ads personalisation off everywhere,
+  granular location/device off in the EEA/UK/CH, enhanced measurement as briefed (browser-history
+  page views excepted, see the doc), key events `sign_up`, `generate_lead`, `begin_checkout`,
+  `tool_scan_completed`, event dimensions `tool_slug` and `cta_location`, Stripe referrals
+  excluded, developer-traffic filter in Testing. `NEXT_PUBLIC_GA_MEASUREMENT_ID` in Vercel
+  Production only.
+- [x] GA loads only on `/`, `/compare/**`, `/try`, `/tools/**`, `/blog/**`, `/docs/**`,
+  `/pricing`, `/privacy`, `/terms`, `/demo`; never on the dashboard, `/settings`, `/edit`,
+  `/login`, `/signup`, `/auth/**`, the API, the widget or the `/try` runtime. One helper
+  (`isAnalyticsRoute`). Tests: `routes.test.ts`, `GoogleAnalytics.test.tsx`,
+  `third-party-scripts.test.ts`, `e2e/google-analytics.spec.ts`.
+- [x] Consent Mode v2: everything denied by default in the EEA + UK + CH (`region`) and for any
+  visitor the country hint places there (missing hint = consent required); analytics granted
+  elsewhere; ads denied everywhere; `url_passthrough` false, `ads_data_redaction` true. Where
+  consent is required, nothing is requested from Google before "Allow analytics". Choice in a
+  first-party cookie for 6 months; "Cookie settings" in the footer reopens the banner. Tests:
+  `consent.test.ts`, `init-script.test.ts`, `route.test.ts`, the e2e spec.
+- [x] No inline script: a first-party `/analytics/gtag-init.js` route, then gtag.js through
+  `next/script` (`afterInteractive`). The static CSP gains exactly GA4's script, connect and img
+  hosts on allowlisted pages; the nonce policy is unchanged. Tests: `content-security-policy.test.ts`,
+  `middleware-csp.test.ts`, `csp.spec.ts`, `google-analytics.spec.ts` (zero script or Google CSP
+  violations, real beacon/fetch/image hits through the policy, Google stubbed).
+- [x] Typed `track()`: no-op unless active, slug-only params, sanitised `page_location`
+  (no fragment, no query key but landing-page `utm_*`, UUID segments redacted). Events:
+  `generate_lead` (CTA → `/signup`, `cta_location`), `begin_checkout` (CTA → `/dashboard/billing`),
+  `try_started` (sample preview active), `tool_scan_completed` (calculator, once per page view;
+  s96's `ToolScanForm` on a successful scan, slug only). `sign_up` is a documented Measurement
+  Protocol follow-up (`/signup` is app surface). Tests: `gtag.test.ts`, `page-location.test.ts`,
+  `CostCalculator.test.tsx`, `TryExperience.test.tsx`, `ToolScanForm.test.tsx`.
+- [x] `/privacy` states, factually, where GA runs, what is sent, the consent rule, the cookies
+  (`_ga`, `_ga_<ID>`, `rcf_analytics_consent`), 14-month retention and three ways to opt out.
+  Test: `privacy-analytics.test.tsx`; the s54 tripwires unchanged.
+- [x] The comparison Lighthouse gate (ADR 061) stays green with GA in the build (PR #94, run
+  38220513115: perf 98–99, LCP 1,630–1,656 ms, CLS ≤ 0.015, TBT 92–103 ms; `main` 172–185 ms TBT);
+  CI e2e strict count 94 → 99, all passing; 102 after merging s96 (97 + 5); 104 with the
+  independent review's fixes (97 + 7).
+- [x] Independent review of `4e068e9` (max severity major, ship blocked) fixed: GA loads only when
+  the page AND the document it lives in were both loaded on an allowlisted path (a client
+  navigation keeps the document's CSP; `/login` → "Terms" loaded gtag.js under the nonce policy
+  before the fix, reproduced in a browser); placeholder country codes and Quebec (Law 25) ask
+  first; the reopened banner describes the choice in effect; "Cookie settings" only where GA can
+  run; guards no test bit (landing referrer, page view per client navigation, missing init hint,
+  first-visit Escape) now pinned. Record: `docs/reviews/s107-google-analytics.md`.
+
+Complexity: 3. Dependencies: none (s98 merged). Merged with s96 (`c905292`): its scan reports carry
+no analytics (architect decision, ADR 063); the scan is measured on the tool page. Branch
+`feature/s107-google-analytics`.
+Follow-ups (not s107): server-side `sign_up` via the Measurement Protocol; internal-traffic rule
+once the owner's IP is known to be stable; activating the developer-traffic filter; storing the
+landing `utm_*` at sign-up so a GA lead can be tied to an account.
+
+Embed allocation: 0 bytes (nothing in the widget or the /try runtime).
+
+---
+
 ## Story s82-billing-lifetime-guards — a lifetime owner is never billed again for what they own, and billing says only what is true
 
 Follow-ups of s71 (PR #74) and s45, plus s69 L5, scheduled by the orchestrator on 2026-10-09 under
@@ -4891,3 +4962,74 @@ this chat.
 - [x] Independent review passes and normal repository checks pass before a draft PR.
 
 Branch: `feature/s69a-atomic-conversion-dedupe`. Embed allocation: 0 bytes.
+
+## Story s110-analytics-consent-context — consented acquisition context reaches conversion boundaries safely
+
+Owner request 2026-10-12: finish analytics for visitors, completed signups and paying customers.
+This bounded follow-up preserves s107's public-only Google scripts and private-page CSP.
+Research/plan: `docs/research/s110-analytics-consent-context.md` and
+`docs/plans/s110-analytics-consent-context.md` (human validated2026-10-12).
+
+As the operator, I need a visitor's permitted GA attribution to reach an authenticated conversion
+without sending account details to Google or continuing after that visitor declines analytics.
+
+Acceptance criteria:
+- [ ] Capture documented GA client IDs only after the marketing runtime is active;
+  absent/denied/expired context remains unattributed, with no fabricated visitor identity.
+  Session IDs are omitted in s110 because the true session boundaries cannot be proved,
+  as required by the validated plan; a client ID never invents session attribution.
+- [ ] Persist only bounded consent/context with same-origin protection, fail-closed rate limiting,
+  service-only/RLS storage, opaque secure cookie and a short expiry; bind only after verified auth.
+- [ ] Decline revokes server context and prevents later claims (already claimed requests may still send); signout cannot attribute the next
+  account to the prior person. No Google scripts or CSP hosts on auth/dashboard/report documents.
+- [ ] Privacy copy and tests reflect actual storage, expiry, revocation and collection boundaries.
+- [ ] Independent review and required local/hosted/database/browser gates pass.
+
+Complexity: 3. Dependencies: s107. Branch `feature/s110-analytics-consent-context`.
+No new dependency. Forward-only migration required. Embed allocation: 0 bytes.
+
+## Story s111-verified-signup-analytics — completed first signups are measured without counting repeat logins
+
+Research/plan: `docs/research/s111-verified-signup-analytics.md` and
+`docs/plans/s111-verified-signup-analytics.md` (human-validated on 2026-10-12).
+
+As the operator, I need completed account creation counted once, and permitted conversions
+attributed in GA without treating an email request, failed OTP or repeat login as a signup.
+
+Acceptance criteria:
+- [ ] Both auth establishment paths freeze a durable source disposition after provider verification. Only explicit signup/invite proof can send; generic email/PKCE remain unproven. Baseline confirmed accounts, repeat/concurrent callbacks, invalid OTPs and existing-session fallback cannot create duplicate signup delivery.
+- [ ] Surviving Auth accounts with `email_confirmed_at` present define current confirmed-account stock. Mutable timestamp period counts are limited, and missing/cross-device context never blocks signup or invents identity. Total freeze failure stays possibly unattributed; reconciliation only completes already frozen sources.
+- [ ] Private durable outbox, atomic claims and bounded authenticated dispatch protect against
+  replay; ambiguous delivery is visible and never blindly retried as another signup.
+- [ ] Only approved payload fields leave for GA; no user IDs, email, tokens or private URLs.
+  Analytics delivery failure cannot break auth. Consent is rechecked before delivery.
+- [ ] Provider validation and separate QA ingestion evidence distinguish payload validity,
+  HTTP acceptance and actual receipt; no synthetic signup inflates production reports.
+- [ ] Independent review and required local/hosted/database/browser gates pass.
+
+Complexity: 3. Dependencies: s110. Branch `feature/s111-verified-signup-analytics`.
+No new dependency. Forward-only migration/server configuration required. Embed allocation: 0 bytes.
+
+## Story s112-verified-purchase-analytics — successful live payments and unique paying customers are distinct
+
+Research/plan: `docs/research/s112-verified-purchase-analytics.md` and
+`docs/plans/s112-verified-purchase-analytics.md` (human validated on 2026-10-12).
+
+As the operator, I need successful live purchases measured from verified payment outcomes,
+without counting Stripe TEST activity, free trials, repeated webhooks or renewals as new customers.
+
+Acceptance criteria:
+- [ ] Canonical live invoice/payment identity deduplicates overlapping Checkout/payment events;
+  only recognized, successfully provisioned, positive collected payments qualify.
+- [ ] TEST, unpaid/failed, zero-dollar/trial, setup, forged return and automatic-refund exclusions
+  hold. Existing billing/entitlement/refund behavior remains unchanged.
+- [ ] Purchase transactions, unique first paying accounts, renewals and full/partial refunds
+  remain distinct. Complete first-party totals are not replaced by consented GA totals.
+- [ ] Eligible GA purchase/refund payloads use actual amount/currency and stable opaque
+  transaction IDs; unavailable or expired context remains explicitly unattributed.
+- [ ] Outbox failure/reconciliation never causes another charge or blocks monetary processing.
+- [ ] Independent review, real database/concurrency tests, required gates and separate QA receipt
+  pass. A real live customer payment remains a future operational observation, not a test charge.
+
+Complexity: 3. Dependencies: s111 and released s82. Branch `feature/s112-verified-purchase-analytics`.
+No new dependency. Forward-only migration as required by reviewed design. Embed allocation: 0 bytes.

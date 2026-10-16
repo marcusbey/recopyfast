@@ -6,6 +6,7 @@
 import * as Sentry from '@sentry/nextjs';
 import { releaseOption } from './src/lib/monitoring/sentry-release';
 import { tracePropagationTargets } from './src/lib/monitoring/trace-propagation';
+import { isMeasurementProtocolRequest, filterAnalyticsBreadcrumb, filterAnalyticsTransaction } from './src/lib/monitoring/analytics-telemetry';
 
 const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -33,9 +34,18 @@ Sentry.init({
   
   // Integrations
   integrations: [
-    // Default Next.js integrations
+    // The installed SDK's ignoreOutgoingRequests excludes both fetch spans and
+    // breadcrumbs; tracePropagationTargets alone does not hide query secrets.
+    Sentry.nativeNodeFetchIntegration({
+      ignoreOutgoingRequests: isMeasurementProtocolRequest,
+    }),
   ],
   
+  // Final envelope defenses preserve unrelated telemetry and cover duplicate
+  // outgoing instrumentation outside the NodeFetch integration.
+  beforeBreadcrumb: filterAnalyticsBreadcrumb,
+  beforeSendTransaction: filterAnalyticsTransaction,
+
   // Filtering
   ignoreErrors: [
     // Ignore non-critical errors

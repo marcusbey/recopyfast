@@ -52,7 +52,7 @@ export default function Privacy() {
             </span>
             <span className="hidden sm:inline">|</span>
             <span>
-              <strong>Last Updated:</strong> October 11, 2026
+              <strong>Last Updated:</strong> October 12, 2026
             </span>
           </div>
         </div>
@@ -292,6 +292,11 @@ export default function Privacy() {
               <li>Resend — transactional email</li>
               <li>Upstash — rate limiting</li>
               <li>Sentry — error monitoring</li>
+              {/* s107: Google LLC, on the public pages only — see section 6. */}
+              <li>
+                Google Analytics — visit statistics for our public pages (see
+                section 6)
+              </li>
             </ul>
 
             <h3 className="text-lg font-medium text-slate-800 mb-3">
@@ -427,11 +432,127 @@ export default function Privacy() {
                 <strong>Functional:</strong> Remember your preferences and
                 settings
               </li>
+              <li>
+                <strong>Analytics:</strong> Google Analytics on our public
+                pages, described below
+              </li>
             </ul>
 
-            <p className="text-slate-600">
+            <p className="text-slate-600 mb-8">
               You can control cookies through your browser settings.
             </p>
+
+            {/*
+              s107 (ADR 063). Every sentence below is what the code or the GA
+              property does, recorded in docs/operations/analytics.md:
+              - the pages: isAnalyticsRoute (src/lib/analytics/google-analytics/routes.ts);
+              - what is sent: page-location.ts and gtag.ts (no query string but
+                utm_*, no fragment, slug-only event values);
+              - the consent rule: consent.ts (EEA + UK + CH + Quebec, fail-closed) and
+                GoogleAnalytics.tsx (nothing requested before "Allow analytics");
+              - the cookies: CONSENT_COOKIE_* and GA_COOKIE_EXPIRES_SECONDS;
+              - 14 months, signals off, ads personalisation off, no city-level
+                location in the EEA/UK/CH: the GA admin settings.
+              No "cookie consent" phrase and no "geolocation": the s54 tripwires
+              in legal-pages-truth.test.tsx stay as they are.
+            */}
+            <div id="analytics" className="scroll-mt-24">
+              <h3 className="text-lg font-medium text-slate-800 mb-3">
+                Google Analytics
+              </h3>
+              <p className="text-slate-600 mb-4">
+                On our public pages — the homepage, comparisons, free tools, the
+                /try preview, the blog, the documentation, pricing, the demo and
+                these legal pages — we use Google Analytics 4, provided by
+                Google LLC, to count visits and see which pages and links are
+                used. It never runs in your dashboard, on our sign-in and
+                sign-up pages, in the editor, on a free tool&apos;s scan report,
+                or in the ReCopyFast script on your website.
+              </p>
+              <ul className="list-disc pl-6 mb-4 text-slate-600 space-y-2">
+                <li>
+                  <strong>What is sent:</strong> the pages you view (their
+                  address without the query string — campaign tags such as
+                  utm_source are kept on the page you arrive on — and never the
+                  part after #), the page you came from, clicks on sign-up and
+                  checkout links, that a free tool scan or calculation completed
+                  (which tool, never the address you scanned), use of the /try
+                  sample, scrolling to the end of a page, links to other sites
+                  and file downloads. Google adds your browser and device type
+                  and an approximate location it derives from your IP address.
+                  In the European Economic Area, the United Kingdom and
+                  Switzerland, city-level location and detailed device data are
+                  not collected.
+                </li>
+                <li>
+                  <strong>Your choice:</strong> in the European Economic Area,
+                  the United Kingdom, Switzerland and Quebec, Google Analytics
+                  does not load until you choose &ldquo;Allow analytics&rdquo;
+                  in the banner. To know whether to ask, we use the country —
+                  and in Canada the province — our host, Vercel, reports for the
+                  request; it is not stored. When it cannot tell, it asks.
+                  Elsewhere it loads with analytics allowed, and you can
+                  decline. Advertising storage is denied everywhere: we run no
+                  ads, Google signals and ad personalisation are off, and the
+                  data is not used for advertising.
+                </li>
+                <li>
+                  <strong>Cookies:</strong> Google Analytics sets{" "}
+                  <code>_ga</code> and <code>_ga_&lt;ID&gt;</code> on our
+                  domain, only once analytics is allowed. They expire after 13
+                  months unless you visit again. We set{" "}
+                  <code>{"rcf_analytics_consent"}</code> to remember your answer
+                  for 6 months. After Allow, a separate secure cookie records
+                  when our server received that choice and its expiry, for at
+                  most 180 days. This receipt contains no account or Analytics
+                  identifier and is cleared when you withdraw consent. Signing
+                  out clears the separate identifier context.
+                </li>
+                <li>
+                  <strong>First-party conversion attribution:</strong> while
+                  analytics is allowed, we retain its pseudonymous client ID
+                  with an opaque, secure browser cookie for up to 30 days from
+                  an eligible public visit, never beyond your consent expiry.
+                  This can connect a confirmed signup or payment after the
+                  14-day trial to your visit. No Google script runs on private
+                  account, authentication or report pages. Analytics is a
+                  consented subset; our account and billing records remain the
+                  complete business records.
+                </li>
+                <li>
+                  <strong>Context deletion:</strong> withdrawal requests erase
+                  the retained identifiers; expiry immediately prevents further
+                  use. A cleanup job normally removes expired records within
+                  five minutes. An outage may delay deletion but cannot extend
+                  eligibility. We alert on cleanup more than ten minutes
+                  overdue. Failed withdrawal requests retry on your next
+                  same-origin interaction. Requests already claimed for delivery
+                  may still arrive, and data already sent cannot be recalled by
+                  this control. Minimal internal conversion records follow the
+                  underlying account and billing retention; they are sensitive,
+                  not anonymous.
+                </li>
+                <li>
+                  <strong>Retention:</strong> Google Analytics keeps this data
+                  for 14 months, then deletes it. A new visit does not extend
+                  that period.
+                </li>
+                <li>
+                  <strong>Opting out:</strong> choose &ldquo;Decline&rdquo; in
+                  the banner; reopen it with &ldquo;Cookie settings&rdquo; at
+                  the bottom of any public page to change your answer (declining
+                  also deletes the <code>_ga</code> cookies); or install the{" "}
+                  <a
+                    href="https://tools.google.com/dlpage/gaoptout"
+                    className="text-sky-600 hover:underline font-medium"
+                    rel="noopener noreferrer"
+                  >
+                    Google Analytics opt-out browser add-on
+                  </a>
+                  .
+                </li>
+              </ul>
+            </div>
           </section>
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">

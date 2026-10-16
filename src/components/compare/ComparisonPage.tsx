@@ -324,6 +324,7 @@ export function ComparisonPage({
                   comparison document with /signup's nonce document. */}
               <a
                 href={`/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_${comparison.slug}`}
+                data-cta-location="comparison_page"
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast
