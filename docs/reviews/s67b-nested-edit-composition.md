@@ -226,3 +226,32 @@ Devin run, production deployment, real-customer routers, cross-browser behavior 
 
 Max severity: none
 Ship allowed: yes
+
+## Current-main integration review — 2026-10-16 (`8733f9d`)
+
+Current main advanced through s108 to `8733f9d859284fe500fc5e02c5442c2674d0614f`. Its clean,
+no-commit merge into s67b head `00da9de89749cbf4fbed237ebacaf9202df908b5` has no unmerged
+entries and passes both diff checks. The resulting delta against `MERGE_HEAD` remains the reviewed
+15-file s67b story; none of the embed source, generated artifact, size gate, fixture, nested-edit
+tests or accepted ADRs changed during this refresh.
+
+The embed source and artifact SHA-256 values remain
+`e012083864740b670b010b735c515e579d54bb6dbb1c56d63aa85b17312f096d` and
+`cefe75e9ba9ffde17ba4555f658a6b6c354f79d983617f48d3a5f826342bcf65`. The combined CI contract
+still preserves the 106-test application inventory, fake-GA build assertion and separate seven-test
+embed fixture. The incoming s108 release also remains intact: both bulk routes use native
+`randomUUID()`, direct `uuid`/`@types/uuid` roots remain absent, and only LHCI's nested UUID node
+remains.
+
+Fresh independent Node 24.14.0 verification passed both s108 route suites and the combined
+Playwright CI-contract suite: **3 suites / 33 tests**. The generated artifact check passed at
+45,769 / 32,992 / 13,141 gzipped bytes under unchanged ceilings. The late-ancestor neutralization
+continues to bind to the unchanged embed source hash. No LSP diagnostic was required because this
+integration delta changes neither s67b nor s108 source.
+
+No new finding was introduced. The ordinary merge commit and current-head hooks may proceed.
+Hosted checks, production deployment, fresh private Devin availability, real-customer routers,
+cross-browser behavior and the public-host 200 ms gesture remain separate evidence.
+
+Max severity: none
+Ship allowed: yes
