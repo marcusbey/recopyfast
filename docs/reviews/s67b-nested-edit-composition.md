@@ -255,3 +255,33 @@ cross-browser behavior and the public-host 200 ms gesture remain separate eviden
 
 Max severity: none
 Ship allowed: yes
+
+## Released-s69a integration review — 2026-10-16 (`cc6ac07`)
+
+Current main now includes released s69a at
+`cc6ac07e05af0380c8aea202b768643ec0f424b6`. Its clean no-commit merge into s67b head
+`704e8d26a9819171f92bbc18488e723cb12be12f` has no unmerged entries and passes both diff checks.
+The resulting delta against `MERGE_HEAD` remains exactly the reviewed 15-file s67b story; every
+embed source, generated artifact, size gate, fixture, nested-edit test and accepted ADR is unchanged.
+
+The embed source/artifact SHA-256 values remain
+`e012083864740b670b010b735c515e579d54bb6dbb1c56d63aa85b17312f096d` and
+`cefe75e9ba9ffde17ba4555f658a6b6c354f79d983617f48d3a5f826342bcf65`. The released s69a
+migration is preserved at SHA-256
+`ec048ba9faa41f5aa4e54e61a0d7cbaa56bb06446fe508b32d71ed30a3695812`, with its route/tests and
+replay registration unchanged from main. The combined CI contract still pins 106 application
+tests, fake GA and seven separate embed-fixture tests; the story ledger retains s67b, s69a, s108 and
+s113.
+
+Fresh independent Node 24.14.0 verification passed both s69a route suites and the Playwright CI
+contract: **3 suites / 69 tests**. The generated artifact remains current at 45,769 / 32,992 /
+13,141 gzipped bytes under unchanged ceilings. Prior nested-edit and s69a neutralizations remain
+bound to unchanged hashes. No LSP diagnostic was required because this refresh changes neither
+s67b nor s69a source.
+
+No new finding was introduced. The ordinary merge commit and current-head hooks may proceed.
+Hosted checks, production deployment, fresh private Devin availability, real-customer routers,
+cross-browser behavior and the public-host 200 ms gesture remain separate evidence.
+
+Max severity: none
+Ship allowed: yes

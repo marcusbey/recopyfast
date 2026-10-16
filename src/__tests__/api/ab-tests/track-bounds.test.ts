@@ -24,8 +24,13 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
+const mockCheckTestCompletion = jest.fn();
+
 jest.mock("@/lib/supabase/service");
 jest.mock("@/lib/api/rate-limit", () => ({ enforceRateLimit: jest.fn() }));
+jest.mock("@/lib/ab-testing/lifecycle", () => ({
+  checkTestCompletion: mockCheckTestCompletion,
+}));
 
 import { POST } from "@/app/api/ab-tests/track/route";
 
@@ -58,10 +63,19 @@ type Query = {
 };
 
 const queries: Query[] = [];
+interface RpcCall {
+  name: string;
+  args: { p_events: Array<Record<string, unknown>> };
+}
+const rpcCalls: RpcCall[] = [];
 const recordedViews = new Set<string>();
 const recordedConversions = new Set<string>();
 /** `visitor_buckets` rows, as `<site_id>:<visitor_id>:<test_id>`. */
 const bucketRows = new Set<string>();
+let runningViewCount = 0;
+let rpcResponder:
+  | null
+  | ((rows: Array<Record<string, unknown>>) => Array<Record<string, unknown>>);
 
 /**
  * A `visitor_buckets` lookup finds a row only when every filter it carries
@@ -114,7 +128,7 @@ function respond(query: Query) {
   // which keeps the significance check out of this suite.
   const pair = `${query.filters.visitor_id}:${query.filters.test_id}`;
   if (query.filters.visitor_id === undefined) {
-    return { count: 0, data: null, error: null };
+    return { count: runningViewCount, data: null, error: null };
   }
   const recorded =
     query.filters.event_type === "view" ? recordedViews : recordedConversions;
@@ -123,6 +137,14 @@ function respond(query: Query) {
 
 function serviceClient() {
   return {
+    rpc(name: string, args: { p_events: Array<Record<string, unknown>> }) {
+      rpcCalls.push({ name, args });
+      const landed = rpcResponder
+        ? rpcResponder(args.p_events)
+        : args.p_events.map((row) => ({ id: randomUUID(), ...row }));
+      recordInsert(landed);
+      return Promise.resolve({ data: landed, error: null });
+    },
     from(table: string) {
       const query: Query = { table, filters: {} };
       queries.push(query);
@@ -197,15 +219,21 @@ function conversionEvent(visitorId = UUID_VISITOR) {
 }
 
 function insertedRows(): Array<Record<string, unknown>> {
-  return queries.flatMap((query) => query.inserted ?? []);
+  return [
+    ...queries.flatMap((query) => query.inserted ?? []),
+    ...rpcCalls.flatMap((call) => call.args.p_events),
+  ];
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
   queries.length = 0;
+  rpcCalls.length = 0;
   recordedViews.clear();
   recordedConversions.clear();
   bucketRows.clear();
+  runningViewCount = 0;
+  rpcResponder = null;
   (createServiceRoleClient as jest.Mock).mockImplementation(serviceClient);
   (enforceRateLimit as jest.Mock).mockResolvedValue(null);
 });
@@ -539,6 +567,40 @@ describe("POST /api/ab-tests/track — an event name the public API can send is 
 });
 
 describe("POST /api/ab-tests/track — one conversion per visitor per test, after a view", () => {
+  it("reports a concurrently lost conversion as deduplicated from the RPC result", async () => {
+    recordedViews.add(`${UUID_VISITOR}:${TESTS[0].test}`);
+    rpcResponder = () => [];
+
+    const response = await POST(trackRequest([conversionEvent()]));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      recorded: 0,
+      deduplicated: 1,
+    });
+    expect(rpcCalls).toEqual([
+      expect.objectContaining({ name: "insert_ab_test_events" }),
+    ]);
+  });
+
+  it("counts only landed rows and schedules completion only from landed views", async () => {
+    runningViewCount = 51;
+    rpcResponder = (rows) =>
+      rows
+        .filter((row) => row.event_type === "view")
+        .map((row) => ({ id: randomUUID(), ...row }));
+
+    const response = await POST(
+      trackRequest([viewEvent(0), conversionEvent()]),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      recorded: 1,
+      deduplicated: 1,
+    });
+    expect(mockCheckTestCompletion).not.toHaveBeenCalled();
+  });
+
   it("does not record a second conversion for the same visitor and test", async () => {
     recordedViews.add(`${UUID_VISITOR}:${TESTS[0].test}`);
     recordedConversions.add(`${UUID_VISITOR}:${TESTS[0].test}`);

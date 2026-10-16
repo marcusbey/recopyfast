@@ -65,7 +65,7 @@ interface QueryResult {
 
 interface RecordedWrite {
   table: string;
-  op: "insert" | "update" | "upsert";
+  op: "insert" | "update" | "upsert" | "rpc";
   payload: unknown;
 }
 
@@ -243,7 +243,6 @@ function wireDatabase(options: WireOptions = {}) {
       "ab_test_results",
       [
         { count: 0, data: null, error: null }, // dedupe: visitor has no view yet
-        { data: null, error: null }, // the insert
         { count: totalViews, data: null, error: null }, // running view total
         { count: 100, data: null, error: null }, // control views
         { count: 0, data: null, error: null }, // control clicks
@@ -266,6 +265,15 @@ function wireDatabase(options: WireOptions = {}) {
   };
 
   const client = {
+    rpc: jest.fn(
+      (name: string, args: { p_events: Array<Record<string, unknown>> }) => {
+        log.push({ table: name, op: "rpc", payload: args.p_events });
+        return Promise.resolve({
+          data: args.p_events.map((row) => ({ id: "result-id", ...row })),
+          error: null,
+        });
+      },
+    ),
     from: jest.fn((table: string) => {
       const chain = tables[table];
       if (!chain) throw new Error(`unexpected table: ${table}`);
@@ -334,7 +342,9 @@ describe("POST /api/ab-tests/track — the test_id is a tenant boundary", () => 
 
     expect(response.status).toBe(200);
     expect(
-      log.filter((op) => op.table === "ab_test_results" && op.op === "insert"),
+      log.filter(
+        (op) => op.table === "insert_ab_test_events" && op.op === "rpc",
+      ),
     ).toHaveLength(1);
 
     // Scoped to the caller's site, and asking only about the ids in the batch.
@@ -356,6 +366,7 @@ describe("POST /api/ab-tests/track — the test_id is a tenant boundary", () => 
 
     // Site B's results table is untouched: no row was filed against its test.
     expect(log).toHaveLength(0);
+    expect(client.rpc).not.toHaveBeenCalled();
 
     // And the chain that ends in a service-role write to site B's staged copy is
     // never entered at all — `checkTestCompletion` is only reachable past the
