@@ -15,7 +15,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import {
+  featuresWithMonthlyCredits,
+  findSubscriptionPlan,
   isPaidPlanId,
+  isPlanCoveredByGrants,
+  PAID_PLAN_IDS,
   planCyclePrice,
   planDisplayPrice,
   sellablePlans,
@@ -54,6 +58,42 @@ interface UpgradeDialogProps {
   lifetimeOffers: readonly OneTimeProduct[];
   foundingAgencyAvailability: FoundingAgencyAvailability | null;
   agencyCheckoutEnabled?: boolean;
+  /**
+   * The plan in force when a permanent grant covers it, with the monthly AI
+   * credits the account actually gets (the wallet's `included`). Its tile
+   * reads "Lifetime access" with that allowance, never a monthly price, and
+   * cannot be bought. Absent for every account without one.
+   *
+   * `endsAt` (ISO) when the grant is dated (s96, folded into s82 — Devin Review
+   * on PR #81, finding 3): the tile then reads as a dated included tile,
+   * "Included until <date>", never lifetime, and still cannot be bought.
+   */
+  heldForLife?: {
+    planId: string;
+    monthlyCredits: number | null;
+    endsAt?: string;
+  };
+  /**
+   * Every plan the account holds through a live, non-revoked, non-trial grant
+   * (the page's `readGrantedPlanIds`). A plan one of them includes — the same
+   * plan or a lower one, `isPlanCoveredByGrants` — reads "Included" and cannot
+   * be bought: Checkout and the plan change refuse it too (s82 review,
+   * finding 1). Absent or empty for every account without one.
+   */
+  grantedPlanIds?: readonly string[];
+  /**
+   * For a granted plan held only through dated grants, when that holding ends
+   * (ISO); a granted plan absent here is held without an end date. The page
+   * reads it with `grantedPlanIds`, in the same query (`readGrantedPlans`).
+   */
+  grantEndsAt?: Readonly<Partial<Record<string, string>>>;
+  /**
+   * When the live subscription is set to cancel, the date it ends (ISO — the
+   * period end the card prints); absent when it renews. A plan change clears
+   * the scheduled cancellation (s82, Devin Review on PR #81, finding 2), and
+   * the dialog says so before the click.
+   */
+  subscriptionEndsAt?: string;
   onSuccess: () => void;
 }
 
@@ -61,6 +101,57 @@ const BILLING_PERIODS: ReadonlyArray<{ id: BillingPeriod; label: string }> = [
   { id: "monthly", label: "Monthly" },
   { id: "yearly", label: "Yearly (save ~17%)" },
 ];
+
+/**
+ * How the account's grants include a plan: for life, through the highest
+ * undated grant that includes it, or — only when every grant that includes it
+ * has an end date — until the latest of those ends.
+ */
+type GrantInclusion =
+  | { kind: "for_life"; planId: PaidPlanId }
+  | { kind: "until"; endsAt: string };
+
+/**
+ * s82 review (second pass), m3: every included plan read "Included for life",
+ * including one held only through a dated grant (production holds one, the QA
+ * recovery grant `qa_recovery_20260919`). A dated grant ends, so it is never
+ * called lifetime here. Null when no grant includes the plan.
+ */
+function grantInclusion(
+  planId: string,
+  grantedPlanIds: readonly string[],
+  grantEndsAt: Readonly<Partial<Record<string, string>>>,
+): GrantInclusion | null {
+  // Ascending rank, so the last plan in any filtered list is the highest.
+  const including = PAID_PLAN_IDS.filter(
+    (granted) =>
+      grantedPlanIds.includes(granted) &&
+      isPlanCoveredByGrants(planId, [granted]),
+  );
+  if (including.length === 0) return null;
+
+  const highestForLife = including
+    .filter((granted) => grantEndsAt[granted] === undefined)
+    .at(-1);
+  if (highestForLife) return { kind: "for_life", planId: highestForLife };
+
+  // No undated grant includes the plan, so every one of `including` is dated.
+  const endsAt = including
+    .flatMap((granted) => grantEndsAt[granted] ?? [])
+    .reduce((latest, end) =>
+      Date.parse(end) > Date.parse(latest) ? end : latest,
+    );
+  return { kind: "until", endsAt };
+}
+
+/** The same long US date the subscription card prints. */
+function formatLongDate(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
 
 export function UpgradeDialog({
   open,
@@ -71,6 +162,10 @@ export function UpgradeDialog({
   lifetimeOffers,
   foundingAgencyAvailability,
   agencyCheckoutEnabled = true,
+  heldForLife,
+  grantedPlanIds = [],
+  grantEndsAt = {},
+  subscriptionEndsAt,
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
@@ -96,6 +191,13 @@ export function UpgradeDialog({
   const isBusy = isRedirecting || isChangingPlan;
   const error = planChangeError ?? checkoutError;
   const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);
+  const isSelectedHeldForLife = heldForLife?.planId === selectedPlan;
+  const selectedInclusion = grantInclusion(
+    selectedPlan,
+    grantedPlanIds,
+    grantEndsAt,
+  );
+  const isSelectedIncluded = selectedInclusion !== null;
 
   /**
    * No subscription yet → hand off to Stripe Checkout.
@@ -154,10 +256,30 @@ export function UpgradeDialog({
     }
   };
 
+  // The highest undated grant includes every lower plan, so it is the one the
+  // submit names when it refuses an included plan; a plan included only by
+  // dated grants is refused with their end instead.
+  const includedLabel = (inclusion: GrantInclusion) => {
+    if (inclusion.kind === "until")
+      return `Included in your plan until ${formatLongDate(inclusion.endsAt)}`;
+    const lifetimePlanName = findSubscriptionPlan(
+      catalogue,
+      inclusion.planId,
+    )?.name;
+    return lifetimePlanName
+      ? `Included in your lifetime ${lifetimePlanName}`
+      : "Included in your lifetime plan";
+  };
+
   const submitLabel = () => {
     if (isRedirecting) return "Redirecting to Stripe…";
     if (isChangingPlan) return "Updating your plan…";
     if (!selectedPlanData) return "Select a plan";
+    if (isSelectedHeldForLife)
+      return heldForLife?.endsAt
+        ? `Included in your plan until ${formatLongDate(heldForLife.endsAt)}`
+        : `You hold ${selectedPlanData.name} for life`;
+    if (selectedInclusion) return includedLabel(selectedInclusion);
     return hasSubscription
       ? `Switch to ${selectedPlanData.name}`
       : `Continue to payment — $${planCyclePrice(selectedPlanData, billingPeriod)}`;
@@ -174,6 +296,15 @@ export function UpgradeDialog({
             {hasSubscription
               ? "Switch plans at any time. Stripe prorates the difference and charges your card on file straight away."
               : "Pick a plan and complete payment on Stripe's secure checkout page."}
+            {/* s82, Devin Review on PR #81 (finding 2): switching keeps a
+                subscription set to end — the server clears the scheduled
+                cancellation with the change, so a renewal is never a
+                surprise. */}
+            {hasSubscription && subscriptionEndsAt
+              ? ` Your subscription is set to end on ${formatLongDate(
+                  subscriptionEndsAt,
+                )}. Switching plans keeps it: it will renew instead of ending.`
+              : null}
           </DialogDescription>
         </DialogHeader>
 
@@ -234,6 +365,25 @@ export function UpgradeDialog({
             {plans.map((plan) => {
               const isSelected = selectedPlan === plan.id;
               const isCurrent = currentPlan === plan.id;
+              // s82 (s45 review #1): the plan a lifetime grant covers read
+              // "Current" at "$49/month" with Agency's 1,000 credits — a
+              // subscription's price and semantics for a plan paid for once,
+              // beside a card saying "Lifetime access" and 250. It reads the
+              // way the card does: Lifetime, no price, the account's own
+              // allowance.
+              const isHeldForLife = heldForLife?.planId === plan.id;
+              // s82 review, finding 1: a plan below the one held for life —
+              // or below a lifetime grant while a higher subscription runs —
+              // was still priced and buyable here; the server refuses it now.
+              // Its tile says it is included instead of what it would cost —
+              // for life, or until a dated grant ends (second pass, m3).
+              const inclusion = isHeldForLife
+                ? null
+                : grantInclusion(plan.id, grantedPlanIds, grantEndsAt);
+              const isIncluded = inclusion !== null;
+              const features = isHeldForLife
+                ? featuresWithMonthlyCredits(plan, heldForLife.monthlyCredits)
+                : plan.features;
 
               return (
                 <button
@@ -260,7 +410,14 @@ export function UpgradeDialog({
                         {plan.description}
                       </p>
                     </div>
-                    {isCurrent ? (
+                    {isHeldForLife ? (
+                      // s96: a dated grant is "Included", never Lifetime.
+                      <Badge variant="secondary">
+                        {heldForLife.endsAt ? "Included" : "Lifetime"}
+                      </Badge>
+                    ) : isIncluded ? (
+                      <Badge variant="secondary">Included</Badge>
+                    ) : isCurrent ? (
                       <Badge variant="secondary">Current</Badge>
                     ) : (
                       isSelected && (
@@ -272,20 +429,38 @@ export function UpgradeDialog({
                     )}
                   </div>
 
-                  <div className="mb-4">
-                    <span className="text-3xl font-semibold tabular">
-                      ${planDisplayPrice(plan, billingPeriod)}
-                    </span>
-                    <span className="text-muted-foreground">/month</span>
-                    {billingPeriod === "yearly" && (
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Billed ${planCyclePrice(plan, "yearly")} once a year
-                      </p>
-                    )}
-                  </div>
+                  {isHeldForLife ? (
+                    <div className="mb-4">
+                      <span className="text-xl font-semibold">
+                        {heldForLife.endsAt
+                          ? `Included until ${formatLongDate(heldForLife.endsAt)}`
+                          : "Lifetime access"}
+                      </span>
+                    </div>
+                  ) : inclusion ? (
+                    <div className="mb-4">
+                      <span className="text-xl font-semibold">
+                        {inclusion.kind === "until"
+                          ? `Included until ${formatLongDate(inclusion.endsAt)}`
+                          : "Included for life"}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mb-4">
+                      <span className="text-3xl font-semibold tabular">
+                        ${planDisplayPrice(plan, billingPeriod)}
+                      </span>
+                      <span className="text-muted-foreground">/month</span>
+                      {billingPeriod === "yearly" && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Billed ${planCyclePrice(plan, "yearly")} once a year
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <ul className="space-y-2">
-                    {plan.features.map((feature) => (
+                    {features.map((feature) => (
                       <li key={feature} className="flex items-center text-sm">
                         <svg
                           className="w-4 h-4 text-tone-success-text mr-2 shrink-0"
@@ -382,7 +557,12 @@ export function UpgradeDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isBusy || currentPlan === selectedPlan}
+            disabled={
+              isBusy ||
+              currentPlan === selectedPlan ||
+              isSelectedHeldForLife ||
+              isSelectedIncluded
+            }
           >
             {submitLabel()}
           </Button>

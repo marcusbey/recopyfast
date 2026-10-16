@@ -23,6 +23,7 @@ export function ToolCta({
   return (
     <section
       aria-labelledby="tool-cta"
+      data-cta-location="tool_cta"
       className="rounded-3xl bg-sky-100 px-7 py-10 sm:px-12"
     >
       <h2

@@ -91,6 +91,26 @@ describe("/api/auth/logout - POST", () => {
     });
   });
 
+  it("preserves the identifier-free consent receipt while clearing the capability on logout", async () => {
+    mockSupabaseAuth.signOut.mockResolvedValue({ error: null });
+    const response = await POST(
+      new NextRequest("https://www.recopyfa.st/api/auth/logout", {
+        method: "POST",
+        headers: {
+          cookie:
+            "rcf_analytics_consent=granted; __Host-rcf_analytics_consent=existing-receipt",
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain(
+      "__Host-rcf_analytics_context=;",
+    );
+    expect(response.headers.get("set-cookie")).not.toContain(
+      "__Host-rcf_analytics_consent=",
+    );
+  });
+
   describe("Failed logout scenarios", () => {
     it("should return 400 when Supabase signOut fails", async () => {
       mockSupabaseAuth.signOut.mockResolvedValueOnce({

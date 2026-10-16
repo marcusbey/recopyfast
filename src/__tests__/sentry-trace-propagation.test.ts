@@ -15,7 +15,12 @@
 import { shouldPropagateTraceForUrl } from "@sentry/core";
 import { tracePropagationTargets } from "@/lib/monitoring/trace-propagation";
 
-jest.mock("@sentry/nextjs", () => ({ init: jest.fn() }));
+jest.mock("@sentry/nextjs", () => ({
+  init: jest.fn(),
+  // s111 config adds the supported NodeFetch integration. This suite still
+  // asserts release/header behavior; actual SDK envelope privacy has its own test.
+  nativeNodeFetchIntegration: jest.fn(() => ({ name: "NodeFetch" })),
+}));
 
 const env = process.env as Record<string, string | undefined>;
 const saved = {

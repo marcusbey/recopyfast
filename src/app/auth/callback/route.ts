@@ -1,3 +1,5 @@
+import { freezeVerifiedSignup } from "@/lib/analytics/google-analytics/conversions";
+import { bindAnalyticsContext } from "@/lib/analytics/google-analytics/context-server";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { sanitizeNext } from "../sanitize-next";
@@ -43,8 +45,12 @@ export async function GET(request: Request) {
       try {
         const {
           data: { user },
+          error: userError,
         } = await supabase.auth.getUser();
-        if (user) {
+        if (user && !userError) {
+          // PKCE proves sign-in, not initial confirmation; retain that explicit
+          // provenance gap instead of counting a returning login as a signup.
+          await freezeVerifiedSignup(request, user.id, "pkce");
           await ensureTrialStarted(supabase, user.id);
         }
       } catch (trialError) {
@@ -72,6 +78,7 @@ export async function GET(request: Request) {
       error,
     } = await supabase.auth.getUser();
     if (user && !error) {
+      await bindAnalyticsContext(request, user.id);
       return NextResponse.redirect(`${origin}${next}`);
     }
   } catch (sessionError) {

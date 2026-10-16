@@ -169,3 +169,60 @@ No new finding was identified.
 
 Max severity: none
 Ship allowed: yes
+
+## Current-main pre-integration review — 2026-10-16 (`a58b6fc`)
+
+Story head `a57bf708a15077c812a62071cf4a7d9739ecbc4d` remains internally clean. Its reviewed embed source
+and generated artifact still have SHA-256 values
+`e012083864740b670b010b735c515e579d54bb6dbb1c56d63aa85b17312f096d` and
+`cefe75e9ba9ffde17ba4555f658a6b6c354f79d983617f48d3a5f826342bcf65`. Under Node 24.14.0,
+`node scripts/build-embed.mjs --check` reports the artifact current at 45,769 / 32,992 / 13,141
+gzipped bytes under unchanged ceilings, and the four directly changed Jest suites pass **4 suites /
+88 tests**. The prior late-ancestor neutralization remains bound to these exact source hashes.
+
+Current main and s67b overlap in only two files. `docs/stories.md` needs the usual additive story
+resolution. `src/__tests__/e2e/playwright-ci-contract.test.ts` needs both independent contract
+updates: current main's strict application inventory is **106**, while s67b raises only the separate
+credential-free embed-fixture inventory from **6 to 7**. The correct combined result keeps every
+main-side 106-test assertion and fake-GA check, changes the embed-harness prose/assertion to seven,
+and retains `playwright.embed.config.ts` at `expected: 7`. Neither side should overwrite the other.
+
+No application, embed-source, generated-artifact, ceiling or runtime conflict was found. The late
+ancestor Devin finding remains closed on the exact reviewed source. However, this is a
+pre-integration assessment: the combined `a58b6fc` tree has not yet been materialized or tested.
+After the mechanical two-file resolution, rerun the Playwright CI contract, the three focused embed
+suites and the Node 24 artifact check, then record a final integration verdict. Hosted checks and a
+fresh private Devin run remain separate release evidence.
+
+Max severity: none
+Ship allowed: no
+
+## Final current-main integration review — 2026-10-16 (`a58b6fc`)
+
+The combined tree is now materialized as an in-progress merge of current `main`
+`a58b6fc2e63975bef1c0bbe7506360828c49c2b9` into story head
+`a57bf708a15077c812a62071cf4a7d9739ecbc4d`. It has no unmerged index entries and passes
+`git diff --check` plus `git diff --cached --check`. The only story/main overlap resolutions are
+the additive story ledger and the Playwright CI contract identified above.
+
+The resolved CI contract correctly preserves both independent inventories: the application suite
+remains **106** with its fake-GA build assertion, while the separate credential-free embed fixture
+is **7** in both the test and `playwright.embed.config.ts`. The resulting story delta against
+`MERGE_HEAD` remains the reviewed 15-file s67b change. The embed source and generated artifact still
+match the final Devin-fix review hashes exactly; no production widget behavior or ceiling changed
+during integration.
+
+Fresh independent Node 24.14.0 verification passed the CI-contract plus the three directly changed
+embed suites: **4 suites / 89 tests**. The generated artifact check also passed at 45,769 / 32,992 /
+13,141 gzipped bytes under ceilings 45,801 / 33,044 / 13,141. The previously reviewed
+late-ancestor neutralization remains applicable to the unchanged source hash. No LSP diagnostic was
+required for the integration delta: it changes only test contract prose/assertions and the additive
+Markdown ledger, while the JavaScript embed source is byte-for-byte unchanged.
+
+No new finding was introduced. This closes the pre-integration hold and permits the ordinary merge
+commit and current-head hosted checks. It does not claim that those hooks/checks, a fresh private
+Devin run, production deployment, real-customer routers, cross-browser behavior or the public-host
+200 ms acceptance gesture have completed.
+
+Max severity: none
+Ship allowed: yes

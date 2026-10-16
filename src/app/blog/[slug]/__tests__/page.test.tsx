@@ -13,6 +13,9 @@ jest.mock("next/navigation", () => ({
   notFound: jest.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
+  // The footer reads the pathname (s107: "Cookie settings" only where GA can
+  // run); as in the global mock, no route.
+  usePathname: () => "",
 }));
 
 // Header reads AuthContext; the article date is what is under test here.

@@ -1,3 +1,4 @@
+import type Stripe from "stripe";
 import { stripe } from "./config";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -8,6 +9,13 @@ import {
   type PaidPlanId,
 } from "./plans";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
+import { BillingRefusal } from "@/lib/billing/billing-refusal";
+import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
+import { isPlanCoveredByGrants } from "./plan-types";
+import {
+  CANCELLED_REASON,
+  isTerminalSubscriptionStatus,
+} from "./subscription-status";
 import type { Subscription } from "@/types/billing";
 
 /**
@@ -20,10 +28,6 @@ const RECOVERABLE_CHECKOUT_STATUSES = [
   "past_due",
   "unpaid",
   "paused",
-] as const;
-const TERMINAL_SUBSCRIPTION_STATUSES = [
-  "canceled",
-  "incomplete_expired",
 ] as const;
 
 /**
@@ -179,11 +183,7 @@ export async function getRecoverableSubscriptionCheckout(
       return { kind: "already_subscribed" };
     }
 
-    if (
-      TERMINAL_SUBSCRIPTION_STATUSES.includes(
-        providerSubscription.status as (typeof TERMINAL_SUBSCRIPTION_STATUSES)[number],
-      )
-    ) {
+    if (isTerminalSubscriptionStatus(providerSubscription.status)) {
       // The webhook can lag or be missed. Persisting an already-terminal
       // provider state is safe; checkout never asks Stripe to cancel anything.
       const { data: updated, error: writeError } =
@@ -270,6 +270,33 @@ export async function getRecoverableSubscriptionCheckout(
   );
 }
 
+/** PostgREST's answer when `.single()` finds no row. */
+const NO_ROWS_CODE = "PGRST116";
+
+/**
+ * The row a subscription read returned, or the right failure for its absence.
+ *
+ * s82 review, finding 3: these reads used to answer `error || !row` with the
+ * customer-facing 404 refusal, so a database outage told the customer "No
+ * active subscription found" — and `billingErrorResponse` does not log a
+ * refusal, so the outage left no trace. Only "no row" (PGRST116 from
+ * `.single()`, or no data) is a refusal; any other read error is a plain
+ * `Error`, which the route logs and answers 500.
+ */
+function requireSubscriptionRow(
+  row: SubscriptionRow | null,
+  error: { code?: string; message: string } | null,
+  refusalMessage: string,
+): SubscriptionRow {
+  if (error && error.code !== NO_ROWS_CODE) {
+    throw new Error(`Failed to read the subscription: ${error.message}`);
+  }
+  if (!row) {
+    throw new BillingRefusal(refusalMessage, 404);
+  }
+  return row;
+}
+
 function toSubscription(row: SubscriptionRow): Subscription {
   return {
     ...row,
@@ -281,6 +308,56 @@ function toSubscription(row: SubscriptionRow): Subscription {
     trial_end: row.trial_end ?? undefined,
   };
 }
+
+/**
+ * The update fields that undo a scheduled cancellation, or none.
+ *
+ * s82, Devin Review on PR #81 (finding 2): a plan change on a subscription set
+ * to cancel left the cancellation in place. An owner whose subscription was
+ * set to end — by them, or by a lifetime purchase (`stopBillingForLifetimeOwner`)
+ * — switched up to Agency, was charged the prorated difference straight away,
+ * and still lost Agency at period end. Buying another plan means keeping it,
+ * and the dialog now says so before the click.
+ *
+ * Both forms are cleared, because the card and the dialog read either as
+ * "scheduled to cancel" (the row's `cancel_at`): the app's own cancellation is
+ * `cancel_at_period_end`, and a date set in the Stripe dashboard is `cancel_at`
+ * alone (`""` unsets it). Clearing one and not the other would leave the
+ * dialog's "it will renew" untrue.
+ */
+function keepScheduledToCancel(
+  subscription: Pick<Stripe.Subscription, "cancel_at_period_end" | "cancel_at">,
+): Pick<Stripe.SubscriptionUpdateParams, "cancel_at_period_end" | "cancel_at"> {
+  if (subscription.cancel_at_period_end) return { cancel_at_period_end: false };
+  if (subscription.cancel_at) return { cancel_at: "" };
+  return {};
+}
+
+/**
+ * s82 review (m-5): a subscription the Stripe webhook set to end because a
+ * dispute was lost against us (`stopBillingForChargeback`) — and still set to
+ * end. Clearing that cancellation is not the customer's call: a plan change
+ * would restore recurring billing on the very card that charged us back.
+ */
+function isEndingAfterChargeback(
+  subscription: Pick<
+    Stripe.Subscription,
+    "metadata" | "cancel_at_period_end" | "cancel_at"
+  >,
+): boolean {
+  return (
+    subscription.metadata?.cancelled_reason === CANCELLED_REASON.chargeback &&
+    Boolean(subscription.cancel_at_period_end || subscription.cancel_at)
+  );
+}
+
+/** s82 review (m-5): said when a chargeback's cancellation blocks a switch. */
+const CHARGEBACK_PLAN_CHANGE_REFUSAL =
+  "This subscription is ending after a disputed payment, so its plan can't be changed. Contact support if you'd like to keep it.";
+
+/** s82: said when a permanent grant already includes the plan switched to. */
+const LIFETIME_PLAN_CHANGE_REFUSAL =
+  "Your lifetime plan already includes this one. Cancel your subscription instead of switching to it.";
 
 export interface SubscriptionChangeRequest {
   planId: PaidPlanId;
@@ -316,7 +393,7 @@ export async function updateSubscription(
 ): Promise<SubscriptionChangeResult> {
   const supabase = await createClient();
 
-  const { data: currentSubscription, error: fetchError } = await supabase
+  const { data, error: fetchError } = await supabase
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
@@ -325,8 +402,22 @@ export async function updateSubscription(
     .limit(1)
     .single<SubscriptionRow>();
 
-  if (fetchError || !currentSubscription) {
-    throw new Error("No active subscription found");
+  const currentSubscription = requireSubscriptionRow(
+    data,
+    fetchError,
+    "No active subscription found",
+  );
+
+  // s82 review, finding 1: switching INTO a plan a permanent grant already
+  // includes would bill every month for something owned — a Lifetime Pro owner
+  // still paying for Agency could move the subscription to Pro or Starter. Same
+  // reader, rank rule and RLS client as reactivation below; a subscription
+  // above every grant stays on sale, as the webhook keeps it. Decided before
+  // the price lookup and the first Stripe call; a read failure throws rather
+  // than guessing that nothing is held.
+  const grantedPlanIds = await readGrantedPlanIds(supabase, userId);
+  if (isPlanCoveredByGrants(updates.planId, grantedPlanIds)) {
+    throw new BillingRefusal(LIFETIME_PLAN_CHANGE_REFUSAL, 409);
   }
 
   const billingPeriod = updates.billingPeriod ?? "monthly";
@@ -338,6 +429,9 @@ export async function updateSubscription(
   const existingSubscription = await stripe.subscriptions.retrieve(
     currentSubscription.stripe_subscription_id,
   );
+  if (isEndingAfterChargeback(existingSubscription)) {
+    throw new BillingRefusal(CHARGEBACK_PLAN_CHANGE_REFUSAL, 409);
+  }
   const currentItem = existingSubscription.items.data[0];
 
   if (!currentItem) {
@@ -345,17 +439,27 @@ export async function updateSubscription(
   }
 
   if (currentItem.price.id === priceId) {
-    throw new Error("You are already on this plan");
+    throw new BillingRefusal("You are already on this plan", 409);
   }
 
+  const keep = keepScheduledToCancel(existingSubscription);
+  const clearsCancellation = Object.keys(keep).length > 0;
   const stripeSubscription = await stripe.subscriptions.update(
     currentSubscription.stripe_subscription_id,
     {
       items: [{ id: currentItem.id, price: priceId }],
+      ...keep,
       proration_behavior: "always_invoice",
       // Keep metadata in sync so webhook-driven writes record the new plan.
       metadata: {
         ...existingSubscription.metadata,
+        // s82 review (m-5): the cancellation this clears took its reason with
+        // it; a renewing subscription must not still say why it was ending
+        // ("" is how Stripe unsets a metadata key).
+        ...(clearsCancellation &&
+        existingSubscription.metadata?.cancelled_reason
+          ? { cancelled_reason: "" }
+          : {}),
         user_id: userId,
         plan_id: updates.planId,
         billing_period: billingPeriod,
@@ -419,7 +523,7 @@ export async function cancelSubscription(
   const supabase = await createClient();
 
   // Get current subscription
-  const { data: currentSubscription, error: fetchError } = await supabase
+  const { data, error: fetchError } = await supabase
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
@@ -428,9 +532,11 @@ export async function cancelSubscription(
     .limit(1)
     .single<SubscriptionRow>();
 
-  if (fetchError || !currentSubscription) {
-    throw new Error("No active subscription found");
-  }
+  const currentSubscription = requireSubscriptionRow(
+    data,
+    fetchError,
+    "No active subscription found",
+  );
 
   // Cancel subscription in Stripe
   const stripeSubscription = immediate
@@ -471,8 +577,19 @@ export async function cancelSubscription(
   return toSubscription(updatedSubscription);
 }
 
+/** s82: said when a lifetime grant already covers the subscription's plan. */
+const LIFETIME_REACTIVATION_REFUSAL =
+  "Your lifetime plan already includes this one, so this subscription can't be restarted.";
+
 /**
- * Reactivate a canceled subscription
+ * Reactivate a subscription that is set to cancel at period end.
+ *
+ * Refused when a permanent grant covers the subscription's plan (s82). Buying a
+ * lifetime plan sets the subscriptions it replaces to cancel at period end
+ * (`stopBillingForLifetimeOwner` in the Stripe webhook); this endpoint used to
+ * restart them on request, billing the customer every month for a plan they
+ * already own. The card stopped offering the button in s71 — a rendering
+ * decision — and this is the money decision behind it.
  */
 export async function reactivateSubscription(
   userId: string,
@@ -480,7 +597,7 @@ export async function reactivateSubscription(
   const supabase = await createClient();
 
   // Get current subscription
-  const { data: currentSubscription, error: fetchError } = await supabase
+  const { data, error: fetchError } = await supabase
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
@@ -488,12 +605,30 @@ export async function reactivateSubscription(
     .limit(1)
     .single<SubscriptionRow>();
 
-  if (fetchError || !currentSubscription) {
-    throw new Error("No subscription found");
-  }
+  const currentSubscription = requireSubscriptionRow(
+    data,
+    fetchError,
+    "No subscription found",
+  );
 
   if (!currentSubscription.cancel_at) {
-    throw new Error("Subscription is not scheduled for cancellation");
+    throw new BillingRefusal(
+      "Subscription is not scheduled for cancellation",
+      409,
+    );
+  }
+
+  // The same grant read the billing page and the checkout guards use
+  // (non-trial, non-revoked, not expired), through the caller's own RLS
+  // client, so the page, checkout and this endpoint cannot disagree about who
+  // holds what. A Founding Agency owner's Agency subscription is refused too,
+  // although it lifts their allowance while it runs (ADR 038): the product
+  // never sells that pairing, and restarting it is the invisible $49 a month
+  // the webhook exists to stop (s82 plan, decision 1). A read failure throws —
+  // before Stripe — rather than guessing that nothing is held.
+  const grantedPlanIds = await readGrantedPlanIds(supabase, userId);
+  if (isPlanCoveredByGrants(currentSubscription.plan, grantedPlanIds)) {
+    throw new BillingRefusal(LIFETIME_REACTIVATION_REFUSAL, 409);
   }
 
   // Reactivate subscription in Stripe
