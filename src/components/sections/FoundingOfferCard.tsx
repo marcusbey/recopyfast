@@ -28,26 +28,35 @@ interface FoundingOfferCardProps {
   limit: number;
   /** From the pricing payload's `credits` product; null drops the sentence. */
   creditPack: { credits: number; price: number } | null;
+  variant?: "default" | "editorial";
 }
 
 export default function FoundingOfferCard({
   remaining,
   limit,
   creditPack,
+  variant = "default",
 }: FoundingOfferCardProps) {
+  const isEditorial = variant === "editorial";
   const count =
     remaining === 1
       ? `Last spot left — 1 of ${limit}`
       : `${remaining} of ${limit} spots left`;
 
   return (
-    <div className="mb-8 rounded-3xl border-2 border-teal-500 bg-white p-8 text-left">
+    <div
+      className={`mb-8 border-2 bg-white p-8 text-left ${isEditorial ? "rounded-[3px] border-[#287f7c]" : "rounded-3xl border-teal-500"}`}
+    >
       <div className="grid items-center gap-8 md:grid-cols-[1fr_auto]">
         <div>
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-50">
+          <div
+            className={`mb-4 flex h-12 w-12 items-center justify-center ${isEditorial ? "rounded-[3px] bg-[#ebe7dc]" : "rounded-2xl bg-teal-50"}`}
+          >
             <Rocket className="h-6 w-6 text-teal-700" />
           </div>
-          <span className="mb-3 inline-block rounded-full bg-teal-700 px-4 py-1.5 text-sm font-semibold text-white">
+          <span
+            className={`mb-3 inline-block bg-teal-700 px-4 py-1.5 text-sm font-semibold text-white ${isEditorial ? "rounded-[3px]" : "rounded-full"}`}
+          >
             Founding offer
           </span>
           <h3 className="mb-2 text-2xl font-semibold text-slate-900">
@@ -81,7 +90,7 @@ export default function FoundingOfferCard({
           <a
             href="/signup"
             data-cta-location="founding_offer"
-            className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 text-center font-semibold text-white hover:bg-teal-800"
+            className={`pressable mt-5 block bg-teal-700 px-6 py-3 text-center font-semibold text-white hover:bg-teal-800 ${isEditorial ? "rounded-[3px]" : "rounded-xl"}`}
           >
             Claim your spot
           </a>
@@ -90,7 +99,9 @@ export default function FoundingOfferCard({
 
       {/* The count can lag a sign-up by a few seconds; the second paragraph is
           what keeps "Claim your spot" honest at that boundary. */}
-      <div className="mt-8 space-y-2 border-t border-sky-100 pt-6 text-sm text-slate-600">
+      <div
+        className={`mt-8 space-y-2 border-t pt-6 text-sm text-slate-600 ${isEditorial ? "border-[#d9d3c6]" : "border-sky-100"}`}
+      >
         <p>
           After 90 days, choose a plan to keep editing. Your site keeps serving
           its content either way.

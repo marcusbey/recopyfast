@@ -111,6 +111,7 @@ function entryFor(entries: MetadataRoute.Sitemap, pathname: string) {
 /** Every page that resolves a canonical to itself (seo-canonicals.test.ts). */
 const INDEXABLE_STATIC = [
   "/",
+  "/product",
   "/demo",
   "/try",
   "/compare",

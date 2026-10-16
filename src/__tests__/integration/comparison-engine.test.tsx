@@ -53,6 +53,9 @@ describe("comparison engine data-only extension", () => {
     expect(
       buildStaticSitemapRoutes(entries).map((route) => route.path),
     ).toContain(path);
+    expect(
+      buildStaticSitemapRoutes(entries).map((route) => route.path),
+    ).toContain("/product");
     expect(buildLlmsTxt("https://recopyfa.st", entries)).toContain(
       `[ReCopyFast vs Fixture CMS](https://recopyfa.st${path})`,
     );

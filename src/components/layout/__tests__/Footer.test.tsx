@@ -15,12 +15,52 @@ jest.mock("@/lib/analytics/google-analytics/document-path", () => ({
 }));
 
 describe("Footer", () => {
+  beforeEach(() => {
+    mockPathname = "/";
+  });
+
   it("links the public installation guide", () => {
     render(<Footer />);
 
     expect(
       screen.getByRole("link", { name: "Installation guide" }),
     ).toHaveAttribute("href", "/docs/install");
+  });
+
+  it("keeps the legacy product anchors on /product", () => {
+    mockPathname = "/product";
+    render(<Footer />);
+
+    expect(screen.getByRole("link", { name: "Features" })).toHaveAttribute(
+      "href",
+      "/product#features",
+    );
+    expect(screen.getByRole("link", { name: "Pricing" })).toHaveAttribute(
+      "href",
+      "/product#pricing",
+    );
+  });
+
+  it("uses the flat editorial footer treatment only when requested", () => {
+    const legacy = render(<Footer />);
+    expect(screen.getByRole("contentinfo")).toHaveClass("bg-white");
+    expect(
+      screen
+        .getAllByRole("link", { name: "GitHub" })
+        .find((link) => link.hasAttribute("aria-label")),
+    ).toHaveClass("rounded-xl");
+    legacy.unmount();
+
+    render(<Footer variant="editorial" />);
+    expect(screen.getByRole("contentinfo")).toHaveClass("bg-[#ebe7dc]");
+    const editorialSocialLink = screen
+      .getAllByRole("link", { name: "GitHub" })
+      .find((link) => link.hasAttribute("aria-label"));
+    expect(editorialSocialLink).toHaveClass(
+      "rounded-[3px]",
+      "border-[#d9d3c6]",
+    );
+    expect(editorialSocialLink).not.toHaveClass("bg-sky-50");
   });
 
   /**

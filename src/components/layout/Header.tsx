@@ -1,19 +1,41 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { Zap, Menu, X } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 /* Past this many pixels the header takes on its solid, bordered state. */
 const SCROLLED_THRESHOLD_PX = 50;
 
-export function Header() {
+export function Header({
+  variant = "default",
+}: {
+  variant?: "default" | "editorial";
+}) {
   const { user, loading } = useAuth();
+  const pathname = usePathname();
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isEditorial = variant === "editorial";
+  const isMarketingDocument = pathname === "/" || pathname === "/product";
+  const marketingAnchorRoot = pathname === "/product" ? "/product" : "/";
+
+  const scrollToMarketingSection = (
+    event: ReactMouseEvent<HTMLAnchorElement>,
+    id: "features" | "pricing",
+  ) => {
+    if (!isMarketingDocument) return;
+    const target = document.getElementById(id);
+    if (!target) return;
+    event.preventDefault();
+    window.history.pushState(null, "", `#${id}`);
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   useEffect(() => {
     let frame = 0;
@@ -59,7 +81,13 @@ export function Header() {
     <>
       <header
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          isScrolled ? "glass-sheet border-b border-white/40" : "bg-transparent"
+          isEditorial
+            ? isScrolled
+              ? "border-b border-[#d9d3c6] bg-[#f7f3e9]/95 backdrop-blur"
+              : "bg-[#f7f3e9]/85 backdrop-blur-sm"
+            : isScrolled
+              ? "glass-sheet border-b border-white/40"
+              : "bg-transparent"
         }`}
       >
         <div className="max-w-7xl mx-auto px-6 py-4">
@@ -67,18 +95,18 @@ export function Header() {
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2.5">
               <div
-                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
-                  isScrolled ? "bg-sky-600" : "glass"
+                className={`w-9 h-9 flex items-center justify-center transition-all ${
+                  isEditorial
+                    ? "rounded-[3px] bg-[#287f7c]"
+                    : `rounded-xl ${isScrolled ? "bg-sky-600" : "glass"}`
                 }`}
               >
                 <Zap
-                  className={`w-5 h-5 ${isScrolled ? "text-white" : "text-sky-500"}`}
+                  className={`w-5 h-5 ${isEditorial || isScrolled ? "text-white" : "text-sky-500"}`}
                 />
               </div>
               <span
-                className={`font-semibold text-xl tracking-tight transition-colors ${
-                  isScrolled ? "text-slate-900" : "text-slate-800"
-                }`}
+                className={`text-xl tracking-tight transition-colors ${isEditorial ? "font-serif text-[#142024]" : `font-semibold ${isScrolled ? "text-slate-900" : "text-slate-800"}`}`}
               >
                 ReCopyFast
               </span>
@@ -86,8 +114,17 @@ export function Header() {
 
             {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center gap-8">
+              {isEditorial ? (
+                <Link
+                  href="/product"
+                  className="text-sm font-medium text-[#4c5552] transition-colors hover:text-[#142024]"
+                >
+                  Product overview
+                </Link>
+              ) : null}
               <Link
-                href="/#features"
+                href={`${marketingAnchorRoot}#features`}
+                onClick={(event) => scrollToMarketingSection(event, "features")}
                 className={`text-sm font-medium transition-colors ${
                   isScrolled
                     ? "text-slate-600 hover:text-slate-900"
@@ -97,7 +134,8 @@ export function Header() {
                 Features
               </Link>
               <Link
-                href="/#pricing"
+                href={`${marketingAnchorRoot}#pricing`}
+                onClick={(event) => scrollToMarketingSection(event, "pricing")}
                 className={`text-sm font-medium transition-colors ${
                   isScrolled
                     ? "text-slate-600 hover:text-slate-900"
@@ -158,7 +196,7 @@ export function Header() {
                   <Button
                     asChild
                     size="sm"
-                    className="pressable bg-sky-600 text-white hover:bg-sky-700"
+                    className={`pressable text-white ${isEditorial ? "rounded-[3px] bg-[#287f7c] hover:bg-[#206d6a]" : "bg-sky-600 hover:bg-sky-700"}`}
                   >
                     {/* The native anchor also keeps modifier keys and ordinary
                         link accessibility at this security boundary. */}
@@ -199,17 +237,32 @@ export function Header() {
               className="md:hidden mt-4 pb-4 border-t border-sky-100 pt-4"
             >
               <nav className="flex flex-col gap-4">
+                {isEditorial ? (
+                  <Link
+                    href="/product"
+                    className="text-slate-600 hover:text-slate-900 text-sm font-medium"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    Product overview
+                  </Link>
+                ) : null}
                 <Link
-                  href="/#features"
+                  href={`${marketingAnchorRoot}#features`}
+                  onClick={(event) => {
+                    scrollToMarketingSection(event, "features");
+                    setMobileMenuOpen(false);
+                  }}
                   className="text-slate-600 hover:text-slate-900 text-sm font-medium"
-                  onClick={() => setMobileMenuOpen(false)}
                 >
                   Features
                 </Link>
                 <Link
-                  href="/#pricing"
+                  href={`${marketingAnchorRoot}#pricing`}
+                  onClick={(event) => {
+                    scrollToMarketingSection(event, "pricing");
+                    setMobileMenuOpen(false);
+                  }}
                   className="text-slate-600 hover:text-slate-900 text-sm font-medium"
-                  onClick={() => setMobileMenuOpen(false)}
                 >
                   Pricing
                 </Link>

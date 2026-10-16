@@ -45,6 +45,7 @@ export function buildStaticSitemapRoutes(
 ): readonly StaticRoute[] {
   return [
     { path: "/", changeFrequency: "weekly", priority: 1 },
+    { path: "/product", changeFrequency: "monthly", priority: 0.8 },
     { path: "/demo", changeFrequency: "monthly", priority: 0.8 },
     { path: "/try", changeFrequency: "monthly", priority: 0.9 },
     { path: "/docs/install", changeFrequency: "monthly", priority: 0.8 },

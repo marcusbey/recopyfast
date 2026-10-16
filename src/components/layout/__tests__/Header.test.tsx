@@ -12,9 +12,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { User } from "@supabase/supabase-js";
 
+let mockPathname = "/";
+
 // Mock Next.js router
 jest.mock("next/navigation", () => ({
   useRouter: jest.fn(),
+  usePathname: () => mockPathname,
 }));
 
 // Mock the useAuth hook
@@ -58,6 +61,7 @@ describe("Header", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockPathname = "/";
     (useRouter as jest.Mock).mockReturnValue(mockRouter);
   });
 
@@ -115,6 +119,55 @@ describe("Header", () => {
       "href",
       "/try",
     );
+  });
+
+  it("keeps the legacy product page anchors on /product", () => {
+    mockPathname = "/product";
+    (useAuth as jest.Mock).mockReturnValue({
+      user: null,
+      loading: false,
+      signIn: jest.fn(),
+      signUp: jest.fn(),
+      signOut: jest.fn(),
+      refreshSession: jest.fn(),
+    });
+
+    render(<Header />);
+
+    expect(screen.getByRole("link", { name: "Features" })).toHaveAttribute(
+      "href",
+      "/product#features",
+    );
+    expect(screen.getByRole("link", { name: "Pricing" })).toHaveAttribute(
+      "href",
+      "/product#pricing",
+    );
+  });
+
+  it("scrolls same-document marketing anchors without relying on router hash handling", () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      user: null,
+      loading: false,
+      signIn: jest.fn(),
+      signUp: jest.fn(),
+      signOut: jest.fn(),
+      refreshSession: jest.fn(),
+    });
+    const pricing = document.createElement("section");
+    pricing.id = "pricing";
+    pricing.scrollIntoView = jest.fn();
+    document.body.appendChild(pricing);
+
+    render(<Header />);
+    fireEvent.click(screen.getByRole("link", { name: "Pricing" }));
+
+    expect(pricing.scrollIntoView).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "start",
+    });
+    expect(window.location.hash).toBe("#pricing");
+    pricing.remove();
+    window.history.replaceState(null, "", "/");
   });
 
   it("shows loading skeleton when auth is loading", () => {

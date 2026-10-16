@@ -5094,3 +5094,19 @@ Acceptance criteria:
 
 Complexity: 2. Dependencies: released SEO/site-identity baseline (s50/s88).
 Branch: `feature/s113-social-share-cards`. No new dependency or migration. Embed allocation: 0 bytes.
+
+
+## Story s114-editorial-homepage — freelancers understand the pain and try editing on the new homepage
+
+Owner request October 15: implement approved editorial design, preserve old landing as a subpage, establish a website-wide guide, retain real demo immediately below editable hero.
+
+Acceptance criteria:
+- [x] / presents approved cream/teal illustration design with corrected hand artwork and exactly three hero headline lines.
+- [x] Pointer slowly curves to site→website, then stuck→done; hover dashed outline, click and caret visible. Real interaction cancels animation; reduced motion and cleanup respected.
+- [x] Hero headline/supporting copy editable only in page memory, unchanged fonts, no visible hint/reset/replay, reload resets; accessible keyboard, touch, paste and IME behavior.
+- [x] Existing functional InteractiveHero immediately follows hero; /demo retains working behavior.
+- [x] Prior complete landing remains at /product; canonical, sitemap and existing pricing/features anchors valid.
+- [x] Shared design guide plus route inventory establishes staged migration across website; dashboard/widget functional styling preserved until scoped migration.
+- [x] Catalogue pricing, offers, signup, consent, SEO and required checks remain correct.
+
+Complexity: 4. Dependency: s113. Branch feature/s114-editorial-homepage. Research/design/plan in matching docs paths; plan validated by the owner October 15, 2026.

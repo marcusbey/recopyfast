@@ -66,10 +66,15 @@ const quickFeatures = [
   { icon: Shield, text: "Secure by default" },
 ];
 
-export default function Footer() {
+export default function Footer({
+  variant = "default",
+}: {
+  variant?: "default" | "editorial";
+}) {
   const pathname = usePathname();
   const [year, setYear] = useState<number | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const isEditorial = variant === "editorial";
   // s107: "Cookie settings" reopens the analytics consent banner, so it exists
   // only where the banner can: GA configured, and this page and the document
   // it lives in both on the allowlist — not on a free-tool report, nor on a
@@ -80,6 +85,7 @@ export default function Footer() {
     isMounted &&
     getMeasurementId() !== null &&
     isAnalyticsPage(pathname, getDocumentPathname());
+  const marketingAnchorRoot = pathname === "/product" ? "/product" : "/";
 
   useEffect(() => {
     setYear(new Date().getFullYear());
@@ -87,18 +93,28 @@ export default function Footer() {
   }, []);
 
   return (
-    <footer className="bg-white border-t border-sky-100">
+    <footer
+      className={
+        isEditorial
+          ? "border-t border-[#d9d3c6] bg-[#ebe7dc]"
+          : "border-t border-sky-100 bg-white"
+      }
+    >
       <div className="max-w-7xl mx-auto px-6 py-16">
         <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-12">
           {/* Brand Section */}
           <div className="md:col-span-2 lg:col-span-2">
             <div className="flex items-center space-x-3 mb-6">
               <div className="relative">
-                <div className="w-10 h-10 bg-sky-600 rounded-xl flex items-center justify-center">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center ${isEditorial ? "rounded-[3px] bg-[#287f7c]" : "rounded-xl bg-sky-600"}`}
+                >
                   <Zap className="h-5 w-5 text-white" />
                 </div>
               </div>
-              <span className="text-2xl font-semibold tracking-tight text-slate-900">
+              <span
+                className={`text-2xl tracking-tight ${isEditorial ? "font-serif font-medium text-[#142024]" : "font-semibold text-slate-900"}`}
+              >
                 ReCopyFast
               </span>
             </div>
@@ -112,7 +128,9 @@ export default function Footer() {
             <div className="space-y-3 mb-8">
               {quickFeatures.map((feature, index) => (
                 <div key={index} className="flex items-center space-x-3">
-                  <feature.icon className="h-4 w-4 text-sky-500" />
+                  <feature.icon
+                    className={`h-4 w-4 ${isEditorial ? "text-[#287f7c]" : "text-sky-500"}`}
+                  />
                   <span className="text-slate-600 text-sm">{feature.text}</span>
                 </div>
               ))}
@@ -124,7 +142,7 @@ export default function Footer() {
                 <a
                   key={index}
                   href={social.href}
-                  className="w-11 h-11 bg-sky-50 rounded-xl flex items-center justify-center hover:bg-sky-100 transition-colors duration-200 border border-sky-100"
+                  className={`flex h-11 w-11 items-center justify-center border transition-colors duration-200 ${isEditorial ? "rounded-[3px] border-[#d9d3c6] bg-transparent hover:bg-[#f7f3e9]" : "rounded-xl border-sky-100 bg-sky-50 hover:bg-sky-100"}`}
                   aria-label={social.label}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -142,27 +160,35 @@ export default function Footer() {
                 {category}
               </h3>
               <ul className="space-y-4">
-                {links.map((link, index) => (
-                  <li key={index}>
-                    {link.href.startsWith("http") ? (
-                      <a
-                        href={link.href}
-                        className="text-slate-600 hover:text-slate-900 transition-colors duration-200 text-sm"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {link.name}
-                      </a>
-                    ) : (
-                      <Link
-                        href={link.href}
-                        className="text-slate-600 hover:text-slate-900 transition-colors duration-200 text-sm"
-                      >
-                        {link.name}
-                      </Link>
-                    )}
-                  </li>
-                ))}
+                {links.map((link, index) => {
+                  const href =
+                    link.href === "/#features"
+                      ? `${marketingAnchorRoot}#features`
+                      : link.href === "/#pricing"
+                        ? `${marketingAnchorRoot}#pricing`
+                        : link.href;
+                  return (
+                    <li key={index}>
+                      {href.startsWith("http") ? (
+                        <a
+                          href={href}
+                          className="text-slate-600 hover:text-slate-900 transition-colors duration-200 text-sm"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {link.name}
+                        </a>
+                      ) : (
+                        <Link
+                          href={href}
+                          className="text-slate-600 hover:text-slate-900 transition-colors duration-200 text-sm"
+                        >
+                          {link.name}
+                        </Link>
+                      )}
+                    </li>
+                  );
+                })}
                 {category === "Legal" && hasCookieSettings ? (
                   <li>
                     <button
@@ -180,7 +206,9 @@ export default function Footer() {
         </div>
 
         {/* Bottom Bar */}
-        <div className="border-t border-sky-100 mt-16 pt-8 flex flex-col md:flex-row justify-between items-center">
+        <div
+          className={`mt-16 flex flex-col items-center justify-between border-t pt-8 md:flex-row ${isEditorial ? "border-[#d9d3c6]" : "border-sky-100"}`}
+        >
           <div className="flex flex-col md:flex-row items-center space-y-2 md:space-y-0 md:space-x-6 mb-4 md:mb-0">
             <p className="text-slate-500 text-sm">
               &copy; {year ?? "2025"} ReCopyFast. All rights reserved.
