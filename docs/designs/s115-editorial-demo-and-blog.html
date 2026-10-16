@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>s115 editorial demo and blog reference</title>
+    <style>
+      :root { --paper:#f7f3e9; --ink:#142024; --teal:#287f7c; --line:#d9d3c6; --muted:#4c5552; --white:#fffdf7; }
+      * { box-sizing:border-box } body { margin:0; background:#d8d4ca; color:var(--ink); font:16px/1.6 Arial,sans-serif }
+      .screen { width:min(1400px,96vw); margin:32px auto; background:var(--paper); border:1px solid var(--ink) }
+      .nav,.footer { display:flex; justify-content:space-between; align-items:center; padding:20px 5.5%; border-bottom:1px solid var(--line) }
+      .footer { border-top:1px solid var(--line); border-bottom:0; color:var(--muted) }
+      .brand,h1,h2,h3 { font-family:Georgia,"Times New Roman",serif; font-weight:500 }
+      .brand { font-size:24px }.links { font-size:14px } main { padding:72px 5.5% 88px }
+      .eyebrow { color:var(--teal); font-size:12px; font-weight:700; letter-spacing:.14em; text-transform:uppercase }
+      h1 { max-width:920px; margin:12px 0 20px; font-size:clamp(40px,6vw,76px); line-height:1.02; letter-spacing:-.045em }
+      h2 { font-size:clamp(28px,4vw,46px); line-height:1.08 }.lede { max-width:700px; color:var(--muted); font-size:18px }
+      .steps { display:flex; flex-wrap:wrap; gap:20px; margin:32px 0; padding-top:20px; border-top:1px solid var(--line); font-size:13px }
+      .demo { min-height:420px; margin:48px 0; border:1px solid var(--ink); background:var(--white); display:grid; place-items:center; color:var(--muted) }
+      .cols,.blog-grid { display:grid; gap:28px }.cols { grid-template-columns:repeat(3,1fr) }.cell,.post { padding:22px 0; border-top:1px solid var(--line) }
+      .num,.meta { color:var(--teal); font-size:12px; letter-spacing:.08em; text-transform:uppercase }
+      .cta { display:inline-block; margin-top:20px; padding:12px 18px; border-radius:3px; background:var(--teal); color:white; text-decoration:none; font-weight:700 }
+      .blog-grid { grid-template-columns:220px 1fr; margin-top:48px }.filters { display:flex; flex-direction:column; align-items:flex-start; gap:10px }
+      .filters button { border:0; background:transparent; padding:6px 0; color:var(--muted) }.filters .active { color:var(--teal); border-bottom:2px solid var(--teal) }
+      .post h2 { margin:8px 0 10px }.article-head { max-width:920px; margin:0 auto 48px }.article { max-width:720px; margin:auto; font-size:18px }
+      .article table { width:100%; border-collapse:collapse; font-size:15px }.article th,.article td { padding:10px; border:1px solid var(--line); text-align:left }
+      .close { margin-top:64px; padding:32px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line) }
+      @media (max-width:767px) { .screen{width:100%;margin:0 0 24px;border-left:0;border-right:0}.links{display:none}main{padding:56px 20px 64px}.cols,.blog-grid{grid-template-columns:1fr}.filters{flex-direction:row;flex-wrap:wrap}.demo{min-height:340px}.article{font-size:17px}.article table{display:block;overflow-x:auto} }
+    </style>
+  </head>
+  <body>
+    <section class="screen"><header class="nav"><span class="brand">ReCopyFast</span><span class="links">Product · Demo · Blog · Sign in</span></header><main><p class="eyebrow">Interactive demo</p><h1>Edit a real website, right here.</h1><p class="lede">Choose from three sample designs. Change a word or photograph and see the page respond in place.</p><div class="steps"><span>01 Click</span><span>02 Type</span><span>03 Swap an image</span></div><div class="demo">Existing InteractiveHero — functional component, not a screenshot</div><div class="cols"><div class="cell"><span class="num">01</span><h3>Click anything</h3></div><div class="cell"><span class="num">02</span><h3>Type over it</h3></div><div class="cell"><span class="num">03</span><h3>Swap the photograph</h3></div></div><div class="close"><h2>That is the whole product.</h2><a class="cta" href="#">Add it to your site</a></div></main><footer class="footer">ReCopyFast <span>Privacy · Terms · Cookie settings</span></footer></section>
+    <section class="screen"><header class="nav"><span class="brand">ReCopyFast</span><span class="links">Product · Demo · Blog · Sign in</span></header><main><p class="eyebrow">Field notes</p><h1>Practical notes for handing over websites.</h1><p class="lede">Client edits, maintenance, and clearer responsibility after launch.</p><div class="blog-grid"><nav class="filters"><button class="active">All</button><button>Freelancing</button><button>Development</button></nav><div><article class="post"><span class="meta">Freelancing · Oct 16, 2026</span><h2>Who owns website copy after launch?</h2><p>A practical handoff checklist for deciding who can change, approve, publish and maintain a website.</p><a href="#">Read article →</a></article><article class="post"><span class="meta">Development · Date</span><h2>Second published article title</h2><p>Only deliberately published posts appear in this list.</p></article></div></div></main><footer class="footer">ReCopyFast <span>Privacy · Terms · Cookie settings</span></footer></section>
+    <section class="screen"><header class="nav"><span class="brand">ReCopyFast</span><span class="links">Product · Demo · Blog · Sign in</span></header><main><header class="article-head"><p>← Back to blog</p><p class="eyebrow">Freelancing</p><h1>Who owns website copy after launch?</h1><p class="lede">A practical handoff checklist for deciding who can change, approve, publish and maintain a website.</p><p class="meta">Oct 16, 2026 · 8 min read</p></header><article class="article"><p>The website is live. Then a small copy request arrives with a larger question about responsibility.</p><h2>Separate ownership from access</h2><p>Name who decides, who edits, who publishes, and who keeps each page accurate.</p><table><tr><th>Page</th><th>Editor</th><th>Publisher</th></tr><tr><td>Homepage</td><td>Marketing editor</td><td>Founder</td></tr></table><div class="close"><h2>Try the editing experience.</h2><a class="cta" href="#">Try the demo</a></div></article></main><footer class="footer">ReCopyFast <span>Privacy · Terms · Cookie settings</span></footer></section>
+  </body>
+</html>

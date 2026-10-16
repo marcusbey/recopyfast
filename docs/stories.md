@@ -5050,3 +5050,48 @@ Acceptance criteria:
 - [x] Catalogue pricing, offers, signup, consent, SEO and required checks remain correct.
 
 Complexity: 4. Dependency: s113. Branch feature/s114-editorial-homepage. Research/design/plan in matching docs paths; plan validated by the owner October 15, 2026.
+
+
+## Story s115-editorial-demo-and-blog — the demo and useful writing feel like the same product
+
+Owner request October 16: carry the approved editorial homepage direction into the real demo and
+the public blog, then begin the blog with one useful, human-reviewed article. Scope is only
+`/demo`, `/blog` and `/blog/[slug]`; the other route families in the s114 inventory stay separate.
+Research: `docs/research/s115-editorial-demo-and-blog.md`. Design:
+`docs/designs/s115-editorial-demo-and-blog.md`. Draft plan:
+`docs/plans/s115-editorial-demo-and-blog.md`.
+
+As a freelance designer or small studio evaluating ReCopyFast, I can try the real in-browser
+editing experience and read practical guidance without feeling that I have left the editorial
+website, while unpublished writing remains private until a human deliberately publishes it.
+
+Acceptance criteria:
+- [x] `/demo` uses the approved cream, ink and teal editorial shell and the existing auth-aware
+  navigation/footer, while rendering the existing `InteractiveHero` exactly once. Its edits remain
+  browser-memory-only and require no site id, token, embed script, API call or account.
+- [x] Demo copy describes the three designs as samples, not customers or endorsements. The current
+  text/image-editing affordances, focus behavior and signup action remain reachable by mouse,
+  keyboard and touch.
+- [x] `/blog` uses the same editorial identity and readable hierarchy while retaining the bounded
+  anonymous `published`-only query, newest-first order, category filtering, one-hour regeneration,
+  and distinct list, empty and error states.
+- [x] `/blog/[slug]` has the approved editorial article measure and hierarchy. The existing body
+  content flow and tested `RICH_TEXT` sanitization boundary remain unchanged; styling does not add
+  a parser, bypass sanitization or widen the allowed markup/URL surface.
+- [x] Draft and archived rows remain absent from the index and return 404 at their article URLs,
+  including for a signed-in platform admin whose RLS session can read drafts. The cron, admin
+  list, publish/unpublish routes, database schema and human-review workflow are unchanged.
+- [x] Existing canonical URLs, sitemap inclusion, social metadata inheritance, GA route allowlist,
+  consent banner and footer Cookie settings behavior remain correct on all three routes.
+- [x] At 320, 390, 768, 1280 and 1440 CSS pixels, the demo has no document overflow, its nested
+  site remains usable, blog cards do not clip, and article prose stays within a readable measure.
+  Focus is visible and reduced-motion behavior is preserved.
+- [x] A repository-only draft of “Who owns website copy after launch?” provides a practical
+  handoff checklist without invented customers, results, statistics or product capabilities. It is
+  not inserted into `blog_posts` or published by this story's planning work.
+- [x] Focused route/component tests, canonical/sitemap and consent regressions, browser checks, and
+  the repository's required lint, type, format, build and Jest gates pass before review.
+
+Complexity: 4. Dependencies: s114 editorial foundation, released s88 public discovery and s89
+human-publish boundary. Branch `feature/s115-editorial-demo-and-blog`. No new dependency,
+migration, API or embed change. Embed allocation: 0 bytes.

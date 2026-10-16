@@ -16,6 +16,18 @@ import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import Demo from "@/app/demo/page";
 
+jest.mock("@/components/layout/Header", () => ({
+  Header: ({ variant }: { variant?: string }) => (
+    <header data-testid="header" data-variant={variant} />
+  ),
+}));
+jest.mock("@/components/layout/Footer", () => ({
+  __esModule: true,
+  default: ({ variant }: { variant?: string }) => (
+    <footer data-testid="footer" data-variant={variant} />
+  ),
+}));
+
 // The demo page renders <Header/>, which consumes the auth context. Provide a
 // signed-out context so the page can mount standalone.
 jest.mock("@/contexts/AuthContext", () => ({
@@ -41,8 +53,20 @@ describe("Demo page", () => {
         screen.getByRole("heading", { name: /edit a real website/i }),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/three customer sites, three different designers/i),
+        screen.getByText(/three sample sites, three different styles/i),
       ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/three customer sites/i),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/01 click/i)).toBeInTheDocument();
+      expect(screen.getByTestId("header")).toHaveAttribute(
+        "data-variant",
+        "editorial",
+      );
+      expect(screen.getByTestId("footer")).toHaveAttribute(
+        "data-variant",
+        "editorial",
+      );
     });
 
     it("renders the interactive demo itself", () => {
@@ -52,6 +76,7 @@ describe("Demo page", () => {
       // a description of one.
       const editables = container.querySelectorAll("[data-editable-id]");
       expect(editables.length).toBeGreaterThan(5);
+      expect(container.querySelectorAll("[data-demo-surface]")).toHaveLength(1);
     });
 
     it("renders the closing call to action", () => {
