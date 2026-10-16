@@ -108,6 +108,21 @@ function buildClient(writeResult: { error: unknown }) {
   // saying "not seen before"), while billing_customers must resolve a row or
   // the handler correctly refuses to attribute the event to anyone.
   const chain = (table: string) => {
+    // HARNESS ONLY (s82, Devin fix pass): `customer.subscription.created` now
+    // asks whether a lifetime grant covers the plan before writing. This
+    // account holds none, so the grant read answers no rows and every case
+    // below behaves as before; the grant cases are in
+    // stripe-webhook-lifetime-covered.test.ts.
+    if (table === "plan_entitlements") {
+      const grants: Record<string, unknown> = {
+        then: <T>(resolve: (value: { data: []; error: null }) => T) =>
+          Promise.resolve({ data: [] as [], error: null }).then(resolve),
+      };
+      for (const method of ["select", "eq", "is", "neq", "or", "returns"]) {
+        grants[method] = jest.fn(() => grants);
+      }
+      return grants;
+    }
     const row = table === "billing_customers" ? CUSTOMER_ROW : null;
     const thenable: Record<string, unknown> = {
       select: jest.fn(() => thenable),

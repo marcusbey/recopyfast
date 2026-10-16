@@ -27,10 +27,12 @@
  */
 
 const mockConstructEvent = jest.fn();
+const mockSubscriptionRetrieve = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
+    subscriptions: { retrieve: mockSubscriptionRetrieve },
   })),
 );
 
@@ -118,6 +120,29 @@ function createFakeClient() {
       },
       is: (column: string, value: unknown) => {
         predicates.push((row) => (row[column] ?? null) === value);
+        return builder;
+      },
+      // HARNESS ONLY (s82 re-review of 2928fcb): a settled invoice now asks
+      // whether the account holds a lifetime grant covering the subscription,
+      // through the shared grant reader, which filters with `neq` and an `or`
+      // of `expires_at` arms. These accounts hold none.
+      neq: (column: string, value: unknown) => {
+        predicates.push((row) => row[column] !== value);
+        return builder;
+      },
+      or: (expression: string) => {
+        const arms = expression.split(",").map((arm) => {
+          const [column, operator, ...rest] = arm.split(".");
+          const value = rest.join(".");
+          if (operator === "is" && value === "null") {
+            return (row: Row) => (row[column] ?? null) === null;
+          }
+          if (operator === "gt") {
+            return (row: Row) => String(row[column] ?? "") > value;
+          }
+          throw new Error(`Unsupported or() arm in test stub: ${arm}`);
+        });
+        predicates.push((row) => arms.some((arm) => arm(row)));
         return builder;
       },
       returns: () => builder,
@@ -239,6 +264,21 @@ describe("invoice and customer handlers", () => {
     jest.spyOn(console, "warn").mockImplementation(() => {});
     jest.spyOn(console, "error").mockImplementation(() => {});
     customerReadError = null;
+    // invoice.payment_succeeded now checks Stripe's cancellation marker even
+    // when the local row reads live: webhook ordering can leave that row stale,
+    // and only `covered_by_lifetime` authorises the late refund. This guard
+    // fixture is an ordinary renewing subscription, so the invoice is recorded
+    // and no refund path runs.
+    mockSubscriptionRetrieve.mockResolvedValue({
+      id: "sub_1",
+      customer: "cus_1",
+      status: "active",
+      cancellation_details: {
+        comment: null,
+        feedback: null,
+        reason: null,
+      },
+    });
     db = {
       billing_events: [],
       billing_invoices: [],

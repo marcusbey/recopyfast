@@ -11,6 +11,18 @@
     {
       "path": "/api/cron/tool-reports-cleanup",
       "schedule": "15 3 * * *"
+    },
+    {
+      "path": "/api/cron/analytics-context-cleanup",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/analytics-dispatch",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/analytics-payments",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

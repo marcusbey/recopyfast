@@ -2,7 +2,12 @@
 
 import { Zap, Github, Mail, Rocket, Shield } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
+import { openCookieSettings } from "@/lib/analytics/google-analytics/cookie-settings";
+import { getDocumentPathname } from "@/lib/analytics/google-analytics/document-path";
+import { getMeasurementId } from "@/lib/analytics/google-analytics/measurement-id";
+import { isAnalyticsPage } from "@/lib/analytics/google-analytics/routes";
 
 const footerLinks = {
   Product: [
@@ -62,10 +67,23 @@ const quickFeatures = [
 ];
 
 export default function Footer() {
+  const pathname = usePathname();
   const [year, setYear] = useState<number | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+  // s107: "Cookie settings" reopens the analytics consent banner, so it exists
+  // only where the banner can: GA configured, and this page and the document
+  // it lives in both on the allowlist — not on a free-tool report, nor on a
+  // marketing page reached by a client navigation from an app page
+  // (independent review F5). After mount only: the document's path is
+  // unknown on the server, and the server HTML must match the first render.
+  const hasCookieSettings =
+    isMounted &&
+    getMeasurementId() !== null &&
+    isAnalyticsPage(pathname, getDocumentPathname());
 
   useEffect(() => {
     setYear(new Date().getFullYear());
+    setIsMounted(true);
   }, []);
 
   return (
@@ -145,6 +163,17 @@ export default function Footer() {
                     )}
                   </li>
                 ))}
+                {category === "Legal" && hasCookieSettings ? (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={openCookieSettings}
+                      className="text-slate-600 hover:text-slate-900 transition-colors duration-200 text-sm"
+                    >
+                      Cookie settings
+                    </button>
+                  </li>
+                ) : null}
               </ul>
             </div>
           ))}

@@ -10,8 +10,16 @@ const REPORT =
 const assign = jest.fn();
 const fetchMock = jest.fn();
 
+// s107: the scan's analytics event. `track` itself is a no-op unless GA runs
+// on the page; here only the call is observed.
+const mockTrack = jest.fn();
+jest.mock("@/lib/analytics/google-analytics/gtag", () => ({
+  track: (...args: unknown[]) => mockTrack(...args),
+}));
+
 beforeEach(() => {
   assign.mockReset();
+  mockTrack.mockReset();
   fetchMock.mockReset();
   global.fetch = fetchMock as unknown as typeof fetch;
 });
@@ -95,6 +103,29 @@ describe("ToolScanForm", () => {
     await waitFor(() => expect(assign).toHaveBeenCalledWith(REPORT));
   });
 
+  it("sends tool_scan_completed with the tool's slug before entering the report", async () => {
+    respond(200, { reportId: "x", reportUrl: REPORT, cached: false });
+    assign.mockImplementation(() => {
+      expect(mockTrack).toHaveBeenCalledWith("tool_scan_completed", {
+        tool_slug: "website-spell-checker",
+      });
+    });
+
+    await submit();
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(REPORT));
+    expect(mockTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends no event when the scan is refused or fails", async () => {
+    respond(429, { error: "Too many scans. Try again in a minute." });
+
+    await submit();
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(mockTrack).not.toHaveBeenCalled();
+  });
+
   it.each([
     "https://evil.example/tools/website-spell-checker/r/6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c",
     "//evil.example/x",
@@ -108,6 +139,7 @@ describe("ToolScanForm", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(FALLBACK_ERROR);
     expect(assign).not.toHaveBeenCalled();
+    expect(mockTrack).not.toHaveBeenCalled();
   });
 
   it.each([

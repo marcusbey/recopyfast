@@ -28,6 +28,8 @@ const BOOTSTRAP = path.join(
 );
 const REQUIRED_MIGRATION = "20260925120000_sites_api_key_column_grants.sql";
 const REVISION_MIGRATION = "20261005000000_versioned_public_content_cache.sql";
+const RETIRED_REVISION_MIGRATION =
+  "20261012120000_retire_public_content_revision_rotation.sql";
 // s68a (ADR 047): both carry a data step or a postcondition, so a retry after
 // an uncertain connection result must converge rather than raise.
 const EDIT_SESSIONS_MIGRATION =
@@ -40,6 +42,9 @@ const isPreFixProof = process.argv.includes("--pre-fix-proof");
 // file, registered a placeholder other than the PostgREST one, or skipped
 // everything.
 const REPLAY_SUITES = [
+  "src/__tests__/db/analytics-payments.test.ts",
+  "src/__tests__/db/analytics-delivery.test.ts",
+  "src/__tests__/db/analytics-context.test.ts",
   "src/__tests__/db/column-privileges.test.ts",
   "src/__tests__/db/public-content-revision.test.ts",
   // s68a: the definer-function and RLS invariants were only ever run by
@@ -202,6 +207,11 @@ try {
   if (!isPreFixProof && !migrations.includes(REVISION_MIGRATION)) {
     throw new Error(`Required migration is missing: ${REVISION_MIGRATION}`);
   }
+  if (!isPreFixProof && !migrations.includes(RETIRED_REVISION_MIGRATION)) {
+    throw new Error(
+      `Required migration is missing: ${RETIRED_REVISION_MIGRATION}`,
+    );
+  }
 
   for (const migration of migrations) {
     run(
@@ -217,6 +227,13 @@ try {
     for (const migration of [
       REQUIRED_MIGRATION,
       REVISION_MIGRATION,
+      // s65b retires the revision migration's trigger/function mechanism. The
+      // replay intentionally runs s62 again to prove its own convergence, so
+      // restore today's final schema immediately afterward. Run the retirement
+      // twice: an operator retry after an uncertain result must also converge
+      // once every helper is already absent.
+      RETIRED_REVISION_MIGRATION,
+      RETIRED_REVISION_MIGRATION,
       EDIT_SESSIONS_MIGRATION,
       CONVERGENCE_MIGRATION,
     ]) {

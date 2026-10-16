@@ -27,8 +27,11 @@ jest.mock("@/lib/supabase/server", () => ({
   })),
 }));
 
+const mockReadGrantedPlans = jest.fn();
+
 jest.mock("@/lib/billing/effective-plan", () => ({
   readGrantedPlanIds: jest.fn(async () => []),
+  readGrantedPlans: (...args: unknown[]) => mockReadGrantedPlans(...args),
 }));
 
 jest.mock("@/lib/billing/founding-agency", () => ({
@@ -42,12 +45,17 @@ jest.mock("@/lib/billing/founding-agency", () => ({
 jest.mock("@/components/billing/BillingDashboard", () => ({
   BillingDashboard: ({
     agencyCheckoutEnabled,
+    lifetimeGrant,
   }: {
     agencyCheckoutEnabled: boolean;
+    lifetimeGrant: unknown;
   }) => (
-    <div data-testid="agency-checkout-enabled">
-      {String(agencyCheckoutEnabled)}
-    </div>
+    <>
+      <div data-testid="agency-checkout-enabled">
+        {String(agencyCheckoutEnabled)}
+      </div>
+      <div data-testid="lifetime-grant">{JSON.stringify(lifetimeGrant)}</div>
+    </>
   ),
 }));
 
@@ -88,6 +96,11 @@ function firstPaint(node: ReactNode): ReactNode {
 
 describe("BillingPage", () => {
   const originalAgencyCheckoutEnabled = process.env.AGENCY_CHECKOUT_ENABLED;
+
+  beforeEach(() => {
+    mockReadGrantedPlans.mockReset();
+    mockReadGrantedPlans.mockResolvedValue([]);
+  });
 
   afterEach(() => {
     if (originalAgencyCheckoutEnabled === undefined) {
@@ -153,5 +166,39 @@ describe("BillingPage", () => {
     expect(
       await screen.findByTestId("agency-checkout-enabled"),
     ).toHaveTextContent("false");
+  });
+
+  /*
+   * s82 review (second pass), m3: the plan dialog called a plan included by a
+   * dated grant "Included for life". The page's one grant read now carries
+   * when each plan's holding ends, and hands the dated ones to the dashboard.
+   */
+  it("hands the dashboard each granted plan, and the end of the dated ones", async () => {
+    mockReadGrantedPlans.mockResolvedValue([
+      { planId: "pro", expiresAt: null },
+      { planId: "agency", expiresAt: "2026-11-19T12:00:00.000Z" },
+    ]);
+
+    await renderBillingDashboardSection();
+
+    const passed = JSON.parse(
+      (await screen.findByTestId("lifetime-grant")).textContent ?? "null",
+    );
+    expect(passed).toEqual({
+      kind: "granted",
+      planIds: ["pro", "agency"],
+      endsAt: { agency: "2026-11-19T12:00:00.000Z" },
+    });
+  });
+
+  it("hands the dashboard no grant when the account holds none", async () => {
+    mockReadGrantedPlans.mockResolvedValue([]);
+
+    await renderBillingDashboardSection();
+
+    const passed = JSON.parse(
+      (await screen.findByTestId("lifetime-grant")).textContent ?? "null",
+    );
+    expect(passed).toEqual({ kind: "none" });
   });
 });

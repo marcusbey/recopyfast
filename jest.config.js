@@ -65,12 +65,15 @@ const customJestConfig = {
   // measurement, not at it: the measurement was local, and CI's placeholder
   // environment gates a few suites differently. The next story can tighten
   // them to its own CI measurement.
+  // s112 complete local suite (534 suites): branches 71.12, functions 75.16,
+  // lines 77.83, statements 77.07. Raise each floor with at least one point
+  // of measured slack for hosted environment differences; 80% is not earned.
   coverageThreshold: {
     global: {
-      branches: 67,
-      functions: 71,
-      lines: 74,
-      statements: 73,
+      branches: 70,
+      functions: 74,
+      lines: 76,
+      statements: 76,
     },
   },
   // Only *.test.* / *.spec.* are suites. The previous

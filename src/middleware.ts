@@ -14,6 +14,8 @@ import {
   isForwardableTunnelRequest,
   isSentryTunnelPath,
 } from "@/lib/monitoring/sentry-tunnel-guard";
+import { getMeasurementId } from "@/lib/analytics/google-analytics/measurement-id";
+import { isAnalyticsRoute } from "@/lib/analytics/google-analytics/routes";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -114,6 +116,12 @@ async function isUnentitled(
  * A report's nonce is still issued: the policy is chosen above, before this
  * check returns.
  *
+ * `/analytics/gtag-init.js` (s107, ADR 063) is Google Analytics' first-party
+ * init script, requested on every marketing page view. Its answer depends on
+ * Vercel's country hint and nothing else; a GoTrue round trip per page view
+ * would buy nothing. Exact, like `/try`: `/analytics/*` siblings and
+ * `/api/analytics/*` keep the session-aware path.
+ *
  * These paths stay *in* `config.matcher`. Skipping the middleware entirely
  * would also skip the security headers below, and `/embed/recopyfast.js` is
  * executable JavaScript loaded cross-origin onto every customer site — the one
@@ -133,6 +141,7 @@ function isSessionlessPath(pathname: string): boolean {
     pathname === "/tools" ||
     pathname.startsWith("/tools/") ||
     pathname.startsWith("/api/tools/") ||
+    pathname === "/analytics/gtag-init.js" ||
     isSentryTunnelPath(pathname)
   );
 }
@@ -152,6 +161,11 @@ export async function middleware(request: NextRequest) {
   const contentSecurityPolicy = buildContentSecurityPolicy({
     nonce,
     isDev: process.env.NODE_ENV !== "production",
+    // s107 (ADR 063): Google Analytics' hosts, on an allowlisted marketing
+    // page with a configured measurement id only. The builder ignores this
+    // under a nonce, and `isAnalyticsRoute` excludes every nonce path anyway.
+    analytics:
+      isAnalyticsRoute(request.nextUrl.pathname) && getMeasurementId() !== null,
     // Named one by one, as before s79: these are the origins connect-src is
     // derived from, and nothing else in the environment reaches the policy.
     env: {
@@ -345,8 +359,8 @@ export const config = {
      * (X-Content-Type-Options, X-Frame-Options, etc.).
      *
      * `embed/`, `/docs/install`, `/try`, its exact runtime asset, robots.txt,
-     * sitemap.xml, llms.txt and the Sentry tunnel are deliberately NOT excluded
-     * here.
+     * sitemap.xml, llms.txt, the Sentry tunnel and the analytics init script
+     * are deliberately NOT excluded here.
      * They must not pay for a session — but the matcher is all-or-nothing, and
      * excluding them would drop the security headers too. The widget script is
      * executable JavaScript loaded cross-origin onto every customer site, so

@@ -19,6 +19,11 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(mockSearch),
 }));
 
+const mockTrack = jest.fn();
+jest.mock("@/lib/analytics/google-analytics/gtag", () => ({
+  track: (...args: unknown[]) => mockTrack(...args),
+}));
+
 const ORIGIN = "https://recopyfa.st";
 
 function setup() {
@@ -50,6 +55,8 @@ async function replaceField(
 beforeEach(() => {
   jest.useFakeTimers();
   mockReplace.mockClear();
+  mockTrack.mockReset();
+  mockTrack.mockReturnValue(true);
   mockSearch = "";
 });
 
@@ -255,6 +262,69 @@ describe("CostCalculator", () => {
       "/tools/website-maintenance-cost?sites=12&changes=2&minutes=20&rate=60&billed=0&currency=USD",
       { scroll: false },
     );
+  });
+
+  /**
+   * s107: the free tool's "scan completed" event, once per page view, when the
+   * visitor's own inputs produce a settled result — the same moment the URL
+   * follows them. Never for the defaults or a shared link nobody touched.
+   */
+  it("sends tool_scan_completed once, when the visitor's own result settles", async () => {
+    const user = setup();
+
+    act(() => {
+      jest.advanceTimersByTime(1_000);
+    });
+    expect(mockTrack).not.toHaveBeenCalled();
+
+    await replaceField(user, "Sites you maintain", "12");
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    await replaceField(user, "Hourly rate", "80");
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+
+    expect(mockReplace).toHaveBeenCalledTimes(2);
+    expect(mockTrack).toHaveBeenCalledTimes(1);
+    expect(mockTrack).toHaveBeenCalledWith("tool_scan_completed", {
+      tool_slug: "website-maintenance-cost",
+    });
+  });
+
+  // PR #94 review (Devin): a result that settles before analytics is active
+  // (consent pending, init script still loading) must not use up the page's
+  // one event. The first settled result AFTER activation sends it.
+  it("keeps the event for later when analytics was not active yet", async () => {
+    mockTrack.mockReturnValueOnce(false).mockReturnValue(true);
+    const user = setup();
+
+    await replaceField(user, "Sites you maintain", "12");
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    await replaceField(user, "Hourly rate", "80");
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    await replaceField(user, "Minutes per change", "25");
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+
+    expect(mockTrack).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends no event while a field is empty", async () => {
+    const user = setup();
+
+    await user.clear(screen.getByLabelText("Sites you maintain"));
+    act(() => {
+      jest.advanceTimersByTime(1_000);
+    });
+
+    expect(mockTrack).not.toHaveBeenCalled();
   });
 
   it("does not touch the URL when nothing changed", () => {

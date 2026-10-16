@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { reactivateSubscription } from "@/lib/stripe/subscription";
+import { billingErrorResponse } from "@/lib/billing/billing-refusal";
 
 /**
  * POST /api/billing/subscription/reactivate
@@ -23,15 +24,13 @@ export async function POST() {
 
     return NextResponse.json({ subscription });
   } catch (error: unknown) {
-    console.error("Error reactivating subscription:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to reactivate subscription",
-      },
-      { status: 500 },
+    // Only a `BillingRefusal` keeps its words — the lifetime refusal (409) and
+    // "not scheduled for cancellation" among them; Stripe's text stays in the
+    // log (s82, s69 L5). See billing-refusal.ts.
+    return billingErrorResponse(
+      error,
+      "Error reactivating subscription",
+      "Failed to reactivate subscription",
     );
   }
 }

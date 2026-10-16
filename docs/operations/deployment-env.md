@@ -15,6 +15,7 @@ a non-production run. Both are listed below with the failure they cause.
 | `STRIPE_WEBHOOK_SECRET`      | the `whsec_…` printed by `stripe listen` | the signing secret of the **test-mode** endpoint pointed at the preview URL | — (production uses `STRIPE_WEBHOOK_SECRET_LIVE`)                  |
 | `STRIPE_WEBHOOK_SECRET_LIVE` | —                                        | —                                                                           | the signing secret of the **live-mode** endpoint on `recopyfa.st` |
 | `ALLOWED_ORIGINS`            | `http://localhost:3000`                  | the preview origin                                                          | `https://recopyfa.st,https://www.recopyfa.st`                     |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | leave **unset** (a real id sends your local visits to the production property) | leave **unset** | the GA4 id `G-DQ…` (s107, `docs/operations/analytics.md`) |
 
 On Vercel, set these under **Settings → Environment Variables** and untick the
 environments they do not apply to. A variable ticked for all three environments

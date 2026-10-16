@@ -125,3 +125,39 @@ No open findings. The reported nullable-version defect is resolved.
 
 Max severity: none
 Ship allowed: yes
+
+## Current-main integration review — 2026-10-16 (`a58b6fc`)
+
+The in-progress merge of current `main`
+`a58b6fc2e63975bef1c0bbe7506360828c49c2b9` into story head
+`e848654dc100dd2f7cc8e8b9598ce2e8cc897dff` has no unmerged index entries and passes both
+`git diff --check` and `git diff --cached --check`. Compared with `MERGE_HEAD`, the resulting tree
+retains the complete 22-file s81 delta. Compared with the reviewed story head, every s81 route,
+hook, validation helper, test, ADR and migration file is unchanged. The shared database runner
+adds the current-main replay suites while retaining `staging-content-cas`; the additive
+`docs/stories.md` resolution preserves s81 and the subsequently merged stories.
+
+The CAS migration SHA-256 remains
+`157808f46b033234fd02d30c8aa7d3b23029a549d734ec70685ee5672ca515cf`, exactly matching the
+reviewed head. The authoritative row-version projection, same-statement row lock and comparison,
+typed saved/missing/conflict outcomes, nullable-version refusal, no-write conflict path,
+service-role boundary and monotonic token behavior are therefore unchanged. The client still maps
+409 to the existing stale outcome, refreshes the row, and performs no automatic retry or force
+discard. The omitted-version path remains the deliberate legacy last-write-wins contract; no
+fallback was added around the conditional path.
+
+Fresh Node 24.14.0 verification passed the five focused route, validator, hook and Changes-view
+suites: **5 suites / 183 tests**. The prior route, hook and database neutralizations remain bound
+to unchanged source hashes and were not repeated during this no-source-mutation integration pass.
+No LSP diagnostic was required for the merge delta because it changes no s81 TypeScript source;
+the only shared JavaScript change is additive database-suite registration already exercised by the
+release lane.
+
+No new finding was introduced by integrating current main. This is a passing technical source
+review, not proof of the remaining release lanes. The merge commit and normal hooks, current-head
+hosted checks, the production migration preflight/application, deployment and live two-tab Discard
+gesture remain separate evidence. The prior Devin nullable-version finding is fixed in the exact
+migration reviewed here; absence of a fresh private Devin run is not treated as approval.
+
+Max severity: none
+Ship allowed: yes

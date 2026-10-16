@@ -1,3 +1,7 @@
+import {
+  freezeVerifiedSignup,
+  type SignupProof,
+} from "@/lib/analytics/google-analytics/conversions";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
@@ -123,8 +127,12 @@ export async function GET(request: NextRequest) {
   try {
     const {
       data: { user },
+      error: userError,
     } = await supabase.auth.getUser();
-    if (user) {
+    if (user && !userError) {
+      // Freeze binding and the signup source in one transaction. A separate
+      // best-effort bind loses which browser actually confirmed the account.
+      await freezeVerifiedSignup(request, user.id, type as SignupProof);
       await ensureTrialStarted(supabase, user.id);
     }
   } catch (trialError) {

@@ -4711,6 +4711,189 @@ Complexity: 2. Dependencies: s96. Branch `feature/s101-alt-text-checker`.
 
 Embed allocation: 0 bytes.
 
+## Story s107-google-analytics — the marketing site is measured, with consent where the law asks for it
+
+Owner request 2026-10-12: Google Analytics 4 on the public marketing site, "with the settings
+perfectly fine". Architect brief the same day (pre-approved scope). Plan:
+`docs/plans/s107-google-analytics.md`. Decision: ADR 063. Operations record (every GA setting and
+its value): `docs/operations/analytics.md`. Retrospective pipeline records, added after the
+implementation without claiming the missing pre-implementation checkpoints: research
+`docs/research/s107-google-analytics.md`; UI design
+`docs/designs/s107-google-analytics.md` + `.html`.
+
+Before: no visitor analytics at all (launch kit §10 "Channel: nowhere automatic", §12 ledger).
+
+Acceptance criteria:
+
+- [x] A GA4 property "RecopyFast" (America/Toronto, USD) with one web stream for
+  `https://www.recopyfa.st`, configured as recorded in `docs/operations/analytics.md`: 14-month
+  retention (no reset on activity), Google signals off, ads personalisation off everywhere,
+  granular location/device off in the EEA/UK/CH, enhanced measurement as briefed (browser-history
+  page views excepted, see the doc), key events `sign_up`, `generate_lead`, `begin_checkout`,
+  `tool_scan_completed`, event dimensions `tool_slug` and `cta_location`, Stripe referrals
+  excluded, developer-traffic filter in Testing. `NEXT_PUBLIC_GA_MEASUREMENT_ID` in Vercel
+  Production only.
+- [x] GA loads only on `/`, `/compare/**`, `/try`, `/tools/**`, `/blog/**`, `/docs/**`,
+  `/pricing`, `/privacy`, `/terms`, `/demo`; never on the dashboard, `/settings`, `/edit`,
+  `/login`, `/signup`, `/auth/**`, the API, the widget or the `/try` runtime. One helper
+  (`isAnalyticsRoute`). Tests: `routes.test.ts`, `GoogleAnalytics.test.tsx`,
+  `third-party-scripts.test.ts`, `e2e/google-analytics.spec.ts`.
+- [x] Consent Mode v2: everything denied by default in the EEA + UK + CH (`region`) and for any
+  visitor the country hint places there (missing hint = consent required); analytics granted
+  elsewhere; ads denied everywhere; `url_passthrough` false, `ads_data_redaction` true. Where
+  consent is required, nothing is requested from Google before "Allow analytics". Choice in a
+  first-party cookie for 6 months; "Cookie settings" in the footer reopens the banner. Tests:
+  `consent.test.ts`, `init-script.test.ts`, `route.test.ts`, the e2e spec.
+- [x] No inline script: a first-party `/analytics/gtag-init.js` route, then gtag.js through
+  `next/script` (`afterInteractive`). The static CSP gains exactly GA4's script, connect and img
+  hosts on allowlisted pages; the nonce policy is unchanged. Tests: `content-security-policy.test.ts`,
+  `middleware-csp.test.ts`, `csp.spec.ts`, `google-analytics.spec.ts` (zero script or Google CSP
+  violations, real beacon/fetch/image hits through the policy, Google stubbed).
+- [x] Typed `track()`: no-op unless active, slug-only params, sanitised `page_location`
+  (no fragment, no query key but landing-page `utm_*`, UUID segments redacted). Events:
+  `generate_lead` (CTA → `/signup`, `cta_location`), `begin_checkout` (CTA → `/dashboard/billing`),
+  `try_started` (sample preview active), `tool_scan_completed` (calculator, once per page view;
+  s96's `ToolScanForm` on a successful scan, slug only). `sign_up` is a documented Measurement
+  Protocol follow-up (`/signup` is app surface). Tests: `gtag.test.ts`, `page-location.test.ts`,
+  `CostCalculator.test.tsx`, `TryExperience.test.tsx`, `ToolScanForm.test.tsx`.
+- [x] `/privacy` states, factually, where GA runs, what is sent, the consent rule, the cookies
+  (`_ga`, `_ga_<ID>`, `rcf_analytics_consent`), 14-month retention and three ways to opt out.
+  Test: `privacy-analytics.test.tsx`; the s54 tripwires unchanged.
+- [x] The comparison Lighthouse gate (ADR 061) stays green with GA in the build (PR #94, run
+  38220513115: perf 98–99, LCP 1,630–1,656 ms, CLS ≤ 0.015, TBT 92–103 ms; `main` 172–185 ms TBT);
+  CI e2e strict count 94 → 99, all passing; 102 after merging s96 (97 + 5); 104 with the
+  independent review's fixes (97 + 7).
+- [x] Independent review of `4e068e9` (max severity major, ship blocked) fixed: GA loads only when
+  the page AND the document it lives in were both loaded on an allowlisted path (a client
+  navigation keeps the document's CSP; `/login` → "Terms" loaded gtag.js under the nonce policy
+  before the fix, reproduced in a browser); placeholder country codes and Quebec (Law 25) ask
+  first; the reopened banner describes the choice in effect; "Cookie settings" only where GA can
+  run; guards no test bit (landing referrer, page view per client navigation, missing init hint,
+  first-visit Escape) now pinned. Record: `docs/reviews/s107-google-analytics.md`.
+
+Complexity: 3. Dependencies: none (s98 merged). Merged with s96 (`c905292`): its scan reports carry
+no analytics (architect decision, ADR 063); the scan is measured on the tool page. Branch
+`feature/s107-google-analytics`.
+Follow-ups (not s107): server-side `sign_up` via the Measurement Protocol; internal-traffic rule
+once the owner's IP is known to be stable; activating the developer-traffic filter; storing the
+landing `utm_*` at sign-up so a GA lead can be tied to an account.
+
+Embed allocation: 0 bytes (nothing in the widget or the /try runtime).
+
+---
+
+## Story s82-billing-lifetime-guards — a lifetime owner is never billed again for what they own, and billing says only what is true
+
+Follow-ups of s71 (PR #74) and s45, plus s69 L5, scheduled by the orchestrator on 2026-10-09 under
+the owner's directive. Research: `docs/research/s82-billing-lifetime-guards.md`. Design:
+`docs/designs/s82-billing-lifetime-guards.md` (no new screen). Plan:
+`docs/plans/s82-billing-lifetime-guards.md`.
+
+Cause (verified on `origin/main` `72f4cff`):
+- `POST /api/billing/subscription/reactivate` (`route.ts:9-37`) calls `reactivateSubscription`
+  (`src/lib/stripe/subscription.ts:477-527`), which has no lifetime check: a lifetime owner whose
+  subscription the Stripe webhook set to cancel (`stopBillingForLifetimeOwner`,
+  `webhooks/stripe/route.ts:941-1000`) can restart monthly billing for a plan the grant replaced.
+  The card hides the button since s71 (`SubscriptionCard.tsx:221-227`); the endpoint does not.
+- (Found by the review, fix pass.) Reactivation is not the only door: Checkout's subscription
+  intent (`checkout/route.ts:209-237`) and the plan change (`updateSubscription`,
+  `subscription.ts:313-410`) never read grants, so a lifetime owner can buy or switch into a plan
+  the grant already includes, billed monthly; the webhook stops billing only when a lifetime is
+  bought. The grant reader the guards share (`readGrantedPlanIds`) ignores `expires_at`, while the
+  entitlement resolver honours it — production holds one dated non-trial grant
+  (`qa_recovery_20260919`).
+- (Found by the second review, fix pass 2, on `84d7b0c`.) Checkout's catch answers
+  `error.message` (`checkout/route.ts:811-821`), so a grant read failure reaches the browser as
+  "Failed to read plan entitlements: <database text>". The plan dialog says "Included for life" and
+  "Included in your lifetime <plan>" for a plan included only by a dated grant
+  (`UpgradeDialog.tsx:127-130,340-345`), and its naming of the highest grant is unpinned.
+- (Found by Devin Review on PR #81, on `d08b967`.) A subscription Checkout Session opened before a
+  lifetime grant lands stays payable: `stopBillingForLifetimeOwner`
+  (`webhooks/stripe/route.ts:941-1002`) only cancels subscriptions already live, and
+  `handleSubscriptionCreated` (`:486-534`) records a later one without reading grants — open Pro
+  Checkout, buy Lifetime Pro in another tab, pay the old session, and Pro bills monthly for a plan
+  owned. An allowed plan change on a subscription set to cancel (`subscription.ts:378,399-413`)
+  charges the proration and still cancels at period end. The plan in force held only through a
+  dated grant reads "Lifetime" / "Lifetime access" / "for life" on the card and its dialog tile
+  (`SubscriptionCard.tsx:52-55,194-195`, `BillingDashboard.tsx:378`) — the queued follow-up **s96,
+  folded into s82** (it has no story of its own).
+- A Founding Agency owner still running out an Agency subscription reads "1,000 AI credits /
+  month" with nothing saying it drops to 250 when the subscription ends (s71 review N-1;
+  `SubscriptionCard.tsx:102-128`, ADR 038).
+- The card finds the allowance bullet by its exact text (`SubscriptionCard.tsx:38-40,61-63`, s45
+  review #2). Pro's live bullet is "AI rewrite suggestions, 500 credits a month"
+  (`20260928130000_catalogue_copy_truth.sql:56`), which "500 AI credits" never matches, so a
+  founding-offer holder metered at 100 reads 500.
+- The plan dialog marks a lifetime owner's plan "Current" at "$49/month" with the catalogue's
+  allowance (`UpgradeDialog.tsx:234-285`, s45 review #1).
+- `POST /api/ai/suggest` answers "You were not charged" even when the refund failed
+  (`src/app/api/ai/suggest/route.ts:153-162,333-341`); the failure reaches only `console.error`,
+  which nothing forwards to Sentry.
+- `POST /api/ai/translate` charges the caller (`route.ts:261`), against ADR 035 (the site owner
+  pays).
+- Billing routes return raw exception text, Stripe's included, to the client
+  (`payment-methods/route.ts:119-122,204-207`; `subscription/route.ts:104-107,141-144`;
+  `subscription/reactivate/route.ts:28-33`), and a missing payment-method id answers 500 with
+  Stripe's "No such PaymentMethod" while a foreign one answers 404 — an existence oracle.
+  `payment-methods` has no limiter (s69 L5).
+
+Acceptance criteria:
+- [ ] Reactivating a subscription whose plan a non-trial permanent grant covers (same plan or a
+  higher one) answers 409 with a clear message and never reaches Stripe. A Founding Agency owner
+  cannot restart an Agency subscription either (CTO decision, plan). A subscription above every
+  grant (Lifetime Pro + Agency subscription), a trial-only account and an account with no grant
+  reactivate exactly as before.
+- [ ] Starting a subscription through Checkout, or switching a subscription (plan change), to a
+  plan a live grant covers answers 409 with a clear message before any Stripe call, and fails
+  closed when grants cannot be read; an Agency subscription beside Lifetime Pro stays on sale. The
+  plan dialog marks such a plan "Included" and refuses it, naming the lifetime plan that includes
+  it (fix pass) — the highest undated grant; a plan included only by dated grants reads "Included
+  until <date>" and its submit "Included in your plan until <date>", never "for life" (fix pass 2).
+- [ ] A grant whose `expires_at` has passed is not held, for every reader (billing page, dashboard,
+  entitlement badge, checkout, plan change, reactivation), exactly as the entitlement resolver
+  already says; an unexpired dated grant is held (fix pass).
+- [ ] Under a plan held for life, the running-out row and the cancel confirmation say what the
+  monthly AI-credit allowance becomes without the subscription, when the subscription is what
+  raises it (resolved server-side). Every other state's copy is unchanged.
+- [ ] The plan card restates the allowance bullet found from the plan's own
+  `limits.monthlyCredits`, not one spelling of it: Pro's real wording is restated, a reworded
+  bullet is restated, unrelated numbers are untouched, no resolved allowance drops it.
+- [ ] The plan dialog shows a plan held for life as "Lifetime" with "Lifetime access" and the
+  account's own allowance — no price, no "Current", no annual line, not purchasable.
+- [ ] `ai/suggest` says "You were not charged" only when the refund succeeded in full; otherwise a
+  truthful message, and the failure is logged through `@/lib/monitoring/logger` (Sentry in
+  production) with ids only, no secrets.
+- [ ] `ai/translate` charges the site owner's wallet through the service client (ADR 035), for the
+  owner and for a non-owner editor alike; a non-owner editor's refusal tells them to ask the owner.
+- [ ] Subscription, reactivate, payment-method and checkout (fix pass 2) routes answer a generic
+  message for anything that is not a deliberate billing refusal and log the detail — a failed subscription read
+  included, which is never told as "No active subscription found" (fix pass); a missing and a
+  foreign payment method answer the same 404; `payment-methods` is rate limited per IP before
+  authorisation, and the card shows the limiter's sentence and when to try again (fix pass).
+- [ ] (Devin fix pass) When a lifetime grant lands, the customer's open subscription Checkouts for a
+  plan it covers are expired (an Agency Checkout beside Lifetime Pro stays open); a failure keeps
+  the grant and is reported to Sentry.
+- [ ] (Devin fix pass) A subscription that starts while an undated, non-trial grant covers its plan
+  is cancelled at once without proration, what its first invoice collected is refunded in full, it
+  is recorded cancelled (never live), and the refusal is reported to Sentry — whether its event
+  arrives after the grant's or before it (then only when Stripe created it after the lifetime was
+  paid; an older subscription keeps the period-end cancellation). Replays and retries refund once;
+  a failure is retried or reported, never silent. An Agency subscription beside Lifetime Pro, a
+  dated grant and a trial never trigger it.
+- [ ] (Devin fix pass) A plan change on a subscription scheduled to cancel clears the scheduled
+  cancellation, and the dialog says before the click that the subscription will renew.
+- [ ] (Devin fix pass, s96 folded in) The plan in force held only through a dated grant reads
+  "Included" and "Included until <date>" on the card and in its dialog tile — never "Lifetime" or
+  "for life", and the running-out row never calls the subscription beside it unneeded; it stays
+  unbuyable and Reactivate stays hidden while the grant is live.
+- [ ] Every non-lifetime billing behaviour is unchanged, pinned by regression tests.
+
+Complexity: 3. Dependencies: s71 (merged, #74). Branch `feature/s82-billing-lifetime-guards`.
+Folds in s96 (dated grant on the plan in force), which was queued from this story's review and has
+no entry of its own.
+
+Embed allocation: 0 bytes (ceilings only go down).
+
 ## Story s96c-streamed-html — the Typo Finder reads the page a Next.js site streams, not its loading screen
 
 > Hotfix, 2026-10-12. Found in production right after s96 shipped: the Typo Finder said our own
@@ -4746,6 +4929,22 @@ dependency.
 
 Embed allocation: 0 bytes.
 
+## Story s65b-site-delete-revision-lock-order — approved Devin review remediation
+
+Deleting a site cannot deadlock with a content write. Editing content also stops presenting as a
+site-metadata change through `sites.updated_at` unless research finds a current product consumer
+that intentionally depends on that coupling.
+
+Human validated 2026-10-12. The complete acceptance criteria, tasks and constraints are
+`docs/plans/s65b-site-delete-revision-lock-order.md`, materialized from the four-fix proposal approved in this chat.
+
+- [x] Research confirms the current premise and records consumers and compatibility boundaries.
+- [x] All approved plan tasks and their regression/concurrency checks pass.
+- [x] No applied migration is changed; no dependency is added.
+- [x] Independent review passes and normal repository checks pass before a draft PR.
+
+Branch: `feature/s65b-site-delete-revision-lock-order`. Embed allocation: 0 bytes.
+
 ## Story s81-version-restore-integrity — Discard refuses a changed row
 
 As an owner, Discard applies only to the exact version I just reviewed. If another writer changes
@@ -4762,3 +4961,92 @@ The full plan `docs/plans/s81-version-restore-integrity.md` was human validated 
 
 Branch: `feature/s81-version-restore-integrity`. Dependency: s65b verification/deployment first.
 Embed allocation: 0 bytes.
+
+## Story s110-analytics-consent-context — consented acquisition context reaches conversion boundaries safely
+
+Owner request 2026-10-12: finish analytics for visitors, completed signups and paying customers.
+This bounded follow-up preserves s107's public-only Google scripts and private-page CSP.
+Research/plan: `docs/research/s110-analytics-consent-context.md` and
+`docs/plans/s110-analytics-consent-context.md` (human validated2026-10-12).
+
+As the operator, I need a visitor's permitted GA attribution to reach an authenticated conversion
+without sending account details to Google or continuing after that visitor declines analytics.
+
+Acceptance criteria:
+- [ ] Capture documented GA client IDs only after the marketing runtime is active;
+  absent/denied/expired context remains unattributed, with no fabricated visitor identity.
+  Session IDs are omitted in s110 because the true session boundaries cannot be proved,
+  as required by the validated plan; a client ID never invents session attribution.
+- [ ] Persist only bounded consent/context with same-origin protection, fail-closed rate limiting,
+  service-only/RLS storage, opaque secure cookie and a short expiry; bind only after verified auth.
+- [ ] Decline revokes server context and prevents later claims (already claimed requests may still send); signout cannot attribute the next
+  account to the prior person. No Google scripts or CSP hosts on auth/dashboard/report documents.
+- [ ] Privacy copy and tests reflect actual storage, expiry, revocation and collection boundaries.
+- [ ] Independent review and required local/hosted/database/browser gates pass.
+
+Complexity: 3. Dependencies: s107. Branch `feature/s110-analytics-consent-context`.
+No new dependency. Forward-only migration required. Embed allocation: 0 bytes.
+
+## Story s111-verified-signup-analytics — completed first signups are measured without counting repeat logins
+
+Research/plan: `docs/research/s111-verified-signup-analytics.md` and
+`docs/plans/s111-verified-signup-analytics.md` (human-validated on 2026-10-12).
+
+As the operator, I need completed account creation counted once, and permitted conversions
+attributed in GA without treating an email request, failed OTP or repeat login as a signup.
+
+Acceptance criteria:
+- [ ] Both auth establishment paths freeze a durable source disposition after provider verification. Only explicit signup/invite proof can send; generic email/PKCE remain unproven. Baseline confirmed accounts, repeat/concurrent callbacks, invalid OTPs and existing-session fallback cannot create duplicate signup delivery.
+- [ ] Surviving Auth accounts with `email_confirmed_at` present define current confirmed-account stock. Mutable timestamp period counts are limited, and missing/cross-device context never blocks signup or invents identity. Total freeze failure stays possibly unattributed; reconciliation only completes already frozen sources.
+- [ ] Private durable outbox, atomic claims and bounded authenticated dispatch protect against
+  replay; ambiguous delivery is visible and never blindly retried as another signup.
+- [ ] Only approved payload fields leave for GA; no user IDs, email, tokens or private URLs.
+  Analytics delivery failure cannot break auth. Consent is rechecked before delivery.
+- [ ] Provider validation and separate QA ingestion evidence distinguish payload validity,
+  HTTP acceptance and actual receipt; no synthetic signup inflates production reports.
+- [ ] Independent review and required local/hosted/database/browser gates pass.
+
+Complexity: 3. Dependencies: s110. Branch `feature/s111-verified-signup-analytics`.
+No new dependency. Forward-only migration/server configuration required. Embed allocation: 0 bytes.
+
+## Story s112-verified-purchase-analytics — successful live payments and unique paying customers are distinct
+
+Research/plan: `docs/research/s112-verified-purchase-analytics.md` and
+`docs/plans/s112-verified-purchase-analytics.md` (human validated on 2026-10-12).
+
+As the operator, I need successful live purchases measured from verified payment outcomes,
+without counting Stripe TEST activity, free trials, repeated webhooks or renewals as new customers.
+
+Acceptance criteria:
+- [ ] Canonical live invoice/payment identity deduplicates overlapping Checkout/payment events;
+  only recognized, successfully provisioned, positive collected payments qualify.
+- [ ] TEST, unpaid/failed, zero-dollar/trial, setup, forged return and automatic-refund exclusions
+  hold. Existing billing/entitlement/refund behavior remains unchanged.
+- [ ] Purchase transactions, unique first paying accounts, renewals and full/partial refunds
+  remain distinct. Complete first-party totals are not replaced by consented GA totals.
+- [ ] Eligible GA purchase/refund payloads use actual amount/currency and stable opaque
+  transaction IDs; unavailable or expired context remains explicitly unattributed.
+- [ ] Outbox failure/reconciliation never causes another charge or blocks monetary processing.
+- [ ] Independent review, real database/concurrency tests, required gates and separate QA receipt
+  pass. A real live customer payment remains a future operational observation, not a test charge.
+
+Complexity: 3. Dependencies: s111 and released s82. Branch `feature/s112-verified-purchase-analytics`.
+No new dependency. Forward-only migration as required by reviewed design. Embed allocation: 0 bytes.
+
+
+## Story s113-social-share-cards — a shared link shows the freelancer benefit and real product
+
+Status: implemented; independent review pending.
+Research: `docs/research/s113-social-share-cards.md`. Design: `docs/designs/s113-social-share-cards.md`.
+
+As a freelance web designer or small-agency owner receiving a ReCopyFast link, I can immediately understand that clients can edit everyday wording while I keep my focus on design work.
+
+Acceptance criteria:
+- [x] The default Open Graph and Twitter card uses approved 1200×630 concept C v2 with accurate alt text, the developer-bottleneck request loop, and readable freelancer benefit copy.
+- [x] `/opengraph-image` and `/twitter-image` remain fetchable PNGs; existing canonical, title, description, robots and route-specific metadata remain coherent.
+- [x] A production build's rendered metadata resolves to accessible images with correct size/type; representative explicit-image routes and the homepage are checked.
+- [x] No invented product UI, savings, customers or product behavior; immutable design/source provenance, prior concepts, both concept C previews, and small-preview visual proof are retained.
+- [ ] Required checks and independent review pass; manual ship strategy is respected before deployment and live verification.
+
+Complexity: 2. Dependencies: released SEO/site-identity baseline (s50/s88).
+Branch: `feature/s113-social-share-cards`. No new dependency or migration. Embed allocation: 0 bytes.

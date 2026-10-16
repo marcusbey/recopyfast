@@ -132,6 +132,20 @@ function createFakeClient() {
         predicates.push((row) => allowed.includes(row[column]));
         return builder;
       },
+      // HARNESS ONLY (s82, Devin fix pass): `customer.subscription.created`
+      // now asks whether a lifetime grant covers the plan, through the grant
+      // read's `.is` / `.neq` / `.or`. No `plan_entitlements` row is seeded in
+      // this file, so the read answers none and every case below behaves as
+      // before; the grant cases are in stripe-webhook-lifetime-covered.test.ts.
+      is: (column: string, value: unknown) => {
+        predicates.push((row) => (row[column] ?? null) === value);
+        return builder;
+      },
+      neq: (column: string, value: unknown) => {
+        predicates.push((row) => row[column] !== value);
+        return builder;
+      },
+      or: () => builder,
       returns: () => builder,
       insert: (payload: Row) => {
         operation = "insert";
