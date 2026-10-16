@@ -141,3 +141,36 @@ this addendum.
 
 Max severity: none
 Ship allowed: yes
+
+## Integration review addendum — 2026-10-16 (`a58b6fc`)
+
+The in-progress merge of current `main`
+`a58b6fc2e63975bef1c0bbe7506360828c49c2b9` into story head
+`86fc2d1d82b3c5f157af1a4e69f172ea291f2604` is technically clean. The resolved index contains
+only the already-merged s113 social-card files and the combined `docs/stories.md`; the canonical
+s108 and s113 sections are both present. `git diff --check` and `git diff --cached --check` pass,
+and no unmerged index entry remains.
+
+The six implementation/test/manifest files owned by s108 are byte-for-byte identical to story
+head `86fc2d1d`: `package.json`, `package-lock.json`, both bulk routes and both strengthened route
+tests have matching SHA-256 hashes in the worktree and `HEAD`. The resulting feature delta against
+`a58b6fc` therefore remains the reviewed change: replace only the two `uuidv4()` calls with
+`node:crypto.randomUUID()`, remove only the direct `uuid` and `@types/uuid` roots, and preserve the
+nested dev-only `@lhci/cli@0.15.1 -> uuid@8.3.2` dependency. No application `uuid` import remains.
+No fallback, alternate generator or weakened error path was introduced.
+
+Fresh verification under Node 24.14.0 passed the two changed route suites: **2 suites / 20 tests**.
+The existing fixed-valid-v4 neutralization remains applicable because all six reviewed file hashes
+are unchanged; it previously made exactly the two distinct-id assertions fail and was not repeated
+during this no-source-mutation integration review. No LSP diagnostic was required for the merge
+delta because it contains no changed TypeScript or JavaScript owned by s108; the prior full Node 24
+type checks remain bound to these exact source hashes.
+
+No new finding was introduced. This addendum establishes only source-preserving integration onto
+`a58b6fc`. The merge commit and normal hooks, hosted checks on the resulting PR head, private Devin
+review availability, and any release action remain separate evidence lanes. Devin review could not
+be refreshed because the private review service currently reports unavailable credits; no approval
+is inferred from that absence.
+
+Max severity: none
+Ship allowed: yes
