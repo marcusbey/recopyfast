@@ -11,6 +11,7 @@ import {
   listPublishedPosts,
   type PublishedPostsResult,
 } from "@/lib/blog/published-posts";
+import styles from "@/components/marketing/editorial-content.module.css";
 
 // Until s88 /blog inherited the root layout's canonical, which named the
 // homepage. Every indexable page names itself.
@@ -66,48 +67,51 @@ export default async function Blog() {
   const result = await listPublishedPosts();
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
+    <div className={styles.page}>
+      <Header variant="editorial" />
 
-      <main className="max-w-7xl mx-auto px-6 py-16">
-        {/* Blog Header */}
-        <div className="text-center mb-16">
-          <h1 className="text-display mb-6">Blog</h1>
-          <p className="text-sm text-muted-foreground max-w-3xl mx-auto">
-            Insights, tutorials, and stories for creators who build and manage
-            websites with AI tools
+      <main className={styles.main}>
+        <header className={`${styles.frame} ${styles.intro}`}>
+          <p className={styles.eyebrow}>Field notes</p>
+          <h1 className={styles.displayTitle}>
+            Practical notes for handing over websites
+          </h1>
+          <p className={styles.lede}>
+            Client edits, maintenance, and clearer responsibility after launch.
           </p>
-        </div>
+        </header>
 
-        <BlogPosts result={result} />
+        <section className={`${styles.frame} ${styles.blogBody}`}>
+          <BlogPosts result={result} />
 
-        {/* Newsletter CTA
+          {/* Newsletter CTA
             The email capture form that used to live here had no onChange, no
             onSubmit and no endpoint — every address typed into it was silently
             discarded. There is no subscriber store in this codebase, so it is
             replaced with a CTA that goes somewhere real. */}
-        <div className="mt-20 bg-surface-1 rounded-xl p-8 md:p-12 text-center">
-          <h3 className="text-xl font-semibold text-foreground mb-4">
-            Start editing your site in minutes
-          </h3>
-          <p className="text-sm text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Drop one script tag into any site and make its copy editable — no
-            migration, no rebuild.
-          </p>
-          {/* Static marketing -> nonce app: this must replace the document. */}
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a
-            href="/signup"
-            data-cta-location="blog_index"
-            className="inline-flex items-center px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
-          >
-            Get started free
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </a>
-        </div>
+          <div className={styles.indexCta}>
+            <h2 className={styles.featureTitle}>
+              Start editing your site in minutes
+            </h2>
+            <p className={styles.closeBody}>
+              Drop one script tag into any site and make its copy editable — no
+              migration, no rebuild.
+            </p>
+            {/* Static marketing -> nonce app: this must replace the document. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
+              href="/signup"
+              data-cta-location="blog_index"
+              className={styles.primaryAction}
+            >
+              Get started free
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </a>
+          </div>
+        </section>
       </main>
 
-      <Footer />
+      <Footer variant="editorial" />
     </div>
   );
 }

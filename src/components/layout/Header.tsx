@@ -27,7 +27,7 @@ export function Header({
 
   const scrollToMarketingSection = (
     event: ReactMouseEvent<HTMLAnchorElement>,
-    id: "features" | "pricing",
+    id: "pricing",
   ) => {
     if (!isMarketingDocument) return;
     const target = document.getElementById(id);
@@ -114,36 +114,6 @@ export function Header({
 
             {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center gap-8">
-              {isEditorial ? (
-                <Link
-                  href="/product"
-                  className="text-sm font-medium text-[#4c5552] transition-colors hover:text-[#142024]"
-                >
-                  Product overview
-                </Link>
-              ) : null}
-              <Link
-                href={`${marketingAnchorRoot}#features`}
-                onClick={(event) => scrollToMarketingSection(event, "features")}
-                className={`text-sm font-medium transition-colors ${
-                  isScrolled
-                    ? "text-slate-600 hover:text-slate-900"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Features
-              </Link>
-              <Link
-                href={`${marketingAnchorRoot}#pricing`}
-                onClick={(event) => scrollToMarketingSection(event, "pricing")}
-                className={`text-sm font-medium transition-colors ${
-                  isScrolled
-                    ? "text-slate-600 hover:text-slate-900"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Pricing
-              </Link>
               <Link
                 href="/demo"
                 className={`text-sm font-medium transition-colors ${
@@ -155,14 +125,15 @@ export function Header({
                 Demo
               </Link>
               <Link
-                href="/try"
+                href={`${marketingAnchorRoot}#pricing`}
+                onClick={(event) => scrollToMarketingSection(event, "pricing")}
                 className={`text-sm font-medium transition-colors ${
                   isScrolled
                     ? "text-slate-600 hover:text-slate-900"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                Try your site
+                Pricing
               </Link>
               <Link
                 href="/blog"
@@ -237,24 +208,12 @@ export function Header({
               className="md:hidden mt-4 pb-4 border-t border-sky-100 pt-4"
             >
               <nav className="flex flex-col gap-4">
-                {isEditorial ? (
-                  <Link
-                    href="/product"
-                    className="text-slate-600 hover:text-slate-900 text-sm font-medium"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    Product overview
-                  </Link>
-                ) : null}
                 <Link
-                  href={`${marketingAnchorRoot}#features`}
-                  onClick={(event) => {
-                    scrollToMarketingSection(event, "features");
-                    setMobileMenuOpen(false);
-                  }}
+                  href="/demo"
                   className="text-slate-600 hover:text-slate-900 text-sm font-medium"
+                  onClick={() => setMobileMenuOpen(false)}
                 >
-                  Features
+                  Demo
                 </Link>
                 <Link
                   href={`${marketingAnchorRoot}#pricing`}
@@ -265,20 +224,6 @@ export function Header({
                   className="text-slate-600 hover:text-slate-900 text-sm font-medium"
                 >
                   Pricing
-                </Link>
-                <Link
-                  href="/demo"
-                  className="text-slate-600 hover:text-slate-900 text-sm font-medium"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Demo
-                </Link>
-                <Link
-                  href="/try"
-                  className="text-slate-600 hover:text-slate-900 text-sm font-medium"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Try your site
                 </Link>
                 <Link
                   href="/blog"

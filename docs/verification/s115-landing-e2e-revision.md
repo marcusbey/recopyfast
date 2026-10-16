@@ -15,3 +15,11 @@ track, but four browser checks still targeted those deleted surfaces. The repair
 The rest of `landing.spec.ts` was scanned for the removed `#hero`, offer-aware hero CTA and
 `data-sky` expectations; no other stale references remain. On a fresh production build served with
 `next start`, the four formerly failing tests passed together in 5.7 seconds with no retry.
+
+Follow-up stabilization: the touch helper now stops attraction through the hydrated reload control,
+centres the actual `data-demo-scroller`, waits two animation frames for layout, and derives the
+gesture from the scroller's visible viewport intersection. Both touch endpoints are asserted inside
+that intersection before CDP dispatch, so a cold layout cannot turn the regression check into a
+zero-movement retry. The positive final movement and every nondecreasing intermediate sample remain
+required. Both mobile tests then passed five consecutive production-mode repetitions: 10/10 tests
+in 17.4 seconds with retries disabled.

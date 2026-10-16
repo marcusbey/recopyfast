@@ -5,6 +5,7 @@ import {
   fireEvent,
   act,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Header } from "../Header";
@@ -84,42 +85,46 @@ describe("Header", () => {
     );
   });
 
-  it("renders navigation links", () => {
-    (useAuth as jest.Mock).mockReturnValue({
-      user: null,
-      loading: false,
-      signIn: jest.fn(),
-      signUp: jest.fn(),
-      signOut: jest.fn(),
-      refreshSession: jest.fn(),
-    });
+  it.each(["default", "editorial"] as const)(
+    "keeps the %s desktop navigation to Demo, Pricing and Blog",
+    (variant) => {
+      (useAuth as jest.Mock).mockReturnValue({
+        user: null,
+        loading: false,
+        signIn: jest.fn(),
+        signUp: jest.fn(),
+        signOut: jest.fn(),
+        refreshSession: jest.fn(),
+      });
 
-    render(<Header />);
+      render(<Header variant={variant} />);
 
-    // Root-relative, not bare "#features": the header renders on /demo, /blog,
-    // /privacy and /terms, where a bare fragment points at an anchor that does
-    // not exist on the page and the link does nothing.
-    expect(screen.getByRole("link", { name: "Features" })).toHaveAttribute(
-      "href",
-      "/#features",
-    );
-    expect(screen.getByRole("link", { name: "Pricing" })).toHaveAttribute(
-      "href",
-      "/#pricing",
-    );
-    expect(screen.getByRole("link", { name: "Demo" })).toHaveAttribute(
-      "href",
-      "/demo",
-    );
-    expect(screen.getByRole("link", { name: "Blog" })).toHaveAttribute(
-      "href",
-      "/blog",
-    );
-    expect(screen.getByRole("link", { name: "Try your site" })).toHaveAttribute(
-      "href",
-      "/try",
-    );
-  });
+      const navigation = screen.getByRole("navigation");
+      expect(
+        within(navigation)
+          .getAllByRole("link")
+          .map((link) => link.textContent),
+      ).toEqual(["Demo", "Pricing", "Blog"]);
+      expect(
+        within(navigation).getByRole("link", { name: "Demo" }),
+      ).toHaveAttribute("href", "/demo");
+      expect(
+        within(navigation).getByRole("link", { name: "Pricing" }),
+      ).toHaveAttribute("href", "/#pricing");
+      expect(
+        within(navigation).getByRole("link", { name: "Blog" }),
+      ).toHaveAttribute("href", "/blog");
+      expect(
+        within(navigation).queryByRole("link", { name: "Features" }),
+      ).toBeNull();
+      expect(
+        within(navigation).queryByRole("link", { name: "Try your site" }),
+      ).toBeNull();
+      expect(
+        within(navigation).queryByRole("link", { name: "Product overview" }),
+      ).toBeNull();
+    },
+  );
 
   it("keeps the legacy product page anchors on /product", () => {
     mockPathname = "/product";
@@ -134,10 +139,6 @@ describe("Header", () => {
 
     render(<Header />);
 
-    expect(screen.getByRole("link", { name: "Features" })).toHaveAttribute(
-      "href",
-      "/product#features",
-    );
     expect(screen.getByRole("link", { name: "Pricing" })).toHaveAttribute(
       "href",
       "/product#pricing",
@@ -317,7 +318,7 @@ describe("Header", () => {
     expect(nav).toHaveClass("hidden", "md:flex");
   });
 
-  it("includes Try your site in the mobile menu", async () => {
+  it("keeps the mobile menu to Demo, Pricing and Blog", async () => {
     const user = userEvent.setup();
     (useAuth as jest.Mock).mockReturnValue({
       user: null,
@@ -331,12 +332,22 @@ describe("Header", () => {
     render(<Header />);
     await user.click(screen.getByRole("button", { name: "Open menu" }));
 
-    expect(screen.getAllByRole("link", { name: "Try your site" })).toHaveLength(
-      2,
-    );
-    for (const link of screen.getAllByRole("link", { name: "Try your site" })) {
-      expect(link).toHaveAttribute("href", "/try");
-    }
+    const mobileMenu = document.getElementById("mobile-menu");
+    expect(mobileMenu).not.toBeNull();
+    expect(
+      within(mobileMenu!)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["Demo", "Pricing", "Blog"]);
+    expect(
+      within(mobileMenu!).queryByRole("link", { name: "Features" }),
+    ).toBeNull();
+    expect(
+      within(mobileMenu!).queryByRole("link", { name: "Try your site" }),
+    ).toBeNull();
+    expect(
+      within(mobileMenu!).queryByRole("link", { name: "Product overview" }),
+    ).toBeNull();
   });
 
   it("supports keyboard navigation", async () => {
@@ -355,13 +366,7 @@ describe("Header", () => {
     await user.tab();
     expect(screen.getByRole("link", { name: /ReCopyFast/i })).toHaveFocus();
 
-    for (const name of [
-      "Features",
-      "Pricing",
-      "Demo",
-      "Try your site",
-      "Blog",
-    ]) {
+    for (const name of ["Demo", "Pricing", "Blog"]) {
       await user.tab();
       expect(screen.getByRole("link", { name })).toHaveFocus();
     }

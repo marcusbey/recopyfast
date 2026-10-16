@@ -2,11 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Calendar, ArrowRight } from "lucide-react";
 import { formatDate } from "@/lib/utils/format-date";
 import type { PublishedPostSummary } from "@/lib/blog/published-posts";
+import styles from "@/components/marketing/editorial-content.module.css";
 
 interface BlogPostListProps {
   posts: PublishedPostSummary[];
@@ -33,81 +31,58 @@ export function BlogPostList({ posts }: BlogPostListProps) {
   );
 
   return (
-    <>
-      {/* Category Filter */}
-      <div
-        role="tablist"
-        aria-label="Filter posts by category"
-        className="flex flex-wrap justify-center gap-3 mb-12"
-      >
-        {categories.map((category) => {
-          const isActive = category === activeCategory;
-          return (
-            <button
-              key={category}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => setActiveCategory(category)}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                isActive
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-surface-2 text-muted-foreground hover:bg-surface-3"
-              }`}
-            >
-              {category}
-            </button>
-          );
-        })}
-      </div>
+    <div className={styles.blogGrid}>
+      <aside aria-label="Browse blog categories">
+        <h2 className={styles.browseLabel}>Browse</h2>
+        <div
+          role="tablist"
+          aria-label="Filter posts by category"
+          className={styles.categoryTabs}
+        >
+          {categories.map((category) => {
+            const isActive = category === activeCategory;
+            return (
+              <button
+                key={category}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setActiveCategory(category)}
+                className={`${styles.categoryTab} ${isActive ? styles.categoryTabActive : ""}`}
+              >
+                {category}
+              </button>
+            );
+          })}
+        </div>
+      </aside>
 
-      {/* Blog Posts Grid */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <div className={styles.postList}>
         {visiblePosts.map((post) => (
-          <Card key={post.id} className="group">
-            <CardHeader className="space-y-4">
-              <div className="flex items-center">
-                <Badge variant="secondary" className="text-xs">
-                  {post.category}
-                </Badge>
-              </div>
-              <CardTitle className="group-hover:text-primary transition-colors">
-                {post.title}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {post.excerpt && (
-                <p className="text-sm text-muted-foreground mb-4">
-                  {post.excerpt}
-                </p>
+          <article key={post.id} className={styles.postRow}>
+            <p className={styles.meta}>
+              <span>{post.category}</span>
+              {post.publishedAt && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <time dateTime={post.publishedAt}>
+                    {formatDate(post.publishedAt)}
+                  </time>
+                </>
               )}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                  {post.publishedAt && (
-                    <>
-                      <Calendar className="h-3 w-3" />
-                      <span>{formatDate(post.publishedAt)}</span>
-                    </>
-                  )}
-                </div>
-                <Link
-                  href={`/blog/${post.slug}`}
-                  className="text-primary hover:underline font-medium text-sm flex items-center"
-                >
-                  Read more
-                  <ArrowRight className="ml-1 h-3 w-3" />
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
+            </p>
+            <h2 className={styles.postTitle}>{post.title}</h2>
+            {post.excerpt && <p className={styles.excerpt}>{post.excerpt}</p>}
+            <Link href={`/blog/${post.slug}`} className={styles.postLink}>
+              Read article →
+            </Link>
+          </article>
         ))}
-      </div>
 
-      {visiblePosts.length === 0 && (
-        <p className="text-center text-muted-foreground py-12">
-          No posts in {activeCategory} yet.
-        </p>
-      )}
-    </>
+        {visiblePosts.length === 0 && (
+          <p className={styles.excerpt}>No posts in {activeCategory} yet.</p>
+        )}
+      </div>
+    </div>
   );
 }

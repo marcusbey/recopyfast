@@ -34,7 +34,15 @@ jest.mock("@/lib/supabase/service", () => ({
 
 // Header reads AuthContext; the post list is what is under test here.
 jest.mock("@/components/layout/Header", () => ({
-  Header: () => <div data-testid="header" />,
+  Header: ({ variant }: { variant?: string }) => (
+    <header data-testid="header" data-variant={variant} />
+  ),
+}));
+jest.mock("@/components/layout/Footer", () => ({
+  __esModule: true,
+  default: ({ variant }: { variant?: string }) => (
+    <footer data-testid="footer" data-variant={variant} />
+  ),
 }));
 
 import BlogIndex, { revalidate } from "@/app/blog/page";
@@ -120,7 +128,7 @@ async function renderIndex() {
 
 function postLinks(): (string | null)[] {
   return screen
-    .queryAllByRole("link", { name: /read more/i })
+    .queryAllByRole("link", { name: /read (more|article)/i })
     .map((link) => link.getAttribute("href"));
 }
 
@@ -144,6 +152,23 @@ describe("/blog with published posts", () => {
     expect(postLinks()).toEqual(["/blog/a-newer-post", "/blog/an-older-post"]);
     expect(screen.getByText("A newer post")).toBeInTheDocument();
     expect(screen.getByText("Oct 8, 2026")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "Practical notes for handing over websites",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("header")).toHaveAttribute(
+      "data-variant",
+      "editorial",
+    );
+    expect(screen.getByTestId("footer")).toHaveAttribute(
+      "data-variant",
+      "editorial",
+    );
+    expect(
+      screen.getByRole("link", { name: /get started free/i }),
+    ).toHaveAttribute("href", "/signup");
   });
 
   it("never lists a draft or an archived post", async () => {

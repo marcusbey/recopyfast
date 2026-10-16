@@ -9,6 +9,7 @@ import {
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import InteractiveHero from "@/components/landing/InteractiveHero";
+import styles from "@/components/marketing/editorial-content.module.css";
 
 /**
  * The demo page.
@@ -49,85 +50,73 @@ const AFFORDANCES = [
 
 export default function Demo() {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
+    <div className={styles.page}>
+      <Header variant="editorial" />
 
-      <main className="pt-24">
-        <section className="px-6 pt-8 pb-12">
-          <div className="mx-auto max-w-3xl text-center">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-sm">
-              <MousePointerClick className="h-4 w-4 text-sky-500" />
-              <span className="text-sm text-slate-600">
-                Nothing to install, nothing to sign up for
-              </span>
-            </div>
-
-            <h1 className="mb-4 text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
-              Edit a real website, right here
-            </h1>
-
-            <p className="mx-auto max-w-2xl text-lg leading-relaxed text-slate-600">
-              Three customer sites, three different designers. Change any word
-              or photograph on any of them and watch it update the way it would
-              on your own site.
-            </p>
-          </div>
+      <main className={styles.main}>
+        <section className={`${styles.frame} ${styles.intro}`}>
+          <p className={styles.eyebrow}>Interactive demo</p>
+          <h1 className={styles.displayTitle}>
+            Edit a real website, right here
+          </h1>
+          <p className={styles.lede}>
+            Three sample sites, three different styles. Change any word or
+            photograph and see the page respond in place. Nothing to install,
+            and no account required.
+          </p>
+          <p className={styles.steps}>
+            <span>01 Click</span>
+            <span>02 Type</span>
+            <span>03 Swap an image</span>
+          </p>
         </section>
 
         {/* The demo itself, on solid white and out of the article measure: these
             are meant to read as whole websites, and boxing them into a text
             column is what stops them doing that. */}
-        <section className="border-y border-slate-200 bg-white py-12">
-          <div className="mx-auto max-w-[104rem]">
+        <section className={styles.demoSection}>
+          <div className={styles.demoFrame}>
             <InteractiveHero />
           </div>
         </section>
 
-        <section className="px-6 py-20">
-          <div className="mx-auto max-w-5xl">
-            <div className="grid gap-8 md:grid-cols-3">
-              {AFFORDANCES.map(({ icon: Icon, title, body }) => (
-                <div key={title}>
-                  <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <h2 className="mb-2 text-lg font-semibold text-slate-900">
-                    {title}
-                  </h2>
-                  <p className="text-[15px] leading-relaxed text-slate-600">
-                    {body}
-                  </p>
-                </div>
-              ))}
+        <section className={`${styles.frame} ${styles.featureGrid}`}>
+          {AFFORDANCES.map(({ icon: Icon, title, body }, index) => (
+            <div key={title} className={styles.feature}>
+              <span className={styles.featureNumber}>
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <Icon
+                className="mt-5 h-5 w-5 text-[#287f7c]"
+                aria-hidden="true"
+              />
+              <h2 className={styles.featureTitle}>{title}</h2>
+              <p className={styles.featureBody}>{body}</p>
             </div>
-          </div>
+          ))}
         </section>
 
-        <section className="border-t border-slate-200 bg-white px-6 py-20">
-          <div className="mx-auto max-w-3xl text-center">
-            <h2 className="mb-4 text-3xl font-bold tracking-tight text-slate-900">
-              That is the whole product
-            </h2>
-            <p className="mx-auto mb-8 max-w-xl text-lg leading-relaxed text-slate-600">
-              One script tag on your site turns it into the page you just
-              edited. Your developers keep the codebase; everyone else stops
-              queueing for copy changes.
-            </p>
-            {/* Static demo -> nonce signup document (ADR 059). */}
-            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-            <a
-              href="/signup"
-              data-cta-location="demo"
-              className="pressable group inline-flex items-center gap-2 rounded-full bg-slate-900 px-8 py-4 text-base font-semibold text-white transition-colors hover:bg-slate-800"
-            >
-              <span>Add it to your site</span>
-              <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-            </a>
-          </div>
+        <section className={`${styles.frame} ${styles.closeSection}`}>
+          <h2 className={styles.closeTitle}>That is the whole product</h2>
+          <p className={styles.closeBody}>
+            One script tag on your site turns it into the page you just edited.
+            Your developers keep the codebase; everyone else stops queueing for
+            copy changes.
+          </p>
+          {/* Static demo -> nonce signup document (ADR 059). */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
+            href="/signup"
+            data-cta-location="demo"
+            className={`${styles.primaryAction} pressable group gap-2`}
+          >
+            <span>Add it to your site</span>
+            <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+          </a>
         </section>
       </main>
 
-      <Footer />
+      <Footer variant="editorial" />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { act } from "react";
 import { renderToString } from "react-dom/server";
 import { hydrateRoot, type Root } from "react-dom/client";
 import { within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { BlogPostList } from "../BlogPostList";
 import type { PublishedPostSummary } from "@/lib/blog/published-posts";
 
@@ -13,6 +14,14 @@ const POSTS: PublishedPostSummary[] = [
     excerpt: "The newest one.",
     category: "Guides",
     publishedAt: "2024-01-15",
+  },
+  {
+    id: "post-3",
+    title: "Product post",
+    slug: "product-post",
+    excerpt: null,
+    category: "Product",
+    publishedAt: null,
   },
   {
     id: "post-2",
@@ -126,5 +135,24 @@ describe("BlogPostList hydration", () => {
     expect(recoverableErrors).toEqual([]);
     expect(within(container).getByText("Jan 15, 2024")).toBeInTheDocument();
     expect(within(container).getByText("Jan 14, 2024")).toBeInTheDocument();
+  });
+
+  it("keeps category tabs keyboard reachable and filters the editorial rows", async () => {
+    const user = userEvent.setup();
+    container.innerHTML = renderOnServer();
+    await act(async () => {
+      root = hydrateRoot(container, <BlogPostList posts={POSTS} />);
+    });
+
+    const product = within(container).getByRole("tab", { name: "Product" });
+    product.focus();
+    await user.keyboard("{Enter}");
+
+    expect(product).toHaveAttribute("aria-selected", "true");
+    expect(within(container).getByText("Product post")).toBeInTheDocument();
+    expect(within(container).queryByText("Newer post")).not.toBeInTheDocument();
+    expect(
+      within(container).getByRole("link", { name: /read article/i }),
+    ).toHaveAttribute("href", "/blog/product-post");
   });
 });
