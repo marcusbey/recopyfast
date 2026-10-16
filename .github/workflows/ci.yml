@@ -165,11 +165,13 @@ jobs:
       - name: Test with coverage ratchet (Jest – CI mode, blocking)
         run: npm test -- --ci --coverage --coverageReporters=text-summary --maxWorkers=2 --workerIdleMemoryLimit=512MB
 
-      # s75: the replay's own checks — the PostgreSQL major it accepts, and the
-      # report check that refuses a named suite that did not run — need no
-      # database, so they are tested before the replay relies on them.
-      - name: Test database replay checks (Node, blocking)
-        run: node --test scripts/__tests__/replay-checks.test.mjs
+      # s116: this runner discovers every script test before executing any. A
+      # new diagnostic must be reviewed as fixture-only before it can enter the
+      # explicit manifest; silently omitted tests and accidental provider calls
+      # are both refusals. It also rejects zero, failed, cancelled, skipped or
+      # todo results per file rather than trusting node:test's exit code alone.
+      - name: Test reviewed Node tooling (blocking)
+        run: node scripts/run-node-tests.mjs
 
       # A normal Jest run deliberately gates real-Postgres suites when no
       # matching database is present. This dedicated step sets a required-db
@@ -179,22 +181,6 @@ jobs:
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:55438/recopyfast_s38_ci"
         run: node scripts/run-db-invariants.mjs
-
-      - name: Test Stripe catalogue tooling (Node, blocking)
-        run: node --test scripts/__tests__/sync-stripe-catalogue.test.mjs
-
-      # s65a: the operator's speed and freshness evidence comes from this
-      # script, so its URL building, thresholds and polling are tested. Local
-      # HTTP servers only — no network, no credential.
-      - name: Test published-snapshot measurement tooling (Node, blocking)
-        run: node --test scripts/__tests__/measure-published-snapshot.test.mjs
-
-      # s84: every decision the scheduled uptime workflow makes (probe, retry,
-      # open/comment/close an issue, what a public issue may say) and the
-      # workflow's own pins (schedule, permissions, SHA-pinned actions). Local
-      # HTTP servers and a recording `gh` only — no network, no token.
-      - name: Test uptime monitor decisions (Node, blocking)
-        run: node --test scripts/__tests__/uptime-check.test.mjs
 
   # This job is intentionally separate from `e2e`. That job owns the strict
   # 106-test Next/Supabase/Redis/WebSocket stack; collecting this directory there

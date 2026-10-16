@@ -9,8 +9,8 @@ import type { EditableText as EditableTextModel } from "../types";
 
 // `EditableText`'s edit-mode branch renders `motion.div`; framer-motion's
 // animation machinery is irrelevant here and jsdom does not need it mocked
-// away for correctness, but the rest of the suite follows this repo's
-// convention (see `InteractiveHero.test.tsx`) of swapping it for a plain div.
+// away for correctness, but the maintained focused editor suites use the same
+// plain-element boundary so animation timing cannot hide an interaction result.
 jest.mock("framer-motion", () => ({
   motion: {
     div: ({ children, ...props }: React.ComponentProps<"div">) => (

@@ -258,14 +258,142 @@ describeDb(
         });
       });
 
+      test("authenticated cannot insert or update site permissions, while service_role can", async () => {
+        await withClient(async (client) => {
+          await client.query("BEGIN");
+          try {
+            await actAs(client, ids.collaborator);
+            await expect(
+              client.query(
+                `INSERT INTO public.site_permissions
+                   (site_id, user_id, permission, granted_by)
+                 VALUES ($1, $2, 'view', $3)`,
+                [siteId, ids.stranger, ids.creator],
+              ),
+            ).rejects.toMatchObject({ code: "42501" });
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        });
+
+        // Use fresh transactions for each refused statement: PostgreSQL marks a
+        // transaction aborted after 42501, and a shared transaction would make
+        // the second assertion measure that state instead of the next privilege.
+        await withClient(async (client) => {
+          await client.query("BEGIN");
+          try {
+            await actAs(client, ids.collaborator);
+            await expectRefusedOrNoRows(
+              client,
+              "permission_update",
+              `UPDATE public.site_permissions
+                  SET permission = 'view'
+                WHERE site_id = $1 AND user_id = $2`,
+              [siteId, ids.collaborator],
+            );
+            await client.query("RESET ROLE");
+            const { rows } = await client.query<{ permission: string }>(
+              `SELECT permission
+                 FROM public.site_permissions
+                WHERE site_id = $1 AND user_id = $2`,
+              [siteId, ids.collaborator],
+            );
+            expect(rows).toEqual([{ permission: "admin" }]);
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        });
+
+        await withClient(async (client) => {
+          await client.query("BEGIN");
+          try {
+            await client.query("SET LOCAL ROLE service_role");
+            const inserted = await client.query<{ permission: string }>(
+              `INSERT INTO public.site_permissions
+                 (site_id, user_id, permission, granted_by)
+               VALUES ($1, $2, 'view', $3)
+               RETURNING permission`,
+              [siteId, ids.stranger, ids.creator],
+            );
+            expect(inserted.rows).toEqual([{ permission: "view" }]);
+
+            const updated = await client.query<{ permission: string }>(
+              `UPDATE public.site_permissions
+                  SET permission = 'edit'
+                WHERE site_id = $1 AND user_id = $2
+                RETURNING permission`,
+              [siteId, ids.stranger],
+            );
+            expect(updated.rows).toEqual([{ permission: "edit" }]);
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        });
+      });
+
+      test("an authenticated admin can delete a non-creator row but never the creator row", async () => {
+        await withClient(async (client) => {
+          await client.query("BEGIN");
+          try {
+            await actAs(client, ids.collaborator);
+            const creatorDelete = await client.query<{ user_id: string }>(
+              `DELETE FROM public.site_permissions
+                WHERE site_id = $1 AND user_id = $2
+                RETURNING user_id`,
+              [siteId, ids.creator],
+            );
+            expect(creatorDelete.rows).toEqual([]);
+
+            const collaboratorDelete = await client.query<{ user_id: string }>(
+              `DELETE FROM public.site_permissions
+                WHERE site_id = $1 AND user_id = $2
+                RETURNING user_id`,
+              [siteId, ids.collaborator],
+            );
+            expect(collaboratorDelete.rows).toEqual([
+              { user_id: ids.collaborator },
+            ]);
+
+            await client.query("RESET ROLE");
+            const { rows } = await client.query<{
+              user_id: string;
+              granted_by: string | null;
+            }>(
+              `SELECT user_id, granted_by
+                 FROM public.site_permissions
+                WHERE site_id = $1
+                ORDER BY user_id`,
+              [siteId],
+            );
+            expect(rows).toEqual([{ user_id: ids.creator, granted_by: null }]);
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        });
+      });
+
       test("guard: the per-row revoke policy of 20260813140000 survives", async () => {
-        const { rows } = await query<{ polname: string }>(`
-        SELECT polname FROM pg_policy
-        WHERE polrelid = 'public.site_permissions'::regclass AND polcmd = 'd'
-      `);
+        const { rows } = await query<{ polname: string; predicate: string }>(`
+          SELECT polname, pg_get_expr(polqual, polrelid) AS predicate
+          FROM pg_policy
+          WHERE polrelid = 'public.site_permissions'::regclass AND polcmd = 'd'
+        `);
 
         expect(rows.map((row) => row.polname)).toContain(
           "Site admins can revoke non-creator permissions",
+        );
+        const predicate = rows.find(
+          (row) =>
+            row.polname === "Site admins can revoke non-creator permissions",
+        )?.predicate;
+        expect(predicate).toEqual(
+          expect.stringContaining("user_id IS NOT NULL"),
+        );
+        expect(predicate).toEqual(
+          expect.stringContaining("granted_by IS NOT NULL"),
+        );
+        expect(predicate).toEqual(
+          expect.stringContaining("user_has_site_permission"),
         );
       });
 

@@ -215,7 +215,7 @@ async function rest(
 
 describeDb(
   "s56 — content tables take no direct writes (ADR 042)",
-  ({ query, createSite }) => {
+  ({ query, withClient, createSite }) => {
     describe("catalogue, list-wide over the nine content tables", () => {
       test("anon and authenticated hold no table or column write privilege", async () => {
         const offenders: string[] = [];
@@ -341,6 +341,95 @@ describeDb(
         }
 
         expect(missing).toEqual([]);
+      });
+    });
+
+    describe("the content audit trigger and authenticated write boundary", () => {
+      test("guard: a service-side insert reaches content_history", async () => {
+        const siteId = await createSite("s116-history-guard");
+        const elementId = `s116-guard-${crypto.randomUUID()}`;
+        const {
+          rows: [element],
+        } = await query<{ id: string }>(
+          `INSERT INTO content_elements
+             (site_id, element_id, selector, original_content, current_content)
+           VALUES ($1, $2, 'h1', 'Before', 'Before')
+           RETURNING id`,
+          [siteId, elementId],
+        );
+
+        // A denial test can pass for the wrong reason when pointed at the wrong
+        // schema. This positive control proves the real trigger is installed and
+        // can write history before the authenticated refusal is interpreted.
+        const { rows } = await query<{ change_type: string }>(
+          "SELECT change_type FROM content_history WHERE content_element_id = $1 ORDER BY created_at, id",
+          [element.id],
+        );
+        expect(rows.map((row) => row.change_type)).toEqual(["create"]);
+      });
+
+      test("authenticated cannot update content or append history directly", async () => {
+        const userId = crypto.randomUUID();
+        const siteId = await createSite("s116-authenticated-refusal");
+
+        await withClient(async (client) => {
+          await client.query("BEGIN");
+          try {
+            await client.query(
+              `INSERT INTO auth.users (id, email)
+               VALUES ($1, $2)`,
+              [userId, `s116-${userId}@example.invalid`],
+            );
+            await client.query(
+              `INSERT INTO site_permissions (user_id, site_id, permission)
+               VALUES ($1, $2, 'admin')`,
+              [userId, siteId],
+            );
+            const {
+              rows: [element],
+            } = await client.query<{ id: string }>(
+              `INSERT INTO content_elements
+                 (site_id, element_id, selector, original_content, current_content)
+               VALUES ($1, 's116-authenticated', 'h1', 'Before', 'Before')
+               RETURNING id`,
+              [siteId],
+            );
+
+            await client.query("SAVEPOINT before_direct_update");
+            await client.query(
+              "SELECT set_config('request.jwt.claims', $1, true)",
+              [JSON.stringify({ sub: userId, role: "authenticated" })],
+            );
+            await client.query("SET LOCAL ROLE authenticated");
+            await expect(
+              client.query(
+                "UPDATE content_elements SET current_content = 'After' WHERE id = $1",
+                [element.id],
+              ),
+            ).rejects.toMatchObject({ code: "42501" });
+
+            await client.query("ROLLBACK TO SAVEPOINT before_direct_update");
+            await client.query("RESET ROLE");
+
+            const { rows: content } = await client.query<{
+              current_content: string;
+            }>("SELECT current_content FROM content_elements WHERE id = $1", [
+              element.id,
+            ]);
+            expect(content).toEqual([{ current_content: "Before" }]);
+
+            const { rows: history } = await client.query<{
+              change_type: string;
+            }>(
+              `SELECT change_type FROM content_history
+               WHERE content_element_id = $1 AND change_type = 'update'`,
+              [element.id],
+            );
+            expect(history).toEqual([]);
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        });
       });
     });
 
