@@ -34,6 +34,9 @@ import type { ContentChange } from "../useContentChanges";
  * the PUT and builds the PUT from that read, or sends nothing when the draft
  * changed meanwhile. Every write that landed is followed by a re-read of the
  * element, inside the action, so the row is never reported done as it was.
+ * s81 closes the remaining read-to-PUT window: Discard carries the exact
+ * content_elements.updated_at string from that final read, treats the route's
+ * 409 as stale, refreshes once and never retries the destructive write.
  *
  * Verification of 63d7ba2: every write in flight has its own entry, and a
  * second write to an element being written is refused; a write whose answer
@@ -63,6 +66,7 @@ function row(overrides: Partial<ContentChange> = {}): ContentChange {
     hasLiveText: true,
     state: "published",
     changedAt: "2026-10-08T10:00:00+00:00",
+    updatedAt: "2026-10-08T10:00:00.123456+00:00",
     changedBy: null,
     createdAt: "2026-09-28T09:00:00+00:00",
     ...overrides,
@@ -240,7 +244,19 @@ describe("useChangeActions", () => {
     const outcome = await run("discardDraft", pending);
 
     expect(outcome).toEqual(done("discardDraft"));
-    expect(fetchCalls()).toEqual([ELEMENT_READ, PUT_REVERT]);
+    expect(fetchCalls()).toEqual([
+      ELEMENT_READ,
+      {
+        ...PUT_REVERT,
+        body: JSON.stringify({
+          elementId: "rcf-1gom2eazz3g",
+          content: ORDINARY_COPY,
+          language: "fr",
+          variant: "b",
+          expectedUpdatedAt: pending.updatedAt,
+        }),
+      },
+    ]);
   });
 
   it("discards a staged link and alt too: each goes back to its live value in the same PUT", async () => {
@@ -269,6 +285,7 @@ describe("useChangeActions", () => {
           variant: "b",
           href: "/pricing?plan=team&ref=hero",
           alt: "",
+          expectedUpdatedAt: pending.updatedAt,
         }),
       },
     ]);
@@ -345,6 +362,7 @@ describe("useChangeActions", () => {
   // update writes published_content without touching the draft), and the
   // PUT must send the current ones or it stages the old ones again.
   it("builds the discard from the row as read just now: its live text and live link", async () => {
+    const freshVersion = "2026-10-08T10:00:00.654321+00:00";
     const seen = row({
       state: "pending",
       live: "Start free trial",
@@ -356,6 +374,7 @@ describe("useChangeActions", () => {
       {
         ...seen,
         live: ORDINARY_COPY,
+        updatedAt: freshVersion,
         draftAttributes: [{ name: "href", live: "/signup?ref=new" }],
       },
     ]);
@@ -373,6 +392,7 @@ describe("useChangeActions", () => {
           language: "fr",
           variant: "b",
           href: "/signup?ref=new",
+          expectedUpdatedAt: freshVersion,
         }),
       },
     ]);
@@ -461,6 +481,7 @@ describe("useChangeActions", () => {
           content: ORDINARY_COPY,
           language: "l55",
           variant: "b",
+          expectedUpdatedAt: target.updatedAt,
         }),
       },
     ]);
@@ -492,6 +513,30 @@ describe("useChangeActions", () => {
     });
     expect(fetchCalls()).toEqual([ELEMENT_READ]);
   });
+
+  it.each([
+    ["is absent", undefined],
+    ["is malformed", "2026-02-30T10:00:00+00:00"],
+  ])(
+    "sends nothing when the final read's authoritative version %s",
+    async (_label, updatedAt) => {
+      serverHolds([
+        {
+          ...SEEN,
+          updatedAt: updatedAt as ContentChange["updatedAt"],
+        },
+      ]);
+
+      const outcome = await run("discardDraft", SEEN);
+
+      expect(outcome).toEqual({
+        error: "Could not check this draft before discarding it. Try again.",
+        applied: null,
+        isStale: true,
+      });
+      expect(fetchCalls()).toEqual([ELEMENT_READ]);
+    },
+  );
 
   it("sends nothing when the row cannot be read again before the discard", async () => {
     (global.fetch as jest.Mock).mockImplementation(async () =>
@@ -572,6 +617,47 @@ describe("useChangeActions", () => {
       const outcome = await runWithReread("discardDraft", SEEN, reread);
 
       expect(outcome?.error).toBe(UPDATED_ELSEWHERE);
+      expect(reread).toHaveBeenCalledWith(SEEN);
+    });
+
+    it("forwards the final read's exact microsecond version, maps a CAS conflict to stale, refreshes and does not retry", async () => {
+      const finalVersion = "2026-10-08T10:00:00.987654+00:00";
+      const fresh = { ...SEEN, updatedAt: finalVersion };
+      global.fetch = jest.fn(async (_url: string, init?: RequestInit) => {
+        if ((init?.method ?? "GET") === "GET") {
+          return response({
+            sites: [],
+            rows: [fresh],
+            total: 1,
+            counts: { pending: 1, published: 0, original: 0 },
+            nextOffset: null,
+          });
+        }
+        return response({ error: UPDATED_ELSEWHERE }, 409);
+      }) as unknown as typeof fetch;
+      const reread = jest.fn(async () => true);
+
+      const outcome = await runWithReread("discardDraft", SEEN, reread);
+
+      expect(outcome).toEqual({
+        error: UPDATED_ELSEWHERE,
+        applied: null,
+        isStale: true,
+      });
+      expect(fetchCalls()).toEqual([
+        ELEMENT_READ,
+        {
+          ...PUT_REVERT,
+          body: JSON.stringify({
+            elementId: "rcf-1gom2eazz3g",
+            content: ORDINARY_COPY,
+            language: "fr",
+            variant: "b",
+            href: "/signup",
+            expectedUpdatedAt: finalVersion,
+          }),
+        },
+      ]);
       expect(reread).toHaveBeenCalledWith(SEEN);
     });
 

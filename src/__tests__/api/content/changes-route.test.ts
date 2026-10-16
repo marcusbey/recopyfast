@@ -20,6 +20,9 @@
  * stages with their live values (one RLS read of those rows' metadata), so
  * Discard can send them back; and no next offset is offered past the offset
  * ceiling, where "Show 50 more" was refused with a 400 on every click.
+ * s81: the fixed view projection also carries content_elements.updated_at from
+ * the same snapshot as the text; the route preserves its original timestamp
+ * string for Discard's compare-and-set request.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -114,6 +117,7 @@ function viewRow(index: number, overrides: Record<string, unknown> = {}) {
     staging_content: null,
     change_state: "published",
     changed_at: "2026-10-08T10:00:00+00:00",
+    updated_at: "2026-10-08T10:00:00.123456+00:00",
     changed_by: "ana@example.com",
     created_at: "2026-09-28T09:00:00+00:00",
     ...overrides,
@@ -302,6 +306,7 @@ describe("GET /api/content/changes", () => {
     await get("?offset=100");
 
     const list = listQuery();
+    expect(callsOf(list, "select")[0][0]).toContain("updated_at");
     expect(callsOf(list, "select")[0][1]).toEqual({ count: "exact" });
     expect(callsOf(list, "order")).toEqual([
       ["changed_at", { ascending: false }],
@@ -476,6 +481,7 @@ describe("GET /api/content/changes", () => {
       hasLiveText: true,
       state: "published",
       changedAt: "2026-10-08T10:00:00+00:00",
+      updatedAt: "2026-10-08T10:00:00.123456+00:00",
       changedBy: "ana@example.com",
       createdAt: "2026-09-28T09:00:00+00:00",
     });
@@ -519,6 +525,37 @@ describe("GET /api/content/changes", () => {
       [],
     ]);
     expect(JSON.stringify(body)).not.toContain("/new");
+  });
+
+  it("takes updatedAt from the same view snapshot as the text, never from the later metadata read", async () => {
+    mockRespond = defaultResponder(
+      [
+        viewRow(1, {
+          change_state: "pending",
+          staging_content: "Draft from view snapshot",
+          updated_at: "2026-10-08T10:00:00.123456+00:00",
+        }),
+      ],
+      1,
+    );
+    mockMetadata = [
+      {
+        id: "row-1",
+        metadata: { type: "a", staging_attributes: { href: "/new" } },
+        // Deliberately an extra field from a later row version. The real fixed
+        // projection does not request it; adding it here catches anyone who
+        // starts pairing later metadata with the earlier text snapshot.
+        updated_at: "2026-10-08T10:00:01.654321+00:00",
+      } as (typeof mockMetadata)[number],
+    ];
+
+    const body = await (await get()).json();
+
+    expect(body.rows[0]).toMatchObject({
+      draft: "Draft from view snapshot",
+      updatedAt: "2026-10-08T10:00:00.123456+00:00",
+    });
+    expect(callsOf(metadataQueries()[0], "select")).toEqual([["id, metadata"]]);
   });
 
   // Devin re-review N3: the file header promises an explicit site filter as a

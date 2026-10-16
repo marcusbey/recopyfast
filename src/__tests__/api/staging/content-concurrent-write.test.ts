@@ -1,6 +1,7 @@
 /**
- * A-17 — PUT /api/staging/content/[siteId] remains last-write-wins because it
- * does not enforce the caller's expectedUpdatedAt value.
+ * A-17 / s81 — PUT /api/staging/content/[siteId] remains last-write-wins when
+ * the caller omits expectedUpdatedAt, while a caller that supplies the exact
+ * content_elements.updated_at it read gets compare-and-set semantics.
  *
  * The atomic save function now owns the draft and history write under a row
  * lock. Concurrent calls are serialized at that database boundary, so each
@@ -10,10 +11,10 @@
  * Nothing here mocks `sanitizeIncomingContent`: the identity mock used
  * elsewhere in the suite is one of the reasons this route looks well covered.
  *
- * The lost-update case remains `test.failing`: the route still ignores
- * `expectedUpdatedAt`. The audit-chain case is now a plain test because the
- * atomic save function locks the row and records the value each edit actually
- * replaced inside the same transaction.
+ * The conditional lost-update case is a normal regression: the stale write is
+ * refused with 409 and records no history. The audit-chain case deliberately
+ * omits the precondition because old editor callers keep their established
+ * last-write-wins contract.
  */
 
 import { NextRequest } from "next/server";
@@ -30,6 +31,7 @@ interface ContentElementRow {
   variant: string;
   staging_content: string | null;
   staging_updated_at: string;
+  updated_at: string;
 }
 
 interface StagingHistoryRow {
@@ -48,7 +50,8 @@ class FakeDb {
     language: "en",
     variant: "default",
     staging_content: "Version A",
-    staging_updated_at: "2026-08-07T10:00:00.000Z",
+    staging_updated_at: "2026-08-07T10:00:00.123456+00:00",
+    updated_at: "2026-08-07T10:00:00.123456+00:00",
   };
   history: StagingHistoryRow[] = [];
 }
@@ -56,18 +59,44 @@ class FakeDb {
 const db = new FakeDb();
 
 let atomicSaveQueue = Promise.resolve();
+let versionSequence = 0;
+
+function nextVersion(): string {
+  versionSequence += 1;
+  return `2026-08-07T10:00:01.${String(versionSequence).padStart(6, "0")}+00:00`;
+}
 
 function makeServiceClient() {
   return {
     rpc(name: string, args: Record<string, unknown>) {
-      expect(name).toBe("save_staging_content_atomic");
+      expect([
+        "save_staging_content_atomic",
+        "save_staging_content_compare_and_set",
+      ]).toContain(name);
       const save = atomicSaveQueue.then(() => {
+        if (
+          name === "save_staging_content_compare_and_set" &&
+          args.p_expected_updated_at !== db.element.updated_at
+        ) {
+          return {
+            data: [
+              {
+                save_status: "conflict",
+                content_element_id: db.element.id,
+                updated_at: db.element.updated_at,
+              },
+            ],
+            error: null,
+          };
+        }
+
         const previousContent = db.element.staging_content;
-        const now = new Date().toISOString();
+        const now = nextVersion();
         db.element = {
           ...db.element,
           staging_content: String(args.p_staging_content),
           staging_updated_at: now,
+          updated_at: now,
         };
         db.history = [
           ...db.history,
@@ -80,7 +109,15 @@ function makeServiceClient() {
           },
         ];
         return {
-          data: [{ content_element_id: db.element.id, updated_at: now }],
+          data: [
+            {
+              ...(name === "save_staging_content_compare_and_set"
+                ? { save_status: "saved" }
+                : {}),
+              content_element_id: db.element.id,
+              updated_at: now,
+            },
+          ],
           error: null,
         };
       });
@@ -136,16 +173,20 @@ function accessFor(email: string): EditorAccess {
 
 function putContent(params: {
   content: string;
-  expectedUpdatedAt: string;
+  expectedUpdatedAt?: unknown;
 }): Promise<Response> {
+  const body: Record<string, unknown> = {
+    elementId: ELEMENT_ID,
+    content: params.content,
+  };
+  if (params.expectedUpdatedAt !== undefined) {
+    body.expectedUpdatedAt = params.expectedUpdatedAt;
+  }
+
   return PUT(
     new NextRequest(`https://www.recopyfa.st/api/staging/content/${SITE_ID}`, {
       method: "PUT",
-      body: JSON.stringify({
-        elementId: ELEMENT_ID,
-        content: params.content,
-        expectedUpdatedAt: params.expectedUpdatedAt,
-      }),
+      body: JSON.stringify(body),
       headers: { "Content-Type": "application/json" },
     }),
     { params: Promise.resolve({ siteId: SITE_ID }) },
@@ -163,10 +204,12 @@ describe("A-17 concurrent staging writes", () => {
       language: "en",
       variant: "default",
       staging_content: "Version A",
-      staging_updated_at: "2026-08-07T10:00:00.000Z",
+      staging_updated_at: "2026-08-07T10:00:00.123456+00:00",
+      updated_at: "2026-08-07T10:00:00.123456+00:00",
     };
     db.history = [];
     atomicSaveQueue = Promise.resolve();
+    versionSequence = 0;
     mockAuthorize.mockResolvedValue(accessFor("first@example.com"));
   });
 
@@ -177,7 +220,6 @@ describe("A-17 concurrent staging writes", () => {
   it("stores a single edit (control)", async () => {
     const response = await putContent({
       content: "Version B",
-      expectedUpdatedAt: db.element.staging_updated_at,
     });
 
     expect(response.status).toBe(200);
@@ -186,29 +228,55 @@ describe("A-17 concurrent staging writes", () => {
     expect(db.history[0].previous_content).toBe("Version A");
   });
 
-  test.failing(
-    "refuses a write whose expectedUpdatedAt no longer matches the row",
-    async () => {
-      // Both collaborators loaded the editor at this version.
-      const sharedVersion = db.element.staging_updated_at;
+  it.each([
+    ["null", null],
+    ["the wrong type", 123],
+    ["not a timestamp", "yesterday"],
+    ["an impossible calendar time", "2026-02-30T10:00:00+00:00"],
+    [
+      "more precision than PostgreSQL stores",
+      "2026-08-07T10:00:00.1234567+00:00",
+    ],
+    ["an overlong value", `${"2".repeat(65)}`],
+  ])("refuses expectedUpdatedAt when it is %s", async (_label, value) => {
+    const response = await putContent({
+      content: "Version B",
+      expectedUpdatedAt: value,
+    });
 
-      const first = await putContent({
-        content: "Version B",
-        expectedUpdatedAt: sharedVersion,
-      });
-      expect(first.status).toBe(200);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Field "expectedUpdatedAt" must be a valid ISO timestamp',
+    });
+    expect(db.element.staging_content).toBe("Version A");
+    expect(db.history).toEqual([]);
+  });
 
-      // The second still quotes the version they loaded. The row has moved on.
-      const second = await putContent({
-        content: "Version C",
-        expectedUpdatedAt: sharedVersion,
-      });
+  it("refuses a write whose expectedUpdatedAt no longer matches the row, without a history entry", async () => {
+    // Both collaborators loaded the editor at this authoritative row version.
+    const sharedVersion = db.element.updated_at;
 
-      expect(second.status).toBe(409);
-      // And the refusal must actually refuse: B survives.
-      expect(db.element.staging_content).toBe("Version B");
-    },
-  );
+    const first = await putContent({
+      content: "Version B",
+      expectedUpdatedAt: sharedVersion,
+    });
+    expect(first.status).toBe(200);
+
+    // The second still quotes the version they loaded. The row has moved on.
+    const second = await putContent({
+      content: "Version C",
+      expectedUpdatedAt: sharedVersion,
+    });
+
+    expect(second.status).toBe(409);
+    await expect(second.json()).resolves.toEqual({
+      error: "This change was updated elsewhere — review it again.",
+    });
+    // And the refusal must actually refuse: B and its sole audit row survive.
+    expect(db.element.staging_content).toBe("Version B");
+    expect(db.history).toHaveLength(1);
+    expect(db.history[0].new_content).toBe("Version B");
+  });
 
   // Guard for the concurrent case below: both handlers run to completion and
   // both write. Without this, a rejected promise would leave the audit-chain
@@ -217,11 +285,9 @@ describe("A-17 concurrent staging writes", () => {
     const responses = await Promise.all([
       putContent({
         content: "Version B",
-        expectedUpdatedAt: db.element.staging_updated_at,
       }),
       putContent({
         content: "Version C",
-        expectedUpdatedAt: db.element.staging_updated_at,
       }),
     ]);
 
@@ -241,11 +307,9 @@ describe("A-17 concurrent staging writes", () => {
     await Promise.all([
       putContent({
         content: "Version B",
-        expectedUpdatedAt: db.element.staging_updated_at,
       }),
       putContent({
         content: "Version C",
-        expectedUpdatedAt: db.element.staging_updated_at,
       }),
     ]);
 

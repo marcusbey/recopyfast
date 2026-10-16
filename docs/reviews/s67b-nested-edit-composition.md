@@ -285,3 +285,33 @@ cross-browser behavior and the public-host 200 ms gesture remain separate eviden
 
 Max severity: none
 Ship allowed: yes
+
+## Released-s81 integration review — 2026-10-16 (`23b9277`)
+
+Current main now includes released s81 at
+`23b927743b97ac8bf57b31ac9e9fc2a93753fd8c`. Its clean no-commit merge into s67b head
+`e26d06ffdec1180d785c58aef9bc3519178615d6` has no unmerged entries and passes both diff checks.
+The resulting delta against `MERGE_HEAD` remains exactly the reviewed 15-file s67b story; every
+embed source, generated artifact, size gate, fixture, nested-edit test and accepted ADR is unchanged.
+
+The embed source/artifact SHA-256 values remain
+`e012083864740b670b010b735c515e579d54bb6dbb1c56d63aa85b17312f096d` and
+`cefe75e9ba9ffde17ba4555f658a6b6c354f79d983617f48d3a5f826342bcf65`. The released s81 CAS
+migration is preserved at SHA-256
+`157808f46b033234fd02d30c8aa7d3b23029a549d734ec70685ee5672ca515cf`; released s69a remains at
+`ec048ba9faa41f5aa4e54e61a0d7cbaa56bb06446fe508b32d71ed30a3695812`. Their route, hook, test and
+replay registrations are unchanged from main. Native UUID cleanup, the 106-test/fake-GA application
+contract and the separate seven-test embed fixture also remain intact.
+
+Fresh independent Node 24.14.0 verification passed the staging concurrency, ISO-version, Discard
+hook and Playwright CI-contract suites: **4 suites / 79 tests**. The generated artifact remains
+current at 45,769 / 32,992 / 13,141 gzipped bytes under unchanged ceilings. Prior nested-edit, CAS,
+s69a and UUID neutralizations remain bound to unchanged hashes. No LSP diagnostic was required
+because this refresh changes none of those source files.
+
+No new finding was introduced. The ordinary merge commit and current-head hooks may proceed.
+Hosted checks, production deployment, fresh private Devin availability, real-customer routers,
+cross-browser behavior and the public-host 200 ms gesture remain separate evidence.
+
+Max severity: none
+Ship allowed: yes

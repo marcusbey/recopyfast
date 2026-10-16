@@ -388,6 +388,7 @@ const MIGRATIONS = [
   "supabase/migrations/20260924010000_content_attributes_lifecycle.sql",
   "supabase/migrations/20260924030000_content_page_path.sql",
   "supabase/migrations/20260924060000_restore_site_wide_publish.sql",
+  "supabase/migrations/20261012122000_staging_content_compare_and_set.sql",
 ].map((migration) => path.join(process.cwd(), migration));
 
 function validateScratchTarget(connectionString: string): URL {
@@ -1465,6 +1466,7 @@ if (!DB_URL) {
 
     test.each([
       "save_staging_content_atomic(uuid,text,text,text,text,jsonb,uuid,text)",
+      "save_staging_content_compare_and_set(uuid,text,text,text,text,timestamp with time zone,jsonb,uuid,text)",
       "publish_staging_content_atomic(uuid,text[],uuid,text)",
       "publish_staging_content_with_attributes_atomic(uuid,text[],uuid,text,text)",
       "create_content_version(uuid,text,text,text)",

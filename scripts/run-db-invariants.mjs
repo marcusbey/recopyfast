@@ -66,6 +66,7 @@ const REPLAY_SUITES = [
   "src/__tests__/db/site-delete-cascade.test.ts",
   "src/__tests__/db/sites-install-status.test.ts",
   "src/__tests__/db/content-attributes-lifecycle.test.ts",
+  "src/__tests__/db/staging-content-cas.test.ts",
   "src/__tests__/db/editor-activation-concurrency.test.ts",
   // s89: one cron blog draft per UTC day is a unique key, and anon reads
   // published posts only. Plain Postgres is enough; named so it never
