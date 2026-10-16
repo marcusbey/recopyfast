@@ -388,9 +388,48 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * storage helper for the auth client (+9 / +5), one captured sessionStorage
  * (+0 / +1). The middle lines carry the banner hash's ±2 B; only the two ends
  * are measurements.
+ *
+ * RATCHETED DOWN 2026-10-12 (s67b-nested-edit-composition), from
+ * 45818 / 33059. The first pass incorrectly measured with the managed
+ * worktree's Node 25.6.1 / zlib 1.2.12. The repository and CI pin Node
+ * 24.14.0 / zlib 1.3.1-e00f703; all figures below are the corrected runtime.
+ *
+ * A mapped parent now yields text owned by a descendant whose copy was applied
+ * in this page view, through one reader/writer shared by discovery, hydration,
+ * observer repair, realtime, variants and editing. Complete originals keep the
+ * prior whole-element route restore; late parents whose discovery read pruned
+ * an applied child restore only their captured owned text. Funding removes no
+ * discovery spacing, trailing report, per-page cap or shadow-root coverage.
+ *
+ *   45818 / 33059  measured on main at bc6e503, zero headroom
+ *   +115 / +106    applied-descendant ownership, whole-route restore, editor
+ *                  whitespace and exact element-identity check
+ *   -4 / -4        shorter private ownership-helper name
+ *   -65 / -60      equivalent DOM forms already used in the widget:
+ *                  Element.remove(), direct NodeList iteration and lexical
+ *                  polling callback instead of a redundant self alias
+ *   -74 / -82      equivalent lexical collection/A-B callbacks and redundant
+ *                  self aliases removed; selectors, buckets and payloads are
+ *                  unchanged and pinned by the embed suites
+ *   +8 / +8        fresh-review fix: whole route restoration compares whole
+ *                  text before its writer, plus the incident tombstone
+ *   45798 / 33027  first reviewed measurement
+ *   +136 / +132    PR #99 repair: explicit partial-capture scope, snapshot all
+ *                  route eligibility, restore descendants before ancestors
+ *                  while mappings remain, then clean up entries
+ *   -145 / -144    equivalent DOM insertion forms and lexical-this callbacks;
+ *                  no insertion return value or connected grouped mutation
+ *                  was changed
+ *   -19 / -22      equivalent string-array membership checks
+ *   -1 / -1        final incident-comment source-hash movement
+ *   45769 / 32992  corrected final measurement
+ *
+ * The stricter 45801 / 33044 constants from the first pass remain the ceilings,
+ * leaving 32 / 52 B headroom under the corrected runtime rather than widening
+ * either one after the runtime error was found.
  */
-const MAX_BUNDLE_GZ = 45818;
-const MAX_WIDGET_GZ = 33059;
+const MAX_BUNDLE_GZ = 45801;
+const MAX_WIDGET_GZ = 33044;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

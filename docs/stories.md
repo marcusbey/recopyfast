@@ -3380,11 +3380,12 @@ build as is.
 Embed allocation: ≤ +850 gz gross on each measurement (bundle and widget), net ≤ 0, paid in
 this branch. See § Byte budget and `docs/plans/s67-embed-spa-support.md`.
 
-## Story s67b-nested-edit-composition — STUB (backlog)
+## Story s67b-nested-edit-composition — scheduled and validated 2026-10-12
 
 Owner decision, 2026-10-08, on the PR #69 fix run's byte overrun: **"Ship D2+D3 now, D1 as
 follow-up"**. D2 (A/B markers leave with the route) and D3 (null-prototype row index) shipped
-with s67. This story is D1. There is no research or plan until the owner schedules it.
+with s67. This story is D1. The owner validated its implementation on 2026-10-12; see
+`docs/plans/s67b-nested-edit-composition.md`.
 
 **Evidence: PR #69 bot review (Devin), D1, red** (`docs/reviews/s67-embed-spa-support.md`).
 A parent and a mapped descendant both have edited rows (`<h1>Buy <span>now</span></h1>`).
@@ -3407,11 +3408,11 @@ writes on that `h1` during boot.
 - Spacing. The outer element owns `"Buy "` with its trailing space, so its row must be
   `"Shop "`. A row of `"Shop"` renders "Shoptoday". So the editor reads and saves the owned
   text untrimmed around such a descendant.
-- The restore on a route change ignores the rule and writes over the whole element. The
-  authored copy was recorded with the child's words inside it, and restoring only the owned
-  part gave "Buy nownow". Consequence: when a persistent parent and child are both edited, the
-  parent shows its whole authored text after navigation, and the child stays blank until the
-  host re-renders it.
+- Route restoration follows the scope captured by discovery. A complete parent original includes
+  the child's authored words and restores over the whole element; restoring only its owned part
+  gave "Buy nownow". A parent discovered after an applied child records only its owned prefix and
+  restores through the ownership writer so the descendant remains intact. Route cleanup snapshots
+  eligibility, restores descendants first with all mappings present, then removes page entries.
 - Editor: on an outer element with such a descendant, text typed inside the descendant belongs
   to the descendant, and the outer save does not keep it.
 - Tests that went red then green: the `h1` settles on "Shop today" in at most 3 writes, a
@@ -3443,7 +3444,24 @@ so each is the owner's call:
   copy. It costs +36 / +38 on top of D2+D3, against D1's +87 / +84. It is untested, and it
   renders "Shop " rather than "Shop today".
 
-**Embed allocation:** TBD.
+**Embed allocation (Node 24.14.0 / zlib 1.3.1-e00f703):** the applied-descendant feature is
++115 / +106 gz over current main (45,818 / 33,059). Behavior-equivalent compaction contributes
+-143 / -146; the first fresh-review whole-restore correction and tombstone add +8 / +8. PR #99's
+late-parent repair then adds +136 / +132 over that reviewed result; equivalent DOM insertion and
+bounded lexical-callback compaction recovers -145 / -144, and equivalent membership checks recover
+-19 / -22; the final source tombstone's banner-hash movement recovers -1 / -1. Final is
+45,769 / 32,992, net -49 / -67 from main. The stricter ceilings committed for
+the story remain 45,801 / 33,044. Discovery spacing, its trailing report, the per-page cap and
+shadow-root observation are unchanged. The earlier 45,681 / 32,932 baseline came from the managed
+worktree's Node 25.6.1 / zlib 1.2.12 and is not valid repository evidence.
+
+**Review repair (PR #99).** A child can apply before the host introduces and the widget discovers
+its parent. That late parent captures only its owned prefix as `originalContent`; treating it as a
+complete original lost authored child text and made navigation depend on `Map` insertion order.
+ADR 068 records the explicit capture-scope bit and the snapshot → descendant-first restore →
+cleanup sequence. Both page-scoped insertion orders restore `"Buy now"`; a shared child stays
+`"today"` without a child text mutation. ADR 066's complete-parent/shared-child result remains a
+documented bounded limitation rather than being silently widened into a new snapshot model.
 
 ## s68 — security hardening (split into s68a / s68b / s68c)
 

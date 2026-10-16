@@ -53,9 +53,19 @@ interface FetchOptions {
   variantTarget?: string;
 }
 
+interface WidgetEntry {
+  element: Element;
+  path: string | null;
+  writes?: number;
+  written?: string;
+}
+
 interface Widget {
-  elements: Map<string, { element: Element; path: string | null }>;
+  elements: Map<string, WidgetEntry>;
   isInitialized: boolean;
+  rescan(): void;
+  startInlineEdit(element: Element): void;
+  handleContentUpdate(data: Record<string, unknown>): void;
   destroy(): void;
 }
 
@@ -474,6 +484,558 @@ describe("AC 4 — a host re-render cannot put the authored copy back", () => {
 
     expect(host.errors).toEqual([]);
     expect(hero.textContent).toBe("Published hero");
+  });
+});
+
+describe("s67b — nested edited elements compose by applied-descendant ownership", () => {
+  function nestedMarkup(withIds = true) {
+    document.body.innerHTML = `<h1${withIds ? ' data-rcf-id="parent"' : ""}>Buy <span${withIds ? ' data-rcf-id="child"' : ""}>now</span></h1>`;
+    return {
+      parent: document.querySelector("h1") as HTMLElement,
+      child: document.querySelector("h1 span") as HTMLElement,
+    };
+  }
+
+  function editedRows(parentId = "parent", childId = "child"): Row[] {
+    return [
+      {
+        element_id: parentId,
+        original_content: "Buy now",
+        current_content: "Shop ",
+      },
+      {
+        element_id: childId,
+        original_content: "now",
+        current_content: "today",
+      },
+    ];
+  }
+
+  it("settles in three writes, rescans silently, and repairs twelve alternating host write-backs without losing either edit", async () => {
+    const { parent, child } = nestedMarkup();
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((batch) => records.push(...batch));
+    observer.observe(parent, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    await boot({ rows: { "*": editedRows() } });
+
+    expect(parent.firstChild!.nodeValue).toBe("Shop ");
+    expect(child.textContent).toBe("today");
+    expect(parent.textContent).toBe("Shop today");
+    expect(
+      records.filter((record) => record.type === "characterData"),
+    ).toHaveLength(3);
+
+    const afterBoot = records.length;
+    widget().rescan();
+    await flushMicrotasks();
+    expect(records).toHaveLength(afterBoot);
+
+    for (let index = 0; index < 12; index++) {
+      if (index % 2 === 0) parent.firstChild!.nodeValue = `Host ${index} `;
+      else child.firstChild!.nodeValue = `host ${index}`;
+      await flushMicrotasks();
+      expect(parent.firstChild!.nodeValue).toBe("Shop ");
+      expect(child.textContent).toBe("today");
+      expect(parent.textContent).toBe("Shop today");
+    }
+
+    observer.disconnect();
+  });
+
+  it("keeps the whole-parent row behavior when a mapped child has no applied copy", async () => {
+    document.body.innerHTML =
+      '<h1 data-rcf-id="parent">Build faster with <span data-rcf-id="child">AI</span></h1>';
+    const parent = byId("parent");
+    const child = byId("child");
+
+    await boot({
+      rows: {
+        "*": [
+          {
+            element_id: "parent",
+            original_content: "Build faster with AI",
+            current_content: "Ship smarter with AI",
+          },
+        ],
+      },
+    });
+
+    expect(parent.firstChild!.nodeValue).toBe("Ship smarter with AI");
+    expect(child.textContent).toBe("");
+    expect(parent.textContent).toBe("Ship smarter with AI");
+  });
+
+  it("does not transfer applied ownership to a remounted descendant that reuses the old id", async () => {
+    const { parent, child } = nestedMarkup();
+    await boot({ rows: { "*": editedRows() } });
+    expect(parent.textContent).toBe("Shop today");
+
+    const replacement = document.createElement("span");
+    replacement.setAttribute("data-rcf-id", "child");
+    replacement.textContent = "replacement authored child";
+    child.replaceWith(replacement);
+    parent.firstChild!.nodeValue = "Host parent ";
+    await flushMicrotasks();
+
+    // The Map still points at the detached child until the scheduled rescan.
+    // Exact node identity keeps that stale entry from making this new span look
+    // applied: the parent owns and blanks it for now.
+    expect(parent.firstChild!.nodeValue).toBe("Shop ");
+    expect(replacement.textContent).toBe("");
+    expect(parent.textContent).toBe("Shop ");
+  });
+
+  it("keeps a realtime child update through later parent and child write-backs", async () => {
+    const { parent, child } = nestedMarkup();
+    await boot({ rows: { "*": [editedRows()[0]] } });
+
+    widget().handleContentUpdate({ elementId: "child", content: "today" });
+    expect(parent.textContent).toBe("Shop today");
+
+    for (let index = 0; index < 12; index++) {
+      if (index % 2 === 0) parent.firstChild!.nodeValue = `Host ${index} `;
+      else child.firstChild!.nodeValue = `host ${index}`;
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop today");
+    }
+  });
+
+  it("keeps a child variant and its markers when the host writes the parent back", async () => {
+    const { parent, child } = nestedMarkup();
+    await boot({
+      rows: { "*": [editedRows()[0]] },
+      variantTarget: "child",
+    });
+    expect(child.textContent).toBe("Variant copy");
+    expect(child.getAttribute("data-rcf-variant")).toBe(VARIANT_ID);
+
+    parent.firstChild!.nodeValue = "Host parent ";
+    await flushMicrotasks();
+
+    expect(parent.firstChild!.nodeValue).toBe("Shop ");
+    expect(child.textContent).toBe("Variant copy");
+    expect(child.getAttribute("data-rcf-test")).toBe(TEST_ID);
+    expect(child.getAttribute("data-rcf-variant")).toBe(VARIANT_ID);
+  });
+
+  it("restores the whole authored parent on navigation, then reports the host-rendered parent and child under the new path", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      const { parent, child } = nestedMarkup(false);
+      const recorded = await boot({
+        rows: (pagePath) =>
+          pagePath === "/"
+            ? editedRows(
+                parent.getAttribute("data-rcf-id")!,
+                child.getAttribute("data-rcf-id")!,
+              )
+            : [],
+      });
+      expect(parent.textContent).toBe("Shop today");
+
+      useFakeTimers();
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("");
+      expect(parent.hasAttribute("data-rcf-id")).toBe(false);
+      expect(child.hasAttribute("data-rcf-id")).toBe(false);
+
+      // The route's host render owns the complete authored tree. The restore
+      // above deliberately leaves the child blank until this render arrives.
+      parent.firstChild!.nodeValue = "Buy ";
+      child.firstChild!.nodeValue = "now";
+      await flushMicrotasks();
+      await advance(250, 50);
+
+      const parentId = parent.getAttribute("data-rcf-id")!;
+      const childId = child.getAttribute("data-rcf-id")!;
+      expect(widget().elements.get(parentId)!.path).toBe("/next");
+      expect(widget().elements.get(childId)!.path).toBe("/next");
+      const nextPage = discoveryBodies(recorded)
+        .flatMap((body) => Object.entries(body))
+        .filter(([, entry]) => entry.page_path === "/next");
+      expect(nextPage.find(([id]) => id === parentId)?.[1].content).toBe(
+        "Buy now",
+      );
+      expect(nextPage.find(([id]) => id === childId)?.[1].content).toBe("now");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("does not skip a whole route restore when the parent's owned copy equals its aggregate authored copy", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      const { parent, child } = nestedMarkup(false);
+      await boot({
+        rows: (pagePath) =>
+          pagePath === "/"
+            ? [
+                {
+                  element_id: child.getAttribute("data-rcf-id")!,
+                  original_content: "now",
+                  current_content: "today",
+                },
+              ]
+            : [],
+      });
+      const parentId = parent.getAttribute("data-rcf-id")!;
+      expect(parent.textContent).toBe("Buy today");
+
+      widget().handleContentUpdate({
+        elementId: parentId,
+        content: "Buy now",
+      });
+      await flushMicrotasks();
+      expect(parent.firstChild!.nodeValue).toBe("Buy now");
+      expect(child.textContent).toBe("today");
+      expect(parent.textContent).toBe("Buy nowtoday");
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it.each(["child-first", "parent-first"])(
+    "restores a late-discovered parent's owned original and its page-scoped child independent of %s record order",
+    async (order) => {
+      const navigation = new EventTarget();
+      Object.defineProperty(window, "navigation", {
+        configurable: true,
+        value: navigation,
+      });
+      try {
+        document.body.innerHTML = '<div id="mount"><span>now</span></div>';
+        const child = document.querySelector("span") as HTMLElement;
+        await boot({
+          rows: (pagePath) =>
+            pagePath === "/"
+              ? [
+                  {
+                    element_id: child.getAttribute("data-rcf-id")!,
+                    original_content: "now",
+                    current_content: "today",
+                  },
+                ]
+              : [],
+        });
+        expect(child.textContent).toBe("today");
+
+        const parent = document.createElement("h1");
+        parent.append("Buy ", child);
+        document.getElementById("mount")!.replaceChildren(parent);
+        widget().rescan();
+        await flushMicrotasks();
+        const parentId = parent.getAttribute("data-rcf-id")!;
+
+        if (order === "parent-first") {
+          child.remove();
+          widget().rescan();
+          const unrelated = document.createElement("p");
+          unrelated.textContent = "Aside";
+          document.getElementById("mount")!.appendChild(unrelated);
+          widget().rescan();
+          parent.appendChild(child);
+          widget().rescan();
+          widget().handleContentUpdate({
+            elementId: child.getAttribute("data-rcf-id")!,
+            content: "today",
+          });
+          await flushMicrotasks();
+        }
+
+        widget().handleContentUpdate({
+          elementId: parentId,
+          content: "Shop ",
+        });
+        await flushMicrotasks();
+        expect(parent.textContent).toBe("Shop today");
+
+        history.pushState(null, "", "/next");
+        navigation.dispatchEvent(new Event("currententrychange"));
+        await flushMicrotasks();
+
+        expect(parent.textContent).toBe("Buy now");
+        expect(child.textContent).toBe("now");
+        if (order === "parent-first") {
+          expect(document.querySelector("p")?.textContent).toBe("Aside");
+        }
+      } finally {
+        delete (window as unknown as Record<string, unknown>).navigation;
+      }
+    },
+  );
+
+  it("restores a late-discovered parent's owned original without blanking or resetting a shared-id child", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML =
+        '<div id="mount"><span data-rcf-id="shared-child">now</span></div>';
+      const child = byId("shared-child");
+      await boot({
+        rows: {
+          "*": [
+            {
+              element_id: "shared-child",
+              original_content: "now",
+              current_content: "today",
+            },
+          ],
+        },
+      });
+      expect(child.textContent).toBe("today");
+
+      const parent = document.createElement("h1");
+      parent.append("Buy ", child);
+      document.getElementById("mount")!.replaceChildren(parent);
+      widget().rescan();
+      await flushMicrotasks();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop ",
+      });
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop today");
+
+      const childMutations: MutationRecord[] = [];
+      const childObserver = new MutationObserver((records) =>
+        childMutations.push(...records),
+      );
+      childObserver.observe(child, {
+        characterData: true,
+        subtree: true,
+      });
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy today");
+      expect(child.textContent).toBe("today");
+      expect(child.getAttribute("data-rcf-id")).toBe("shared-child");
+      expect(childMutations).toHaveLength(0);
+      childObserver.disconnect();
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("keeps ADR 066's complete-parent restore behavior when a shared child applies after discovery", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML =
+        '<h1>Buy <span data-rcf-id="shared-child">now</span></h1>';
+      const parent = document.querySelector("h1") as HTMLElement;
+      const child = byId("shared-child");
+      await boot();
+
+      widget().handleContentUpdate({
+        elementId: "shared-child",
+        content: "today",
+      });
+      await flushMicrotasks();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop ",
+      });
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop today");
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("");
+      expect(child.getAttribute("data-rcf-id")).toBe("shared-child");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("restores a complete parent after its page child when an unrelated entry separates their record order", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML =
+        '<main><h1>Buy <span>now</span></h1><div id="aside"></div></main>';
+      const parent = document.querySelector("h1") as HTMLElement;
+      const child = document.querySelector("span") as HTMLElement;
+      await boot();
+
+      child.remove();
+      widget().rescan();
+      const unrelated = document.createElement("p");
+      unrelated.textContent = "Aside";
+      document.getElementById("aside")!.appendChild(unrelated);
+      widget().rescan();
+      parent.appendChild(child);
+      widget().rescan();
+
+      widget().handleContentUpdate({
+        elementId: child.getAttribute("data-rcf-id")!,
+        content: "today",
+      });
+      await flushMicrotasks();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop ",
+      });
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop today");
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("");
+      expect(unrelated.textContent).toBe("Aside");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("records a late parent's partial original even when the applied child's text is empty", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML = '<div id="mount"><span>now</span></div>';
+      const child = document.querySelector("span") as HTMLElement;
+      await boot();
+      widget().handleContentUpdate({
+        elementId: child.getAttribute("data-rcf-id")!,
+        content: "",
+      });
+      await flushMicrotasks();
+      expect(child.textContent).toBe("");
+
+      const parent = document.createElement("h1");
+      parent.append("Buy ", child);
+      document.getElementById("mount")!.replaceChildren(parent);
+      widget().rescan();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop ",
+      });
+      await flushMicrotasks();
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy now");
+      expect(child.textContent).toBe("now");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("restores a three-level late ancestor around an applied leaf", async () => {
+    const navigation = new EventTarget();
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: navigation,
+    });
+    try {
+      document.body.innerHTML = '<div id="mount"><span>now</span></div>';
+      const child = document.querySelector("span") as HTMLElement;
+      await boot();
+      widget().handleContentUpdate({
+        elementId: child.getAttribute("data-rcf-id")!,
+        content: "today",
+      });
+      await flushMicrotasks();
+
+      const middle = document.createElement("em");
+      middle.append("right ", child);
+      const parent = document.createElement("h1");
+      parent.append("Buy ", middle);
+      document.getElementById("mount")!.replaceChildren(parent);
+      widget().rescan();
+      widget().handleContentUpdate({
+        elementId: parent.getAttribute("data-rcf-id")!,
+        content: "Shop right ",
+      });
+      await flushMicrotasks();
+      expect(parent.textContent).toBe("Shop right today");
+
+      history.pushState(null, "", "/next");
+      navigation.dispatchEvent(new Event("currententrychange"));
+      await flushMicrotasks();
+
+      expect(parent.textContent).toBe("Buy right now");
+      expect(middle.textContent).toBe("now");
+      expect(child.textContent).toBe("now");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    }
+  });
+
+  it("saves only the outer element's owned text and preserves the separating space", async () => {
+    const { parent, child } = nestedMarkup();
+    const recorded = await boot({ rows: { "*": editedRows() } });
+    jest.spyOn(window, "confirm").mockReturnValue(true);
+
+    const editor = widget() as Widget & {
+      stagingMode: boolean;
+      stagingToken: string;
+    };
+    // Exercise the editor renderer directly without installing a second
+    // document click listener into this shared jsdom suite.
+    editor.stagingMode = true;
+    editor.stagingToken = "test_nested_editor";
+    editor.startInlineEdit(parent);
+    parent.firstChild!.nodeValue = "Sell ";
+    (document.querySelector(".rcf-btn-save") as HTMLButtonElement).click();
+    await settle();
+
+    const saved = recorded.find(
+      (request) =>
+        request.method === "PUT" &&
+        request.url.includes(`/staging/content/${SITE_ID}`),
+    );
+    expect(saved).toBeDefined();
+    expect(JSON.parse(saved!.body!).content).toBe("Sell ");
+    expect(parent.firstChild!.nodeValue).toBe("Sell ");
+    expect(child.textContent).toBe("today");
+    expect(parent.textContent).toBe("Sell today");
   });
 });
 

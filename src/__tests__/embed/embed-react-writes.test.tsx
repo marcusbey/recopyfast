@@ -108,7 +108,7 @@ function installScriptTag() {
  * The content GET answers when the test says so, so a test can change the DOM
  * after the embed scanned it and before published copy arrives.
  */
-function installFetch(holdContent: boolean) {
+function installFetch(holdContent: boolean, rows = ROWS) {
   let release: () => void = () => {};
   const held = new Promise<void>((resolve) => {
     release = resolve;
@@ -118,7 +118,7 @@ function installFetch(holdContent: boolean) {
       const method = options?.method || "GET";
       if (url.includes(`/content/${SITE_ID}?`) && method === "GET") {
         if (holdContent) await held;
-        return { ok: true, status: 200, json: async () => ROWS };
+        return { ok: true, status: 200, json: async () => rows };
       }
       if (url.includes("/ab-tests/active/")) {
         return { ok: true, status: 200, json: async () => ({ tests: [] }) };
@@ -272,6 +272,73 @@ describe("published copy written into a React 19 tree", () => {
     expect(directText?.nodeValue).toBe("Published kicker");
     expect(span.textContent).toBe("");
     expect(heading.textContent).toBe("Published kicker");
+  });
+
+  it("keeps React's parent and applied-child text nodes while their edits compose", async () => {
+    function NestedCopy() {
+      return (
+        <h1 data-rcf-id="r-parent">
+          Buy <span data-rcf-id="r-child">now</span>
+        </h1>
+      );
+    }
+    const rows = [
+      {
+        element_id: "r-parent",
+        original_content: "Buy now",
+        current_content: "Shop ",
+      },
+      {
+        element_id: "r-child",
+        original_content: "now",
+        current_content: "today",
+      },
+    ];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<NestedCopy />));
+    const parent = byId("r-parent");
+    const child = byId("r-child");
+    const parentText = parent.firstChild;
+    const childText = child.firstChild;
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((batch) => records.push(...batch));
+    observer.observe(parent, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    installFetch(false, rows);
+    new Function(WIDGET_SOURCE)();
+    await settle();
+    harness = {
+      root,
+      reactErrors: [],
+      hostErrors: [],
+      resolveContent: () => {},
+    };
+
+    expect(parent.firstChild).toBe(parentText);
+    expect(child.firstChild).toBe(childText);
+    expect(parentText!.nodeValue).toBe("Shop ");
+    expect(childText!.nodeValue).toBe("today");
+    expect(parent.textContent).toBe("Shop today");
+    expect(
+      records.filter((record) => record.type === "characterData"),
+    ).toHaveLength(3);
+
+    for (let index = 0; index < 12; index++) {
+      if (index % 2 === 0) parentText!.nodeValue = `Host ${index} `;
+      else childText!.nodeValue = `host ${index}`;
+      await settle();
+      expect(parentText!.nodeValue).toBe("Shop ");
+      expect(childText!.nodeValue).toBe("today");
+    }
+    expect(parent.firstChild).toBe(parentText);
+    expect(child.firstChild).toBe(childText);
+    observer.disconnect();
   });
 
   it("keeps an element child: <button><svg/>Buy</button> keeps its svg", async () => {

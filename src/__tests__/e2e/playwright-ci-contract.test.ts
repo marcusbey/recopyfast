@@ -87,7 +87,7 @@ describe("Playwright CI contract", () => {
   it("keeps the credential-free built-embed harness outside the strict 106-test suite", () => {
     // s06b was recovered after the strict-count reporter became a hard CI contract.
     // Its specs live below e2e/ for shared Playwright conventions, so without an
-    // explicit exclusion Playwright recursively collects six extra tests into
+    // explicit exclusion Playwright recursively collects seven extra tests into
     // the main job and makes that otherwise-correct job miss its exact count. The
     // second config and unguarded job are the ownership boundary: the harness
     // still has to run, just without Next, Supabase, or provider credentials.
@@ -95,7 +95,7 @@ describe("Playwright CI contract", () => {
     expect(embedConfig).toContain('testDir: "./e2e/embed-fixture"');
     expect(embedConfig).not.toContain("webServer:");
     expect(embedConfig).toContain('"./e2e/support/strict-reporter.ts"');
-    expect(embedConfig).toContain("expected: 6");
+    expect(embedConfig).toContain("expected: 7");
     expect(embedConfig).toContain(
       'outputFile: "test-results/embed-fixture-summary.json"',
     );
