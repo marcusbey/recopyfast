@@ -10,7 +10,7 @@
  * Founding Agency ($299) offer.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { pricingSection } from "./support/landing-locators";
 
 // Increase timeout for landing page tests (homepage can be slow to hydrate)
@@ -24,16 +24,116 @@ test.describe("Landing Page", () => {
     expect(response?.status()).toBe(200);
   });
 
-  // E2E-011: Hero section renders with CTA
+  // E2E-011: Hero section renders with CTA and keeps each authored headline
+  // line inside its own editable box. The first s114 browser pass checked only
+  // document-level overflow, which missed the hidden horizontal scroller on
+  // each contenteditable line: at narrow desktop widths the page stayed the
+  // right size while "website" was clipped inside the headline itself.
   test("E2E-011: Hero section renders with CTA", async ({ page }) => {
+    const widths = [320, 390, 901, 1024, 1100, 1440, 1920];
+    const settleResponsiveLayout = async (targetPage: Page) => {
+      await targetPage.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            window.requestAnimationFrame(() =>
+              window.requestAnimationFrame(() => resolve()),
+            );
+          }),
+      );
+    };
+    const assertHeroCopyFits = async (
+      targetPage: Page,
+      state: "authored" | "animated",
+    ) => {
+      const lines = targetPage.getByRole("textbox", {
+        name: /Headline line|Supporting text line/,
+      });
+      await expect(lines).toHaveCount(5);
+      const geometry = await lines.evaluateAll((elements) =>
+        elements.map((element) => ({
+          label: element.getAttribute("aria-label"),
+          text: element.textContent,
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        })),
+      );
+
+      for (const line of geometry) {
+        expect(
+          line.scrollWidth,
+          `${state} ${line.label} (${JSON.stringify(line.text)}) must fit its ${line.clientWidth}px editable box`,
+        ).toBeLessThanOrEqual(line.clientWidth);
+      }
+    };
+
+    // Hold the authored words still while every responsive breakpoint is
+    // measured. This is the product's actual reduced-motion behavior, rather
+    // than a test-only timer override.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: widths[0], height: 900 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("editorial-hero")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 900 });
+      await settleResponsiveLayout(page);
+      await assertHeroCopyFits(page, "authored");
+    }
 
-    // The hero has "Start editing for free" CTA and "Watch it work" link
-    const ctaButton = page.locator(
-      'a[href*="signup"], a:has-text("Start editing"), a:has-text("Start"), button:has-text("Start")',
+    // The component test above this browser layer proves the real sequence
+    // writes site -> website before stuck -> done. Put those same completed
+    // words into the rendered spans here so this regression remains a fast,
+    // deterministic CSS geometry check instead of depending on 14 seconds of
+    // Web Animations scheduling in every Playwright environment.
+    const animatedPage = page;
+    const firstLine = animatedPage.getByRole("textbox", {
+      name: "Headline line 1",
+    });
+    const secondLine = animatedPage.getByRole("textbox", {
+      name: "Headline line 2",
+    });
+    await firstLine.locator("span").evaluate((word) => {
+      word.textContent = "website";
+    });
+    await secondLine.locator("span").evaluate((word) => {
+      word.textContent = "done";
+    });
+    for (const width of widths) {
+      await animatedPage.setViewportSize({ width, height: 900 });
+      await settleResponsiveLayout(animatedPage);
+      await assertHeroCopyFits(animatedPage, "animated");
+    }
+
+    // Authored and animated copy must fit, but a visitor can deliberately
+    // type up to 120 characters. Preserve the existing one-line editor for
+    // that custom text instead of shrinking it into unreadable type or
+    // letting it create a fourth headline line.
+    await animatedPage.setViewportSize({ width: 320, height: 900 });
+    await settleResponsiveLayout(animatedPage);
+    const customGeometry = await firstLine.evaluate((line) => {
+      line.textContent = "W".repeat(120);
+      const computed = window.getComputedStyle(line);
+      return {
+        clientWidth: line.clientWidth,
+        scrollWidth: line.scrollWidth,
+        overflowX: computed.overflowX,
+        whiteSpace: computed.whiteSpace,
+      };
+    });
+    expect(customGeometry.scrollWidth).toBeGreaterThan(
+      customGeometry.clientWidth,
     );
+    expect(customGeometry.overflowX).toBe("auto");
+    // Chromium computes plaintext-only contenteditable as `pre` even though
+    // the authored rule is `nowrap`; both preserve the intentional one-line
+    // editing surface, and the overflow assertion above proves the behavior.
+    expect(["nowrap", "pre"]).toContain(customGeometry.whiteSpace);
 
-    await expect(ctaButton.first()).toBeVisible({ timeout: 15000 });
+    await expect(
+      page
+        .getByTestId("editorial-hero")
+        .getByRole("link", { name: "Start your free trial" }),
+    ).toBeVisible();
   });
 
   // E2E-012: Preserve Lifetime Pro and add the separately highlighted founding offer.

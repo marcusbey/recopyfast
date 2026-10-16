@@ -56,6 +56,7 @@
 .heroCopy {
   position: relative;
   width: min(680px, 100%);
+  container-type: inline-size;
   grid-column: 1;
 }
 
@@ -70,7 +71,15 @@
 
 .heroTitle {
   min-height: 3.24em;
-  font-size: clamp(44px, 4.6vw, 68px);
+  /*
+   * This headline used to scale against the viewport even though the artwork
+   * track, rather than the viewport, decides how much room the words receive.
+   * At 901px the completed first line was 376px wide inside a 351px editable
+   * box, and its hidden horizontal scrollbar made "website" look cut off.
+   * Keep the type tied to the real copy container so every authored animation
+   * state fits while visitor-written long copy can still scroll on one line.
+   */
+  font-size: clamp(29px, 11cqw, 68px);
   line-height: 1.08;
 }
 
@@ -163,8 +172,11 @@
   max-width: 500px;
   margin: 26px 0;
   color: var(--ink);
+  /* The 320px follow-up caught this line clipping behind the same hidden
+   * scrollbar as the headline. Size it from the copy column as well so the
+   * authored two-line payoff is complete without changing custom-text rules. */
   font:
-    24px/1.42 Georgia,
+    clamp(17px, 6cqw, 24px) / 1.42 Georgia,
     "Times New Roman",
     serif;
 }
@@ -339,7 +351,7 @@
   margin-top: 28px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .hero {
     display: flex;
     min-height: 0;
@@ -364,9 +376,6 @@
   }
   .heroTitle {
     font-size: clamp(29px, 7vw, 54px);
-  }
-  .payoff {
-    font-size: 21px;
   }
   .realDemo,
   .storySection,

@@ -22,3 +22,13 @@ Initial middleware configuration failure was fixed before these observations. Br
 Final verification added: the editorial pricing variant renders the catalogue with flat cream/teal controls and no legacy sky/glass/gradient treatment; the Pricing header anchor updates the hash and scrolls the section to the viewport. Automated gates passed: 537 suites passed (2 skipped), 8,021 tests passed (38 skipped), lint reported 0 errors and 33 pre-existing warnings, type-check and type-check:build passed, format:check passed, and the production build completed.
 
 Final visual follow-up: editorial Pricing now uses flat cream/teal cards and controls. Header Pricing link settles at the pricing section (scroll4057.5, targettopapproximately0). Saved s114-pricing.png. Legacy /product default styling remains separate.
+
+## Responsive hero regression — October 16 follow-up
+
+The reported hidden clipping was reproduced with a browser-level box measurement. Before the repair, the completed first line at 901px had `scrollWidth: 376` inside a `clientWidth: 351` editable line. Extending the same check to all authored hero copy also caught the second supporting line at 320px (`341 > 282`). The page itself did not overflow in either case because each contenteditable hid its own horizontal scrollbar.
+
+The focused Playwright check now measures all three headline lines and both supporting lines in their authored and completed (`website` / `done`) states at 320, 390, 901, 1024, 1100, 1440 and 1920px. Every stock line satisfies `scrollWidth <= clientWidth`; the document also remains within its viewport. A separate assertion preserves the intended behavior for visitor-written copy: a 120-character custom headline stays on one horizontally scrollable line instead of wrapping into a fourth line or forcing unreadably small type. The existing component suite remains the timing/order proof for the real site → website → stuck → done animation; the browser geometry check deterministically installs those exact completed words so it does not depend on headless Web Animations scheduling.
+
+Fresh production output was rebuilt and served on port 4321 before final capture. At 1024px, completed headline boxes are 901/901px; at 320px they are 282/282px, the longer supporting line is 276/276px, and document width is 320/320px. Saved `s114-responsive-1024.png` and `s114-responsive-320.png`.
+
+Final focused evidence: E2E-011 passed; EditableEditorialHero Jest passed 11/11; targeted ESLint and Prettier passed; `npm run type-check` passed; the final `npm run build` completed successfully.

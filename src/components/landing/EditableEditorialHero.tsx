@@ -291,7 +291,7 @@ export default function EditableEditorialHero() {
         width={1600}
         height={800}
         priority
-        sizes="(max-width: 900px) 100vw, 58vw"
+        sizes="(max-width: 1024px) 100vw, 58vw"
       />
       <div ref={containerRef} className={styles.heroCopy}>
         <p className={styles.eyebrow}>For freelancers + small web studios</p>
