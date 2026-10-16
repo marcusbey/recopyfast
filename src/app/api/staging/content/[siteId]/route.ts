@@ -16,6 +16,7 @@ import { sanitizeIncomingContent } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import {
   canonicalSiteId,
+  optionalIsoTimestamp,
   validateContentAttributePatch,
 } from "@/lib/api/validation";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
@@ -24,6 +25,8 @@ import {
   checkOwnerCanEdit,
   ownerCanEditRefusal,
 } from "@/lib/billing/owner-can-edit";
+
+const VERSION_CONFLICT = "This change was updated elsewhere — review it again.";
 
 /**
  * s77 (s69 L7) — per IP, before anything is decided about the caller.
@@ -263,6 +266,17 @@ export async function PUT(
       );
     }
 
+    const expectedUpdatedAt = optionalIsoTimestamp(
+      requestBody,
+      "expectedUpdatedAt",
+    );
+    if (!expectedUpdatedAt.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: expectedUpdatedAt.error }, { status: 400 }),
+        request,
+      );
+    }
+
     // The site's own owner is signed in and holds a `site_permissions` row; they
     // carry no editor token and never can, so validating tokens alone refused
     // the one caller guaranteed to hold every right. Tried first, falls through
@@ -380,18 +394,34 @@ export async function PUT(
     // The draft and its audit entry are one database operation. This used to
     // update content_elements first and insert staging_history second; a failed
     // insert therefore returned 500 after the draft had already committed.
+    //
+    // s81 keeps the old function for permanent editor callers that omit the
+    // optional precondition. Discard supplies one and takes the separately
+    // named CAS function: its row lock, version comparison, update and history
+    // insert are one statement. A route preflight read would reopen the exact
+    // read-to-write race this boundary exists to close. Never silently drop an
+    // invalid/null precondition into the old last-write-wins path; validation
+    // above treats only an absent field as omission.
+    const isConditional = expectedUpdatedAt.value !== undefined;
+    const saveFunction = isConditional
+      ? "save_staging_content_compare_and_set"
+      : "save_staging_content_atomic";
+    const saveArgs = {
+      p_site_id: siteId,
+      p_element_id: elementId,
+      p_language: language,
+      p_variant: variant,
+      p_staging_content: sanitizedContent,
+      ...(isConditional
+        ? { p_expected_updated_at: expectedUpdatedAt.value }
+        : {}),
+      p_attribute_patch: attributePatch.value,
+      p_staging_access_id: access.stagingAccessId || null,
+      p_user_email: access.email || access.userId || access.kind,
+    };
     const { data: savedRows, error: saveError } = await supabase.rpc(
-      "save_staging_content_atomic",
-      {
-        p_site_id: siteId,
-        p_element_id: elementId,
-        p_language: language,
-        p_variant: variant,
-        p_staging_content: sanitizedContent,
-        p_attribute_patch: attributePatch.value,
-        p_staging_access_id: access.stagingAccessId || null,
-        p_user_email: access.email || access.userId || access.kind,
-      },
+      saveFunction,
+      saveArgs,
     );
 
     if (saveError) {
@@ -406,6 +436,37 @@ export async function PUT(
     }
 
     const saved = Array.isArray(savedRows) ? savedRows[0] : null;
+    if (isConditional) {
+      const saveStatus = saved?.save_status;
+      if (saveStatus === "conflict") {
+        return withPublicCors(
+          NextResponse.json({ error: VERSION_CONFLICT }, { status: 409 }),
+          request,
+        );
+      }
+      if (saveStatus === "missing") {
+        return withPublicCors(
+          NextResponse.json(
+            { error: "Content element not found" },
+            { status: 404 },
+          ),
+          request,
+        );
+      }
+      if (saveStatus !== "saved") {
+        console.error(
+          "Conditional staging save returned an invalid result:",
+          saveStatus,
+        );
+        return withPublicCors(
+          NextResponse.json(
+            { error: "Failed to update staging content" },
+            { status: 500 },
+          ),
+          request,
+        );
+      }
+    }
     if (!saved) {
       return withPublicCors(
         NextResponse.json(

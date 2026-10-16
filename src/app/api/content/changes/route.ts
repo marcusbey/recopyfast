@@ -50,7 +50,7 @@ type StateFilter = (typeof STATES)[number];
 type ChangeState = "pending" | "published" | "original";
 
 const ROW_COLUMNS =
-  "id, site_id, element_id, page_path, selector, language, variant, element_type, original_content, published_content, staging_content, change_state, changed_at, changed_by, created_at";
+  "id, site_id, element_id, page_path, selector, language, variant, element_type, original_content, published_content, staging_content, change_state, changed_at, updated_at, changed_by, created_at";
 
 interface ViewRow {
   id: string;
@@ -66,6 +66,7 @@ interface ViewRow {
   staging_content: string | null;
   change_state: ChangeState;
   changed_at: string | null;
+  updated_at: string;
   changed_by: string | null;
   created_at: string;
 }
@@ -205,6 +206,9 @@ function toRow(row: ViewRow, draftAttributes: DraftAttribute[] | null) {
     hasLiveText: row.published_content !== null,
     state: row.change_state,
     changedAt: row.changed_at,
+    // This exact string versions the text above. Do not rebuild it through a
+    // Date: PostgreSQL carries microseconds that Date.toISOString() discards.
+    updatedAt: row.updated_at,
     changedBy: emailOrNull(row.changed_by),
     createdAt: row.created_at,
   };

@@ -99,7 +99,7 @@ function seed(row: SeedRow): StoredRow {
     isMetadataUnread: state === "pending" && row.draftAttributes === null,
     publishedAt: state === "published" ? changedAt : null,
     stagingUpdatedAt: state === "pending" ? changedAt : null,
-    updatedAt: changedAt,
+    updatedAt: text(row.updatedAt) ?? changedAt,
   };
 }
 
@@ -145,14 +145,17 @@ function toAnswer(row: StoredRow): SeedRow {
       state === "pending"
         ? row.stagingUpdatedAt
         : (row.publishedAt ?? row.updatedAt),
+    updatedAt: row.updatedAt,
   };
 }
+
+export type FakePutResult = "saved" | "missing" | "conflict";
 
 export interface FakeChangesServer {
   /** The list route's answer for a URL, or null for a site not the caller's. */
   list(url: URL): Record<string, unknown> | null;
-  /** The staging PUT's write; false when no row matches. */
-  put(siteId: string, body: Record<string, unknown>): boolean;
+  /** The staging PUT's typed outcome, including s81 compare-and-set. */
+  put(siteId: string, body: Record<string, unknown>): FakePutResult;
   /** The publish POST's write. */
   publish(body: Record<string, unknown>): void;
 }
@@ -226,7 +229,13 @@ export function createFakeChangesServer(
           row.language === body.language &&
           row.variant === body.variant,
       );
-      if (!target) return false;
+      if (!target) return "missing";
+      if (
+        body.expectedUpdatedAt !== undefined &&
+        body.expectedUpdatedAt !== target.updatedAt
+      ) {
+        return "conflict";
+      }
       const patch = Object.fromEntries(
         ATTRIBUTE_KEYS.filter((key) => typeof body[key] === "string").map(
           (key) => [key, body[key] as string],
@@ -246,7 +255,7 @@ export function createFakeChangesServer(
         updatedAt: now,
       };
       stored = stored.map((row) => (row === target ? saved : row));
-      return true;
+      return "saved";
     },
 
     publish(body) {
