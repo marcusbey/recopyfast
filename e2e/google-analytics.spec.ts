@@ -509,9 +509,22 @@ test.describe("s107 Google Analytics: the app surface", () => {
       });
 
       await signInAsLayoutOwner(page, supabase, owner, "/dashboard");
+      // s117: this awaiting-install fixture polls /api/sites every five
+      // seconds, so network idle can time out after the authenticated
+      // overview is already usable. The heading is the readiness contract;
+      // the fixed observation window then gives forbidden analytics time to
+      // surface before the negative assertions run.
       await page.goto(`/dashboard/sites/${owner.siteId}`, {
-        waitUntil: "networkidle",
+        waitUntil: "load",
       });
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: "E2E layout site",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await page.waitForTimeout(3_000);
 
       expect(dashboardPolicies.length).toBeGreaterThanOrEqual(2);
       for (const policy of dashboardPolicies) {

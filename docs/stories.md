@@ -5362,3 +5362,19 @@ Acceptance criteria:
 Complexity: 3. Dependencies: released s75 CI gates and current s68a/s56 database invariants.
 Branch `feature/s116-ci-test-inventory`. No migration, dependency, provider call, branch-protection
 change, package-manifest change, UI change or embed change. Embed allocation: 0 bytes.
+
+## s117-analytics-e2e-readiness — Stable authenticated analytics E2E readiness
+
+As the release operator, I need the signed-in analytics exclusion test to wait for the actual
+site overview and observe forbidden activity, so background polling cannot make correct
+behavior fail a network-idle wait.
+
+Plan: `docs/plans/s117-analytics-e2e-readiness.md` (human validated 2026-10-16).
+Research: `docs/research/s117-analytics-e2e-readiness.md`. No UI/design or embed allocation.
+Branch: `feature/s117-analytics-e2e-readiness`, based on main `245d261`.
+
+Acceptance: the affected navigation uses load and asserts the E2E layout site heading;
+three seconds of negative observation follow readiness; all current CSP, Google-request and
+runtime-state assertions remain. Fixture status, 106/7 test counts, timeout/retry settings and
+zero-flaky enforcement remain unchanged. Independent review and complete hosted gates are
+required. No product/dependency/migration/production-data changes. Merge is manual.
