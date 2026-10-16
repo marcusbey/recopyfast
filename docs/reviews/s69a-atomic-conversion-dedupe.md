@@ -138,3 +138,36 @@ release evidence and are not claimed here.
 
 Max severity: none
 Ship allowed: yes
+
+## Current-main integration review — 2026-10-16 (`8733f9d`)
+
+Current main advanced through the reviewed native-operation-id release to
+`8733f9d859284fe500fc5e02c5442c2674d0614f`. Its in-progress merge into s69a head
+`441de1fd677a4d23f164b60ac917e4c6fe396606` is clean: there are no unmerged index entries, both
+diff checks pass, and the resulting delta against `MERGE_HEAD` remains exactly the ten-file s69a
+story. Every s69a route, API test, real-database test, replay registration and migration file is
+unchanged from the previously reviewed/currently hosted story head.
+
+The s69a migration SHA-256 remains
+`ec048ba9faa41f5aa4e54e61a0d7cbaa56bb06446fe508b32d71ed30a3695812`. The route still meters the
+unauthenticated request before authorization, rate-limits the authorized site separately, proves
+site/test/variant ownership and conversion exposure before the bounded RPC, derives accounting
+from rows that actually landed, and advances completion cadence only from returned views. No
+alternate insert path, broadened grant or failure-masking branch was introduced.
+
+The incoming s108 release is preserved exactly. Both bulk routes use `node:crypto.randomUUID()`;
+the root manifest and lock have no direct `uuid` or `@types/uuid`; the only resolved UUID node is
+the independently owned `@lhci/cli@0.15.1 -> uuid@8.3.2`; and no UUID migration was added. The
+canonical s69a, s108 and s113 story entries all remain in the combined ledger.
+
+Fresh independent Node 24.14.0 verification passed the two s69a route suites and both s108 route
+suites: **4 suites / 76 tests**. The prior SQL/route and fixed-UUID neutralizations remain bound to
+unchanged hashes. No LSP diagnostic was required for this integration delta because neither s69a
+nor s108 TypeScript source changed during the merge.
+
+No new finding was introduced. This review permits the ordinary merge commit and normal current-head
+hooks. Hosted checks, production duplicate probing, migration application, PostgREST schema-cache
+smoke, deployment and private Devin availability remain separate evidence and are not claimed.
+
+Max severity: none
+Ship allowed: yes

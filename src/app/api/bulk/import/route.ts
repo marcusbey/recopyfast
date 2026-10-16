@@ -7,7 +7,7 @@ import {
   BulkImportRowResult,
   ContentElementMetadata,
 } from "@/types";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { validateVerbatimText } from "@/lib/security/discovered-text";
 import { parseCSV } from "@/lib/bulk/csv";
 import { MAX_IMPORT_BYTES, MAX_IMPORT_LABEL } from "@/lib/bulk/constants";
@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
     const writer = createServiceRoleClient();
 
     // Create bulk operation record
-    const operationId = uuidv4();
+    const operationId = randomUUID();
     const { error: operationError } = await supabase
       .from("bulk_operations")
       .insert({

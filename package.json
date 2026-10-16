@@ -91,7 +91,6 @@
     "tailwind-merge": "^3.3.1",
     "three": "^0.182.0",
     "tldts": "^6.1.86",
-    "uuid": "^11.1.0",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",
     "wordlist-english": "1.2.1"
@@ -113,7 +112,6 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.182.0",
-    "@types/uuid": "^10.0.0",
     "@types/winston": "^2.4.4",
     "concurrently": "^9.2.0",
     "dotenv": "^17.2.1",
