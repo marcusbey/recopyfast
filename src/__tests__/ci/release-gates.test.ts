@@ -66,10 +66,20 @@ describe("the database replay runs the production PostgreSQL major", () => {
     expect(majors).toEqual([PRODUCTION_PG_MAJOR]);
   });
 
-  it("names the replay's node test in the main CI job", () => {
-    expect(mainJob()).toContain(
-      "node --test scripts/__tests__/replay-checks.test.mjs",
+  it("runs every reviewed Node test through the shared fail-closed runner", () => {
+    const job = withoutComments(mainJob(), "#");
+
+    expect(job.match(/node scripts\/run-node-tests\.mjs/g) ?? []).toHaveLength(
+      1,
     );
+    expect(job).not.toMatch(/node --test scripts\/.+\.test\.mjs/);
+  });
+});
+
+describe("the browser inventories stay owned by their strict reporters", () => {
+  it("keeps the app and built-embed inventories at 106 and 7", () => {
+    expect(read("playwright.config.ts")).toContain("expected: 106");
+    expect(read("playwright.embed.config.ts")).toContain("expected: 7");
   });
 });
 
@@ -103,6 +113,21 @@ describe("every database suite runs against a database in CI", () => {
       '"src/__tests__/db/column-privileges.test.ts"',
     );
     expect(unnamed).toEqual([]);
+  });
+
+  it("keeps content/share database invariants out of optional API-suite gates", () => {
+    const optional = [
+      "src/__tests__/api/bulk/update-history-policy.test.ts",
+      "src/__tests__/api/sites/share-rls.test.ts",
+      "src/__tests__/api/sites/share-owner-lockout.test.ts",
+    ].filter((file) => {
+      const source = read(file);
+      return (
+        source.includes("describeWithDb") || source.includes("RCF_DB_TESTS")
+      );
+    });
+
+    expect(optional).toEqual([]);
   });
 });
 

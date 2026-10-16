@@ -11,6 +11,10 @@ describe("Playwright CI contract", () => {
     "utf8",
   );
   const packageManifest = readFileSync(join(ROOT, "package.json"), "utf8");
+  const nodeRunner = readFileSync(
+    join(ROOT, "scripts/run-node-tests.mjs"),
+    "utf8",
+  );
   const coreFlow = readFileSync(
     join(ROOT, "e2e/share-edit-publish.spec.ts"),
     "utf8",
@@ -184,19 +188,21 @@ describe("Playwright CI contract", () => {
     );
   });
 
-  it("runs the snapshot measurement tooling test beside the Stripe tooling test", () => {
+  it("runs the snapshot and Stripe tooling tests through the reviewed inventory", () => {
     // s65a review m5: `node --test` files are not Jest suites, so `npm test`
-    // never collects them. A script test that no CI step names guards nothing.
+    // never collects them. s116 keeps the two files explicit, but one shared
+    // runner now refuses any discovered script test that was not reviewed.
     const mainJob = workflow.slice(
       workflow.indexOf("\n  ci:\n"),
       workflow.indexOf("\n  e2e:\n"),
     );
 
-    expect(mainJob).toContain(
-      "node --test scripts/__tests__/sync-stripe-catalogue.test.mjs",
+    expect(mainJob).toContain("node scripts/run-node-tests.mjs");
+    expect(nodeRunner).toContain(
+      "scripts/__tests__/sync-stripe-catalogue.test.mjs",
     );
-    expect(mainJob).toContain(
-      "node --test scripts/__tests__/measure-published-snapshot.test.mjs",
+    expect(nodeRunner).toContain(
+      "scripts/__tests__/measure-published-snapshot.test.mjs",
     );
   });
 

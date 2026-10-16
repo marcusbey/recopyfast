@@ -5321,3 +5321,44 @@ Acceptance criteria:
 Complexity: 4. Dependencies: s114 editorial foundation, released s88 public discovery and s89
 human-publish boundary. Branch `feature/s115-editorial-demo-and-blog`. No new dependency,
 migration, API or embed change. Embed allocation: 0 bytes.
+
+## Story s116-ci-test-inventory — green CI means every approved test actually ran
+
+Owner request October 16: close the test-inventory gaps found on exact remote `main` `1cbf586`
+without touching provider systems, weakening a gate, changing browser inventories or colliding
+with the open Stripe-provider PR. Research: `docs/research/s116-ci-test-inventory.md`. Draft plan:
+`docs/plans/s116-ci-test-inventory.md` (`validated: yes`, owner checkpoint 2026-10-16). No Design step: this story has no UI.
+
+As the operator, I need a green required CI run to prove that every approved local test was
+discovered and executed in its reviewed environment, so a skipped, misplaced or newly-added test
+cannot disappear behind a successful aggregate count.
+
+Acceptance criteria:
+
+- [ ] The five existing fixture-only `scripts/**/*.test.mjs` files, including the 11-case analytics
+      conversion suite, plus the runner's focused fixture-only contract suite, are the six explicitly
+      reviewed entries in one fail-closed Node 24 inventory runner. Discovered-file equality is exact;
+      a missing or unexpected file is refused before any child runs. Zero-test, failed, skipped, todo
+      or cancelled results are red. An unreviewed provider-call test is rejected rather than executed.
+- [ ] The runner is invoked directly from the required main CI job without changing `package.json`
+      or `package-lock.json`; PR #90's package-script addition remains conflict-free. No dependency
+      is added and no live Stripe, Google, Supabase, Redis or other provider call is made.
+- [ ] The six conditionally skipped PostgreSQL cases are retired from their ad-hoc gates. Their three
+      substantive current assertions remain as effective-role and actual-write/history checks in
+      durable database suites on disposable PostgreSQL 17; the one stale authenticated-INSERT oracle
+      is replaced by the current service-role/no-web-write semantic; the two connectivity-only guards
+      are removed rather than counted as proof.
+- [ ] The obsolete 30-case `InteractiveHero` suite is deleted only after every still-current
+      behavior is mapped to existing current-contract component, integration or browser coverage;
+      assertions for UI that no longer exists are recorded as obsolete rather than rewritten to
+      pass against unrelated behavior.
+- [ ] A CI contract test and mutation proofs fail when an approved Node test disappears, a new
+      script test appears, a test reports zero/failure/skip/todo/cancellation, a DB suite falls back
+      to a placeholder, or the workflow bypasses the inventory runner.
+- [ ] The strict browser contracts remain exactly 106 app Playwright tests and 7 built-embed tests,
+      each with zero failed, skipped or flaky results. Coverage thresholds, PostgreSQL 17 replay,
+      dependency audits, lint, format, type-check and build remain at least as strict as on `main`.
+
+Complexity: 3. Dependencies: released s75 CI gates and current s68a/s56 database invariants.
+Branch `feature/s116-ci-test-inventory`. No migration, dependency, provider call, branch-protection
+change, package-manifest change, UI change or embed change. Embed allocation: 0 bytes.

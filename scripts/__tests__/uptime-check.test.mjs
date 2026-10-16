@@ -418,5 +418,7 @@ test("runs the tested script with the job token, bounded and serialized", () => 
 
 test("this file is a blocking CI step", () => {
   const ci = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
-  assert.match(ci, /run: node --test scripts\/__tests__\/uptime-check\.test\.mjs/);
+  const runner = readFileSync(resolve(REPO_ROOT, "scripts/run-node-tests.mjs"), "utf8");
+  assert.match(ci, /run: node scripts\/run-node-tests\.mjs/);
+  assert.match(runner, /scripts\/__tests__\/uptime-check\.test\.mjs/);
 });

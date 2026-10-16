@@ -6,9 +6,9 @@ import { render, screen, cleanup, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import EditableImage from "../EditableImage";
 
-// This repo's convention (see `InteractiveHero.test.tsx`): framer-motion is
-// swapped for plain elements, so the dialog leaves the DOM as soon as it
-// closes instead of after an exit animation jsdom never runs.
+// The maintained focused editor suites swap framer-motion for plain elements,
+// so the dialog leaves the DOM as soon as it closes instead of after an exit
+// animation jsdom never runs.
 jest.mock("framer-motion", () => ({
   motion: {
     div: ({ children, ...props }: React.ComponentProps<"div">) => (

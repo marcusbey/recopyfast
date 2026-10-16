@@ -14,9 +14,9 @@
  * scrollable viewport is the only thing the visitor scrolls, so that scroll now
  * has to count on its own; otherwise the tabs cycle every 6s while they read.
  *
- * Deliberately a separate file from `InteractiveHero.test.tsx`: that suite is a
- * `describe.skip` written against a version of this component that no longer
- * exists, and it mocks framer-motion flat, which would remove the ref this test
+ * This focused suite survives the deleted legacy InteractiveHero suite, which
+ * targeted a component version that no longer exists. That suite also mocked
+ * framer-motion flat; carrying that mock here would remove the ref this test
  * needs to reach the demo's scroller.
  */
 import {
