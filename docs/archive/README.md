@@ -23,6 +23,22 @@ For what is true now, start at [`../prd.md`](../prd.md).
 | `database-setup-legacy.md` | DB setup, hyphen variant — a duplicate of the above | Three overlapping DB setup docs existed; this is the oldest |
 | `execute-sql-commands.md` | Ad-hoc SQL execution notes | Folded into `operations/database-setup.md` scope |
 
+## October 12 remaining-work audit sequence
+
+These reports are historical, in the order below; “current”, “now” and pending statuses describe
+that report's capture, not the repository today. The 15:59 UTC checkpoint (11:59 Toronto time)
+predates the owner's later plan/release authorization and #81's 16:22:49 UTC squash merge
+(`20f95f5`). The operator's active goal and release artifacts are local operational records, not
+part of this archive publication. Use live PR/deployment evidence for current status.
+
+| Snapshot | Scope and capture boundary |
+| --- | --- |
+| [Recent work and Devin audit](2026-10-12-recent-work-devin-audit.md) | Initial audit and repair follow-through; before the remaining-work goal and release authorization |
+| [Embed budget feasibility](2026-10-12-embed-budget-feasibility.md) | Measured experiments on reviewed s67b, before any new transport implementation |
+| [Release proposal review](2026-10-12-reviewed-fixes-release-review.md) | Independent readiness to request approval; the referenced executor and proposal were operator-local |
+| [Preserved-work inventory](2026-10-12-preserved-work-inventory.md) | Read-only preservation census; later active-lane annotations are labeled |
+| [15:59 UTC checkpoint](2026-10-12-remaining-work-checkpoint.md) | Latest pre-authorization summary; calculator retrospective docs opened in PR #100, not merged |
+
 ## Rule
 
 Do not edit files in this folder. If something here is still needed, promote it: move it
