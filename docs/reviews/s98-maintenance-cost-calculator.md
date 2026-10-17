@@ -65,3 +65,94 @@ static) and the Playwright spec against `next start` all pass.
 
 Max severity: minor
 Ship allowed: yes
+
+## Docs-only retrospective follow-up — 2026-10-12
+
+Fresh-context review of the two retrospective backfills only:
+
+- `docs/research/s98-maintenance-cost-calculator.md`
+- `docs/designs/s98-maintenance-cost-calculator.md`
+
+The review baseline was `origin/main` at `bc6e503`. The branch head is the old s98 feature head
+`05bdbca`; its staged main-integration entries compare cleanly with `origin/main` and were not
+treated as new s98 work. No source, test, plan, research or design file was changed by this review.
+
+### Checks performed
+
+- Compared every behavioral claim with the calculator source, its direct unit/component/page tests,
+  the current s98 plan and the existing review.
+- Compared the UI description with `docs/design-system.md`, the merged s96 free-tools design and the
+  current `/tools` implementation. The fixed colors in the exported result card are accurately
+  identified as an external-host contract; the surrounding page follows the accepted pinned-light
+  free-tools surface.
+- Confirmed that the backfills identify themselves as retrospective and do not claim that research,
+  design, plan validation or review preceded implementation.
+- Confirmed the local history: `9541589` is the s98 merge commit for PR #92, and `05bdbca` contains
+  the reviewed live-region, cents/rounding and empty-field fixes described by the research.
+- Ran the six direct calculator/page Jest suites under the repository's Node 24 test environment:
+  **6 suites passed, 99 tests passed, 0 failed**.
+
+Mutation testing was not repeated: this follow-up changes documentation only, and the assigned write
+scope permits only this review append. The original independent review already records the s98 code
+fixes; this pass independently read the tests and ran the focused suites without changing source.
+
+### Findings
+
+1. **Minor — merge/source evidence is described as “shipped”.** Both backfills repeatedly call the
+   code, page, feature or interaction “shipped” while anchoring the reconstruction only to
+   `origin/main` and expressly stating that no production access occurred. In this repository,
+   merge, deployment and browser observation are separate evidence lanes. Replace “shipped” with
+   “merged” or “current source on `origin/main`” unless a separate deployment record is cited. The
+   explicit retrospective disclaimers prevent this wording from becoming a false pre-implementation
+   approval claim, but the status word is still stronger than the evidence reviewed here.
+2. **Minor — assistive-technology effect is stated more strongly than the tests prove.** The DOM
+   tests prove that the polite live region keeps its old text during typing and receives the final
+   headline after 500 ms. They do not prove how a real screen reader queues or speaks that mutation.
+   The research sentence that the debounce “does not queue” announcements and the design sentence
+   that it “prevent[s] queued announcements” should be framed as intent. The research correctly
+   discloses that no attended screen-reader transcript exists.
+3. **Minor — part of the responsive section is implementation intent, not measured capture.** The
+   existing Playwright spec measures the working 390 px flow and asserts document scroll width is at
+   most 390 px. It does not capture the 1440 px layout or directly measure every wrapping, control
+   width, card-capping, FAQ and CTA statement in the design. Label those remaining claims as intent
+   inferred from the current Tailwind classes. The research already discloses the absence of a fresh
+   390/1440 cross-browser visual capture; the design should preserve that boundary where it states
+   the responsive contract.
+
+No critical or major defect was found. The arithmetic, URL contract, inert card shape, timer values,
+empty state, source ownership, design-system references, PR #92 review history and test inventory are
+otherwise supported by the current repository.
+
+### Could not verify in this pass
+
+- Production deployment or the rendered production page; no production/provider access was used.
+- Current GitHub open/closed status for PR #94. Local refs support the separate unmerged
+  `s107-google-analytics` branch and its PR #94 identity, but provider state was intentionally not
+  queried.
+- Real screen-reader output, 1440 px rendering, cross-browser visual behavior, or CMS preservation of
+  the pasted card. A human follow-up would open the production build at 390 px and 1440 px, run the
+  calculator with keyboard and an attended screen reader, and paste the card into representative CMS
+  editors.
+
+Max severity: minor
+Ship allowed: yes
+
+### Resolution recheck — 2026-10-12
+
+The author changed only the two retrospective backfills and resolved all three findings:
+
+- “shipped” status wording now says merged code/current page source on `origin/main`;
+- the 500 ms live-region benefit is explicitly intent, with tests limited to DOM timing and no
+  claim of attended screen-reader behavior;
+- the responsive section is explicitly a CSS-derived contract, distinguishes the existing 390 px
+  flow/no-horizontal-scroll check, and discloses the lack of fresh 1440 px or cross-browser capture.
+
+The repaired wording remains retrospective and does not create pre-implementation approval,
+deployment, production-browser or assistive-technology evidence. No tests were repeated for this
+prose-only correction; the focused 6-suite, 99-test passing run above remains the source-behavior
+evidence.
+
+No unresolved finding remains in the two docs-only artifacts.
+
+Max severity: none
+Ship allowed: yes
