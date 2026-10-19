@@ -344,15 +344,20 @@ export default function EditableEditorialHero() {
             Make time for the work that matters.
           </span>
         </p>
-        {/* Establish signup as a fresh nonce document (ADR 059). */}
-        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-        <a
-          href="/signup"
-          data-cta-location="editorial_hero"
-          className={styles.primaryButton}
-        >
-          Start your free trial
-        </a>
+        <div className={styles.heroActions}>
+          {/* Establish signup as a fresh nonce document (ADR 059). */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
+            href="/signup"
+            data-cta-location="editorial_hero"
+            className={styles.primaryButton}
+          >
+            Start your free trial
+          </a>
+          <a href="#product-tour" className={styles.secondaryButton}>
+            See how it works
+          </a>
+        </div>
       </div>
     </section>
   );

@@ -66,6 +66,14 @@ describe("EditableEditorialHero", () => {
     expect(screen.queryByRole("button", { name: /reset|replay/i })).toBeNull();
   });
 
+  it("links the secondary hero action to the product walkthrough", () => {
+    render(<EditableEditorialHero />);
+
+    expect(
+      screen.getByRole("link", { name: "See how it works" }),
+    ).toHaveAttribute("href", "#product-tour");
+  });
+
   it("prevents line breaks and inserts pasted text as plaintext", () => {
     render(<EditableEditorialHero />);
     const firstLine = screen.getByRole("textbox", { name: "Headline line 1" });

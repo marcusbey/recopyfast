@@ -10,6 +10,7 @@ import {
 } from "@/hooks/useFoundingOffer";
 import EditableEditorialHero from "./EditableEditorialHero";
 import InteractiveHero from "./InteractiveHero";
+import ProductTour from "./ProductTour";
 import styles from "./editorial-homepage.module.css";
 
 export default function EditorialHomePage() {
@@ -20,6 +21,8 @@ export default function EditorialHomePage() {
       <Header variant="editorial" />
       <main>
         <EditableEditorialHero />
+
+        <ProductTour />
 
         <section className={styles.realDemo} data-testid="real-demo-section">
           <div className={styles.sectionHeading}>

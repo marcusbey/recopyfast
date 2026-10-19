@@ -15,18 +15,25 @@ jest.mock("../InteractiveHero", () => ({
   default: () => <div data-testid="real-interactive-demo" />,
 }));
 
+jest.mock("../ProductTour", () => ({
+  __esModule: true,
+  default: () => <section id="product-tour" data-testid="product-tour" />,
+}));
+
 jest.mock("@/components/sections/Pricing", () => ({
   __esModule: true,
   default: () => <section id="pricing" data-testid="pricing" />,
 }));
 
 describe("EditorialHomePage", () => {
-  it("places the real interactive demo immediately after the editable hero", () => {
+  it("places the walkthrough between the editable hero and real interactive demo", () => {
     render(<EditorialHomePage />);
 
     const hero = screen.getByTestId("editorial-hero");
+    const tour = screen.getByTestId("product-tour");
     const demo = screen.getByTestId("real-demo-section");
-    expect(hero.nextElementSibling).toBe(demo);
+    expect(hero.nextElementSibling).toBe(tour);
+    expect(tour.nextElementSibling).toBe(demo);
     expect(demo).toContainElement(screen.getByTestId("real-interactive-demo"));
   });
 

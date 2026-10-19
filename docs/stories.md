@@ -5378,3 +5378,27 @@ three seconds of negative observation follow readiness; all current CSP, Google-
 runtime-state assertions remain. Fixture status, 106/7 test counts, timeout/retry settings and
 zero-flaky enforcement remain unchanged. Independent review and complete hosted gates are
 required. No product/dependency/migration/production-data changes. Merge is manual.
+
+
+## Story s118-homepage-product-tour — see the workflow before signing up
+
+Draft requested October 19, 2026. As a prospect, I can see setup, editing, publishing and
+change tracking without an account. Complexity 3; dependencies: released s114/s115 and
+existing install/Changes flows. Branch feature/s118-homepage-product-tour; embed allocation 0.
+Within existing PRD acquisition/core-loop scope. No backend feature or new dependency.
+
+Acceptance:
+- [x] Hero outline visible on all sides at 320/390/768/901/1280/1440px; preserve three lines,
+      long-text scrolling, local edits, reduced motion and keyboard editing.
+- [x] “See how it works” opens a six-chapter tour with actual UI: register/generate snippet,
+      install, edit, publish/revisit, find changes, inspect dated before/after history.
+- [x] One sample site and one hours edit connect all screens; captions explain concrete benefits.
+- [x] No signup, mutations or autoplay; keyboard/mobile use and failed-media states work.
+- [x] Existing InteractiveHero remains below the walkthrough; /demo, /product, pricing and consent stay intact.
+- [x] Screenshot tour is complete without video. Only add optional owner recording with an actual
+      asset, captions, controls and poster; no empty player or fictional publish proof.
+- [x] Fresh coherent captures replace review-only historical QA images before release; no invented
+      customer outcomes, conversion gains or exposed credentials. Admin-only identity history is explicit.
+- [ ] Required checks and independent review pass; owner authorized merge on October 19, 2026; CI and deployment verification remain pending.
+
+Research/design/plan use the matching story path. Plan validated by the owner in chat on October 19, 2026.
