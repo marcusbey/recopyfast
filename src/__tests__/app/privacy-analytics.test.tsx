@@ -118,3 +118,16 @@ describe("/privacy — Google Analytics", () => {
     );
   });
 });
+
+/** ADR 073 — DataFast is a processor on every page, so /privacy names it. */
+describe("/privacy — DataFast", () => {
+  it("lists DataFast among the processors, with where it runs", () => {
+    render(<Privacy />);
+
+    const item = screen.getByText(/^DataFast —/);
+
+    expect(item.textContent).toMatch(/every\s+page of this website/);
+    expect(item.textContent).toMatch(/sign-up/);
+    expect(item.textContent).toMatch(/never in the ReCopyFast script/);
+  });
+});

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/theme-init-script";
+import { DATAFAST_ORIGIN } from "@/lib/analytics/datafast";
 
 /**
  * The Content Security Policies this app sends — two of them, by ADR 059.
@@ -102,6 +103,13 @@ export interface ContentSecurityPolicyOptions {
    * names Google's hosts.
    */
   analytics?: boolean;
+  /**
+   * DataFast may run (ADR 073): its origin joins script-src and connect-src
+   * under BOTH policies, because DataFast runs on every page — the signup
+   * funnel it attributes lives on the nonce surface. Unlike `analytics`, this
+   * is not dropped under a nonce. The middleware passes `isDataFastEnabled()`.
+   */
+  dataFast?: boolean;
 }
 
 /**
@@ -197,11 +205,21 @@ export function buildContentSecurityPolicy({
   isDev,
   env = {},
   analytics = false,
+  dataFast = false,
 }: ContentSecurityPolicyOptions): string {
   const ga = analytics && !nonce ? GOOGLE_ANALYTICS_SOURCES : null;
-  const scripts = [scriptSources(nonce, isDev), ...(ga?.script ?? [])].join(
-    " ",
-  );
+  // Under the nonce policy `'strict-dynamic'` makes browsers IGNORE this host
+  // entry: there the script loads because Next stamps the nonce on its preload
+  // and inserts it from its own trusted runtime (DataFastScript.tsx). The
+  // entry is what admits it on the static policy, and on a CSP2 browser that
+  // falls back to host sources. connect-src is honoured under both: the
+  // script's beacons go to `${DATAFAST_ORIGIN}/api/events`.
+  const df = dataFast ? [DATAFAST_ORIGIN] : [];
+  const scripts = [
+    scriptSources(nonce, isDev),
+    ...(ga?.script ?? []),
+    ...df,
+  ].join(" ");
   return [
     "default-src 'self'",
     `script-src ${scripts}`,
@@ -212,7 +230,7 @@ export function buildContentSecurityPolicy({
     "style-src 'self' 'unsafe-inline'",
     ["img-src 'self' data: https:", ...(ga?.img ?? [])].join(" "),
     "font-src 'self' https:",
-    `connect-src ${[...connectSources(env, isDev), ...(ga?.connect ?? [])].join(" ")}`,
+    `connect-src ${[...connectSources(env, isDev), ...(ga?.connect ?? []), ...df].join(" ")}`,
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
