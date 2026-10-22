@@ -94,7 +94,10 @@ const CUSTOMER_ROW = {
  * (upsert/update) resolve with `{ error: WRITE_ERROR }` — the exact shape
  * supabase-js returns on a failed write.
  */
-function buildClient(writeResult: { error: unknown }) {
+function buildClient(
+  writeResult: { error: unknown },
+  claimResult: { error: unknown } = { error: null },
+) {
   // `update().eq()` is awaitable on its own AND chainable into `.select("id")`,
   // because the subscription handlers ask for the affected rows back (a zero-row
   // update is not an error — see assertRowMatched) while customer.updated does
@@ -129,7 +132,10 @@ function buildClient(writeResult: { error: unknown }) {
       eq: jest.fn(() => thenable),
       single: jest.fn(async () => ({ data: row, error: null })),
       maybeSingle: jest.fn(async () => ({ data: row, error: null })),
-      insert: jest.fn(async () => ({ error: null })),
+      // The only insert the routed events make is the billing_events claim.
+      insert: jest.fn(async () =>
+        table === "billing_events" ? claimResult : { error: null },
+      ),
       upsert: jest.fn(async () => writeResult),
       update: jest.fn(() => {
         const updateChain: Record<string, unknown> = {
@@ -238,12 +244,20 @@ describe("Stripe webhook — successful writes still succeed", () => {
     await expect(response.json()).resolves.toMatchObject({ received: true });
   });
 
-  it("still answers 200 on a concurrent duplicate (23505)", async () => {
-    // A unique violation means another delivery already did the work. Retrying
-    // would never succeed, so 200 is correct here and 500 would be wrong.
-    mockServiceClient.mockReturnValue(
-      buildClient({ error: { code: "23505", message: "duplicate key" } }),
+  it("answers 200 when a concurrent delivery already claimed the event (23505 on the claim)", async () => {
+    // The billing_events stripe_event_id claim is the duplicate detector: a
+    // unique violation THERE means another delivery owns this event.
+    const client = buildClient(
+      { error: null },
+      {
+        error: {
+          code: "23505",
+          message:
+            'duplicate key value violates unique constraint "billing_events_stripe_event_id_key"',
+        },
+      },
     );
+    mockServiceClient.mockReturnValue(client);
     constructEvent.mockReturnValue({
       id: "evt_dup",
       type: "customer.subscription.created",
@@ -253,6 +267,37 @@ describe("Stripe webhook — successful writes still succeed", () => {
     const response = await POST(request());
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ duplicate: true });
+    // The handler never ran: no subscription write was attempted.
+    expect(client.from).not.toHaveBeenCalledWith("billing_subscriptions");
+  });
+
+  it("returns 500 when a handler write hits a genuine unique violation", async () => {
+    // The claim succeeded, so this delivery owns the event. A 23505 from a
+    // HANDLER write is a real constraint failure, not a duplicate delivery:
+    // answering 200 would ack an event that was never marked processed, Stripe
+    // would stop retrying, and the entitlement would be silently lost.
+    mockServiceClient.mockReturnValue(
+      buildClient({
+        error: {
+          code: "23505",
+          message:
+            'duplicate key value violates unique constraint "billing_subscriptions_stripe_subscription_id_key"',
+        },
+      }),
+    );
+    constructEvent.mockReturnValue({
+      id: "evt_handler_unique",
+      type: "customer.subscription.created",
+      data: { object: SUBSCRIPTION },
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.not.toMatchObject({
+      received: true,
+    });
   });
 });
 

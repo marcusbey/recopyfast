@@ -58,8 +58,7 @@ export async function createOrGetCustomer(
    * object exists in test mode, but a live mode key was used"). Every
    * account that ever checked out against test Stripe hits this the moment
    * production goes live, and the stale row failed their checkout with a 500
-   * forever. Stale is stale: discard the row and enrol again under the key
-   * actually in use.
+   * forever.
    */
   const isStaleCustomer = (error: unknown): boolean => {
     if (
@@ -71,6 +70,53 @@ export async function createOrGetCustomer(
     return (error as { code?: string } | null)?.code === "resource_missing";
   };
 
+  /**
+   * Point the EXISTING row at a fresh customer under the key in use.
+   *
+   * Replaced in place, never deleted: `billing_subscriptions` and
+   * `billing_invoices` reference `billing_customers(id)` with no ON DELETE
+   * action, so deleting the row of any account with billing history is
+   * refused. The earlier delete-then-insert ignored that refusal, collided on
+   * the `user_id` UNIQUE, re-read the same stale row and failed checkout
+   * again — live, for a test-mode QA account (req_rvMVo5WjK0VyJ4).
+   *
+   * Idempotent: the Stripe create is keyed on the stale id, so a retry after a
+   * failed write replays the same customer instead of opening another, and
+   * the UPDATE is a compare-and-swap on the stale id, so a concurrent recovery
+   * that already swapped the row wins and is adopted.
+   */
+  const replaceStaleCustomer = async (stale: Customer) => {
+    const stripeCustomer = await stripe.customers.create(
+      { email, name, metadata: { user_id: userId } },
+      {
+        idempotencyKey: `billing-customer-replace:${userId}:${stale.stripe_customer_id}`,
+      },
+    );
+
+    const { data: replaced, error: replaceError } = await supabase
+      .from("billing_customers")
+      .update({ stripe_customer_id: stripeCustomer.id })
+      .eq("id", stale.id)
+      .eq("stripe_customer_id", stale.stripe_customer_id)
+      .select()
+      .maybeSingle();
+
+    if (replaceError) {
+      throw new Error(
+        `Failed to replace stale customer: ${replaceError.message}`,
+      );
+    }
+    if (replaced) {
+      return { customer: replaced as Customer, stripeCustomer };
+    }
+
+    const current = await readCustomer();
+    if (!current) {
+      throw new Error("Billing customer disappeared during replacement");
+    }
+    return resolveStripeCustomer(current);
+  };
+
   const existingCustomer = await readCustomer();
   if (existingCustomer) {
     try {
@@ -79,7 +125,7 @@ export async function createOrGetCustomer(
       if (!isStaleCustomer(error)) {
         throw error;
       }
-      await supabase.from("billing_customers").delete().eq("user_id", userId);
+      return replaceStaleCustomer(existingCustomer);
     }
   }
 
