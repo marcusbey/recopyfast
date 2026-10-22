@@ -93,8 +93,13 @@ test.describe("s79 content security policy", () => {
     const analyticsScriptSource = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID
       ? " https://www.googletagmanager.com"
       : "";
+    // ADR 073: DataFast's origin follows on every policy unless disabled.
+    const dataFastScriptSource =
+      process.env.NEXT_PUBLIC_DATAFAST_DISABLED === "true"
+        ? ""
+        : " https://datafa.st";
     expect(headers["content-security-policy"]).toContain(
-      `script-src 'self' 'unsafe-inline'${analyticsScriptSource};`,
+      `script-src 'self' 'unsafe-inline'${analyticsScriptSource}${dataFastScriptSource};`,
     );
     expect(nonceOf(headers["content-security-policy"])).toBeUndefined();
     expect(headers["strict-transport-security"]).toBe(

@@ -266,6 +266,9 @@ jobs:
       # country header every other spec sees the consent banner and no gtag.js.
       NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-E2ETEST000"
       GA4_MP_ENABLED: "0"
+      # ADR 073: no live third-party script in e2e. The flag drops both the
+      # DataFast script and its CSP origin; the specs assert that disabled shape.
+      NEXT_PUBLIC_DATAFAST_DISABLED: "true"
       # Public test fixture only; production uses a separately provisioned random key.
       ANALYTICS_CONSENT_SIGNING_KEY: "abababababababababababababababababababababababababababababababab"
       CI: "true"

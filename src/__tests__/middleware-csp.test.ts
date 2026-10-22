@@ -202,6 +202,8 @@ describe("the marketing surface keeps today's policy", () => {
       expect(responsePolicy(response)).toBe(
         buildContentSecurityPolicy({
           isDev: false,
+          // ADR 073: DataFast's origin is on every page by default.
+          dataFast: true,
           env: {
             NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
             NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
@@ -240,7 +242,10 @@ describe("Google Analytics in the policy", () => {
 
     const policy = responsePolicy(await run(pathname));
 
-    expect(policy).toContain(`script-src 'self' 'unsafe-inline' ${GTM};`);
+    // ADR 073: DataFast's origin follows Google's on every page.
+    expect(policy).toContain(
+      `script-src 'self' 'unsafe-inline' ${GTM} https://datafa.st;`,
+    );
     expect(policy).toContain("https://*.google-analytics.com");
     expect(getScriptNonceFromHeader(policy)).toBeUndefined();
   });
@@ -279,6 +284,64 @@ describe("Google Analytics in the policy", () => {
 
     expect(responsePolicy(await run("/"))).not.toContain("google");
   });
+});
+
+/**
+ * ADR 073 — DataFast runs on every page, so its origin is on both policies:
+ * the marketing pages and the nonce app surface where the signup funnel it
+ * attributes lives. `NEXT_PUBLIC_DATAFAST_DISABLED=true` removes it everywhere.
+ */
+describe("DataFast in the policy", () => {
+  const saved = process.env.NEXT_PUBLIC_DATAFAST_DISABLED;
+  const DF = "https://datafa.st";
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env.NEXT_PUBLIC_DATAFAST_DISABLED;
+    else process.env.NEXT_PUBLIC_DATAFAST_DISABLED = saved;
+  });
+
+  it.each([
+    ["/", false],
+    ["/compare/webflow-editor", false],
+    ["/pricing", false],
+    ["/signup", false],
+    ["/login", false],
+    ["/dashboard/sites", true],
+  ] as const)(
+    "%s allows datafa.st scripts and beacons",
+    async (pathname, isSignedIn) => {
+      delete process.env.NEXT_PUBLIC_DATAFAST_DISABLED;
+      getUser.mockResolvedValue({
+        data: { user: isSignedIn ? { id: "user-1" } : null },
+      });
+
+      const response = await run(pathname);
+      const policy = responsePolicy(response);
+      const directive = (name: string) =>
+        policy
+          .split(";")
+          .map((part) => part.trim())
+          .find((part) => part.startsWith(`${name} `)) ?? "";
+
+      expect(directive("script-src").split(" ")).toContain(DF);
+      expect(directive("script-src-elem").split(" ")).toContain(DF);
+      expect(directive("connect-src").split(" ")).toContain(DF);
+      if (forwardedPolicy(response) !== null) {
+        // The nonce surface: Next renders with the same policy it sends.
+        expect(forwardedPolicy(response)).toBe(policy);
+        expect(getScriptNonceFromHeader(policy)).toEqual(expect.any(String));
+      }
+    },
+  );
+
+  it.each(["/", "/signup", "/login"])(
+    "%s names no datafa.st when NEXT_PUBLIC_DATAFAST_DISABLED=true",
+    async (pathname) => {
+      process.env.NEXT_PUBLIC_DATAFAST_DISABLED = "true";
+
+      expect(responsePolicy(await run(pathname))).not.toContain("datafa.st");
+    },
+  );
 });
 
 describe("legacy headers", () => {

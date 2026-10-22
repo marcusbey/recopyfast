@@ -30,12 +30,17 @@ jest.mock("@/lib/billing/trial", () => ({
   ensureTrialStarted: jest.fn(),
 }));
 
+jest.mock("@/lib/monitoring/auth-error-report", () => ({
+  reportAuthError: jest.fn(),
+}));
+
 jest.mock("@/app/auth/public-origin", () => ({
   resolvePublicOrigin: () => "https://recopyfast.test",
 }));
 
 import { GET } from "@/app/auth/callback/route";
 import { ensureTrialStarted } from "@/lib/billing/trial";
+import { reportAuthError } from "@/lib/monitoring/auth-error-report";
 
 const asMock = (fn: unknown) => fn as jest.Mock;
 
@@ -114,6 +119,25 @@ describe("GET /auth/callback", () => {
     expect(ensureTrialStarted).not.toHaveBeenCalled();
     expect(mockGetUser).not.toHaveBeenCalled();
     expect(destination(response)).toBe("/auth/error");
+  });
+
+  it("reports a failed code exchange to Sentry", async () => {
+    const error = { message: "invalid flow state", code: "flow_state_expired" };
+    mockExchangeCodeForSession.mockResolvedValue({ error });
+
+    await GET(request(`${ORIGIN}/auth/callback?code=abc`));
+
+    expect(reportAuthError).toHaveBeenCalledTimes(1);
+    expect(reportAuthError).toHaveBeenCalledWith(
+      "exchangeCodeForSession",
+      error,
+    );
+  });
+
+  it("reports nothing when the exchange succeeds", async () => {
+    await GET(request(`${ORIGIN}/auth/callback?code=abc`));
+
+    expect(reportAuthError).not.toHaveBeenCalled();
   });
 
   it("attempts nothing when there is no code at all", async () => {

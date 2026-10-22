@@ -297,6 +297,14 @@ export default function Privacy() {
                 Google Analytics — visit statistics for our public pages (see
                 section 6)
               </li>
+              {/* ADR 073: DataFast runs on every page of this website,
+                  sign-in, sign-up and the dashboard included, and never in
+                  the ReCopyFast script on customers' websites. */}
+              <li>
+                DataFast — visit statistics and sign-up attribution on every
+                page of this website, including sign-in, sign-up and your
+                dashboard (never in the ReCopyFast script on your website)
+              </li>
             </ul>
 
             <h3 className="text-lg font-medium text-slate-800 mb-3">

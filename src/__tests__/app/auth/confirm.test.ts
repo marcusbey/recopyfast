@@ -23,7 +23,12 @@ jest.mock("@/lib/billing/trial", () => ({
   ensureTrialStarted: jest.fn(),
 }));
 
+jest.mock("@/lib/monitoring/auth-error-report", () => ({
+  reportAuthError: jest.fn(),
+}));
+
 import { GET } from "@/app/auth/confirm/route";
+import { reportAuthError } from "@/lib/monitoring/auth-error-report";
 import { ensureTrialStarted } from "@/lib/billing/trial";
 import type { NextRequest } from "next/server";
 
@@ -91,6 +96,18 @@ describe("GET /auth/confirm", () => {
 
     expect(ensureTrialStarted).not.toHaveBeenCalled();
     expect(destination(response)).toBe("/auth/error");
+  });
+
+  it("reports a failed verification to Sentry, tagged with the OTP type", async () => {
+    const error = { message: "expired", code: "otp_expired" };
+    mockVerifyOtp.mockResolvedValue({ error });
+
+    await GET(request(CONFIRM));
+
+    expect(reportAuthError).toHaveBeenCalledTimes(1);
+    expect(reportAuthError).toHaveBeenCalledWith("verifyOtp", error, {
+      otp_type: expect.any(String),
+    });
   });
 
   it("attempts nothing for a link with no token at all", async () => {

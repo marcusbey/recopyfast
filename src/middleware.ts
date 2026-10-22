@@ -16,6 +16,7 @@ import {
 } from "@/lib/monitoring/sentry-tunnel-guard";
 import { getMeasurementId } from "@/lib/analytics/google-analytics/measurement-id";
 import { isAnalyticsRoute } from "@/lib/analytics/google-analytics/routes";
+import { isDataFastEnabled } from "@/lib/analytics/datafast";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -166,6 +167,10 @@ export async function middleware(request: NextRequest) {
     // under a nonce, and `isAnalyticsRoute` excludes every nonce path anyway.
     analytics:
       isAnalyticsRoute(request.nextUrl.pathname) && getMeasurementId() !== null,
+    // ADR 073: DataFast runs on every page, the nonce surface included (the
+    // signup funnel it attributes is there), so its origin is on both
+    // policies whenever the root layout renders its script.
+    dataFast: isDataFastEnabled(),
     // Named one by one, as before s79: these are the origins connect-src is
     // derived from, and nothing else in the environment reaches the policy.
     env: {

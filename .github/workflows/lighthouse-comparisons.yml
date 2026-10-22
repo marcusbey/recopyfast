@@ -31,6 +31,8 @@ jobs:
       # takes the consent-required path production serves the EEA: the init
       # script and the banner, and no request to Google.
       NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-E2ETEST000"
+      # ADR 073: score our pages, not a live third-party script.
+      NEXT_PUBLIC_DATAFAST_DISABLED: "true"
 
     steps:
       - name: Checkout repository

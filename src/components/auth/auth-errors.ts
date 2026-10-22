@@ -9,6 +9,8 @@
  *     debugging.
  */
 
+import { reportAuthError } from "@/lib/monitoring/auth-error-report";
+
 /** Fallback shown when an error cannot be classified. */
 const GENERIC_MESSAGE =
   "Something went wrong. Please try again in a few moments.";
@@ -104,4 +106,6 @@ export function getAuthErrorMessage(error: unknown): string {
  */
 export function logAuthError(context: string, error: unknown): void {
   console.error(`[auth] ${context}`, error);
+  // The console above is the customer's browser; operators only see Sentry.
+  reportAuthError(context, error);
 }

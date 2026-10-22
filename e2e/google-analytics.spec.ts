@@ -162,8 +162,13 @@ test.describe("s107 Google Analytics: a visitor outside the EEA", () => {
       { waitUntil: "load" },
     );
     const policy = response?.headers()["content-security-policy"] ?? "";
+    // ADR 073: DataFast's origin follows on every policy unless disabled.
+    const dataFastScriptSource =
+      process.env.NEXT_PUBLIC_DATAFAST_DISABLED === "true"
+        ? ""
+        : " https://datafa.st";
     expect(policy).toContain(
-      "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com;",
+      `script-src 'self' 'unsafe-inline' https://www.googletagmanager.com${dataFastScriptSource};`,
     );
     expect(policy).toContain("https://*.google-analytics.com");
     expect(policy).not.toMatch(/'nonce-/);

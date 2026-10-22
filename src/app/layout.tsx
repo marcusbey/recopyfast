@@ -7,6 +7,7 @@ import {
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { GoogleAnalytics } from "@/components/analytics/GoogleAnalytics";
+import { DataFastScript } from "@/components/analytics/DataFastScript";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -145,6 +146,12 @@ export default function RootLayout({
           so it follows client navigations and can switch itself off.
         */}
         <GoogleAnalytics />
+        {/*
+          DataFast: every page, marketing and app surface alike, outside the
+          GA consent gate (CTO decision). Its nonce comes from Next on the
+          app surface — see DataFastScript.tsx before moving it.
+        */}
+        <DataFastScript />
       </body>
     </html>
   );

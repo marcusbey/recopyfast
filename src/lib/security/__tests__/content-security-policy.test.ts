@@ -216,6 +216,99 @@ describe("Google Analytics sources", () => {
   });
 });
 
+/**
+ * ADR 073 — DataFast on every page. Unlike GA, its origin reaches BOTH
+ * policies: the signup funnel it attributes lives on the nonce surface.
+ */
+describe("DataFast sources", () => {
+  const DF = "https://datafa.st";
+
+  it("adds datafa.st to script-src and connect-src of the static policy", () => {
+    const policy = directives(
+      buildContentSecurityPolicy({ isDev: false, env: {}, dataFast: true }),
+    );
+
+    expect(policy["script-src"]).toBe(`'self' 'unsafe-inline' ${DF}`);
+    expect(policy["script-src-elem"]).toBe(policy["script-src"]);
+    expect(policy["connect-src"]).toBe(`'self' ${DF}`);
+  });
+
+  it("adds datafa.st to the nonce policy too, after the nonce sources", () => {
+    const policy = directives(
+      buildContentSecurityPolicy({
+        nonce: NONCE,
+        isDev: false,
+        env: {},
+        dataFast: true,
+      }),
+    );
+
+    expect(policy["script-src"]).toBe(
+      `'nonce-${NONCE}' 'strict-dynamic' ${THEME_INIT_SCRIPT_HASH} 'self' 'unsafe-inline' ${DF}`,
+    );
+    expect(policy["script-src-elem"]).toBe(policy["script-src"]);
+    expect(policy["connect-src"]).toBe(`'self' ${DF}`);
+  });
+
+  it("keeps the nonce Next extracts, and the static policy nonce-free", () => {
+    expect(
+      getScriptNonceFromHeader(
+        buildContentSecurityPolicy({
+          nonce: NONCE,
+          isDev: false,
+          env: {},
+          dataFast: true,
+        }),
+      ),
+    ).toBe(NONCE);
+    expect(
+      buildContentSecurityPolicy({ isDev: false, env: {}, dataFast: true }),
+    ).not.toMatch(/'nonce-|'sha256-|'strict-dynamic'/);
+  });
+
+  it("changes nothing but script and connect sources", () => {
+    const withDf = directives(
+      buildContentSecurityPolicy({ isDev: false, env: {}, dataFast: true }),
+    );
+    const without = directives(
+      buildContentSecurityPolicy({ isDev: false, env: {} }),
+    );
+
+    expect(Object.keys(withDf)).toEqual(Object.keys(without));
+    for (const name of Object.keys(without)) {
+      if (["script-src", "script-src-elem", "connect-src"].includes(name)) {
+        continue;
+      }
+      expect([name, withDf[name]]).toEqual([name, without[name]]);
+    }
+  });
+
+  it("sits after Google's hosts when both run on a marketing page", () => {
+    const policy = directives(
+      buildContentSecurityPolicy({
+        isDev: false,
+        env: {},
+        analytics: true,
+        dataFast: true,
+      }),
+    );
+
+    expect(policy["script-src"]).toBe(
+      `'self' 'unsafe-inline' https://www.googletagmanager.com ${DF}`,
+    );
+    expect(policy["connect-src"].split(" ").at(-1)).toBe(DF);
+  });
+
+  it("is absent unless asked", () => {
+    expect(buildContentSecurityPolicy({ isDev: false, env: {} })).not.toContain(
+      "datafa.st",
+    );
+    expect(
+      buildContentSecurityPolicy({ nonce: NONCE, isDev: false, env: {} }),
+    ).not.toContain("datafa.st");
+  });
+});
+
 describe("the theme script's hash", () => {
   it("is the SHA-256 of the script the root layout renders", () => {
     const expected = createHash("sha256")
