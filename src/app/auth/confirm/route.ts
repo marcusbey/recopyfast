@@ -8,6 +8,7 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 import { sanitizeNext } from "../sanitize-next";
 import { resolvePublicOrigin } from "../public-origin";
 import { ensureTrialStarted } from "@/lib/billing/trial";
+import { reportAuthError } from "@/lib/monitoring/auth-error-report";
 
 /**
  * Email-link confirmation via one-time token hash.
@@ -115,6 +116,7 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     console.error("[auth] verifyOtp failed", { type, message: error.message });
+    reportAuthError("verifyOtp", error, { otp_type: type });
     return NextResponse.redirect(`${origin}/auth/error`);
   }
 

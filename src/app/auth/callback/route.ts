@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { sanitizeNext } from "../sanitize-next";
 import { resolvePublicOrigin } from "../public-origin";
 import { ensureTrialStarted } from "@/lib/billing/trial";
+import { reportAuthError } from "@/lib/monitoring/auth-error-report";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -63,6 +64,7 @@ export async function GET(request: Request) {
     // opened in a different browser than the one that requested it (the PKCE
     // code verifier lives in a cookie). Log it rather than losing the reason.
     console.error("[auth] exchangeCodeForSession failed", error.message);
+    reportAuthError("exchangeCodeForSession", error);
     return NextResponse.redirect(`${origin}/auth/error`);
   }
 
