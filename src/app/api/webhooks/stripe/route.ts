@@ -343,19 +343,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ received: true });
   } catch (error: unknown) {
-    // A unique-violation means a concurrent delivery already processed this
-    // event. Return 200 so Stripe stops retrying — the work is already done.
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "23505"
-    ) {
-      console.log(
-        `Stripe event ${event.id} hit a unique-violation — already processed concurrently.`,
-      );
-      return NextResponse.json({ received: true, duplicate: true });
-    }
+    // No unique-violation is treated as a duplicate here. Duplicate delivery is
+    // detected exactly once, by the billing_events stripe_event_id claim above
+    // (claimBillingEvent returns false on its 23505). A 23505 that reaches this
+    // catch came from a handler write AFTER this delivery won the claim, so it
+    // is a genuine constraint failure: acking it with 200 would leave the event
+    // `processed = false`, stop Stripe's retries and silently lose the effect.
     console.error("Error processing webhook:", error);
     return NextResponse.json(
       { error: "Error processing webhook" },
@@ -387,9 +380,9 @@ function idOf(
  * Throwing routes the failure into the POST handler's catch, which returns 500
  * and lets Stripe redeliver on its own retry schedule.
  *
- * The Postgres error `code` is preserved on the thrown Error because the catch
- * block keys on `23505` (unique violation) to recognise a concurrent duplicate
- * delivery and answer 200 instead of 500.
+ * The Postgres error `code` is preserved on the thrown Error for diagnosis. It
+ * does NOT turn a failure into a 200: duplicate delivery is recognised only at
+ * the billing_events claim, so even a `23505` thrown from here is a 500.
  */
 function assertWritten(
   error: { code?: string; message?: string; details?: string } | null,
