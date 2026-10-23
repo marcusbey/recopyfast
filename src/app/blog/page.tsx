@@ -12,6 +12,7 @@ import {
   type PublishedPostsResult,
 } from "@/lib/blog/published-posts";
 import styles from "@/components/marketing/editorial-content.module.css";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 // Until s88 /blog inherited the root layout's canonical, which named the
 // homepage. Every indexable page names itself.
@@ -102,6 +103,7 @@ export default async function Blog() {
             <a
               href="/signup"
               data-cta-location="blog_index"
+              {...dataFastCtaAttributes("blog_index", "signup")}
               className={styles.primaryAction}
             >
               Get started free

@@ -85,6 +85,8 @@ const REPLAY_SUITES = [
   // s119 (ADR 075): source drift is recorded once, on edited rows only, keeps
   // the s81 CAS token, and both RPCs are service-role only. Plain Postgres.
   "src/__tests__/db/content-source-drift.test.ts",
+  // ADR 074: datafast_visitors is service-role only. Plain Postgres is enough.
+  "src/__tests__/db/datafast-visitors.test.ts",
 ];
 
 function run(command, args, options = {}) {

@@ -8,6 +8,8 @@ import {
   SiteAuthError,
 } from "@/lib/security/site-auth";
 import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
+import { DATAFAST_GOALS } from "@/lib/analytics/datafast-goals";
+import { sendSiteOwnerGoal } from "@/lib/analytics/datafast-server";
 import {
   redactControlCharacters,
   validateDiscoveredElement,
@@ -668,8 +670,16 @@ export async function POST(
     // and `live_at` keeps naming the first one. `recordSiteReport` is
     // unconditional: it is the liveness signal, and it has to keep landing.
     await bestEffortSiteWrite("install status update", siteId, async () => {
-      await markSiteLive(supabase, siteId);
+      const becameLive = await markSiteLive(supabase, siteId);
       await recordSiteReport(supabase, siteId);
+      // DataFast `script_installed` (ADR 074): exactly the one request whose
+      // guarded update matched. This request comes from the customer's domain
+      // and carries no cookie of ours, so the goal is attributed to the
+      // owner's stored visitor id. After the response; inert without
+      // DATAFAST_API_KEY; never throws.
+      if (becameLive) {
+        after(() => sendSiteOwnerGoal(siteId, DATAFAST_GOALS.scriptInstalled));
+      }
     });
 
     const discovered = buildDiscoveryRows(siteId, contentMap);

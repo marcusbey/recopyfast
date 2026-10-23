@@ -10,6 +10,7 @@ import {
   type Comparison,
 } from "@/lib/compare/comparisons";
 import { buildFAQPageLd, serializeJsonLd } from "@/lib/seo/json-ld";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 const DESCRIPTION =
   "Compare ReCopyFast with seven website editing and content platforms by workflow, client access, publishing, integration, and pricing model.";
@@ -272,6 +273,7 @@ export function CompareIndexContent({ comparisons }: CompareIndexContentProps) {
               <a
                 href="/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_index"
                 data-cta-location="compare_index"
+                {...dataFastCtaAttributes("compare_index", "signup")}
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast
@@ -279,6 +281,7 @@ export function CompareIndexContent({ comparisons }: CompareIndexContentProps) {
               </a>
               <Link
                 href="/try"
+                {...dataFastCtaAttributes("compare_index", "try")}
                 className="pressable inline-flex items-center rounded-full border border-slate-300 bg-white px-7 py-3.5 font-semibold text-slate-900 hover:border-slate-400"
               >
                 Try it on a site

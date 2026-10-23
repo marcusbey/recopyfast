@@ -151,7 +151,8 @@ describe("grantTrialEntitlement", () => {
 
 describe("ensureTrialStarted", () => {
   it("starts a trial for a brand-new account with nothing at all", async () => {
-    await ensureTrialStarted(supabase, USER);
+    // ADR 074: and says so — the auth routes key DataFast's signup on it.
+    await expect(ensureTrialStarted(supabase, USER)).resolves.toBe("standard");
 
     expect(inserts).toHaveLength(1);
     expect(inserts[0].row).toMatchObject({ plan_id: "pro", source: "trial" });
@@ -162,7 +163,7 @@ describe("ensureTrialStarted", () => {
     // and must not depend on the database rejecting it.
     asMock(resolveEntitlement).mockResolvedValue(ON_A_PLAN);
 
-    await ensureTrialStarted(supabase, USER);
+    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeNull();
 
     expect(inserts).toHaveLength(0);
   });
@@ -188,7 +189,8 @@ describe("ensureTrialStarted", () => {
     // index refuses the second. Sign-in must not fail because of it.
     insertError = { code: "23505", message: "duplicate key value" };
 
-    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeUndefined();
+    // ADR 074: resolves (never throws) and reports that it started nothing.
+    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeNull();
   });
 
   it("lets sign-in proceed when the grant cannot be written at all", async () => {
@@ -196,14 +198,14 @@ describe("ensureTrialStarted", () => {
     // log line, never a locked-out customer.
     insertError = { code: "42501", message: "permission denied" };
 
-    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeUndefined();
+    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeNull();
     expect(console.error).toHaveBeenCalled();
   });
 
   it("lets sign-in proceed when entitlement cannot be resolved", async () => {
     asMock(resolveEntitlement).mockRejectedValue(new Error("supabase down"));
 
-    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeUndefined();
+    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeNull();
     expect(inserts).toHaveLength(0);
     expect(console.error).toHaveBeenCalled();
   });
@@ -219,7 +221,7 @@ describe("ensureTrialStarted with the founding offer (s47a)", () => {
       expiresAt: "2026-12-27T10:00:00.000Z",
     });
 
-    await ensureTrialStarted(supabase, USER);
+    await expect(ensureTrialStarted(supabase, USER)).resolves.toBe("founding");
 
     expect(claimFoundingOfferSpot).toHaveBeenCalledWith(USER);
     expect(inserts).toHaveLength(0);
@@ -262,7 +264,9 @@ describe("ensureTrialStarted with the founding offer (s47a)", () => {
     async (_label, arrange) => {
       arrange();
 
-      await expect(ensureTrialStarted(supabase, USER)).resolves.toBeUndefined();
+      await expect(ensureTrialStarted(supabase, USER)).resolves.toBe(
+        "standard",
+      );
 
       expect(inserts).toHaveLength(1);
       expect(inserts[0].row).toMatchObject({ plan_id: "pro", source: "trial" });
@@ -274,7 +278,7 @@ describe("ensureTrialStarted with the founding offer (s47a)", () => {
     asMock(claimFoundingOfferSpot).mockRejectedValue(new Error("rpc down"));
     insertError = { code: "42501", message: "permission denied" };
 
-    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeUndefined();
+    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeNull();
 
     expect(console.error).toHaveBeenCalledTimes(2);
   });

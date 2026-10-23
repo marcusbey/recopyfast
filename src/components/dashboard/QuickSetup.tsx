@@ -12,6 +12,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/code-block";
+import { trackGoal } from "@/lib/analytics/datafast-client";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SiteStatus } from "@/components/ui/status-badge";
 import { cn } from "@/lib/utils/cn";
@@ -538,6 +539,11 @@ function InstallSnippetStep({
             value={embedScript}
             label="HTML"
             copyLabel="Copy snippet"
+            onCopied={() =>
+              trackGoal("install_snippet_copied", {
+                location: "dashboard_quick_setup",
+              })
+            }
           />
           <p className="text-sm text-muted-foreground">
             Paste it just before{" "}

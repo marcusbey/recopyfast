@@ -299,11 +299,17 @@ export default function Privacy() {
               </li>
               {/* ADR 073: DataFast runs on every page of this website,
                   sign-in, sign-up and the dashboard included, and never in
-                  the ReCopyFast script on customers' websites. */}
+                  the ReCopyFast script on customers' websites. ADR 074: its
+                  visitor id is linked to the account (datafast_visitors) and
+                  to Stripe Checkout for funnel and revenue attribution. */}
               <li>
                 DataFast — visit statistics and sign-up attribution on every
                 page of this website, including sign-in, sign-up and your
-                dashboard (never in the ReCopyFast script on your website)
+                dashboard (never in the ReCopyFast script on your website). We
+                link its random visitor identifier to your account and to
+                checkout so account milestones and purchases are attributed to
+                the visit that led to them; no email, name or site address is
+                sent to DataFast
               </li>
             </ul>
 

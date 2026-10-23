@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { track } from "@/lib/analytics/google-analytics/gtag";
+import { trackToolGoal } from "@/lib/analytics/datafast-client";
 
 /**
  * The scan form on every scanning tool page (s96).
@@ -94,6 +95,8 @@ export function ToolScanForm({
       // runs on this page. gtag.js sends queued events with `sendBeacon` as
       // the page is left, so the navigation below does not lose it.
       track("tool_scan_completed", { tool_slug: tool });
+      // DataFast (ADR 074): the tool's goal, never the scanned address.
+      trackToolGoal(tool);
       navigate(reportUrl);
       return;
     }

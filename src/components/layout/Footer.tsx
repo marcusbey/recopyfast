@@ -213,7 +213,7 @@ export default function Footer({
         >
           <div className="flex flex-col md:flex-row items-center space-y-2 md:space-y-0 md:space-x-6 mb-4 md:mb-0">
             <p className="text-slate-500 text-sm">
-              &copy; {year ?? "2025"} ReCopyFast. All rights reserved.
+              &copy; {year ?? "2026"} ReCopyFast. All rights reserved.
             </p>
             <span className="text-slate-400 text-sm">
               Made with care for content teams

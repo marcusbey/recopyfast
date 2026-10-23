@@ -9,6 +9,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import styles from "./editorial-homepage.module.css";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 const START_DELAY_MS = 1_400;
 const MAX_EDIT_LENGTH = 120;
@@ -350,6 +351,7 @@ export default function EditableEditorialHero() {
           <a
             href="/signup"
             data-cta-location="editorial_hero"
+            {...dataFastCtaAttributes("editorial_hero", "signup")}
             className={styles.primaryButton}
           >
             Start your free trial

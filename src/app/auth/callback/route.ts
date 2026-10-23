@@ -1,11 +1,33 @@
 import { freezeVerifiedSignup } from "@/lib/analytics/google-analytics/conversions";
 import { bindAnalyticsContext } from "@/lib/analytics/google-analytics/context-server";
+import { readDataFastVisitorId } from "@/lib/analytics/datafast-attribution";
+import { recordDataFastSession } from "@/lib/analytics/datafast-server";
 import { createClient } from "@/lib/supabase/server";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { sanitizeNext } from "../sanitize-next";
 import { resolvePublicOrigin } from "../public-origin";
 import { ensureTrialStarted } from "@/lib/billing/trial";
 import { reportAuthError } from "@/lib/monitoring/auth-error-report";
+
+/**
+ * DataFast (ADR 074): remember this browser's visitor id for the account and,
+ * when this session started the trial, send `signup` + `app_trial_started`.
+ * Read the cookie now; deliver after the redirect has gone. Inert without
+ * DATAFAST_API_KEY, and it cannot throw into the sign-in.
+ */
+function scheduleDataFastSession(
+  request: Request,
+  userId: string,
+  trial: Awaited<ReturnType<typeof ensureTrialStarted>>,
+): void {
+  try {
+    const visitorId = readDataFastVisitorId(request.headers.get("cookie"));
+    if (!visitorId) return;
+    after(() => recordDataFastSession({ userId, visitorId, trial }));
+  } catch {
+    // Attribution is never worth a failed sign-in.
+  }
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -52,7 +74,8 @@ export async function GET(request: Request) {
           // PKCE proves sign-in, not initial confirmation; retain that explicit
           // provenance gap instead of counting a returning login as a signup.
           await freezeVerifiedSignup(request, user.id, "pkce");
-          await ensureTrialStarted(supabase, user.id);
+          const trial = await ensureTrialStarted(supabase, user.id);
+          scheduleDataFastSession(request, user.id, trial);
         }
       } catch (trialError) {
         console.error("[auth] trial start failed after sign-in", trialError);
@@ -81,6 +104,7 @@ export async function GET(request: Request) {
     } = await supabase.auth.getUser();
     if (user && !error) {
       await bindAnalyticsContext(request, user.id);
+      scheduleDataFastSession(request, user.id, null);
       return NextResponse.redirect(`${origin}${next}`);
     }
   } catch (sessionError) {

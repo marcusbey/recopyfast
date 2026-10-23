@@ -27,6 +27,7 @@ import {
   TRY_CTA_LABEL,
   TRY_CTA_NOTE,
 } from "@/lib/tools/maintenance-cost/copy";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 /*
  * Static on purpose. The calculator reads the URL with `useSearchParams`,
@@ -152,6 +153,7 @@ export default function WebsiteMaintenanceCostPage() {
               <a
                 href="/signup?utm_source=tools&utm_medium=free_tool&utm_campaign=website-maintenance-cost"
                 data-cta-location="tool_page"
+                {...dataFastCtaAttributes("tool_page", "signup")}
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 {SIGNUP_CTA_LABEL}
@@ -159,6 +161,7 @@ export default function WebsiteMaintenanceCostPage() {
               </a>
               <Link
                 href="/try?utm_source=tools&utm_medium=free_tool&utm_campaign=website-maintenance-cost#install"
+                {...dataFastCtaAttributes("tool_page", "try")}
                 className="pressable inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-7 py-3.5 font-semibold text-slate-900 hover:border-slate-400"
               >
                 {TRY_CTA_LABEL}

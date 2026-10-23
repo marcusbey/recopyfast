@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CodeBlock } from "@/components/ui/code-block";
+import { trackGoal } from "@/lib/analytics/datafast-client";
 import { IconTile } from "@/components/ui/icon-tile";
 import {
   StatusBadge,
@@ -173,6 +174,11 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
               value={embedScript}
               label="HTML"
               copyLabel="Copy snippet"
+              onCopied={() =>
+                trackGoal("install_snippet_copied", {
+                  location: "dashboard_site",
+                })
+              }
             />
             <WhereToPaste />
           </>

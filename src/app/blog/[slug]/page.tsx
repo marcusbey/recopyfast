@@ -7,6 +7,7 @@ import { notFound } from "next/navigation";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 import { formatDate } from "@/lib/utils/format-date";
 import styles from "@/components/marketing/editorial-content.module.css";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 interface BlogPost {
   id: string;
@@ -105,7 +106,11 @@ export default async function BlogPostPage({
             fits your handoff.
           </p>
           <div className={styles.actionRow}>
-            <Link href="/demo" className={styles.primaryAction}>
+            <Link
+              href="/demo"
+              {...dataFastCtaAttributes("blog_post", "demo")}
+              className={styles.primaryAction}
+            >
               Try the demo
             </Link>
             <Link href="/#features" className={styles.secondaryAction}>

@@ -7,6 +7,7 @@ import { ArrowRight, Play, Rocket } from "lucide-react";
 import Link from "next/link";
 import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
 import { foundingOfferHeadline } from "./founding-offer-copy";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 const editableWords = [
   "headline",
@@ -221,6 +222,7 @@ export default function Hero({ offer }: { offer: FoundingOfferView }) {
           <a
             href="/signup"
             data-cta-location="hero"
+            {...dataFastCtaAttributes("hero", "signup")}
             className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-sky-700"
           >
             <span>Start your free trial</span>
@@ -229,6 +231,7 @@ export default function Hero({ offer }: { offer: FoundingOfferView }) {
 
           <Link
             href="/demo"
+            {...dataFastCtaAttributes("hero", "demo")}
             className="group inline-flex items-center gap-2 px-6 py-4 font-medium text-slate-700 transition-colors hover:text-slate-900"
           >
             <span className="glass flex h-10 w-10 items-center justify-center rounded-full">

@@ -16,6 +16,7 @@ import {
   type MonthlyOffer,
 } from "@/lib/seo/json-ld";
 import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/seo/site-identity";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 type ComparisonPageProps = {
   comparison: Comparison;
@@ -325,6 +326,7 @@ export function ComparisonPage({
               <a
                 href={`/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_${comparison.slug}`}
                 data-cta-location="comparison_page"
+                {...dataFastCtaAttributes("comparison_page", "signup")}
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast
@@ -332,6 +334,7 @@ export function ComparisonPage({
               </a>
               <Link
                 href="/try"
+                {...dataFastCtaAttributes("comparison_page", "try")}
                 className="pressable inline-flex items-center rounded-full border border-slate-300 bg-white px-7 py-3.5 font-semibold text-slate-900 hover:border-slate-400"
               >
                 Try ReCopyFast

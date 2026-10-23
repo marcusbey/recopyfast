@@ -28,6 +28,7 @@ import {
   serializeParams,
 } from "@/lib/tools/maintenance-cost/params";
 import { track } from "@/lib/analytics/google-analytics/gtag";
+import { trackToolGoal } from "@/lib/analytics/datafast-client";
 import { CostResultCard } from "./CostResultCard";
 import { EmbedSnippet } from "./EmbedSnippet";
 
@@ -130,6 +131,9 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
   // the slug only, never the figures, which stay in the query string GA never
   // sees.
   const hasTrackedResult = React.useRef(false);
+  // DataFast's `tool_cost_calculator_used` (ADR 074): its own once-per-view
+  // flag, because DataFast is not consent-gated and must not wait on GA's.
+  const hasTrackedDataFast = React.useRef(false);
   React.useEffect(() => {
     if (!isComplete || query === syncedQuery.current) return;
     const timer = setTimeout(() => {
@@ -139,6 +143,9 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
         hasTrackedResult.current = track("tool_scan_completed", {
           tool_slug: TOOL_SLUG,
         });
+      }
+      if (!hasTrackedDataFast.current) {
+        hasTrackedDataFast.current = trackToolGoal(TOOL_SLUG);
       }
     }, URL_SYNC_DEBOUNCE_MS);
     return () => clearTimeout(timer);

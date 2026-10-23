@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { IconTile } from "@/components/ui/icon-tile";
 import { Loader2, Mail, User } from "lucide-react";
 import { getAuthErrorMessage, logAuthError } from "./auth-errors";
+import { trackGoal } from "@/lib/analytics/datafast-client";
 
 interface SignupFormProps {
   onSwitchToLogin?: () => void;
@@ -48,6 +49,8 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
       // parent. Nothing has actually succeeded yet — the user is only signed in
       // once they click the emailed link.
       setSuccess(true);
+      // DataFast (ADR 074): the request succeeded. Never the address or name.
+      trackGoal("signup_email_submitted");
     } catch (err: unknown) {
       logAuthError("signup magic link", err);
       setError(getAuthErrorMessage(err));

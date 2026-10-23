@@ -7,8 +7,13 @@ import {
   authorizeSiteOrigin,
   SiteAuthError,
 } from "@/lib/security/site-auth";
+import { sendSiteOwnerGoal } from "@/lib/analytics/datafast-server";
 
 jest.mock("@/lib/supabase/service");
+// ADR 074: the script_installed goal is asserted, never sent.
+jest.mock("@/lib/analytics/datafast-server", () => ({
+  sendSiteOwnerGoal: jest.fn(),
+}));
 // Only authorization is stubbed, and only because it needs a database. This file
 // used to add `sanitizeIncomingContent: jest.fn((value) => value)` — an identity
 // stub over the one component that was corrupting the customer's copy, which is
@@ -817,6 +822,42 @@ describe("/api/content/[siteId]", () => {
         expect(
           JSON.stringify(mockServiceClient.update.mock.calls),
         ).not.toContain("stale");
+      });
+
+      it("sends DataFast script_installed after the response, only for the report that flipped the site", async () => {
+        // markSiteLive reads back `id` from its guarded update: one row for
+        // the transition, none for every later report.
+        let matched = true;
+        let flipPending = false;
+        mockServiceClient.update.mockImplementation((patch) => {
+          flipPending = (patch as { status?: string })?.status === "live";
+          return mockServiceClient;
+        });
+        mockServiceClient.select.mockImplementation((columns) => {
+          if (flipPending && columns === "id") {
+            flipPending = false;
+            return Promise.resolve({
+              data: matched ? [{ id: "site-123" }] : [],
+              error: null,
+            });
+          }
+          return mockServiceClient;
+        });
+
+        await postContentMap();
+        expect(sendSiteOwnerGoal).not.toHaveBeenCalled();
+        for (const [task] of mockAfter.mock.calls) await runAfterTask(task);
+        expect(sendSiteOwnerGoal).toHaveBeenCalledWith(
+          "site-123",
+          "script_installed",
+        );
+
+        (sendSiteOwnerGoal as jest.Mock).mockClear();
+        mockAfter.mockClear();
+        matched = false;
+        await postContentMap();
+        for (const [task] of mockAfter.mock.calls) await runAfterTask(task);
+        expect(sendSiteOwnerGoal).not.toHaveBeenCalled();
       });
     });
 
