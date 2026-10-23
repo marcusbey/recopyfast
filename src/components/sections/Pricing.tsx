@@ -12,6 +12,7 @@ import type { LucideIcon } from "lucide-react";
 import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
 import FoundingOfferCard from "./FoundingOfferCard";
 import { foundingOfferTrustLead } from "./founding-offer-copy";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 /**
  * Prices, feature bullets and the overage rate all come from `/api/pricing`,
@@ -337,6 +338,11 @@ export default function Pricing({
                   <a
                     href="/signup"
                     data-cta-location="pricing_plan"
+                    {...dataFastCtaAttributes(
+                      "pricing_plan",
+                      "signup",
+                      plan.id,
+                    )}
                     className={`block w-full px-6 py-3 text-center font-semibold transition-all ${isEditorial ? "rounded-[3px]" : "rounded-xl"} ${
                       plan.highlight
                         ? isEditorial
@@ -399,6 +405,11 @@ export default function Pricing({
                 <a
                   href="/dashboard/billing"
                   data-cta-location="pricing_lifetime_pro"
+                  {...dataFastCtaAttributes(
+                    "pricing_lifetime_pro",
+                    "checkout",
+                    "lifetime_pro",
+                  )}
                   className={`pressable mt-5 block px-6 py-3 text-center font-semibold text-white ${isEditorial ? "rounded-[3px] bg-[#287f7c] hover:bg-[#206d6a]" : "rounded-xl bg-sky-600 hover:bg-sky-700"}`}
                 >
                   Buy Lifetime Pro
@@ -460,6 +471,11 @@ export default function Pricing({
                         <a
                           href="/dashboard/billing"
                           data-cta-location="pricing_founding_agency"
+                          {...dataFastCtaAttributes(
+                            "pricing_founding_agency",
+                            "checkout",
+                            "lifetime_agency",
+                          )}
                           className={`pressable mt-5 block bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800 ${isEditorial ? "rounded-[3px]" : "rounded-xl"}`}
                         >
                           Buy founding access

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Copy } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { trackGoal } from "@/lib/analytics/datafast-client";
 
 interface AgentInstructionsCopyProps {
   instructions: string;
@@ -34,6 +35,9 @@ export function AgentInstructionsCopy({
 
       await navigator.clipboard.writeText(instructions);
       setStatus("copied");
+      trackGoal("install_snippet_copied", {
+        location: "docs_agent_instructions",
+      });
       window.setTimeout(() => setStatus("idle"), COPY_CONFIRMATION_MS);
     } catch {
       // Clipboard access is commonly denied on non-secure previews and by

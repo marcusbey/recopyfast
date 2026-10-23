@@ -12,6 +12,10 @@ import {
 import { createOrGetCustomer } from "./customer";
 import { createClient } from "@/lib/supabase/server";
 import { resolveDeploymentOrigin } from "@/lib/deployment/origin";
+import {
+  isDataFastId,
+  type DataFastAttribution,
+} from "@/lib/analytics/datafast-attribution";
 
 /**
  * Stripe Checkout is the single entry point for every payment this app takes.
@@ -48,6 +52,27 @@ export interface CheckoutSessionCreationOptions {
   pendingIntentId?: string;
   expiresAt?: string;
   priceId?: string;
+  /**
+   * DataFast revenue attribution (ADR 074): the buyer's `datafast_visitor_id`
+   * / `datafast_session_id` cookies, already validated by
+   * `readDataFastAttribution`. DataFast's Stripe connection reads them from the
+   * session metadata. Ignored for `payment_method` (setup mode is no revenue).
+   */
+  attribution?: DataFastAttribution;
+}
+
+/** Only the two documented keys, each re-validated: metadata is a contract. */
+function attributionMetadata(
+  attribution: DataFastAttribution | undefined,
+): Record<string, string> {
+  const metadata: Record<string, string> = {};
+  if (isDataFastId(attribution?.datafast_visitor_id)) {
+    metadata.datafast_visitor_id = attribution.datafast_visitor_id;
+  }
+  if (isDataFastId(attribution?.datafast_session_id)) {
+    metadata.datafast_session_id = attribution.datafast_session_id;
+  }
+  return metadata;
 }
 
 export interface PendingCheckoutSession {
@@ -430,12 +455,40 @@ export async function createCheckoutSession(
       : options.pendingIntentId
         ? `subscription-checkout:${options.pendingIntentId}`
         : undefined;
+
+  // DataFast attribution (ADR 074). Never in an IDEMPOTENT create's params:
+  // Stripe rejects a retried key whose parameters differ, and the session
+  // cookie rotates after 30 idle minutes, so a retry carrying a newer cookie
+  // would be refused and strand the buyer behind a conflict until the intent
+  // expires — the exact hazard the pending-intent code above is built to
+  // avoid. Those sessions get the keys by a best-effort metadata update after
+  // creation instead (metadata updates merge; existing keys are untouched).
+  const attribution =
+    intent.type === "payment_method"
+      ? {}
+      : attributionMetadata(options.attribution);
+  const hasAttribution = Object.keys(attribution).length > 0;
+  if (hasAttribution && !idempotencyKey) {
+    params = { ...params, metadata: { ...params.metadata, ...attribution } };
+  }
+
   const session = idempotencyKey
     ? await stripe.checkout.sessions.create(params, { idempotencyKey })
     : await stripe.checkout.sessions.create(params);
 
   if (!session.url) {
     throw new Error("Stripe did not return a Checkout URL");
+  }
+
+  if (hasAttribution && idempotencyKey) {
+    try {
+      await stripe.checkout.sessions.update(session.id, {
+        metadata: attribution,
+      });
+    } catch {
+      // Attribution is never worth a failed checkout. No ids in the log.
+      console.warn("[checkout] DataFast attribution update failed");
+    }
   }
 
   return {

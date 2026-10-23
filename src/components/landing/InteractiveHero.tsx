@@ -16,6 +16,7 @@ import EditableText from "./demo/EditableText";
 import PremiumAutoSpaSite from "./demo/PremiumAutoSpaSite";
 import SweetDreamsSite from "./demo/SweetDreamsSite";
 import { demoSites } from "./demo/demoSites";
+import { trackGoal } from "@/lib/analytics/datafast-client";
 import type {
   DemoSite,
   DemoSiteRenderProps,
@@ -103,12 +104,21 @@ interface InteractiveHeroProps {
   demoScrollProgress?: MotionValue<number>;
   /** Fill the parent's height instead of the fixed marketing-page height. */
   fillHeight?: boolean;
+  /**
+   * Send DataFast `demo_edit` on the visitor's first text edit (ADR 074).
+   * Only /demo sets it: the same component is the homepage hero, and a goal
+   * named for the demo page should mean the demo page.
+   */
+  tracksDemoEdit?: boolean;
 }
 
 export default function InteractiveHero({
   demoScrollProgress,
   fillHeight = false,
+  tracksDemoEdit = false,
 }: InteractiveHeroProps) {
+  // One `demo_edit` per page view: this component mounts once per /demo view.
+  const hasTrackedDemoEdit = useRef(false);
   const [currentSite, setCurrentSite] = useState(0);
   const [slideDirection, setSlideDirection] = useState(0);
 
@@ -389,6 +399,10 @@ export default function InteractiveHero({
   };
 
   const handleTextChange = (id: string, newText: string) => {
+    if (tracksDemoEdit && !hasTrackedDemoEdit.current) {
+      hasTrackedDemoEdit.current = true;
+      trackGoal("demo_edit", { surface: "demo" });
+    }
     updateCurrentTexts((texts) =>
       texts.map((item) => (item.id === id ? { ...item, text: newText } : item)),
     );

@@ -82,6 +82,8 @@ const REPLAY_SUITES = [
   // rows then the ceiling. Plain Postgres is enough for all but the PostgREST
   // half, which the e2e job's PostgREST step runs.
   "src/__tests__/db/tool-reports-privileges.test.ts",
+  // ADR 074: datafast_visitors is service-role only. Plain Postgres is enough.
+  "src/__tests__/db/datafast-visitors.test.ts",
 ];
 
 function run(command, args, options = {}) {

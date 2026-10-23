@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CodeBlock } from "@/components/ui/code-block";
+import { trackGoal } from "@/lib/analytics/datafast-client";
 import { StatusBadge, siteStatuses } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -322,6 +323,11 @@ export function SiteRegistrationModal({
                     value={registrationResult.embedScript}
                     label="HTML"
                     copyLabel="Copy snippet"
+                    onCopied={() =>
+                      trackGoal("install_snippet_copied", {
+                        location: "dashboard_registration",
+                      })
+                    }
                   />
                 </InstallStep>
 

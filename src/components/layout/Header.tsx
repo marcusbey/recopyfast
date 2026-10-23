@@ -8,6 +8,7 @@ import { UserMenu } from "@/components/auth/UserMenu";
 import { Zap, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 /* Past this many pixels the header takes on its solid, bordered state. */
 const SCROLLED_THRESHOLD_PX = 50;
@@ -116,6 +117,7 @@ export function Header({
             <nav className="hidden md:flex items-center gap-8">
               <Link
                 href="/demo"
+                {...dataFastCtaAttributes("header", "demo")}
                 className={`text-sm font-medium transition-colors ${
                   isScrolled
                     ? "text-slate-600 hover:text-slate-900"
@@ -172,7 +174,11 @@ export function Header({
                     {/* The native anchor also keeps modifier keys and ordinary
                         link accessibility at this security boundary. */}
                     {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                    <a href="/signup" data-cta-location="header">
+                    <a
+                      href="/signup"
+                      data-cta-location="header"
+                      {...dataFastCtaAttributes("header", "signup")}
+                    >
                       Get started
                     </a>
                   </Button>
@@ -210,6 +216,7 @@ export function Header({
               <nav className="flex flex-col gap-4">
                 <Link
                   href="/demo"
+                  {...dataFastCtaAttributes("header_mobile", "demo")}
                   className="text-slate-600 hover:text-slate-900 text-sm font-medium"
                   onClick={() => setMobileMenuOpen(false)}
                 >

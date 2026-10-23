@@ -132,6 +132,8 @@ describe("s51 — POST /api/billing/checkout, intent credits", () => {
       "buyer@example.com",
       { type: "credits", quantity: 1 },
       undefined,
+      // ADR 074: DataFast attribution; the fixture sends no cookies.
+      { attribution: {} },
     );
   });
 

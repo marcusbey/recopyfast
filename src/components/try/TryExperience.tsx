@@ -5,6 +5,7 @@ import Image from "next/image";
 import { MousePointerClick, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { track } from "@/lib/analytics/google-analytics/gtag";
+import { trackGoal } from "@/lib/analytics/datafast-client";
 
 export const TRY_RUNTIME_URL =
   "https://www.recopyfa.st/try/rcf-try.js" as const;
@@ -57,6 +58,29 @@ export function TryExperience() {
       (window as PreviewWindow).__rcfTryPreview?.exit();
     };
   }, []);
+
+  // DataFast `demo_edit` (ADR 074), once per page view. The edit happens
+  // inside /try/rcf-try.js, which also runs on third-party pages via the
+  // bookmarklet and must never report anywhere — so it is not instrumented.
+  // Instead this page watches its own sample for the first text change the
+  // runtime's contenteditable produces (a characterData mutation; activating
+  // the editor only toggles attributes).
+  const hasTrackedEdit = useRef(false);
+  useEffect(() => {
+    if (sampleState !== "active" || hasTrackedEdit.current) return;
+    const root = document.querySelector(SAMPLE_ROOT_SELECTOR);
+    if (!root || typeof MutationObserver === "undefined") return;
+
+    const observer = new MutationObserver((records) => {
+      if (!records.some((record) => record.type === "characterData")) return;
+      observer.disconnect();
+      if (hasTrackedEdit.current) return;
+      hasTrackedEdit.current = true;
+      trackGoal("demo_edit", { surface: "try" });
+    });
+    observer.observe(root, { characterData: true, subtree: true });
+    return () => observer.disconnect();
+  }, [sampleState]);
 
   useEffect(() => {
     if (sampleState !== "active") return;

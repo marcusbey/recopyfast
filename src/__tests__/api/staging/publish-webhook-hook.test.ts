@@ -84,7 +84,12 @@ jest.mock("@/lib/webhooks/manager", () => ({
   webhookManager: { recordQualifyingEvent: jest.fn() },
 }));
 
+jest.mock("@/lib/analytics/datafast-server", () => ({
+  sendFirstPublishGoal: jest.fn(),
+}));
+
 import { POST } from "@/app/api/staging/publish/route";
+import { sendFirstPublishGoal } from "@/lib/analytics/datafast-server";
 import { authorizeFirstPartyEditorAccess } from "@/lib/auth/editor-access";
 import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 
@@ -195,5 +200,19 @@ describe("POST /api/staging/publish — webhook hook", () => {
 
     expect(response.status).toBe(200);
     await expect(runDeferred()).resolves.toBeUndefined();
+  });
+
+  it("hands DataFast the published count in the same deferred task (ADR 074)", async () => {
+    await POST(publishRequest());
+    expect(sendFirstPublishGoal).not.toHaveBeenCalled();
+    await runDeferred();
+    expect(sendFirstPublishGoal).toHaveBeenCalledWith(SITE_ID, 2);
+  });
+
+  it("asks DataFast nothing when the publish changed no elements", async () => {
+    mockRpc.mockResolvedValue({ data: [], error: null });
+    await POST(publishRequest());
+    await runDeferred();
+    expect(sendFirstPublishGoal).not.toHaveBeenCalled();
   });
 });

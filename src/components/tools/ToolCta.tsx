@@ -1,6 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import type { ToolCtaVariant } from "@/lib/tools/catalogue";
 import { ctaCopyFor } from "@/lib/tools/cta-copy";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 /**
  * The fix CTA on every report and tool page (s96, plan decision 14). Copy is
@@ -11,6 +12,19 @@ import { ctaCopyFor } from "@/lib/tools/cta-copy";
  * `app-document-boundary-links.test.ts`), and `/try#install` is a fresh
  * document so its anchor lands.
  */
+/**
+ * DataFast `cta_click` (ADR 074) goes on the signup and /try anchors
+ * themselves, not on the section: DataFast counts a click on the element that
+ * carries `data-fast-goal`, so on the section every click on the copy would
+ * count. The install-guide link is not a signup CTA.
+ */
+function ctaGoal(href: string) {
+  if (href.startsWith("/signup"))
+    return dataFastCtaAttributes("tool_cta", "signup");
+  if (href.startsWith("/try")) return dataFastCtaAttributes("tool_cta", "try");
+  return {};
+}
+
 export function ToolCta({
   variant,
   slug,
@@ -39,6 +53,7 @@ export function ToolCta({
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a
           href={primary.href}
+          {...ctaGoal(primary.href)}
           className="pressable inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3 font-semibold text-white hover:bg-slate-800"
         >
           {primary.label}
@@ -49,6 +64,7 @@ export function ToolCta({
           <a
             key={link.href}
             href={link.href}
+            {...ctaGoal(link.href)}
             className="pressable inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-6 py-3 font-semibold text-slate-900 hover:border-slate-400"
           >
             {link.label}
