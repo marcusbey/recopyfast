@@ -203,6 +203,21 @@ describe("source drift under a published override (ADR 075)", () => {
     expect(discoveryBodies(recorded)).toEqual([]);
   });
 
+  // Review M1: a site that server-renders the ADR 046 snapshot
+  // (docs/architecture/published-snapshot.md) puts the served copy into its
+  // HTML, so the text the embed reads first IS the override. That is not a
+  // deploy: reporting it flagged every publish on such sites as a conflict.
+  it("reports nothing when the page already renders the served copy (snapshot SSR)", async () => {
+    const element = page("5 to 11");
+
+    const recorded = await boot([overrideRow("5 to 10")]);
+    leaveCoalescingWindow();
+    await rescan();
+
+    expect(element.textContent).toBe("5 to 11");
+    expect(discoveryBodies(recorded)).toEqual([]);
+  });
+
   it("reports nothing for an unedited row, whose deploy already shows", async () => {
     const element = page("5 to 9");
 

@@ -3267,13 +3267,19 @@
       // on every view. The claim below drops the row's `source_seen` (the live
       // text is fixed for the page view: `content` is the first-seen authored
       // copy), so one page view reports one drift once; a later visitor's GET
-      // carries the recorded text and reports nothing. Do not move this into
+      // carries the recorded text and reports nothing. Nor is the row's own
+      // served copy (`current_content`) a deploy (review M1): a site that
+      // server-renders the ADR 046 snapshot puts the override itself into its
+      // HTML, and reporting that flagged every publish there as a conflict.
+      // The server ignores such a report too. Do not move this into
       // a request of its own: the byte ceilings have no room for one, and the
       // per-site discovery limit (fail-closed) is shared with this one anyway.
       const known = this.serverKnownElementIds;
       const rows = this.index || {};
-      const claimed = elementIds.filter(id => !known.has(id) ||
-        ((rows[id] || 0).source_seen || contentMap[id].content) != contentMap[id].content);
+      const claimed = elementIds.filter(id => {
+        const row = rows[id] || 0, live = contentMap[id].content;
+        return !known.has(id) || row.source_seen && live != row.source_seen && live != row.current_content;
+      });
       if (!claimed.length) return;
 
       // Coalesced (s67). A page that keeps rendering — a live feed, an

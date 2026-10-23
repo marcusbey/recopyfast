@@ -34,7 +34,7 @@
  * also refuses "drop" with 409 — publish or discard it first.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import {
   checkOwnerCanEdit,
@@ -52,6 +52,7 @@ import {
 } from "@/lib/security/discovered-text";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 
 const RESOLUTIONS = ["keep", "drop"] as const;
 type Resolution = (typeof RESOLUTIONS)[number];
@@ -126,6 +127,53 @@ function parseBody(raw: unknown): ValidationResult<ResolveRequest> {
       expectedObserved: observed.value,
     },
   };
+}
+
+/**
+ * "Use new source" changes published copy, so it records the same
+ * `content.updated` marker `POST /api/staging/publish` records (review m3):
+ * integrators that rebuild a static site or a snapshot cache on that webhook
+ * would otherwise keep serving the override the admin just dropped. Same
+ * helper, same payload shape (`{ elements: [{ element_id, content,
+ * attributes }] }`), and the same `after()`: a MARKER, not a delivery (ADR 010),
+ * never on the admin's critical path, and a failure is only logged because the
+ * answer has already gone.
+ *
+ * The RPC answers a status only, so the element id is read here, scoped by the
+ * same site id. The content is the observed text the RPC just verified and
+ * published; no attribute changes.
+ */
+function recordNewSourcePublished(
+  service: ReturnType<typeof createServiceRoleClient>,
+  siteId: string,
+  contentElementId: string,
+  content: string,
+): void {
+  after(async () => {
+    try {
+      const { data: row, error } = await service
+        .from("content_elements")
+        .select("element_id")
+        .eq("id", contentElementId)
+        .eq("site_id", siteId)
+        .maybeSingle();
+      if (error || !row) {
+        throw new Error(error?.message ?? "content element not found");
+      }
+      await webhookManager.recordQualifyingEvent({
+        siteId,
+        eventType: WEBHOOK_EVENTS.CONTENT_UPDATED,
+        payload: {
+          elements: [{ element_id: row.element_id, content, attributes: {} }],
+        },
+      });
+    } catch (webhookError) {
+      console.error(
+        `content/source-drift: failed to record content.updated after "use new source" (site: ${siteId}):`,
+        webhookError,
+      );
+    }
+  });
 }
 
 function failure(context: string, error: unknown): NextResponse {
@@ -211,6 +259,14 @@ export async function POST(request: NextRequest) {
     const status: unknown = data;
 
     if (status === "resolved") {
+      if (resolution === "drop") {
+        recordNewSourcePublished(
+          service,
+          siteId,
+          contentElementId,
+          expectedObserved,
+        );
+      }
       return NextResponse.json({ status, resolution });
     }
     if (status === "conflict" || status === "pending" || status === "missing") {

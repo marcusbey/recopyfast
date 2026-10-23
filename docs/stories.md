@@ -5432,3 +5432,5 @@ Acceptance:
 Research/plan use the matching story path. Plan validated under the owner's standing directive
 for this work, relayed by the parent session on October 22, 2026 (Claude architects,
 subagents implement, PR open with tests).
+Deploy: migration first, then merge — runbook
+[`operations/s119-source-drift-deploy-order.md`](./operations/s119-source-drift-deploy-order.md).

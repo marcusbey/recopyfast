@@ -155,6 +155,16 @@ BEGIN
     AND ce.variant = 'default'
     AND COALESCE(ce.published_content, ce.original_content)
       IS DISTINCT FROM ce.original_content
+    -- A report equal to the row's served copy is no evidence at all (review
+    -- M1). A site that server-renders the ADR 046 snapshot
+    -- (docs/architecture/published-snapshot.md) puts the override itself into
+    -- its HTML, so the text the widget reads first IS the published copy.
+    -- Recording it flagged every publish on such sites as a conflict, and
+    -- "Use new source" would then have rewritten original_content to the
+    -- override. Neither records nor clears: a drift recorded from a visitor
+    -- who saw the real source stays until a report says otherwise.
+    AND reported.content IS DISTINCT FROM
+      COALESCE(ce.published_content, ce.original_content)
     -- Write only when something changes: a reverted source clears an open
     -- drift; a new source differs from the one already recorded. A repeat
     -- report is therefore a zero-row no-op and keeps the first detection time.

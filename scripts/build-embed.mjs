@@ -458,6 +458,9 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *                  kept: edit-board-tabs.test.ts evaluates that block with
  *                  `self` injected
  *   45742 / 32964  measured on the branch, -27 / -28 net
+ *   +8 / +8        review M1: a live text equal to the row's served copy
+ *                  (`current_content`) is not a drift report (snapshot SSR)
+ *   45750 / 32972  after the review fix, under the unchanged ceilings
  *
  * The middle lines are prototype runs in sequence (two of them taken while the
  * reverted createPanel conversion was still applied, hence a 3 B gap in their

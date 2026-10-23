@@ -228,6 +228,36 @@ describeDb("s119 content source drift", ({ query, createSite }) => {
       expect(await read(seeded.rowId)).toEqual(before);
     });
 
+    // Review M1: a page that server-renders the ADR 046 snapshot shows the
+    // served copy, so the text the widget reads first IS the override. It is
+    // no evidence about the developer's source either way.
+    test("a report equal to the served copy (snapshot SSR) records no drift", async () => {
+      const seeded = await seed("ssr");
+      const before = await read(seeded.rowId);
+
+      const changed = await record(seeded.siteId, [
+        { element_id: seeded.elementId, content: "5 to 11" },
+      ]);
+
+      expect(changed).toBe(0);
+      expect(await read(seeded.rowId)).toEqual(before);
+    });
+
+    test("a report equal to the served copy does not clear a recorded drift", async () => {
+      const seeded = await seed("ssr-keeps");
+      await record(seeded.siteId, [
+        { element_id: seeded.elementId, content: "5 to 9" },
+      ]);
+      const recorded = await read(seeded.rowId);
+
+      const changed = await record(seeded.siteId, [
+        { element_id: seeded.elementId, content: "5 to 11" },
+      ]);
+
+      expect(changed).toBe(0);
+      expect(await read(seeded.rowId)).toEqual(recorded);
+    });
+
     test("an unedited row never drifts, and an unknown id is ignored", async () => {
       const seeded = await seed("unedited", { published: "5 to 10" });
 

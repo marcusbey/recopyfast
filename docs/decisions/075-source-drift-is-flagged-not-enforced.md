@@ -7,6 +7,11 @@
   [ADR 037](./037-dashboard-admin-service-role-writes.md) (dashboard admin writes),
   [ADR 054](./054-content-change-state-is-a-security-invoker-view.md) (the Changes view stays narrow),
   s67 / AC 11 (only an edited row writes page text)
+- Narrows: ADR 046 parity — the content GET carries `source_seen`, the snapshot does not.
+  `source_seen` is a comparison hint for the widget, not copy, and putting it (or the drift
+  columns behind it) in the unauthenticated, CDN-cached snapshot would widen ADR 046's public
+  projection for no reader that needs it: the widget never reads the snapshot. Every other byte
+  of the two reads stays identical, and the parity test pins both halves.
 
 ## Context
 
@@ -80,10 +85,13 @@ What already exists and is reused:
 
 The site token is public, so anyone can forge a discovery report. Forged drift can only set
 `source_drift_content` on an edited row — the same trust level as forging a discovery row today
-— and changes nothing a visitor sees. "Drop" makes the row unedited, so the page shows its real
-authored text whatever the forged value was; "keep" on a forged value is self-healing, because the
-next real visitor's text differs from the forged baseline and re-flags it. The admin sees the
-observed text before choosing.
+— and changes nothing a visitor sees until an admin acts on it. "Keep" on a forged value is
+self-healing: the next real visitor's text differs from the forged baseline and re-flags it.
+"Drop" makes the row unedited at the observed text. On a site where the widget is the only
+renderer, the page then shows its own authored text whatever the stored value is; but every
+consumer that renders the stored copy — an ADR 046 snapshot integration, the v1 API — serves
+the observed text as published copy. So "drop" publishes what the admin was shown, and the
+dialog shows the observed text before they choose; that review is the control, not the widget.
 
 ## Known limits
 
@@ -95,6 +103,14 @@ observed text before choosing.
 - A drift that predates the first edit (developer deployed between discovery and the client's
   first publish) is flagged too. It is still true that the override masks the developer's current
   source; "Keep override" clears it once.
+
+- **SSR snapshot integrations.** A site that server-renders `GET /api/published/[siteId]`
+  (`docs/architecture/published-snapshot.md`) puts the served copy into its HTML, so the text
+  the widget reads first is the override, never the developer's source: drift there is
+  undetectable. A live text equal to the row's served copy is therefore no evidence either way —
+  the widget does not report it, and `record_content_source_drift` neither records nor clears on
+  it (review M1). Inside the snapshot's cache window after a publish, such a page can still show
+  the previous override and report it once as drift; the admin sees that text before choosing.
 
 ## Rejected
 

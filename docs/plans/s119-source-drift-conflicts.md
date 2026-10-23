@@ -136,7 +136,44 @@ ADR's decision.
 - **Not CI-run here.** `founding-offer-cap.test.ts` fails against the bare-Postgres replay
   (`auth.users.created_at` NOT NULL in the fixture); it is unrelated, unchanged, and runs in CI
   against the Supabase stack only.
-- **Migration first, then deploy.** The visitor content GET now selects the three new columns:
+- **Migration first, then deploy** — runbook:
+  [`docs/operations/s119-source-drift-deploy-order.md`](../operations/s119-source-drift-deploy-order.md)
+  (review M2). The visitor content GET now selects the three new columns:
   an app deployed before `20261022120000_content_source_drift.sql` is applied answers that read
   with a 500, and every widget falls back to the authored page (published copy disappears until
   the migration lands). The migration is additive and safe to apply ahead of the code.
+
+### Review fixes (docs/reviews/s119-source-drift-conflicts.md)
+
+- **M1 — snapshot SSR sites.** A page that server-renders the ADR 046 snapshot shows the
+  override itself, so the widget read it as the "authored" source and every publish raised a
+  false conflict. Fixed twice: the widget does not report a live text equal to the row's
+  `current_content`, and `record_content_source_drift` treats a report equal to
+  `COALESCE(published_content, original_content)` as a no-op (it neither records nor clears).
+  The migration was edited in place: it has not been applied anywhere (the branch is unmerged).
+  Tested at the widget level (page "5 to 11", `source_seen` "5 to 10" → no POST) and the DB level
+  (no drift recorded, and none cleared). ADR 075 gains the "SSR snapshot integrations" known
+  limit, and its Trust paragraph no longer says "drop" always shows the real authored text.
+  Embed: +8 / +8 → 45750 / 32972 B gz, still under the unchanged 45774 / 33016 ceilings and
+  −19 / −20 against main.
+- **M2 — deploy order.** Runbook `docs/operations/s119-source-drift-deploy-order.md`, linked from
+  this plan, the story and `docs/README.md`.
+- **m1 — ADR 046 parity.** ADR 075's header carries a "Narrows:" line with the reason.
+- **m3 — webhook.** "Use new source" records `content.updated` through
+  `webhookManager.recordQualifyingEvent` in `after()`, with the publish route's payload shape.
+  "Keep override" changes no copy and records nothing.
+
+### Deferred
+
+- **m2 — same-origin guard.** Add `isSameOriginRequest` to `POST /api/content/source-drift`
+  together with `staging/publish` and `staging/content`, which share the gap. One follow-up
+  story, so the content writes stay consistent.
+- **m4 — lazy images and other per-load authored values.** A host lazy-loader that swaps an
+  edited image's `src` after the first scan can make drift flap between visitors (one report
+  per view while it flaps). This is covered in spirit by ADR 075's "per-visitor authored text"
+  limit, but images are not named there. Mitigation, if it shows up: skip IMG rows whose `src`
+  is a known placeholder, or compare `currentSrc`.
+- **Snapshot cache window.** After a publish on an SSR snapshot site, a page served from a
+  ≤ 60 s stale snapshot still shows the previous override, which can be reported once as drift
+  (named in ADR 075's known limit). `docs/architecture/published-snapshot.md` could say so for
+  integrators. It is not edited here.
