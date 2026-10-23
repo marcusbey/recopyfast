@@ -141,6 +141,9 @@ const TRY_ASSETS = ["/try", "/try/rcf-try.js"];
 const INSTALLATION_DOCS = [
   "/docs/install",
   "/docs/install/agent-instructions.md",
+  // s120: the developer and WordPress guides the owner's message links to.
+  "/docs/install/for-developers",
+  "/docs/install/wordpress",
 ];
 
 /** Sibling and suffix paths must still take the ordinary session-aware path. */
@@ -150,6 +153,8 @@ const INSTALLATION_DOC_NEAR_MISSES = [
   "/docs/install-not-public",
   "/docs/install/agent-instructions.md.bak",
   "/docs/install/agent-instructions.md/extra",
+  "/docs/install/wordpress/private",
+  "/docs/install/for-developers-extra",
 ];
 
 /**

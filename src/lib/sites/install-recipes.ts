@@ -64,10 +64,13 @@ export const installRecipes: readonly InstallRecipe[] = [
     id: "wordpress",
     label: "WordPress",
     stepTitle: BEFORE_BODY_CLOSE,
+    // s120: the plugin route first. Pasting into footer.php was the headline
+    // here, but a theme update overwrites it, and the owner-facing WordPress
+    // guide (/docs/install/wordpress) tells people not to edit theme files.
     location:
-      "Paste it into your theme's footer.php, immediately before the closing </body> tag.",
+      "Install the free WPCode plugin, then paste it into Code Snippets > Header & Footer, in the Footer box (it loads just before </body>), and select Save Changes.",
     notes:
-      "No access to theme files? A header-and-footer snippet plugin drops it in the same place, and survives theme updates.",
+      "Editing the theme's footer.php also works, but a theme update can overwrite it. Step-by-step guide: /docs/install/wordpress.",
   },
   {
     id: "nextjs",

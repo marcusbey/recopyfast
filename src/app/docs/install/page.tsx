@@ -118,6 +118,24 @@ export default function InstallGuidePage() {
             <p className="mt-3 max-w-3xl text-base leading-relaxed text-muted-foreground">
               {guide.requirement}
             </p>
+            {/* s120: the two step-by-step guides the owner page and the
+                developer message link to. */}
+            <p className="mt-3 max-w-3xl text-base leading-relaxed text-muted-foreground">
+              Step by step:{" "}
+              <Link
+                href="/docs/install/wordpress"
+                className="font-semibold text-primary underline-offset-4 hover:underline"
+              >
+                WordPress with WPCode
+              </Link>
+              {" · "}
+              <Link
+                href="/docs/install/for-developers"
+                className="font-semibold text-primary underline-offset-4 hover:underline"
+              >
+                Guide for your developer
+              </Link>
+            </p>
           </div>
         </section>
 
