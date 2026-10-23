@@ -88,6 +88,18 @@ describe("install recipes", () => {
     expect(recipe.label).toBe("WordPress");
   });
 
+  it("links the WordPress guide as a field, never as a path in prose", () => {
+    const recipe = getInstallRecipe("wordpress") as InstallRecipe;
+
+    expect(recipe.guide).toEqual({
+      href: "/docs/install/wordpress",
+      label: expect.any(String),
+    });
+    for (const each of installRecipes) {
+      expect(`${each.location} ${each.notes ?? ""}`).not.toMatch(/\/docs\//);
+    }
+  });
+
   it("returns undefined rather than a wrong recipe for an unknown id", () => {
     expect(getInstallRecipe("drupal")).toBeUndefined();
     expect(getInstallRecipe("")).toBeUndefined();

@@ -173,6 +173,23 @@ const INDEXABLE: Route[] = [
     path: "/docs/install",
     layers: async () => [layerOf(await import("@/app/docs/install/page"))],
   },
+  // s120: the site-owner page and the two install guides it links.
+  {
+    path: "/for/owners",
+    layers: async () => [layerOf(await import("@/app/for/owners/page"))],
+  },
+  {
+    path: "/docs/install/for-developers",
+    layers: async () => [
+      layerOf(await import("@/app/docs/install/for-developers/page")),
+    ],
+  },
+  {
+    path: "/docs/install/wordpress",
+    layers: async () => [
+      layerOf(await import("@/app/docs/install/wordpress/page")),
+    ],
+  },
 ];
 
 describe("the root layout", () => {

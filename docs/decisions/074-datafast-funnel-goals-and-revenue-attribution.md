@@ -27,12 +27,15 @@ https://datafa.st/api/v1/goals` with `Authorization: Bearer <df_ key>` and
 
    | Goal | Where it fires | Params |
    |---|---|---|
-   | `cta_click` | `data-fast-goal` attributes on every signup/checkout/demo/try anchor (hero, header, mobile header, pricing plans, lifetime, founding, final CTA, founding offer, /demo, /try, blog, compare, comparison pages, tool pages, tool CTA) — no JS | `location`, `target` (`signup`/`checkout`/`demo`/`try`), `plan` (catalogue id) |
+   | `cta_click` | `data-fast-goal` attributes on every signup/checkout/demo/try/docs anchor (hero, header, mobile header, pricing plans, lifetime, founding, final CTA, founding offer, /demo, /try, blog, compare, comparison pages, tool pages, tool CTA; s120: `owners_hero`, `owners_handoff`, `owners_final` on /for/owners, `wp_guide` on /docs/install/wordpress, `dev_guide` on /docs/install/for-developers) — no JS | `location`, `target` (`signup`/`checkout`/`demo`/`try`/`docs`), `plan` (catalogue id) |
    | `demo_edit` | first text edit per page view: `/demo` (`InteractiveHero tracksDemoEdit`), `/try` (a `MutationObserver` on the sample; `rcf-try.js` itself is not instrumented — it also runs on third-party pages) | `surface` |
    | `tool_typo_finder_run` | spell checker scan produced a report (`ToolScanForm`) | — |
    | `tool_cost_calculator_used` | calculator result settled, once per view (`CostCalculator`) | — |
    | `tool_run` | any future /tools entry without its own goal | `tool` (slug) |
    | `install_snippet_copied` | a copy that reached the clipboard: dashboard snippet (site page, registration modal, quick setup), /docs/install agent brief | `location` |
+   | `install_method_selected` | s120: "Who will add the line?" answered (`InstallMethodChoice`, registration modal and site page) | `method` (`self`/`developer`), `location` (`dashboard_registration`/`dashboard_site`) |
+   | `developer_message_copied` | s120: the ready-to-send developer message reached the clipboard (`DeveloperHandoffMessage`) | `location` |
+   | `developer_message_emailed` | s120: "Open in my email app" clicked on the developer message's `mailto:` | `location`, `body` (`full`/`short`/`none`: what the draft carried) |
    | `signup_email_submitted` / `login_email_submitted` | magic-link request succeeded | — |
    | `signup` + `app_trial_started` | server, `/auth/callback` and `/auth/confirm`, when `ensureTrialStarted` started the trial | `offer` (`founding`/`standard`) on the second |
    | `site_created` | server, `/api/sites/register` | — |
@@ -77,6 +80,12 @@ https://datafa.st/api/v1/goals` with `Authorization: Bearer <df_ key>` and
    are deliberately kept out of the create params: Stripe refuses a retried key with different
    parameters, and the session cookie rotates after 30 idle minutes, which would strand the buyer
    behind a conflict. Those sessions get the keys by a best-effort metadata update after creation.
+
+## Amendment (2026-10-23, s120 review)
+
+s120 (`feature/s120-owner-path`) added the three client goals, the `docs` CTA target and the five
+CTA locations now listed in the table above, all in `datafast-goals.ts` as Decision 1 requires.
+Decision 2 holds: every new param is a fixed category; no address, domain or snippet is sent.
 
 ## Options considered and rejected
 

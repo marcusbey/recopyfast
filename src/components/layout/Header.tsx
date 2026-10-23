@@ -115,6 +115,13 @@ export function Header({
 
             {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center gap-8">
+              {/* s120: the site-owner page. A plain nav link, not a CTA. */}
+              <Link
+                href="/for/owners"
+                className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+              >
+                For business owners
+              </Link>
               <Link
                 href="/demo"
                 {...dataFastCtaAttributes("header", "demo")}
@@ -214,6 +221,13 @@ export function Header({
               className="md:hidden mt-4 pb-4 border-t border-sky-100 pt-4"
             >
               <nav className="flex flex-col gap-4">
+                <Link
+                  href="/for/owners"
+                  className="text-slate-600 hover:text-slate-900 text-sm font-medium"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  For business owners
+                </Link>
                 <Link
                   href="/demo"
                   {...dataFastCtaAttributes("header_mobile", "demo")}

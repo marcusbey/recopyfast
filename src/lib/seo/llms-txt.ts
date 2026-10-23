@@ -81,6 +81,21 @@ export function buildLlmsTxt(
       "install the snippet, verify page coverage, invite an editor, and publish.",
     ),
     link(
+      "For business owners",
+      "/for/owners",
+      "change hours, prices and specials on a site someone else built, after the developer adds one line once.",
+    ),
+    link(
+      "WordPress install guide",
+      "/docs/install/wordpress",
+      "add the snippet to WordPress with the free WPCode plugin.",
+    ),
+    link(
+      "Developer guide",
+      "/docs/install/for-developers",
+      "what the script does, the CSP it needs, verifying and removing it, and how edits behave across deploys.",
+    ),
+    link(
       "Agent installation brief",
       "/docs/install/agent-instructions.md",
       "the installation guide's brief as Markdown, for a coding agent.",
