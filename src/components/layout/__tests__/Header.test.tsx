@@ -86,7 +86,8 @@ describe("Header", () => {
   });
 
   it.each(["default", "editorial"] as const)(
-    "keeps the %s desktop navigation to Demo, Pricing and Blog",
+    // s120 adds "For business owners" ahead of the three existing links.
+    "keeps the %s desktop navigation to For business owners, Demo, Pricing and Blog",
     (variant) => {
       (useAuth as jest.Mock).mockReturnValue({
         user: null,
@@ -104,7 +105,10 @@ describe("Header", () => {
         within(navigation)
           .getAllByRole("link")
           .map((link) => link.textContent),
-      ).toEqual(["Demo", "Pricing", "Blog"]);
+      ).toEqual(["For business owners", "Demo", "Pricing", "Blog"]);
+      expect(
+        within(navigation).getByRole("link", { name: "For business owners" }),
+      ).toHaveAttribute("href", "/for/owners");
       expect(
         within(navigation).getByRole("link", { name: "Demo" }),
       ).toHaveAttribute("href", "/demo");
@@ -318,7 +322,7 @@ describe("Header", () => {
     expect(nav).toHaveClass("hidden", "md:flex");
   });
 
-  it("keeps the mobile menu to Demo, Pricing and Blog", async () => {
+  it("keeps the mobile menu to For business owners, Demo, Pricing and Blog", async () => {
     const user = userEvent.setup();
     (useAuth as jest.Mock).mockReturnValue({
       user: null,
@@ -338,7 +342,7 @@ describe("Header", () => {
       within(mobileMenu!)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Demo", "Pricing", "Blog"]);
+    ).toEqual(["For business owners", "Demo", "Pricing", "Blog"]);
     expect(
       within(mobileMenu!).queryByRole("link", { name: "Features" }),
     ).toBeNull();
@@ -366,7 +370,7 @@ describe("Header", () => {
     await user.tab();
     expect(screen.getByRole("link", { name: /ReCopyFast/i })).toHaveFocus();
 
-    for (const name of ["Demo", "Pricing", "Blog"]) {
+    for (const name of ["For business owners", "Demo", "Pricing", "Blog"]) {
       await user.tab();
       expect(screen.getByRole("link", { name })).toHaveFocus();
     }

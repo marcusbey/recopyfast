@@ -46,9 +46,21 @@ export function buildStaticSitemapRoutes(
   return [
     { path: "/", changeFrequency: "weekly", priority: 1 },
     { path: "/product", changeFrequency: "monthly", priority: 0.8 },
+    // s120: the site-owner page.
+    { path: "/for/owners", changeFrequency: "monthly", priority: 0.8 },
     { path: "/demo", changeFrequency: "monthly", priority: 0.8 },
     { path: "/try", changeFrequency: "monthly", priority: 0.9 },
     { path: "/docs/install", changeFrequency: "monthly", priority: 0.8 },
+    {
+      path: "/docs/install/for-developers",
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
+      path: "/docs/install/wordpress",
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
     { path: "/compare", changeFrequency: "monthly", priority: 0.8 },
     ...comparisons.map(
       (comparison) =>

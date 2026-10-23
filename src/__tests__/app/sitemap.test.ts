@@ -123,6 +123,10 @@ const INDEXABLE_STATIC = [
   "/privacy",
   "/terms",
   "/docs/install",
+  // s120: the owner page and the two install guides it links.
+  "/for/owners",
+  "/docs/install/for-developers",
+  "/docs/install/wordpress",
 ];
 
 const ROWS: Row[] = [
