@@ -26,6 +26,7 @@ import {
 } from "@/lib/sites/install-recipes";
 import { Loader2, AlertCircle, ExternalLink } from "lucide-react";
 import { sitePageHref } from "@/components/dashboard/site/SiteSubnav";
+import { InstallMethodChoice } from "./InstallMethodChoice";
 import { InstallStep } from "./InstallStep";
 
 interface SiteRegistrationModalProps {
@@ -317,86 +318,95 @@ export function SiteRegistrationModal({
             </DialogHeader>
 
             <DialogBody>
-              <ol className="space-y-6">
-                <InstallStep number={1} title="Copy the snippet">
-                  <CodeBlock
-                    value={registrationResult.embedScript}
-                    label="HTML"
-                    copyLabel="Copy snippet"
-                    onCopied={() =>
-                      trackGoal("install_snippet_copied", {
-                        location: "dashboard_registration",
-                      })
-                    }
-                  />
-                </InstallStep>
+              {/* s120: an owner whose site someone else built picks "My
+                  developer will" and gets a message to send instead of the
+                  paste steps. Only the generated tag goes in it — never the
+                  `apiKey` this response also carries. */}
+              <InstallMethodChoice
+                embedScript={registrationResult.embedScript}
+                siteDomain={registrationResult.site.domain}
+                location="dashboard_registration"
+              >
+                <ol className="space-y-6">
+                  <InstallStep number={1} title="Copy the snippet">
+                    <CodeBlock
+                      value={registrationResult.embedScript}
+                      label="HTML"
+                      copyLabel="Copy snippet"
+                      onCopied={() =>
+                        trackGoal("install_snippet_copied", {
+                          location: "dashboard_registration",
+                        })
+                      }
+                    />
+                  </InstallStep>
 
-                {/* The same recipes, in the same words, as the site's
+                  {/* The same recipes, in the same words, as the site's
                     Installation card: the product used to describe
                     installation two different ways. */}
-                <InstallStep
-                  number={2}
-                  title={<StepTitle title={selectedRecipe.stepTitle} />}
-                >
-                  <Tabs value={recipeId} onValueChange={setRecipeId}>
-                    <TabsList aria-label="Platform">
+                  <InstallStep
+                    number={2}
+                    title={<StepTitle title={selectedRecipe.stepTitle} />}
+                  >
+                    <Tabs value={recipeId} onValueChange={setRecipeId}>
+                      <TabsList aria-label="Platform">
+                        {installRecipes.map((recipe) => (
+                          <TabsTrigger key={recipe.id} value={recipe.id}>
+                            {recipe.label}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
                       {installRecipes.map((recipe) => (
-                        <TabsTrigger key={recipe.id} value={recipe.id}>
-                          {recipe.label}
-                        </TabsTrigger>
+                        <TabsContent
+                          key={recipe.id}
+                          value={recipe.id}
+                          className="mt-3 space-y-2 text-sm"
+                        >
+                          <p className="text-foreground">{recipe.location}</p>
+                          {recipe.notes && (
+                            <p className="text-muted-foreground">
+                              {recipe.notes}
+                            </p>
+                          )}
+                        </TabsContent>
                       ))}
-                    </TabsList>
-                    {installRecipes.map((recipe) => (
-                      <TabsContent
-                        key={recipe.id}
-                        value={recipe.id}
-                        className="mt-3 space-y-2 text-sm"
-                      >
-                        <p className="text-foreground">{recipe.location}</p>
-                        {recipe.notes && (
-                          <p className="text-muted-foreground">
-                            {recipe.notes}
-                          </p>
-                        )}
-                      </TabsContent>
-                    ))}
-                  </Tabs>
-                </InstallStep>
+                    </Tabs>
+                  </InstallStep>
 
-                <InstallStep
-                  number={3}
-                  title="Open your site — text is editable by itself"
-                >
-                  {/*
+                  <InstallStep
+                    number={3}
+                    title="Open your site — text is editable by itself"
+                  >
+                    {/*
                     These instructions used to tell people to add a
                     `data-recopyfast-editable` attribute. No such attribute
                     exists anywhere in the product: the widget discovers text by
                     tag name and only reads data-rcf-content / data-rcf-ignore.
                     Anyone who followed the old steps literally got nothing.
                   */}
-                  <p className="text-sm text-muted-foreground">
-                    The widget finds headings, paragraphs, list items, table
-                    cells, labels, buttons and images by itself — no markup
-                    changes.
-                  </p>
-                  {/* Ruled rows, per the design: a hairline above the list
+                    <p className="text-sm text-muted-foreground">
+                      The widget finds headings, paragraphs, list items, table
+                      cells, labels, buttons and images by itself — no markup
+                      changes.
+                    </p>
+                    {/* Ruled rows, per the design: a hairline above the list
                       and under every row. Below 640px the term stacks
                       above its value, with one rule under the pair. */}
-                  <dl className="grid grid-cols-1 border-t border-border text-sm sm:grid-cols-[7rem_minmax(0,1fr)]">
-                    {ATTRIBUTE_ROWS.map(({ term, value }) => (
-                      <Fragment key={term}>
-                        <dt className="pt-2 text-muted-foreground sm:border-b sm:border-border sm:pb-2">
-                          {term}
-                        </dt>
-                        <dd className="min-w-0 border-b border-border pb-2 pt-0.5 sm:pt-2">
-                          <code className="rounded-control bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
-                            {value}
-                          </code>
-                        </dd>
-                      </Fragment>
-                    ))}
-                  </dl>
-                  {/*
+                    <dl className="grid grid-cols-1 border-t border-border text-sm sm:grid-cols-[7rem_minmax(0,1fr)]">
+                      {ATTRIBUTE_ROWS.map(({ term, value }) => (
+                        <Fragment key={term}>
+                          <dt className="pt-2 text-muted-foreground sm:border-b sm:border-border sm:pb-2">
+                            {term}
+                          </dt>
+                          <dd className="min-w-0 border-b border-border pb-2 pt-0.5 sm:pt-2">
+                            <code className="rounded-control bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
+                              {value}
+                            </code>
+                          </dd>
+                        </Fragment>
+                      ))}
+                    </dl>
+                    {/*
                     Links are the one common element the widget deliberately
                     skips: the selector is `a.rcf-editable-link`, not `a`, so
                     that discovery cannot turn a site's whole navigation into
@@ -404,33 +414,34 @@ export function SiteRegistrationModal({
                     marketing page — the register's F-12 asked for "the copy AND
                     docs", and this modal IS the docs for anyone installing.
                   */}
-                  <p className="text-sm text-muted-foreground">
-                    Links are skipped on purpose, so nobody can rewrite your
-                    navigation by accident.
-                  </p>
-                  {/* Rendered only while open: a closed <details> still holds
+                    <p className="text-sm text-muted-foreground">
+                      Links are skipped on purpose, so nobody can rewrite your
+                      navigation by accident.
+                    </p>
+                    {/* Rendered only while open: a closed <details> still holds
                       its children in the DOM, and a second always-present
                       "Copy" button would make the snippet's ambiguous. */}
-                  <details
-                    onToggle={(event) =>
-                      setIsExampleOpen(event.currentTarget.open)
-                    }
-                  >
-                    <summary className="cursor-pointer text-sm font-medium text-foreground">
-                      Show example
-                    </summary>
-                    {isExampleOpen && (
-                      <CodeBlock
-                        className="mt-2"
-                        label="HTML"
-                        wrap={false}
-                        value={INSTALL_EXAMPLE}
-                        copyLabel="Copy example"
-                      />
-                    )}
-                  </details>
-                </InstallStep>
-              </ol>
+                    <details
+                      onToggle={(event) =>
+                        setIsExampleOpen(event.currentTarget.open)
+                      }
+                    >
+                      <summary className="cursor-pointer text-sm font-medium text-foreground">
+                        Show example
+                      </summary>
+                      {isExampleOpen && (
+                        <CodeBlock
+                          className="mt-2"
+                          label="HTML"
+                          wrap={false}
+                          value={INSTALL_EXAMPLE}
+                          copyLabel="Copy example"
+                        />
+                      )}
+                    </details>
+                  </InstallStep>
+                </ol>
+              </InstallMethodChoice>
             </DialogBody>
 
             <DialogFooter className="flex-col sm:items-center sm:justify-between">

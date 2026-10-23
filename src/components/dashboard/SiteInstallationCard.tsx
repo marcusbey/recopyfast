@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { installRecipes } from "@/lib/sites/install-recipes";
+import { InstallMethodChoice } from "./InstallMethodChoice";
 
 /**
  * The one place a site's install state is shown.
@@ -169,7 +170,11 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
         )}
 
         {embedScript ? (
-          <>
+          <InstallMethodChoice
+            embedScript={embedScript}
+            siteDomain={site.domain}
+            location="dashboard_site"
+          >
             <CodeBlock
               value={embedScript}
               label="HTML"
@@ -181,7 +186,7 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
               }
             />
             <WhereToPaste />
-          </>
+          </InstallMethodChoice>
         ) : (
           <Alert variant="info">
             <Info className="h-4 w-4" aria-hidden="true" />

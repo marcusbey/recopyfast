@@ -113,3 +113,48 @@ describe("dataFastToolGoal", () => {
     expect(dataFastToolGoal("constructor").name).toBe("tool_run");
   });
 });
+
+describe("s120 site-owner path goals", () => {
+  it("names the install-handoff goals with valid, unreserved names", () => {
+    expect(DATAFAST_GOALS).toMatchObject({
+      installMethodSelected: "install_method_selected",
+      developerMessageCopied: "developer_message_copied",
+      developerMessageEmailed: "developer_message_emailed",
+    });
+    for (const name of [
+      DATAFAST_GOALS.installMethodSelected,
+      DATAFAST_GOALS.developerMessageCopied,
+      DATAFAST_GOALS.developerMessageEmailed,
+    ]) {
+      expect(name).toMatch(/^[a-z0-9_:-]{1,64}$/);
+      expect(DATAFAST_RESERVED_GOAL_NAMES).not.toContain(name);
+    }
+  });
+
+  it("knows every new CTA location, as a categorical slug", () => {
+    for (const location of [
+      "owners_hero",
+      "owners_handoff",
+      "owners_final",
+      "wp_guide",
+      "dev_guide",
+    ] as const) {
+      expect(DATAFAST_CTA_LOCATIONS).toContain(location);
+      expect(sanitizeGoalParams({ location })).toEqual({ location });
+    }
+    expect(dataFastCtaAttributes("owners_handoff", "docs")).toEqual({
+      "data-fast-goal": "cta_click",
+      "data-fast-goal-location": "owners_handoff",
+      "data-fast-goal-target": "docs",
+    });
+  });
+
+  it("keeps the install-method params categorical", () => {
+    expect(
+      sanitizeGoalParams({ method: "developer", location: "dashboard_site" }),
+    ).toEqual({ method: "developer", location: "dashboard_site" });
+    expect(
+      sanitizeGoalParams({ location: "dashboard_site", body: "short" }),
+    ).toEqual({ location: "dashboard_site", body: "short" });
+  });
+});

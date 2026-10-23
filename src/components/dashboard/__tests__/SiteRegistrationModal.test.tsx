@@ -985,4 +985,53 @@ describe("SiteRegistrationModal", () => {
       });
     });
   });
+  // s120: "My developer will" turns the registration result into a message the
+  // owner emails. The response also carries `apiKey` — the HMAC secret behind
+  // every site token — which must never reach that message.
+  describe("Send this to your developer", () => {
+    const SITE_ID = "6f1c2b9e-1d2c-4f5a-9b8c-7d6e5f4a3b2c";
+    const SITE_TOKEN = `${SITE_ID}.1761100000.${"cd".repeat(32)}`;
+    const API_KEY = "hmac-secret-0123456789abcdef0123456789abcdef";
+    const EMBED = `<script src="https://www.recopyfa.st/embed/recopyfast.js" data-site-id="${SITE_ID}" data-site-token="${SITE_TOKEN}" data-api-url="https://www.recopyfa.st/api"></script>`;
+
+    it("builds the message from the snippet only, never the API key", async () => {
+      const user = userEvent.setup(TYPING);
+      // `mockClear` in beforeEach keeps an earlier test's unconsumed Once.
+      (global.fetch as jest.Mock).mockReset();
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          site: {
+            id: SITE_ID,
+            domain: "www.example.com",
+            name: "Example",
+            created_at: "2026-10-22T00:00:00Z",
+          },
+          apiKey: API_KEY,
+          siteToken: SITE_TOKEN,
+          embedScript: EMBED,
+        }),
+      });
+
+      render(<SiteRegistrationModal {...defaultProps} />);
+      await user.type(screen.getByLabelText(/Website Name/i), "Example");
+      await user.type(screen.getByLabelText(/Website URL/i), "www.example.com");
+      await user.click(screen.getByRole("button", { name: /Register Site/i }));
+      await screen.findByText(/Site registered/i);
+
+      await user.click(
+        screen.getByRole("radio", { name: /My developer will/ }),
+      );
+
+      const message = screen.getByTestId("developer-handoff-message");
+      expect(message).toHaveTextContent(EMBED);
+      expect(message.textContent).not.toContain(API_KEY);
+      const mailto =
+        screen
+          .getByRole("link", { name: "Open in my email app" })
+          .getAttribute("href") ?? "";
+      expect(decodeURIComponent(mailto)).not.toContain(API_KEY);
+      expect(document.body.innerHTML.split(API_KEY)).toHaveLength(1);
+    });
+  });
 });
