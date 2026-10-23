@@ -1,4 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
+import { readDataFastVisitorId } from "@/lib/analytics/datafast-attribution";
+import { DATAFAST_GOALS } from "@/lib/analytics/datafast-goals";
+import { sendDataFastGoal } from "@/lib/analytics/datafast-server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
@@ -188,6 +191,16 @@ export async function POST(request: NextRequest) {
 
     const siteToken = buildSiteToken(site.id, site.api_key);
     const embedScript = buildEmbedScript({ siteId: site.id, siteToken });
+
+    // DataFast `site_created` (ADR 074): the owner's own dashboard request, so
+    // their first-party visitor cookie is here. No site id, domain or name is
+    // sent. After the response; inert without DATAFAST_API_KEY; never throws.
+    const visitorId = readDataFastVisitorId(request.headers.get("cookie"));
+    if (visitorId) {
+      after(() =>
+        sendDataFastGoal({ visitorId, name: DATAFAST_GOALS.siteCreated }),
+      );
+    }
 
     return NextResponse.json({
       site: {

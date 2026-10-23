@@ -1,4 +1,5 @@
 import { bindAnalyticsContext } from "@/lib/analytics/google-analytics/context-server";
+import { readDataFastAttribution } from "@/lib/analytics/datafast-attribution";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -174,6 +175,9 @@ export async function POST(req: NextRequest) {
     }
 
     await bindAnalyticsContext(req, user.id);
+    // DataFast revenue attribution (ADR 074): the buyer's own first-party
+    // cookies, validated to a short id charset, onto the Checkout metadata.
+    const attribution = readDataFastAttribution(req.cookies);
 
     const body = (await req.json()) as CheckoutRequestBody;
     const parsed = await parseIntent(body);
@@ -509,6 +513,7 @@ export async function POST(req: NextRequest) {
                 pendingIntentId: pending.id,
                 expiresAt: pending.expiresAt,
                 priceId: requestedChoice.stripePriceId,
+                attribution,
               },
             );
           } catch (error: unknown) {
@@ -757,6 +762,7 @@ export async function POST(req: NextRequest) {
               prepared,
             },
             buyerName,
+            { attribution },
           );
         } catch (error: unknown) {
           // Invalid-request, authentication and permission errors reject the
@@ -809,6 +815,7 @@ export async function POST(req: NextRequest) {
       typeof user.user_metadata?.name === "string"
         ? user.user_metadata.name
         : undefined,
+      { attribution },
     );
 
     return NextResponse.json(session);

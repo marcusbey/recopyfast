@@ -3,6 +3,7 @@ import { ArrowRight, ShieldCheck } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import { TryExperience } from "@/components/try/TryExperience";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 const DESCRIPTION =
   "Preview ReCopyFast on any live website in one click. Edit locally in your tab without registering, installing or saving anything.";
@@ -70,6 +71,7 @@ export default function TryPage() {
             <a
               href="/signup?utm_source=try&utm_medium=page&utm_campaign=try_on_any_site"
               data-cta-location="try_page"
+              {...dataFastCtaAttributes("try_page", "signup")}
               className="pressable group mt-8 inline-flex items-center gap-2 rounded-full bg-slate-900 px-8 py-4 text-base font-semibold text-white transition-[background-color,transform] hover:bg-slate-800"
             >
               Start your free trial

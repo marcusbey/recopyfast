@@ -6,6 +6,7 @@ import { ArrowRight, Zap } from "lucide-react";
 import Link from "next/link";
 import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
 import { foundingOfferTrustLead } from "./founding-offer-copy";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 export default function FinalCTA({ offer }: { offer: FoundingOfferView }) {
   const ref = useRef(null);
@@ -75,6 +76,7 @@ export default function FinalCTA({ offer }: { offer: FoundingOfferView }) {
           <a
             href="/signup"
             data-cta-location="final_cta"
+            {...dataFastCtaAttributes("final_cta", "signup")}
             className="pressable group inline-flex items-center gap-2 rounded-full bg-slate-900 px-10 py-5 text-lg font-semibold text-white transition-colors hover:bg-slate-800"
           >
             <span>Get started</span>
@@ -83,6 +85,7 @@ export default function FinalCTA({ offer }: { offer: FoundingOfferView }) {
 
           <Link
             href="/demo"
+            {...dataFastCtaAttributes("final_cta", "demo")}
             className="inline-flex items-center gap-2 px-8 py-5 text-slate-800 hover:text-slate-900 font-medium transition-colors"
           >
             See it in action

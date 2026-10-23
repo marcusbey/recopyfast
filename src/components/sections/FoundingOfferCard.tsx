@@ -1,5 +1,6 @@
 import { Check, Rocket } from "lucide-react";
 import { foundingOfferHeadline } from "./founding-offer-copy";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 /**
  * The founding offer in the pricing section (s47b): the first `limit` accounts
@@ -90,6 +91,7 @@ export default function FoundingOfferCard({
           <a
             href="/signup"
             data-cta-location="founding_offer"
+            {...dataFastCtaAttributes("founding_offer", "signup")}
             className={`pressable mt-5 block bg-teal-700 px-6 py-3 text-center font-semibold text-white hover:bg-teal-800 ${isEditorial ? "rounded-[3px]" : "rounded-xl"}`}
           >
             Claim your spot

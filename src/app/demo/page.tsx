@@ -10,6 +10,7 @@ import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import InteractiveHero from "@/components/landing/InteractiveHero";
 import styles from "@/components/marketing/editorial-content.module.css";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 /**
  * The demo page.
@@ -76,7 +77,7 @@ export default function Demo() {
             column is what stops them doing that. */}
         <section className={styles.demoSection}>
           <div className={styles.demoFrame}>
-            <InteractiveHero />
+            <InteractiveHero tracksDemoEdit />
           </div>
         </section>
 
@@ -108,6 +109,7 @@ export default function Demo() {
           <a
             href="/signup"
             data-cta-location="demo"
+            {...dataFastCtaAttributes("demo", "signup")}
             className={`${styles.primaryAction} pressable group gap-2`}
           >
             <span>Add it to your site</span>

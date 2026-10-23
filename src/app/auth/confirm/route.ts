@@ -2,8 +2,10 @@ import {
   freezeVerifiedSignup,
   type SignupProof,
 } from "@/lib/analytics/google-analytics/conversions";
+import { readDataFastVisitorId } from "@/lib/analytics/datafast-attribution";
+import { recordDataFastSession } from "@/lib/analytics/datafast-server";
 import { createClient } from "@/lib/supabase/server";
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { sanitizeNext } from "../sanitize-next";
 import { resolvePublicOrigin } from "../public-origin";
@@ -135,7 +137,15 @@ export async function GET(request: NextRequest) {
       // Freeze binding and the signup source in one transaction. A separate
       // best-effort bind loses which browser actually confirmed the account.
       await freezeVerifiedSignup(request, user.id, type as SignupProof);
-      await ensureTrialStarted(supabase, user.id);
+      const trial = await ensureTrialStarted(supabase, user.id);
+      // DataFast (ADR 074), same as /auth/callback. On the wrong-device path
+      // the phone usually has no DataFast cookie, so this is a no-op there:
+      // a goal for a visitor DataFast never saw would be refused anyway.
+      const visitorId = readDataFastVisitorId(request.headers.get("cookie"));
+      const userId = user.id;
+      if (visitorId) {
+        after(() => recordDataFastSession({ userId, visitorId, trial }));
+      }
     }
   } catch (trialError) {
     console.error("[auth] trial start failed after confirmation", trialError);

@@ -38,6 +38,8 @@ export interface CodeBlockProps {
   /** Accessible name of the Copy button: what it copies, e.g. "Copy snippet". */
   copyLabel?: string;
   className?: string;
+  /** Called after a copy that actually reached the clipboard (analytics). */
+  onCopied?: () => void;
 }
 
 type CopyState = "idle" | "copied" | "failed";
@@ -74,6 +76,7 @@ export function CodeBlock({
   wrap = true,
   copyLabel = DEFAULT_COPY_LABEL,
   className,
+  onCopied,
 }: CodeBlockProps) {
   const [copyState, setCopyState] = React.useState<CopyState>("idle");
   const preRef = React.useRef<HTMLPreElement>(null);
@@ -101,6 +104,12 @@ export function CodeBlock({
     } catch {
       selectContents(preRef.current);
       show("failed");
+      return;
+    }
+    try {
+      onCopied?.();
+    } catch {
+      // A broken callback must not turn a real copy into "Copy failed".
     }
   };
 

@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth/editor-access";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
+import { sendFirstPublishGoal } from "@/lib/analytics/datafast-server";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { canonicalSiteId } from "@/lib/api/validation";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
@@ -263,6 +264,11 @@ export async function POST(request: NextRequest) {
             webhookError,
           );
         }
+        // DataFast `first_edit_published` (ADR 074), in the same deferred
+        // task. The widget's publish comes from the customer's domain without
+        // our cookie, so it is attributed to the owner's stored visitor id.
+        // Inert without DATAFAST_API_KEY; never throws.
+        await sendFirstPublishGoal(siteId, publishedRows.length);
       });
     }
 

@@ -150,24 +150,34 @@ async function claimedFoundingOffer(userId: string): Promise<boolean> {
  * Nothing here throws. This runs between "the session is valid" and "redirect
  * to the dashboard", so a failure to hand out a free trial must never be able
  * to fail a sign-in.
+ *
+ * Returns which trial THIS call started, or null when it started none (already
+ * entitled, a lapsed trial hitting the one-trial index, or a failure). Because
+ * the index makes a start happen once per account, ever, the auth routes use a
+ * non-null answer as the account's signup moment for DataFast (ADR 074).
  */
 export async function ensureTrialStarted(
   supabase: SupabaseClient,
   userId: string,
-): Promise<void> {
+): Promise<TrialStarted> {
   try {
     const entitlement = await resolveEntitlement(supabase, userId);
 
     if (entitlement.kind !== "none") {
-      return;
+      return null;
     }
 
     if (await claimedFoundingOffer(userId)) {
-      return;
+      return "founding";
     }
 
-    await grantTrialEntitlement(userId);
+    const { granted } = await grantTrialEntitlement(userId);
+    return granted ? "standard" : null;
   } catch (error) {
     console.error(`[trial] could not start a trial for ${userId}:`, error);
+    return null;
   }
 }
+
+/** The trial `ensureTrialStarted` started on this call, if any. */
+export type TrialStarted = "founding" | "standard" | null;

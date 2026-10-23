@@ -12,6 +12,7 @@ import EditableEditorialHero from "./EditableEditorialHero";
 import InteractiveHero from "./InteractiveHero";
 import ProductTour from "./ProductTour";
 import styles from "./editorial-homepage.module.css";
+import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 export default function EditorialHomePage() {
   const offer = toFoundingOfferView(useFoundingOffer());
@@ -137,6 +138,7 @@ export default function EditorialHomePage() {
             <a
               href="/signup"
               data-cta-location="editorial_final"
+              {...dataFastCtaAttributes("editorial_final", "signup")}
               className={styles.primaryButton}
             >
               Start your free trial

@@ -1,9 +1,10 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { POST } from "@/app/api/sites/register/route";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
 import { canCreateWebsite } from "@/lib/feature-gating/permissions";
+import { sendDataFastGoal } from "@/lib/analytics/datafast-server";
 
 // Mock dependencies
 jest.mock("@/lib/supabase/server");
@@ -13,6 +14,10 @@ jest.mock("@/lib/supabase/service");
 // its enforcement is covered by the dedicated case below.
 jest.mock("@/lib/feature-gating/permissions", () => ({
   canCreateWebsite: jest.fn(),
+}));
+// ADR 074: the site_created goal is asserted below, never actually sent.
+jest.mock("@/lib/analytics/datafast-server", () => ({
+  sendDataFastGoal: jest.fn(),
 }));
 jest.mock("@/lib/security/site-auth", () => {
   const actual = jest.requireActual("@/lib/security/site-auth");
@@ -324,5 +329,48 @@ describe("/api/sites/register - POST", () => {
     expect(data.error).toContain("Starter plan includes 1 website");
     // Nothing may be written when the quota refuses the request.
     expect(mockServiceClient.insert).not.toHaveBeenCalled();
+  });
+
+  describe("DataFast site_created (ADR 074)", () => {
+    const VISITOR = "a3ab2331-989f-4cfa-91c6-2461c9e3c6bd";
+    const mockSite = {
+      id: "site-123",
+      domain: "example.com",
+      name: "Example Site",
+      created_at: "2024-01-01T00:00:00Z",
+      api_key: "raw-api-key",
+    };
+
+    function register(cookie?: string) {
+      mockServiceClient.single
+        .mockResolvedValueOnce({ data: null, error: null })
+        .mockResolvedValueOnce({ data: mockSite, error: null });
+      return POST(
+        new NextRequest("http://localhost/api/sites/register", {
+          method: "POST",
+          headers: cookie ? { cookie } : {},
+          body: JSON.stringify({ domain: "example.com", name: "Example" }),
+        }),
+      );
+    }
+
+    beforeEach(() => (after as jest.Mock).mockReset());
+
+    it("sends site_created for the owner's visitor after the response, with no site details", async () => {
+      const response = await register(`datafast_visitor_id=${VISITOR}`);
+      expect(response.status).toBe(200);
+      expect(sendDataFastGoal).not.toHaveBeenCalled();
+
+      for (const [task] of (after as jest.Mock).mock.calls) await task();
+      expect(sendDataFastGoal).toHaveBeenCalledWith({
+        visitorId: VISITOR,
+        name: "site_created",
+      });
+    });
+
+    it("schedules nothing without a visitor cookie", async () => {
+      await register();
+      expect(after).not.toHaveBeenCalled();
+    });
   });
 });

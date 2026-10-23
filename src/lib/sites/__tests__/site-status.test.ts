@@ -134,18 +134,21 @@ describe("the staleness window", () => {
  */
 type ChainCall = { method: string; args: unknown[] };
 
-function mockClient(result: { error: unknown } = { error: null }) {
+function mockClient(
+  result: { error: unknown; data?: unknown } = { error: null },
+) {
   const calls: ChainCall[] = [];
   const builder: Record<string, unknown> = {};
 
-  for (const method of ["update", "eq"]) {
+  // `select` because markSiteLive reads back the matched id (ADR 074).
+  for (const method of ["update", "eq", "select"]) {
     builder[method] = jest.fn((...args: unknown[]) => {
       calls.push({ method, args });
       return builder;
     });
   }
   builder.then = (
-    resolve: (value: { error: unknown }) => unknown,
+    resolve: (value: { error: unknown; data?: unknown }) => unknown,
     reject?: (reason: unknown) => unknown,
   ) => Promise.resolve(result).then(resolve, reject);
 
@@ -212,6 +215,19 @@ describe("markSiteLive", () => {
     const { client } = mockClient({ error: { message: "connection lost" } });
 
     await expect(markSiteLive(client, "site-123", NOW)).rejects.toThrow();
+  });
+
+  it("reports true only for the request that made the transition", async () => {
+    const first = mockClient({ error: null, data: [{ id: "site-123" }] });
+    await expect(markSiteLive(first.client, "site-123", NOW)).resolves.toBe(
+      true,
+    );
+    expect(first.calls).toContainEqual({ method: "select", args: ["id"] });
+
+    const later = mockClient({ error: null, data: [] });
+    await expect(markSiteLive(later.client, "site-123", NOW)).resolves.toBe(
+      false,
+    );
   });
 });
 

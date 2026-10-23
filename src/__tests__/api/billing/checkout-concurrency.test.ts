@@ -420,6 +420,8 @@ describe("A-21: two checkouts started at once", () => {
         pendingIntentId: pendingIntent?.id,
         expiresAt: pendingIntent?.expires_at,
         priceId: "price_pro_monthly",
+        // ADR 074: DataFast attribution; the fixture sends no cookies.
+        attribution: {},
       },
     ]);
     expect(mockFindCheckoutSessionForIntent).not.toHaveBeenCalled();
@@ -1270,6 +1272,8 @@ describe("A-21: two checkouts started at once", () => {
         checkoutExpiresAt: 1_800_000_000,
       }),
       undefined,
+      // ADR 074: DataFast attribution; the fixture sends no cookies.
+      { attribution: {} },
     );
     expect(mockBindFoundingAgencyCheckout).toHaveBeenCalledWith(
       "reservation-1",

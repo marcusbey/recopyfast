@@ -115,15 +115,19 @@ function throwOnWriteError(operation: string, error: unknown): void {
  * would write, and the later `live_at` would win. The guard makes the second
  * update match zero rows instead, which is not an error — it is the normal
  * case for every request after the first.
+ *
+ * Resolves `true` only for the request whose update matched — the site's one
+ * transition to live — which is what makes it safe to hang a once-only event
+ * on (DataFast `script_installed`, ADR 074). `id` is the only column read back.
  */
 export async function markSiteLive(
   supabase: SupabaseClient,
   siteId: string,
   at: Date = new Date(),
-): Promise<void> {
+): Promise<boolean> {
   const timestamp = at.toISOString();
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("sites")
     .update({
       status: "live",
@@ -131,9 +135,11 @@ export async function markSiteLive(
       last_reported_at: timestamp,
     })
     .eq("id", siteId)
-    .eq("status", "awaiting-install");
+    .eq("status", "awaiting-install")
+    .select("id");
 
   throwOnWriteError("markSiteLive", error);
+  return Array.isArray(data) && data.length > 0;
 }
 
 /**
