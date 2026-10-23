@@ -307,9 +307,13 @@ export function ChangeRow({
           <StatusBadge status={status} />
         </div>
 
+        {/* `flex-1`: the location fills its grid track up to ⋮, as it did
+            before the drift badge needed this wrapper. Shrunk to its words, it
+            ended 39px short of ⋮ at 375px and failed changes.spec.ts's "the
+            location reaches ⋮" check (s119, PR #119 E2E). */}
         <div className="flex min-w-0 items-center gap-2 [grid-area:location]">
           <p
-            className="min-w-0 truncate text-sm font-medium text-foreground"
+            className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
             title={location}
           >
             {location}
