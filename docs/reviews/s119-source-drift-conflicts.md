@@ -22,7 +22,7 @@ and neither is reachable without opt-in integration or a deploy mistake.
 ### M1 — major — Sites using the documented ADR 046 snapshot SSR get a false "Source changed" on every published edit, and the ADR 075 trust argument does not hold for them
 
 - `public/embed/recopyfast.src.js:3274-3276` (the new predicate in `postContentMap`)
-- `supabase/migrations/20261022120000_content_source_drift.sql` (`record_content_source_drift`, the SET/WHERE CASE)
+- `supabase/migrations/20261023120000_content_source_drift.sql` (`record_content_source_drift`, the SET/WHERE CASE)
 - `docs/decisions/075-source-drift-is-flagged-not-enforced.md` ("Trust")
 
 The premise in the research and ADR 075 is that `data.originalContent` is the page's *authored*
@@ -67,7 +67,7 @@ integrator doc. Either way, the snapshot path needs its own sentence in ADR 075.
 
 The visitor content GET now selects `source_baseline, source_drift_content,
 source_drift_detected_at`. If the app is deployed before
-`20261022120000_content_source_drift.sql` is applied, PostgREST answers that select with an
+`20261023120000_content_source_drift.sql` is applied, PostgREST answers that select with an
 error. The route then returns 500 to every widget on every customer site, so all published copy
 disappears and visitors see authored text. The Changes page also fails ("drift read failed" →
 500).
@@ -110,7 +110,7 @@ blocks cross-site POST subrequests. Worth adding `isSameOriginRequest` here and 
 
 ### m3 — minor — "Use new source" changes published copy without a `content.updated` webhook marker
 
-- `supabase/migrations/20261022120000_content_source_drift.sql` (`resolve_content_source_drift`, drop branch)
+- `supabase/migrations/20261023120000_content_source_drift.sql` (`resolve_content_source_drift`, drop branch)
 
 `staging/publish` records `WEBHOOK_EVENTS.CONTENT_UPDATED` after a publish. The drop path
 rewrites `published_content` and records no webhook marker. Integrators who rebuild a static
