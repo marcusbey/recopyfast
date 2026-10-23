@@ -179,6 +179,38 @@ describe("buildDeveloperHandoffMessage — no credential ever leaves", () => {
     );
   });
 
+  it.each([
+    ["a Stripe secret as the site token", { token: "sk_live_abc123" }],
+    ["an editor-entry parameter as the site id", { id: "x?rcf_token=abc" }],
+    ["a session token name as the site id", { id: "access_token" }],
+    ["an api_key label as the site token", { token: "api_key=abc" }],
+  ])(
+    "refuses a parser-valid tag carrying %s (the final scan)",
+    (_label, values) => {
+      const embedScript = SCRIPT.replace(
+        `data-site-id="${SITE_ID}"`,
+        `data-site-id="${"id" in values ? values.id : SITE_ID}"`,
+      ).replace(
+        `data-site-token="${SITE_TOKEN}"`,
+        `data-site-token="${"token" in values ? values.token : SITE_TOKEN}"`,
+      );
+      // The shape check passes: only the credential scan can refuse it.
+      expect(parseEmbedScript(embedScript)).not.toBeNull();
+
+      expect(build({ embedScript })).toEqual({
+        ok: false,
+        reason: "credential_detected",
+      });
+    },
+  );
+
+  it.each(["api-key.example", "www.apikey.example", "apikey.example:8080"])(
+    "does not mistake a hostname containing api-key for a secret: %s",
+    (siteDomain) => {
+      expect(build({ siteDomain }).ok).toBe(true);
+    },
+  );
+
   it("detects each credential shape it guards against", () => {
     for (const sample of [
       "https://www.recopyfa.st/edit",
@@ -191,6 +223,8 @@ describe("buildDeveloperHandoffMessage — no credential ever leaves", () => {
       "whsec_abc",
       "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.sig",
       "api_key",
+      "apiKey: abc",
+      "X-Api-Key: abc",
       "https://www.recopyfa.st/dashboard/sites",
     ]) {
       expect([sample, findCredentialMaterial(sample)]).toEqual([
@@ -223,7 +257,7 @@ describe("buildDeveloperHandoffMessage — mailto", () => {
       MAX_MAILTO_HREF_LENGTH,
     );
     // The full message does not fit, so the email app gets the short one.
-    expect(message.isMailtoShortened).toBe(true);
+    expect(message.mailtoBody).toBe("short");
     expect(body).toContain(SCRIPT);
     expect(body).toContain(`${APP}${DEVELOPER_GUIDE_PATH}`);
     expect(body).toContain("Paste the full message");
@@ -239,7 +273,7 @@ describe("buildDeveloperHandoffMessage — mailto", () => {
     });
     const message = messageOf(build({ embedScript }));
 
-    expect(message.isMailtoShortened).toBe(true);
+    expect(message.mailtoBody).toBe("none");
     expect(message.mailtoHref).not.toContain("body=");
     expect(message.mailtoHref.length).toBeLessThanOrEqual(
       MAX_MAILTO_HREF_LENGTH,

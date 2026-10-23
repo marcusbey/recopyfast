@@ -27,7 +27,12 @@ const PRICING = {
   ok: true,
   json: async () => ({
     plans: [
-      { id: "starter", monthlyPrice: 9, currency: "usd" },
+      {
+        id: "starter",
+        monthlyPrice: 9,
+        currency: "usd",
+        limits: { websites: 1 },
+      },
       { id: "pro", monthlyPrice: 19, currency: "usd" },
     ],
   }),
@@ -68,6 +73,59 @@ describe("/for/owners", () => {
       "Your developer adds one line, once. After that, the words are yours",
     );
     await screen.findByText(/\$9 a month/);
+    expect(screen.getByTestId("owner-starter-price")).toHaveTextContent(
+      "for one website that you edit yourself",
+    );
+  });
+
+  it("names no website count when the catalogue omits the limit", async () => {
+    mockPricing({
+      ok: true,
+      json: async () => ({ plans: [{ id: "starter", monthlyPrice: 9 }] }),
+    });
+    render(<ForOwnersPage />);
+
+    await screen.findByText(/\$9 a month/);
+    expect(screen.getByTestId("owner-starter-price").textContent).not.toMatch(
+      /one website/,
+    );
+  });
+
+  it("backs the $75 headline with the sourced per-change range", () => {
+    render(<ForOwnersPage />);
+    const problem = screen.getByRole("region", {
+      name: "Stop paying $75 to fix a typo.",
+    });
+
+    expect(problem).toHaveTextContent(
+      "Small website edits typically cost $50–150 each when you pay your developer per change",
+    );
+  });
+
+  it("only promises draft-without-publish where seats exist", () => {
+    render(<ForOwnersPage />);
+    const text = pageText();
+
+    expect(text).toContain(
+      "If your developer holds the account on the Pro plan, they can invite you to edit without publishing",
+    );
+    expect(text).not.toMatch(/They can keep the publish button/);
+  });
+
+  it("calls the public tag value a site token, not a key", () => {
+    render(<ForOwnersPage />);
+    const text = pageText();
+
+    expect(text).toContain("site token that is public by design");
+    expect(text).not.toMatch(/site key/i);
+  });
+
+  it("describes the rotating demo without naming one sample", () => {
+    render(<ForOwnersPage />);
+    const text = pageText();
+
+    expect(text).not.toMatch(/restaurant's menu/);
+    expect(text).toContain("Your changes stay in this tab until you reload.");
   });
 
   it("keeps headings in order: every h3 sits under an h2", () => {
@@ -100,7 +158,10 @@ describe("/for/owners", () => {
       expect(link).toHaveAttribute("data-fast-goal-target", "try");
     }
 
-    const starts = screen.getAllByRole("link", { name: "Start free" });
+    const starts = screen.getAllByRole("link", {
+      name: "Start your free trial",
+    });
+    expect(pageText()).not.toMatch(/Start free\b/);
     expect(starts.map((link) => link.getAttribute("href"))).toEqual([
       "/signup",
       "/signup",

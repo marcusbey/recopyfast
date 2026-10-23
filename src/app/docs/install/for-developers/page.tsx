@@ -232,6 +232,7 @@ export default function DeveloperGuidePage() {
             keeps showing after your deploy, even if you changed that same text
             in source. Their edit wins.
           </li>
+          {/* Update when s119 source-drift detection (PR #119) ships. */}
           <li>
             If you move or restructure the element, its published text no longer
             matches and the page shows your source text again. There is no
@@ -264,7 +265,7 @@ export default function DeveloperGuidePage() {
           {...dataFastCtaAttributes("dev_guide", "signup")}
           className="font-semibold text-primary underline-offset-4 hover:underline"
         >
-          Start free
+          Start your free trial
         </a>{" "}
         and register their site yourself. Questions:{" "}
         <a

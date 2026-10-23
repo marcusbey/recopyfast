@@ -57,6 +57,19 @@ export interface InstallRecipe {
   location: string;
   /** Integration caveats that must remain visible with the recipe. */
   notes?: string;
+  /**
+   * A public step-by-step guide for this stack. A field, not a path typed into
+   * `notes`: every renderer shows it as a link, and a URL inside prose renders
+   * as dead text.
+   */
+  guide?: InstallRecipeGuide;
+}
+
+export interface InstallRecipeGuide {
+  /** Site-relative path to the public guide. */
+  href: string;
+  /** The link text. */
+  label: string;
 }
 
 export const installRecipes: readonly InstallRecipe[] = [
@@ -70,7 +83,11 @@ export const installRecipes: readonly InstallRecipe[] = [
     location:
       "Install the free WPCode plugin, then paste it into Code Snippets > Header & Footer, in the Footer box (it loads just before </body>), and select Save Changes.",
     notes:
-      "Editing the theme's footer.php also works, but a theme update can overwrite it. Step-by-step guide: /docs/install/wordpress.",
+      "Editing the theme's footer.php also works, but a theme update can overwrite it.",
+    guide: {
+      href: "/docs/install/wordpress",
+      label: "Step-by-step WordPress guide",
+    },
   },
   {
     id: "nextjs",

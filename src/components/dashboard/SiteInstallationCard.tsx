@@ -91,6 +91,18 @@ function WhereToPaste() {
             {recipe.notes && (
               <p className="text-sm text-muted-foreground">{recipe.notes}</p>
             )}
+            {recipe.guide && (
+              <p className="text-sm">
+                <Link
+                  href={recipe.guide.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  {recipe.guide.label}
+                </Link>
+              </p>
+            )}
           </TabsContent>
         ))}
       </Tabs>

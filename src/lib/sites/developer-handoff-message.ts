@@ -26,8 +26,10 @@
  * (around 2,000 characters is the widely safe ceiling). The full message,
  * percent-encoded, is longer than that, so "Open in my email app" falls back
  * to a short body — the snippet and the guide link — and tells the owner to
- * paste the full message they copied. A truncated snippet would be a broken
- * install, which is worse than a short email.
+ * paste the full message they copied. When even that would not fit, the draft
+ * carries the subject only (`mailtoBody: "none"`) and the owner pastes the
+ * whole message. A truncated snippet would be a broken install, which is worse
+ * than a short email.
  */
 
 export const MAX_MAILTO_HREF_LENGTH = 2000;
@@ -42,20 +44,28 @@ export interface DeveloperHandoffInput {
   siteDomain: string;
 }
 
+/**
+ * What the `mailto:` draft carries: the whole message, the short body (snippet
+ * + guide link), or the subject only. Anything but "full" means the owner
+ * pastes the copied message into the email.
+ */
+export type MailtoBody = "full" | "short" | "none";
+
 export interface DeveloperHandoffMessage {
   subject: string;
   body: string;
   mailtoHref: string;
-  /** The email app gets a shorter body; the owner pastes the full one. */
-  isMailtoShortened: boolean;
+  mailtoBody: MailtoBody;
 }
+
+export type DeveloperHandoffFailureReason =
+  | "invalid_snippet"
+  | "invalid_domain"
+  | "credential_detected";
 
 export type DeveloperHandoffResult =
   | { ok: true; message: DeveloperHandoffMessage }
-  | {
-      ok: false;
-      reason: "invalid_snippet" | "invalid_domain" | "credential_detected";
-    };
+  | { ok: false; reason: DeveloperHandoffFailureReason };
 
 interface ParsedEmbedScript {
   script: string;
@@ -110,7 +120,11 @@ export const CREDENTIAL_PATTERNS: readonly RegExp[] = [
   /\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]/,
   /\bwhsec_[A-Za-z0-9]/,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
-  /\bapi[_-]?key\b/i,
+  // `sites.api_key` named as a field, parameter or header (api_key=,
+  // "apiKey":, X-Api-Key:). Not when it is a hostname label: the registered
+  // domain is in every message, and "api-key.example" or "apikey.example:8080"
+  // is somebody's site, not a secret.
+  /\bapi[_-]?key\b(?![.-]|:\d)/i,
 ];
 
 export function findCredentialMaterial(text: string): RegExp | null {
@@ -191,9 +205,9 @@ export function buildDeveloperHandoffMessage(
   const body = buildFullBody(domain, parsed.script, parsed.appOrigin);
 
   let mailtoHref = buildMailtoHref(subject, body);
-  let isMailtoShortened = false;
+  let mailtoBody: MailtoBody = "full";
   if (mailtoHref.length > MAX_MAILTO_HREF_LENGTH) {
-    isMailtoShortened = true;
+    mailtoBody = "short";
     mailtoHref = buildMailtoHref(
       subject,
       buildShortBody(parsed.script, parsed.appOrigin),
@@ -201,6 +215,7 @@ export function buildDeveloperHandoffMessage(
     if (mailtoHref.length > MAX_MAILTO_HREF_LENGTH) {
       // Even the short body would be cut: open a subject-only draft rather
       // than one carrying a truncated (broken) snippet.
+      mailtoBody = "none";
       mailtoHref = buildMailtoHref(subject);
     }
   }
@@ -212,7 +227,7 @@ export function buildDeveloperHandoffMessage(
 
   return {
     ok: true,
-    message: { subject, body, mailtoHref, isMailtoShortened },
+    message: { subject, body, mailtoHref, mailtoBody },
   };
 }
 

@@ -510,6 +510,13 @@ describe("SiteRegistrationModal", () => {
       expect(screen.getByText(installRecipes[0].location)).toBeInTheDocument();
     });
 
+    it("links the WordPress recipe's step-by-step guide", async () => {
+      await registerSite();
+      expect(
+        screen.getByRole("link", { name: "Step-by-step WordPress guide" }),
+      ).toHaveAttribute("href", "/docs/install/wordpress");
+    });
+
     // s66c1 AC 9: the new site has its own page now; the panel leads there.
     it("leads to the new site's own page with Open site page", async () => {
       await registerSite();

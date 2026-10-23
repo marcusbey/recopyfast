@@ -63,9 +63,8 @@ describe("developer guide page", () => {
     expect(
       screen.getByRole("link", { name: "WordPress guide" }),
     ).toHaveAttribute("href", "/docs/install/wordpress");
-    expect(screen.getByRole("link", { name: "Start free" })).toHaveAttribute(
-      "data-fast-goal-location",
-      "dev_guide",
-    );
+    expect(
+      screen.getByRole("link", { name: "Start your free trial" }),
+    ).toHaveAttribute("data-fast-goal-location", "dev_guide");
   });
 });

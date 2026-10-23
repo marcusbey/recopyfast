@@ -11,6 +11,14 @@ function formatPrice(amount: number, currency: string): string {
   }).format(amount);
 }
 
+/** How many sites the plan covers, from `limits.websites`; never a guess. */
+function websitesPhrase(websites: number | null): string {
+  if (websites === null) return "and you edit your site yourself";
+  if (websites === -1) return "for unlimited websites that you edit yourself";
+  if (websites === 1) return "for one website that you edit yourself";
+  return `for up to ${websites} websites that you edit yourself`;
+}
+
 /**
  * The cost answer on /for/owners, with the price read from the catalogue at
  * view time. Loading and failure say so in words; neither shows a number.
@@ -23,8 +31,8 @@ export function OwnerStarterPrice() {
       <p data-testid="owner-starter-price">
         The Starter plan is{" "}
         <strong>{formatPrice(data.monthlyPrice, data.currency)} a month</strong>{" "}
-        for one website that you edit yourself. That is usually less than a
-        single paid change.
+        {websitesPhrase(data.websites)}. That is usually less than a single paid
+        change.
       </p>
     );
   }

@@ -28,8 +28,18 @@ import styles from "./owners-page.module.css";
  *   detector ships.
  * - Price: read from /api/pricing at view time (OwnerStarterPrice), never
  *   typed here (AGENTS.md non-negotiable 7).
- * - "$50–150": typical freelance hourly rates for website changes, from the
- *   research brief's cited sources. No other number on this page is ours.
+ * - Money figures: "$50–150" is the typical freelance hourly rate or
+ *   per-change cost for small website edits, from the research brief's cited
+ *   sources (WebsiteMaintenance.com, r/webdev rate threads). The "$75" in the
+ *   problem headline is owner-approved messaging (headline option 2 of the
+ *   brief), an illustrative point inside that sourced range — not a measured
+ *   price of ours. The sentence under it carries the sourced range; keep the
+ *   two together. No other money figure is typed on this page.
+ * - Approval: the owner who registers a site is its admin, which includes
+ *   publish. Edit-without-publish exists only when someone else holds the
+ *   account and invites the owner, and Starter includes no collaborator seats
+ *   (src/lib/feature-gating/permissions.ts, canShareSite; enforced in
+ *   src/app/api/sites/[siteId]/share/route.ts). Name the plan that has seats.
  *
  * Never: "take control of your website" (a ghosted owner reads "control" as
  * domain, hosting and logins, which we don't give), testimonials, customer
@@ -68,7 +78,7 @@ export default function OwnersPage() {
                 {...dataFastCtaAttributes("owners_hero", "signup")}
                 className={styles.secondaryButton}
               >
-                Start free
+                Start your free trial
               </a>
               <a href="#handoff" className={styles.textLink}>
                 Send this to your developer
@@ -90,10 +100,10 @@ export default function OwnersPage() {
           <p className={styles.eyebrow}>The problem</p>
           <h2 id="owners-problem">Stop paying $75 to fix a typo.</h2>
           <p className={styles.prose}>
-            Freelance web developers typically charge $50–150 an hour, so even a
-            one-line change costs real money, and it waits for their schedule.
-            Meanwhile the old hours stay up and last month&apos;s special is
-            still on the homepage.
+            Small website edits typically cost $50–150 each when you pay your
+            developer per change, so even a one-line fix costs real money, and
+            it waits for their schedule. Meanwhile the old hours stay up and
+            last month&apos;s special is still on the homepage.
           </p>
           <ul className={styles.ruledList}>
             <li>Waiting days for a change that takes a minute.</li>
@@ -134,18 +144,18 @@ export default function OwnersPage() {
             </li>
           </ol>
           <p className={styles.note}>
-            <strong>Want your developer to check first?</strong> They can keep
-            the publish button: you save drafts, and they publish them. Inviting
-            people depends on your plan.
+            <strong>Want your developer to check first?</strong> If your
+            developer holds the account on the Pro plan, they can invite you to
+            edit without publishing: you save drafts, they publish.
           </p>
         </section>
 
         <section className={styles.section} aria-labelledby="owners-demo">
           <p className={styles.eyebrow}>Try it here</p>
-          <h2 id="owners-demo">Change a sample restaurant&apos;s menu.</h2>
+          <h2 id="owners-demo">Change the words on a sample site.</h2>
           <p className={styles.prose}>
             Click a headline, a price or a paragraph in the sample site below.
-            Your changes stay in this browser.
+            Your changes stay in this tab until you reload.
           </p>
           <div className={styles.demoFrame}>
             <InteractiveHero />
@@ -275,7 +285,7 @@ export default function OwnersPage() {
                 The script reads the text on your pages and swaps in the words
                 you publish. It can&apos;t change your layout, code, payments or
                 forms, and links stay locked unless your developer opens one up.
-                The line contains a site key that is public by design and only
+                The line contains a site token that is public by design and only
                 works on your domain. You never give anyone your website login
                 or admin password, and we never ask for it.
               </p>
@@ -310,18 +320,20 @@ export default function OwnersPage() {
                 words keep showing after their update, even if they changed that
                 same text. If they move things around or redesign the page, some
                 of your changes can stop showing and the original text comes
-                back. We don&apos;t warn you about that yet. Every change you
-                publish stays in your history, so you or your developer can see
-                it and publish it again, and developers can tag the text you
-                edit most so it keeps matching after a redesign.
+                back.{" "}
+                {/* Update when s119 source-drift detection (PR #119) ships. */}
+                We don&apos;t warn you about that yet. Every change you publish
+                stays in your history, so you or your developer can see it and
+                publish it again, and developers can tag the text you edit most
+                so it keeps matching after a redesign.
               </p>
             </div>
             <div>
               <h3>How much does it cost compared with paying per change?</h3>
               <OwnerStarterPrice />
               <p>
-                For comparison, freelance developers typically charge $50–150 an
-                hour for website changes.
+                For comparison, small website edits typically cost $50–150 each
+                when you pay your developer per change.
               </p>
             </div>
             <div>
@@ -369,7 +381,7 @@ export default function OwnersPage() {
               {...dataFastCtaAttributes("owners_final", "signup")}
               className={styles.secondaryButton}
             >
-              Start free
+              Start your free trial
             </a>
           </div>
         </section>

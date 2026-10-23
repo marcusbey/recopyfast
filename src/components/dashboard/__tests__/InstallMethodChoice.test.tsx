@@ -19,11 +19,14 @@ const SCRIPT = buildEmbedScript({
   wsUrl: "wss://recopyfast-ws.fly.dev",
 });
 
-function renderChoice(embedScript = SCRIPT) {
+function renderChoice(
+  embedScript = SCRIPT,
+  siteDomain = "www.bellavista.example",
+) {
   return render(
     <InstallMethodChoice
       embedScript={embedScript}
-      siteDomain="www.bellavista.example"
+      siteDomain={siteDomain}
       location="dashboard_site"
     >
       <p>Do-it-yourself steps</p>
@@ -154,5 +157,18 @@ describe("InstallMethodChoice", () => {
       screen.queryByRole("link", { name: "Open in my email app" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
+  });
+
+  it("explains a refusal by its reason, not always as a bad snippet", async () => {
+    const user = userEvent.setup();
+    renderChoice(undefined, "not a domain");
+    await user.click(screen.getByRole("radio", { name: /My developer will/ }));
+
+    expect(
+      screen.getByText(/site's address doesn't look like a plain domain/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/doesn't look like the one ReCopyFast/),
+    ).toBeNull();
   });
 });

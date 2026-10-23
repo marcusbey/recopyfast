@@ -6,6 +6,26 @@ import { useCallback, useEffect, useState } from "react";
 export interface StarterPlanPrice {
   monthlyPrice: number;
   currency: string;
+  /**
+   * `limits.websites` from the catalogue: a positive count, -1 for unlimited,
+   * or null when the payload has no usable value (the page then names no
+   * count rather than guessing one).
+   */
+  websites: number | null;
+}
+
+/** The catalogue's "unlimited" sentinel (src/lib/feature-gating). */
+const UNLIMITED = -1;
+
+function parseWebsitesLimit(limits: unknown): number | null {
+  if (!limits || typeof limits !== "object") return null;
+  const websites = (limits as { websites?: unknown }).websites;
+  if (websites === UNLIMITED) return UNLIMITED;
+  return typeof websites === "number" &&
+    Number.isInteger(websites) &&
+    websites > 0
+    ? websites
+    : null;
 }
 
 function isPositiveNumber(value: unknown): value is number {
@@ -30,7 +50,11 @@ export function parseStarterPlanPrice(body: unknown): StarterPlanPrice | null {
     typeof starter.currency === "string" && /^[a-z]{3}$/i.test(starter.currency)
       ? starter.currency.toUpperCase()
       : "USD";
-  return { monthlyPrice: starter.monthlyPrice, currency };
+  return {
+    monthlyPrice: starter.monthlyPrice,
+    currency,
+    websites: parseWebsitesLimit(starter.limits),
+  };
 }
 
 /**

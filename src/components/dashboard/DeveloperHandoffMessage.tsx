@@ -11,6 +11,8 @@ import {
   DEVELOPER_GUIDE_PATH,
   buildDeveloperHandoffMessage,
   formatDeveloperHandoffForCopy,
+  type DeveloperHandoffFailureReason,
+  type MailtoBody,
 } from "@/lib/sites/developer-handoff-message";
 
 export interface DeveloperHandoffMessageProps {
@@ -18,6 +20,23 @@ export interface DeveloperHandoffMessageProps {
   siteDomain: string;
   location: DataFastInstallChoiceLocation;
 }
+
+/** Why the message was refused, in the owner's words, per refusal reason. */
+const FAILURE_EXPLANATIONS: Record<DeveloperHandoffFailureReason, string> = {
+  invalid_snippet:
+    "This snippet doesn't look like the one ReCopyFast generates, so we won't put it in an email.",
+  invalid_domain:
+    "This site's address doesn't look like a plain domain (for example www.example.com), so we won't build an email around it.",
+  credential_detected:
+    "The message would have contained something that looks like a private key or a sign-in link, so we won't put it in an email.",
+};
+
+/** What the owner does after "Open in my email app", per draft content. */
+const MAILTO_FALLBACK_HELP: Record<Exclude<MailtoBody, "full">, string> = {
+  short:
+    "Email links have a length limit, so your email app opens with a shorter version: the snippet and the guide link. Copy the message above and paste it where the draft says so.",
+  none: "Email links have a length limit, and this snippet is too long to fit, so your email app opens with the subject only. Copy the message above and paste the copied message into the email.",
+};
 
 /**
  * The ready-to-send message for the owner's developer (s120).
@@ -44,8 +63,7 @@ export function DeveloperHandoffMessage({
         <AlertTitle>We couldn&apos;t prepare the message</AlertTitle>
         <AlertDescription>
           <p>
-            This snippet doesn&apos;t look like the one ReCopyFast generates, so
-            we won&apos;t put it in an email. Choose &ldquo;I&apos;ll do it
+            {FAILURE_EXPLANATIONS[result.reason]} Choose &ldquo;I&apos;ll do it
             myself&rdquo; to copy the snippet, and send your developer the guide
             at {DEVELOPER_GUIDE_PATH} with it.
           </p>
@@ -86,7 +104,7 @@ export function DeveloperHandoffMessage({
             onClick={() =>
               trackGoal("developer_message_emailed", {
                 location,
-                body: message.isMailtoShortened ? "short" : "full",
+                body: message.mailtoBody,
               })
             }
           >
@@ -96,11 +114,9 @@ export function DeveloperHandoffMessage({
         </Button>
       </div>
 
-      {message.isMailtoShortened && (
+      {message.mailtoBody !== "full" && (
         <p className="text-sm text-muted-foreground">
-          Email links have a length limit, so your email app opens with a
-          shorter version: the snippet and the guide link. Copy the message
-          above and paste it where the draft says so.
+          {MAILTO_FALLBACK_HELP[message.mailtoBody]}
         </p>
       )}
     </div>

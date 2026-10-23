@@ -368,6 +368,18 @@ export function SiteRegistrationModal({
                               {recipe.notes}
                             </p>
                           )}
+                          {recipe.guide && (
+                            <p>
+                              <Link
+                                href={recipe.guide.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-medium text-primary underline-offset-4 hover:underline"
+                              >
+                                {recipe.guide.label}
+                              </Link>
+                            </p>
+                          )}
                         </TabsContent>
                       ))}
                     </Tabs>

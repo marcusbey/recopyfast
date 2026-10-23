@@ -216,7 +216,7 @@ export default function WordPressGuidePage() {
           {...dataFastCtaAttributes("wp_guide", "signup")}
           className="font-semibold text-primary underline-offset-4 hover:underline"
         >
-          Start free
+          Start your free trial
         </a>
         , register your site and copy its snippet. All platforms:{" "}
         <Link href="/docs/install" className={LINK_CLASS_NAME}>

@@ -55,10 +55,9 @@ describe("WordPress install guide page", () => {
   it("tags its signup CTA and links the developer guide", () => {
     render(<WordPressGuidePage />);
 
-    expect(screen.getByRole("link", { name: "Start free" })).toHaveAttribute(
-      "data-fast-goal-location",
-      "wp_guide",
-    );
+    expect(
+      screen.getByRole("link", { name: "Start your free trial" }),
+    ).toHaveAttribute("data-fast-goal-location", "wp_guide");
     expect(
       screen.getByRole("link", { name: "developer guide" }),
     ).toHaveAttribute("href", "/docs/install/for-developers");

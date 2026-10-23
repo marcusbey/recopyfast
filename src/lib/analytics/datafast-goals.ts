@@ -145,8 +145,11 @@ export interface DataFastGoalParams {
   developer_message_copied: { location: DataFastInstallChoiceLocation };
   developer_message_emailed: {
     location: DataFastInstallChoiceLocation;
-    /** "full" when the whole message fit the mailto URL, else "short". */
-    body: "full" | "short";
+    /**
+     * What the draft carried: the whole message ("full"), the snippet and
+     * guide link ("short"), or the subject only ("none").
+     */
+    body: "full" | "short" | "none";
   };
   signup_email_submitted: NoParams;
   login_email_submitted: NoParams;
