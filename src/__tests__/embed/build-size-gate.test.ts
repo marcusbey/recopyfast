@@ -151,8 +151,15 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // weakening discovery, its cap or shadow coverage. The first
 // 45681 / 32932 evidence was Node 25.6.1 / zlib 1.2.12 and is invalid here.
 // build-embed.mjs itemises the corrected sequence.
-const SEEDED_MAX_BUNDLE_GZ = 45801;
-const SEEDED_MAX_WIDGET_GZ = 33044;
+// RATCHETED 2026-10-22 (s119-source-drift-conflicts), DOWNWARD by what the
+// story earned: 45801 → 45774, 33044 → 33016. Main measures 45769 / 32992; the
+// drift report in postContentMap is +31 / +33, paid for by equivalent forms
+// elsewhere in the widget (object spread for every Object.assign, the literal
+// text-node type, length truthiness, slice, URL.href) for a final 45742 /
+// 32964, -27 / -28 net. The inherited 32 / 52 B headroom is unchanged;
+// build-embed.mjs itemises the sequence.
+const SEEDED_MAX_BUNDLE_GZ = 45774;
+const SEEDED_MAX_WIDGET_GZ = 33016;
 
 interface CheckRun {
   status: number;

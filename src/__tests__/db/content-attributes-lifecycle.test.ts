@@ -389,6 +389,9 @@ const MIGRATIONS = [
   "supabase/migrations/20260924030000_content_page_path.sql",
   "supabase/migrations/20260924060000_restore_site_wide_publish.sql",
   "supabase/migrations/20261012122000_staging_content_compare_and_set.sql",
+  // s119 (ADR 075): the visitor read below is the real content GET, which now
+  // selects the three source-drift columns this migration adds.
+  "supabase/migrations/20261022120000_content_source_drift.sql",
 ].map((migration) => path.join(process.cwd(), migration));
 
 function validateScratchTarget(connectionString: string): URL {

@@ -3,6 +3,8 @@
 import { format } from "date-fns";
 import {
   AlertCircle,
+  AlertTriangle,
+  Check,
   Loader2,
   PencilLine,
   RotateCcw,
@@ -19,6 +21,7 @@ import {
   type ChangeHistoryEvent,
 } from "@/hooks/useChangeHistory";
 import type { ContentChange } from "@/hooks/useContentChanges";
+import type { DriftAction } from "./SourceDriftDialog";
 
 interface ChangeDetailProps {
   id: string;
@@ -39,6 +42,9 @@ interface ChangeDetailProps {
   onPublish: () => void;
   onConfirm: (kind: "revert" | "discard", opener: HTMLElement) => void;
   onEditOnPage: () => void;
+  /** A site admin: offered Keep override and Use new source (ADR 075). */
+  canResolveDrift: boolean;
+  onResolveDrift: (action: DriftAction, opener: HTMLElement) => void;
 }
 
 const fullDate = (iso: string) => format(new Date(iso), "d MMM yyyy, HH:mm");
@@ -95,6 +101,93 @@ function Compare({ row }: { row: ContentChange }) {
       {isSameAsOriginal && (
         <p className="text-xs text-muted-foreground">
           Text is the same as the original.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * s119 (ADR 075). r/SideProject, 2026-10-21: the page said "5 to 10", the
+ * client published "5 to 11", the developer deployed "5 to 9", and the embed
+ * kept writing "5 to 11" with nobody told. Visitors still see the override; this
+ * is where the developer is told, with the three values side by side, and where
+ * a site admin decides. Shown to every member who can read the row — knowing is
+ * not the privileged part, deciding is.
+ */
+function SourceDriftPanel({
+  row,
+  canResolve,
+  isLocked,
+  busyAction,
+  onResolve,
+}: {
+  row: ContentChange;
+  canResolve: boolean;
+  isLocked: boolean;
+  busyAction: ChangeAction | null;
+  onResolve: (action: DriftAction, opener: HTMLElement) => void;
+}) {
+  const drift = row.sourceDrift;
+  if (!drift) return null;
+  const columns: Array<[string, string | null]> = [
+    ["Written against", drift.baseline],
+    ["Page now says", drift.observed],
+    ["Visitors see", row.live],
+  ];
+  const spinner = (action: DriftAction) =>
+    busyAction === action ? (
+      <Loader2 className="animate-spin" aria-hidden="true" />
+    ) : null;
+
+  return (
+    <div
+      role="group"
+      aria-label="Source changed since this edit"
+      className="space-y-3 rounded-container border border-tone-warning-border bg-tone-warning-surface px-3 py-2.5"
+    >
+      <p className="flex items-center gap-1.5 text-sm font-medium text-tone-warning-text">
+        <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+        The page&apos;s own text changed after this edit was published.
+      </p>
+      <div className="grid gap-3 md:grid-cols-3">
+        {columns.map(([label, value]) => (
+          <div key={label} className="min-w-0">
+            <p className="text-eyebrow text-muted-foreground">{label}</p>
+            <ContentValue
+              value={value ?? undefined}
+              metadataType={metadataTypeOf(row)}
+              label={label}
+              expanded
+              className="mt-1 [overflow-wrap:anywhere]"
+            />
+          </div>
+        ))}
+      </div>
+      {canResolve ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(event) => onResolve("keepOverride", event.currentTarget)}
+            disabled={isLocked}
+          >
+            {spinner("keepOverride") ?? <Check aria-hidden="true" />}
+            Keep override
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(event) => onResolve("takeNewSource", event.currentTarget)}
+            disabled={isLocked}
+          >
+            {spinner("takeNewSource") ?? <RotateCcw aria-hidden="true" />}
+            Use new source
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Only a site admin can resolve this.
         </p>
       )}
     </div>
@@ -187,6 +280,8 @@ export function ChangeDetail({
   onPublish,
   onConfirm,
   onEditOnPage,
+  canResolveDrift,
+  onResolveDrift,
 }: ChangeDetailProps) {
   const isPending = row.state === "pending";
   const showLanguage = row.language !== "en" || row.variant !== "default";
@@ -199,6 +294,14 @@ export function ChangeDetail({
       className="space-y-4 border-t border-border bg-surface-1 px-4 py-3"
     >
       <Compare row={row} />
+
+      <SourceDriftPanel
+        row={row}
+        canResolve={canResolveDrift}
+        isLocked={isLocked}
+        busyAction={busyAction}
+        onResolve={onResolveDrift}
+      />
 
       {canEdit && (
         <div className="space-y-2">

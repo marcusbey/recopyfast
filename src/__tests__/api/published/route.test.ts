@@ -807,7 +807,20 @@ describe("parity with the widget-authorized content GET", () => {
       );
 
       expect(contentRows.length).toBeGreaterThan(0);
-      expect(snapshot.rows).toStrictEqual(contentRows);
+      // s119 (ADR 075): the content GET adds `source_seen`, a widget-only
+      // hint for edited rows, which the unauthenticated snapshot never serves
+      // (nor the raw drift columns behind it). Every other byte is the same.
+      for (const row of snapshot.rows as Row[]) {
+        expect(row).not.toHaveProperty("source_seen");
+        expect(row).not.toHaveProperty("source_baseline");
+        expect(row).not.toHaveProperty("source_drift_content");
+      }
+      const withoutHint = contentRows.map((row) => {
+        const copy: Record<string, unknown> = { ...row };
+        delete copy.source_seen;
+        return copy;
+      });
+      expect(snapshot.rows).toStrictEqual(withoutHint);
     },
   );
 });

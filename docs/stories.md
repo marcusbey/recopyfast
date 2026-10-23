@@ -5402,3 +5402,33 @@ Acceptance:
 - [ ] Required checks and independent review pass; owner authorized merge on October 19, 2026; CI and deployment verification remain pending.
 
 Research/design/plan use the matching story path. Plan validated by the owner in chat on October 19, 2026.
+
+## Story s119-source-drift-conflicts — a developer's deploy is never silently masked by a client's override
+
+Requested October 22, 2026, from developer feedback on r/SideProject (2026-10-21): after a
+client publishes an override, a developer deploy that changes that element's source text is
+silently overridden with no warning. As the developer who owns a site, I see every edited element
+whose deployed source no longer matches what the edit was written against, and I choose to keep
+the override or drop it for my new source. Complexity 5; dependencies: discovery POST, content GET,
+Changes page (s70b). Branch `feature/s119-source-drift-conflicts`. Within PRD core-loop scope
+(trust for developer installs). One forward migration; no new dependency. Embed allocation:
+0 net gzipped bytes — the ceilings in `scripts/build-embed.mjs` only go down, so any bytes the
+widget change costs are paid for by savings in the same diff. Decision: [ADR 075](./decisions/075-source-drift-is-flagged-not-enforced.md).
+
+Acceptance:
+- [ ] Original "5 to 10", published override "5 to 11", new deploy "5 to 9" → the conflict is
+      recorded and shown on the Changes page; visitors still see "5 to 11".
+- [ ] A drift is reported once per page view and not by later visitors once recorded; a source
+      reverted to the baseline clears the conflict; unedited rows never drift.
+- [ ] A site admin resolves: Keep override (baseline becomes the new source, copy unchanged) or
+      Use new source (row reset to the deployed text, widget stops writing it, history row
+      `revert`). Stale resolution (newer observation) and pending drafts are refused with 409.
+      Non-admins are refused.
+- [ ] Migration adds the columns and both service-role-only functions; DB tests cover
+      semantics and grants. Widget degrades, never breaks.
+- [ ] lint, type-check, type-check:build, format:check, test, build (embed `--check` within the
+      committed ceilings) green; independent review passes. Merge is manual.
+
+Research/plan use the matching story path. Plan validated under the owner's standing directive
+for this work, relayed by the parent session on October 22, 2026 (Claude architects,
+subagents implement, PR open with tests).

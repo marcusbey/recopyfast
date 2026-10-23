@@ -82,6 +82,9 @@ const REPLAY_SUITES = [
   // rows then the ceiling. Plain Postgres is enough for all but the PostgREST
   // half, which the e2e job's PostgREST step runs.
   "src/__tests__/db/tool-reports-privileges.test.ts",
+  // s119 (ADR 075): source drift is recorded once, on edited rows only, keeps
+  // the s81 CAS token, and both RPCs are service-role only. Plain Postgres.
+  "src/__tests__/db/content-source-drift.test.ts",
 ];
 
 function run(command, args, options = {}) {
