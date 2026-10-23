@@ -92,7 +92,8 @@ async function isUnentitled(
  * slash, percent-encoded), not just the exact one — the rewrite forwards
  * `/Monitoring` too. Anything under the path is not the tunnel.
  *
- * The installation guide and its Markdown handoff are public documentation.
+ * The installation guide, its Markdown handoff and its two step-by-step
+ * guides (s120: for developers, WordPress) are public documentation.
  * A visitor may happen to carry a session cookie, but it changes neither
  * response. Sending those reads through GoTrue would make the help needed to
  * complete an installation depend on authentication being available, which
@@ -134,6 +135,8 @@ function isSessionlessPath(pathname: string): boolean {
     pathname.startsWith("/api/published/") ||
     pathname === "/docs/install" ||
     pathname === "/docs/install/agent-instructions.md" ||
+    pathname === "/docs/install/for-developers" ||
+    pathname === "/docs/install/wordpress" ||
     pathname === "/try" ||
     pathname === "/try/rcf-try.js" ||
     pathname === "/robots.txt" ||

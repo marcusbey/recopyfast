@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { installRecipes } from "@/lib/sites/install-recipes";
+import { InstallMethodChoice } from "./InstallMethodChoice";
 
 /**
  * The one place a site's install state is shown.
@@ -89,6 +90,18 @@ function WhereToPaste() {
             <p className="text-sm text-muted-foreground">{recipe.location}</p>
             {recipe.notes && (
               <p className="text-sm text-muted-foreground">{recipe.notes}</p>
+            )}
+            {recipe.guide && (
+              <p className="text-sm">
+                <Link
+                  href={recipe.guide.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  {recipe.guide.label}
+                </Link>
+              </p>
             )}
           </TabsContent>
         ))}
@@ -169,7 +182,11 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
         )}
 
         {embedScript ? (
-          <>
+          <InstallMethodChoice
+            embedScript={embedScript}
+            siteDomain={site.domain}
+            location="dashboard_site"
+          >
             <CodeBlock
               value={embedScript}
               label="HTML"
@@ -181,7 +198,7 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
               }
             />
             <WhereToPaste />
-          </>
+          </InstallMethodChoice>
         ) : (
           <Alert variant="info">
             <Info className="h-4 w-4" aria-hidden="true" />

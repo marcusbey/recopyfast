@@ -21,6 +21,8 @@ const EXACT_PATHS = new Set([
   "/privacy",
   "/terms",
   "/demo",
+  // s120: the site-owner marketing page (static, editorial Header/Footer).
+  "/for/owners",
 ]);
 
 /** Sections: the index and everything below it, but see `FREE_TOOL_REPORT`. */

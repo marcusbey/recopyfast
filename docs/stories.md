@@ -5434,3 +5434,36 @@ for this work, relayed by the parent session on October 22, 2026 (Claude archite
 subagents implement, PR open with tests).
 Deploy: migration first, then merge — runbook
 [`operations/s119-source-drift-deploy-order.md`](./operations/s119-source-drift-deploy-order.md).
+
+## Story s120-owner-path — a site owner can get the line installed and edit their own words
+
+Requested by the owner in chat on October 22, 2026. As a local-business owner whose site someone
+else built, I can understand what ReCopyFast does for me, get one line onto my site (by sending a
+ready-made message to my developer, or myself on WordPress with WPCode), and then change hours,
+prices and specials without paying per change. Complexity 3; dependencies: released s02 install
+flow, s66c site page, ADR 074 DataFast goals (#118). Branch `feature/s120-owner-path`; embed
+allocation 0 bytes. Within the PRD acquisition and activation scope; no backend, migration,
+dependency or billing change.
+
+Acceptance:
+- [x] `/for/owners` is a static marketing page: owner headline, sourced per-change cost, three
+      steps, the real interactive demo, what can and can't be changed, the handoff, platform fit
+      and honest FAQ (SEO after load, edits after a redesign, a developer who disappeared).
+- [x] No claim exceeds the code: no "take control", no SEO promise, no "edits survive updates",
+      no testimonials or counts; edit-without-publish is offered only where collaborator seats
+      exist (Pro), and every signup CTA uses the trial wording ("Start your free trial").
+- [x] The Starter price and its websites limit are read from `/api/pricing` at view time; loading
+      and failure say so in words, with no number.
+- [x] At the install step the owner chooses "I'll do it myself" or "My developer will". The
+      developer path shows a message the owner sends from their own mailbox (copy, or `mailto:`
+      with a length-safe fallback); ReCopyFast sends nothing and collects no address.
+- [x] The message carries only the generated public tag; a strict tag parser and a final
+      credential scan refuse anything else, and the refusal explains its actual reason.
+- [x] `/docs/install/for-developers` and `/docs/install/wordpress` are static public guides,
+      linked from `/docs/install`, the owner page, the message and the WordPress recipe.
+- [x] DataFast goals `install_method_selected`, `developer_message_copied`,
+      `developer_message_emailed` and the `docs` CTA target are in the one taxonomy (ADR 074).
+- [ ] Required checks and independent review pass; merge and deployment are manual and separate.
+
+Research: `docs/research/s120-owner-path.md`. Plan: `docs/plans/s120-owner-path.md` (owner
+validated in chat on October 22, 2026). Review: `docs/reviews/s120-owner-path.md`.

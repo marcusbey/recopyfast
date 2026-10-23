@@ -29,6 +29,12 @@ export const DATAFAST_GOALS = {
   toolRun: "tool_run",
   /** The install snippet (or the agent brief) was copied. */
   installSnippetCopied: "install_snippet_copied",
+  /** "Who will add the line?" answered at the install step (s120). */
+  installMethodSelected: "install_method_selected",
+  /** The ready-to-send developer message was copied (s120). */
+  developerMessageCopied: "developer_message_copied",
+  /** "Open in my email app" opened the developer message's mailto (s120). */
+  developerMessageEmailed: "developer_message_emailed",
   /** /signup's magic-link request succeeded (client; no email param). */
   signupEmailSubmitted: "signup_email_submitted",
   /** /login's magic-link request succeeded (client; no email param). */
@@ -90,6 +96,12 @@ export const DATAFAST_CTA_LOCATIONS = [
   "tool_page",
   "tool_cta",
   "blog_post",
+  // s120: the site-owner page and the two install guides it links.
+  "owners_hero",
+  "owners_handoff",
+  "owners_final",
+  "wp_guide",
+  "dev_guide",
 ] as const;
 
 export type DataFastCtaLocation = (typeof DATAFAST_CTA_LOCATIONS)[number];
@@ -103,6 +115,14 @@ export const DATAFAST_SNIPPET_LOCATIONS = [
 
 export type DataFastSnippetLocation =
   (typeof DATAFAST_SNIPPET_LOCATIONS)[number];
+
+/** Where the install-method choice is shown (s120). */
+export type DataFastInstallChoiceLocation =
+  | "dashboard_registration"
+  | "dashboard_site";
+
+/** Who adds the snippet: the owner, or their developer (s120). */
+export type DataFastInstallMethod = "self" | "developer";
 
 type NoParams = Record<string, never>;
 
@@ -118,6 +138,19 @@ export interface DataFastGoalParams {
   tool_cost_calculator_used: NoParams;
   tool_run: { tool: string };
   install_snippet_copied: { location: DataFastSnippetLocation };
+  install_method_selected: {
+    method: DataFastInstallMethod;
+    location: DataFastInstallChoiceLocation;
+  };
+  developer_message_copied: { location: DataFastInstallChoiceLocation };
+  developer_message_emailed: {
+    location: DataFastInstallChoiceLocation;
+    /**
+     * What the draft carried: the whole message ("full"), the snippet and
+     * guide link ("short"), or the subject only ("none").
+     */
+    body: "full" | "short" | "none";
+  };
   signup_email_submitted: NoParams;
   login_email_submitted: NoParams;
   signup: NoParams;
@@ -134,6 +167,9 @@ export type DataFastClientGoal =
   | "tool_cost_calculator_used"
   | "tool_run"
   | "install_snippet_copied"
+  | "install_method_selected"
+  | "developer_message_copied"
+  | "developer_message_emailed"
   | "signup_email_submitted"
   | "login_email_submitted";
 
@@ -167,8 +203,11 @@ export function sanitizeGoalParams(params: unknown): Record<string, string> {
   return clean;
 }
 
-/** Where the CTA leads: the signup form, checkout, or a try-it surface. */
-export type DataFastCtaTarget = "signup" | "checkout" | "demo" | "try";
+/**
+ * Where the CTA leads: the signup form, checkout, a try-it surface, or an
+ * install guide (s120: the owner page's "send this to your developer").
+ */
+export type DataFastCtaTarget = "signup" | "checkout" | "demo" | "try" | "docs";
 
 export type DataFastCtaAttributes = {
   "data-fast-goal": "cta_click";
