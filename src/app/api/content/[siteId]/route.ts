@@ -10,6 +10,7 @@ import {
 import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
 import { DATAFAST_GOALS } from "@/lib/analytics/datafast-goals";
 import { sendSiteOwnerGoal } from "@/lib/analytics/datafast-server";
+import { notifyOwnerOfInstall } from "@/lib/sites/install-detected-email";
 import {
   redactControlCharacters,
   validateDiscoveredElement,
@@ -614,7 +615,10 @@ export async function POST(
     // unconditional: it is the liveness signal, and it has to keep landing.
     await bestEffortSiteWrite("install status update", siteId, async () => {
       const becameLive = await markSiteLive(supabase, siteId);
-      await recordSiteReport(supabase, siteId);
+      // Scheduled BEFORE `recordSiteReport` (s122 review): the flip has
+      // already committed, and nothing re-fires it, so a throw from the
+      // liveness bump must not cost the owner their email or the goal.
+      //
       // DataFast `script_installed` (ADR 074): exactly the one request whose
       // guarded update matched. This request comes from the customer's domain
       // and carries no cookie of ours, so the goal is attributed to the
@@ -622,7 +626,13 @@ export async function POST(
       // DATAFAST_API_KEY; never throws.
       if (becameLive) {
         after(() => sendSiteOwnerGoal(siteId, DATAFAST_GOALS.scriptInstalled));
+        // s122: the owner's one "Install detected" email, on the same single
+        // transition. After the response, so the check-in's latency is
+        // untouched; never throws; the `site_install_emails` claim makes a
+        // second send for this site impossible however often this runs.
+        after(() => notifyOwnerOfInstall(siteId));
       }
+      await recordSiteReport(supabase, siteId);
     });
 
     const discovered = buildDiscoveryRows(siteId, contentMap);
