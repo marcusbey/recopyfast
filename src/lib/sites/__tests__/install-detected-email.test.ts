@@ -43,10 +43,20 @@ interface LedgerRow {
   sent_at?: string | null;
 }
 
+interface PermissionRow {
+  id: string;
+  user_id: string;
+  permission: string;
+  created_at: string;
+}
+
 interface FakeOptions {
   ledgerError?: { code: string; message: string } | null;
   site?: { name: string; domain: string } | null;
   ownerUserId?: string | null;
+  /** Full `site_permissions` rows; overrides `ownerUserId`. */
+  permissions?: PermissionRow[];
+  permissionsError?: { code: string; message: string } | null;
 }
 
 /** Just enough of the PostgREST builder for the module under test. */
@@ -58,9 +68,22 @@ function fakeDb(options: FakeOptions = {}) {
       : options.site;
   const ownerUserId =
     options.ownerUserId === undefined ? OWNER_ID : options.ownerUserId;
+  const permissions: PermissionRow[] =
+    options.permissions ??
+    (ownerUserId
+      ? [
+          {
+            id: "00000000-0000-4000-8000-000000000001",
+            user_id: ownerUserId,
+            permission: "admin",
+            created_at: "2026-10-01T00:00:00.000Z",
+          },
+        ]
+      : []);
 
   function from(table: string) {
     const filters: Record<string, unknown> = {};
+    const orders: Array<{ column: string; ascending: boolean }> = [];
     let op: "select" | "upsert" | "update" = "select";
     let payload: Record<string, unknown> = {};
 
@@ -86,8 +109,22 @@ function fakeDb(options: FakeOptions = {}) {
       }
       if (table === "sites") return { data: site, error: null };
       if (table === "site_permissions") {
+        if (options.permissionsError)
+          return { data: null, error: options.permissionsError };
+        // Real ordering, so the tie-breaker is exercised, not assumed.
+        const sorted = permissions
+          .filter((row) => row.permission === filters.permission)
+          .sort((a, b) => {
+            for (const { column, ascending } of orders) {
+              const left = String(a[column as keyof PermissionRow]);
+              const right = String(b[column as keyof PermissionRow]);
+              if (left !== right)
+                return (left < right ? -1 : 1) * (ascending ? 1 : -1);
+            }
+            return 0;
+          });
         return {
-          data: ownerUserId ? { user_id: ownerUserId } : null,
+          data: sorted[0] ? { user_id: sorted[0].user_id } : null,
           error: null,
         };
       }
@@ -112,7 +149,8 @@ function fakeDb(options: FakeOptions = {}) {
         filters[column] = value;
         return builder;
       },
-      order() {
+      order(column: string, opts?: { ascending?: boolean }) {
+        orders.push({ column, ascending: opts?.ascending ?? true });
         return builder;
       },
       limit() {
@@ -279,7 +317,7 @@ describe("notifyOwnerOfInstall", () => {
     expect(text).toMatch(/2\. .*Publish/);
     expect(text).toMatch(/3\. .*Changes.*revert/);
     expect(text).toContain(
-      "If your developer installed it, thank them — they won't need to touch it again.",
+      "If your developer installed it, thank them — the line is in place.",
     );
     expect((html as string).match(/<li\b/g)).toHaveLength(3);
     // s120 messaging rules: no promise the product cannot keep.
@@ -338,17 +376,188 @@ describe("notifyOwnerOfInstall", () => {
     expect(mockResendSend).not.toHaveBeenCalled();
   });
 
-  it("records a failure when the site has no owner", async () => {
+  it("claims nothing and reports when the site has no owner", async () => {
     const db = fakeDb({ ownerUserId: null });
     mockCreateServiceRoleClient.mockReturnValue(db.client);
     const { notifyOwnerOfInstall } = await loadInstallEmail();
 
-    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("failed");
+    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("skipped");
     expect(mockResendSend).not.toHaveBeenCalled();
-    expect(db.ledger.get(SITE_ID)).toMatchObject({
-      status: "failed",
-      error_code: "no_owner",
+    expect(db.ledger.size).toBe(0);
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      "[install-email] owner email not sent",
+      expect.objectContaining({
+        tags: expect.objectContaining({
+          install_email_stage: "resolve",
+          install_email_code: "no_owner",
+        }),
+      }),
+    );
+  });
+
+  it("emails the owner billing charges: earliest admin row, id breaking a created_at tie", async () => {
+    const SAME_INSTANT = "2026-10-01T00:00:00.000Z";
+    const TIE_WINNER = "11111111-1111-4111-8111-111111111111";
+    const TIE_LOSER = "22222222-2222-4222-8222-222222222222";
+    const MANAGER = "33333333-3333-4333-8333-333333333333";
+    const db = fakeDb({
+      permissions: [
+        // Returned first by an unordered read, and newer: a manager share.
+        {
+          id: "00000000-0000-4000-8000-00000000000a",
+          user_id: MANAGER,
+          permission: "admin",
+          created_at: "2026-10-02T00:00:00.000Z",
+        },
+        // Same instant as the winner; only `.order("id")` separates them.
+        {
+          id: "00000000-0000-4000-8000-00000000000c",
+          user_id: TIE_LOSER,
+          permission: "admin",
+          created_at: SAME_INSTANT,
+        },
+        {
+          id: "00000000-0000-4000-8000-00000000000b",
+          user_id: TIE_WINNER,
+          permission: "admin",
+          created_at: SAME_INSTANT,
+        },
+      ],
     });
+    mockCreateServiceRoleClient.mockReturnValue(db.client);
+    const { notifyOwnerOfInstall } = await loadInstallEmail();
+    const { resolveSiteOwnerId } = await import(
+      "@/lib/feature-gating/permissions"
+    );
+
+    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("sent");
+
+    expect(mockResolveUserIdentity).toHaveBeenCalledTimes(1);
+    expect(mockResolveUserIdentity).toHaveBeenCalledWith(TIE_WINNER);
+    // The same answer billing's own resolver gives over the same rows.
+    await expect(resolveSiteOwnerId(db.client as never, SITE_ID)).resolves.toBe(
+      TIE_WINNER,
+    );
+  });
+
+  it("does not turn an owner lookup error into a permanent no-email row", async () => {
+    const failing = fakeDb({
+      permissionsError: { code: "57014", message: "statement timeout" },
+    });
+    mockCreateServiceRoleClient.mockReturnValue(failing.client);
+    const { notifyOwnerOfInstall } = await loadInstallEmail();
+
+    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("skipped");
+    expect(failing.ledger.size).toBe(0);
+    expect(mockResendSend).not.toHaveBeenCalled();
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      "[install-email] owner email not sent",
+      expect.objectContaining({
+        tags: expect.objectContaining({
+          install_email_stage: "resolve",
+          install_email_code: "owner_lookup_error",
+        }),
+      }),
+    );
+
+    // Nothing was claimed, so a later attempt for the same site can still send.
+    const healthy = fakeDb();
+    mockCreateServiceRoleClient.mockReturnValue(healthy.client);
+    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("sent");
+    expect(mockResendSend).toHaveBeenCalledTimes(1);
+  });
+
+  describe("bounded waits inside after()", () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it("gives up on a hung identity lookup after 5 s and claims nothing", async () => {
+      const db = fakeDb();
+      mockCreateServiceRoleClient.mockReturnValue(db.client);
+      mockResolveUserIdentity.mockReturnValue(new Promise(() => {}));
+      const { notifyOwnerOfInstall } = await loadInstallEmail();
+
+      const outcome = notifyOwnerOfInstall(SITE_ID);
+      await jest.advanceTimersByTimeAsync(5_000);
+
+      await expect(outcome).resolves.toBe("skipped");
+      expect(db.ledger.size).toBe(0);
+      expect(mockResendSend).not.toHaveBeenCalled();
+      expect(mockCaptureMessage).toHaveBeenCalledWith(
+        "[install-email] owner email not sent",
+        expect.objectContaining({
+          tags: expect.objectContaining({
+            install_email_stage: "resolve",
+            install_email_code: "lookup_timeout",
+          }),
+        }),
+      );
+    });
+
+    it("finishes the row as failed when the provider hangs past 5 s, without the address", async () => {
+      const db = fakeDb();
+      mockCreateServiceRoleClient.mockReturnValue(db.client);
+      mockResendSend.mockReturnValue(new Promise(() => {}));
+      const { notifyOwnerOfInstall } = await loadInstallEmail();
+
+      const outcome = notifyOwnerOfInstall(SITE_ID);
+      await jest.advanceTimersByTimeAsync(5_000);
+
+      await expect(outcome).resolves.toBe("failed");
+      expect(db.ledger.get(SITE_ID)).toMatchObject({
+        status: "failed",
+        error_code: "provider_timeout",
+      });
+      expect(mockCaptureMessage).toHaveBeenCalledWith(
+        "[install-email] owner email not sent",
+        expect.objectContaining({
+          tags: expect.objectContaining({
+            install_email_stage: "send",
+            install_email_code: "provider_timeout",
+          }),
+        }),
+      );
+      expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+        OWNER_EMAIL,
+      );
+      // Still exactly once: the timed-out claim blocks a second attempt.
+      jest.useRealTimers();
+      await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("duplicate");
+      expect(mockResendSend).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("logs only the provider's error code, never its message or the raw error", async () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    mockCreateServiceRoleClient.mockReturnValue(fakeDb().client);
+    mockResendSend.mockResolvedValueOnce({
+      data: null,
+      error: {
+        name: "validation_error",
+        statusCode: 422,
+        message: `Invalid \`to\` field: ${OWNER_EMAIL}`,
+      },
+    });
+    const { notifyOwnerOfInstall } = await loadInstallEmail();
+
+    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("failed");
+
+    mockCreateServiceRoleClient.mockReturnValue(fakeDb().client);
+    mockResendSend.mockRejectedValueOnce(
+      new TypeError(`fetch failed for ${OWNER_EMAIL}`),
+    );
+    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("failed");
+
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).toContain("validation_error");
+    expect(logged).toContain("TypeError");
+    expect(logged).not.toContain(OWNER_EMAIL);
+    expect(logged).not.toContain("Invalid");
   });
 
   it("never rejects when the database, the identity lookup or the provider throws", async () => {
@@ -359,9 +568,10 @@ describe("notifyOwnerOfInstall", () => {
     });
     await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("skipped");
 
+    // Before the claim: nothing is recorded, so this is a skip, not a failure.
     mockCreateServiceRoleClient.mockReturnValue(fakeDb().client);
     mockResolveUserIdentity.mockRejectedValueOnce(new Error("GoTrue down"));
-    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("failed");
+    await expect(notifyOwnerOfInstall(SITE_ID)).resolves.toBe("skipped");
 
     mockCreateServiceRoleClient.mockReturnValue(fakeDb().client);
     mockResendSend.mockRejectedValueOnce(new Error("socket hang up"));

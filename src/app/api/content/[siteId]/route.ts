@@ -615,7 +615,10 @@ export async function POST(
     // unconditional: it is the liveness signal, and it has to keep landing.
     await bestEffortSiteWrite("install status update", siteId, async () => {
       const becameLive = await markSiteLive(supabase, siteId);
-      await recordSiteReport(supabase, siteId);
+      // Scheduled BEFORE `recordSiteReport` (s122 review): the flip has
+      // already committed, and nothing re-fires it, so a throw from the
+      // liveness bump must not cost the owner their email or the goal.
+      //
       // DataFast `script_installed` (ADR 074): exactly the one request whose
       // guarded update matched. This request comes from the customer's domain
       // and carries no cookie of ours, so the goal is attributed to the
@@ -629,6 +632,7 @@ export async function POST(
         // second send for this site impossible however often this runs.
         after(() => notifyOwnerOfInstall(siteId));
       }
+      await recordSiteReport(supabase, siteId);
     });
 
     const discovered = buildDiscoveryRows(siteId, contentMap);

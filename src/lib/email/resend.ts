@@ -72,14 +72,34 @@ async function send(opts: {
       text: opts.text,
     });
     if (error) {
-      console.error("[email] Resend send failed:", error);
-      return { sent: false, error: error.message };
+      const code = providerErrorCode(error.name);
+      console.error(`[email] Resend send failed (${code})`);
+      return {
+        sent: false,
+        error: `Email provider rejected the send (${code})`,
+      };
     }
     return { sent: true };
   } catch (err) {
-    console.error("[email] Resend threw:", err);
+    console.error(
+      `[email] Resend threw (${providerErrorCode(err instanceof Error ? err.name : undefined)})`,
+    );
     return { sent: false, error: "Email send failed" };
   }
+}
+
+/**
+ * The only part of a provider failure that is ever logged or returned (s122
+ * review). Resend's `message` — and a thrown error's — can echo the recipient
+ * address, and every caller of `send()` logs `SendResult.error`, so neither the
+ * message nor the raw error object leaves this module. The `name` is Resend's
+ * machine code (`validation_error`, `rate_limit_exceeded`, ...); anything not
+ * shaped like one collapses to `unknown`.
+ */
+function providerErrorCode(name: unknown): string {
+  return typeof name === "string" && /^[A-Za-z_]{1,64}$/.test(name)
+    ? name
+    : "unknown";
 }
 
 function escapeHtml(value: string): string {
@@ -284,7 +304,7 @@ export async function sendInstallDetectedEmail(params: {
     "Every change is listed under Changes in your dashboard, where you can revert it to the original text.",
   ];
   const thanks =
-    "If your developer installed it, thank them — they won't need to touch it again.";
+    "If your developer installed it, thank them — the line is in place.";
 
   const text = [
     `ReCopyFast is now installed on ${siteName} (${siteDomain}).`,

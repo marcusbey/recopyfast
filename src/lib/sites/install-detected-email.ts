@@ -6,6 +6,11 @@
  * transition that fires DataFast `script_installed` (ADR 074). The check-in has
  * already answered; nothing here is on the widget's response path (ADR 010).
  *
+ * RESOLVE, THEN CLAIM, THEN SEND. The site, its owner (`resolveSiteOwnerId`,
+ * billing's definition) and the owner's address are read first and claim
+ * nothing if any of them fails or times out — a transient lookup failure must
+ * not become a permanent "no email" row for a site that has an owner.
+ *
  * EXACTLY ONCE, TWICE OVER. The trigger already fires once per flip. The
  * ledger (`site_install_emails`, primary key `site_id`) is claimed BEFORE the
  * provider is called (ADR 011: "record what was sent before sending, not
@@ -17,7 +22,8 @@
  *
  * DEGRADES TO "NO EMAIL", NEVER TO "TWO EMAILS". Any claim error — including the
  * table not existing yet because the code deployed before the migration — skips
- * the send. Any later failure marks the row `failed` with a short code.
+ * the send. A failure after the claim (provider rejection, a 5 s provider
+ * timeout) marks the row `failed` with a short code.
  *
  * NEVER THROWS, NEVER LOGS A PERSON. Every failure is caught here and reported
  * with a stage and a code; no address, no provider message (which can echo
@@ -35,6 +41,7 @@ import {
   sendInstallDetectedEmail,
 } from "@/lib/email/resend";
 import { resolveUserIdentity } from "@/lib/auth/user-identity";
+import { resolveSiteOwnerId } from "@/lib/feature-gating/permissions";
 import { getPublicAppUrl } from "@/lib/sites/embed-script";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
@@ -46,6 +53,14 @@ export type InstallEmailOutcome =
   | "failed";
 
 const LEDGER_TABLE = "site_install_emails";
+
+/**
+ * Bounds on the two network waits inside `after()` (s122 review). Neither may
+ * hold the invocation open indefinitely; both together stay well under the
+ * function's own limit.
+ */
+const LOOKUP_TIMEOUT_MS = 5_000;
+const SEND_TIMEOUT_MS = 5_000;
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>;
 
@@ -114,21 +129,24 @@ async function finish(
   if (error) report("finish", error.code || "db_error", siteId);
 }
 
-/** The site's owner: its earliest `admin` row (never a `sites` column). */
-async function ownerId(
-  db: ServiceClient,
-  siteId: string,
-): Promise<string | null> {
-  const { data, error } = await db
-    .from("site_permissions")
-    .select("user_id")
-    .eq("site_id", siteId)
-    .eq("permission", "admin")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  const userId = (data as { user_id?: unknown } | null)?.user_id;
-  return !error && typeof userId === "string" ? userId : null;
+class TimeoutError extends Error {}
+
+/**
+ * Settle with `promise`, or reject with `TimeoutError` after `ms`. The timer is
+ * cleared either way so a settled call leaves nothing pending in `after()`.
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new TimeoutError()), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function siteLabel(
@@ -140,8 +158,9 @@ async function siteLabel(
     .select("name, domain")
     .eq("id", siteId)
     .maybeSingle();
+  if (error) throw new Error("site lookup failed");
   const site = data as { name?: unknown; domain?: unknown } | null;
-  if (error || typeof site?.domain !== "string" || !site.domain) return null;
+  if (typeof site?.domain !== "string" || !site.domain) return null;
   return {
     domain: site.domain,
     name:
@@ -151,24 +170,76 @@ async function siteLabel(
   };
 }
 
-async function deliver(
+type Recipient = { to: string; siteName: string; siteDomain: string };
+
+/**
+ * Everything the send needs, resolved BEFORE the claim (s122 review).
+ *
+ * The owner is `resolveSiteOwnerId` — the same earliest-admin row, with the
+ * same `id` tie-breaker, that billing, seats and editing charge — so the email
+ * goes to the account that pays for the site, never to a manager who happened
+ * to share its `created_at`.
+ *
+ * Nothing re-fires the trigger, so a row written for a transient failure here
+ * (a lookup error, a GoTrue timeout) would be a permanent "no email" for a
+ * site that has an owner. Resolving first means a failure here claims nothing:
+ * the site has no row, and any later path that calls this again can still
+ * send. A null address is also left unclaimed, because `resolveUserIdentity`
+ * answers null for a lookup error as well as for a deleted user.
+ */
+async function resolveRecipient(
   db: ServiceClient,
   siteId: string,
-): Promise<string | null> {
+): Promise<Recipient | string> {
   const site = await siteLabel(db, siteId);
   if (!site) return "no_site";
-  const userId = await ownerId(db, siteId);
+  let userId: string | null;
+  try {
+    userId = await resolveSiteOwnerId(db, siteId);
+  } catch {
+    return "owner_lookup_error";
+  }
   if (!userId) return "no_owner";
   const owner = await resolveUserIdentity(userId);
   if (!owner?.email) return "no_owner_email";
+  return { to: owner.email, siteName: site.name, siteDomain: site.domain };
+}
 
-  const result = await sendInstallDetectedEmail({
-    to: owner.email,
-    siteName: site.name,
-    siteDomain: site.domain,
-    dashboardUrl: `${getPublicAppUrl()}/dashboard/sites/${encodeURIComponent(siteId)}`,
-  });
-  return result.sent ? null : "provider_rejected";
+async function deliver(
+  siteId: string,
+  recipient: Recipient,
+): Promise<string | null> {
+  try {
+    const result = await withTimeout(
+      sendInstallDetectedEmail({
+        ...recipient,
+        dashboardUrl: `${getPublicAppUrl()}/dashboard/sites/${encodeURIComponent(siteId)}`,
+      }),
+      SEND_TIMEOUT_MS,
+    );
+    return result.sent ? null : "provider_rejected";
+  } catch (error) {
+    // A timeout does not cancel the request (the SDK takes no signal), so the
+    // mail may still arrive. The row says `provider_timeout`, not "not sent",
+    // and the claim keeps a second send impossible either way.
+    return error instanceof TimeoutError ? "provider_timeout" : "exception";
+  }
+}
+
+/** The client and recipient, or the short code of why there is none. */
+async function prepare(
+  siteId: string,
+): Promise<{ db: ServiceClient; recipient: Recipient } | string> {
+  try {
+    const db = createServiceRoleClient();
+    const recipient = await withTimeout(
+      resolveRecipient(db, siteId),
+      LOOKUP_TIMEOUT_MS,
+    );
+    return typeof recipient === "string" ? recipient : { db, recipient };
+  } catch (error) {
+    return error instanceof TimeoutError ? "lookup_timeout" : "lookup_error";
+  }
 }
 
 /**
@@ -178,13 +249,18 @@ async function deliver(
 export async function notifyOwnerOfInstall(
   siteId: string,
 ): Promise<InstallEmailOutcome> {
-  // Checked before the claim: with no provider nothing is attempted, so no
+  // Checked before anything else: with no provider nothing is attempted, so no
   // row should say otherwise.
   if (!isEmailProviderConfigured()) return "disabled";
 
-  let db: ServiceClient;
+  const prepared = await prepare(siteId);
+  if (typeof prepared === "string") {
+    report("resolve", prepared, siteId);
+    return "skipped";
+  }
+  const { db, recipient } = prepared;
+
   try {
-    db = createServiceRoleClient();
     const claimed = await claim(db, siteId);
     if (claimed === "duplicate") return "duplicate";
     if (claimed === "error") return "skipped";
@@ -193,12 +269,7 @@ export async function notifyOwnerOfInstall(
     return "skipped";
   }
 
-  let errorCode: string | null;
-  try {
-    errorCode = await deliver(db, siteId);
-  } catch {
-    errorCode = "exception";
-  }
+  const errorCode = await deliver(siteId, recipient);
 
   try {
     await finish(db, siteId, errorCode);
