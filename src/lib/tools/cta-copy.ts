@@ -86,3 +86,60 @@ export function ctaCopyFor(variant: ToolCtaVariant, slug: string): CtaCopy {
     ],
   };
 }
+
+/**
+ * The owner next step under a tool's result (s121). Links carry
+ * `utm_campaign=owner_path&utm_content=<slug>` so owner-path visits from the
+ * tools read apart from the freelancer CTA's `utm_campaign=<slug>`.
+ *
+ * Held to the same ledger as the fix CTA: `/try` is a desktop-only preview
+ * that saves nothing, and keeping a change needs the one-line install, by the
+ * owner or their developer (`/for/owners`, s120).
+ */
+export function ownerPathUtm(slug: string): string {
+  return `utm_source=tools&utm_medium=free_tool&utm_campaign=owner_path&utm_content=${encodeURIComponent(slug)}`;
+}
+
+export const OWNER_FIX_HEADING = "Fix these yourself in a minute";
+
+export const OWNER_FIX_BODY =
+  "Own the business? You don't need to wait on your developer for a few words. Our free preview runs on your own page: on desktop, click the line and retype it. To keep the change, add ReCopyFast once, yourself or through your developer.";
+
+export const OWNER_GENERAL_HEADING = "Change your own website text";
+
+export const OWNER_GENERAL_BODY =
+  "Own the business? When a price, date or sentence changes, click it on your live page and retype it instead of waiting on your developer. It takes one line added to your site once, by you or your developer.";
+
+export interface OwnerCtaCopy {
+  heading: string;
+  body: string;
+  /** `/try` first, then `/for/owners`. Neither is an app document. */
+  links: [CtaLink, CtaLink];
+}
+
+/**
+ * `hasIssues`: the result surfaced something to fix (a typo, a stale date),
+ * so the heading says "fix these". Otherwise the general owner pitch.
+ */
+export function ownerCtaCopyFor(
+  slug: string,
+  hasIssues: boolean,
+): OwnerCtaCopy {
+  const utm = ownerPathUtm(slug);
+  return {
+    heading: hasIssues ? OWNER_FIX_HEADING : OWNER_GENERAL_HEADING,
+    body: hasIssues ? OWNER_FIX_BODY : OWNER_GENERAL_BODY,
+    links: [
+      {
+        label: "Try it on your site",
+        href: `/try?${utm}#install`,
+        isAppDocument: false,
+      },
+      {
+        label: "How it works for business owners",
+        href: `/for/owners?${utm}`,
+        isAppDocument: false,
+      },
+    ],
+  };
+}

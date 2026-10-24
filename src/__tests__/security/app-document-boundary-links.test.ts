@@ -20,6 +20,7 @@ const MARKETING_BOUNDARY_FILES = [
   "src/app/not-found.tsx",
   "src/app/tools/page.tsx",
   "src/app/tools/website-spell-checker/page.tsx",
+  "src/app/tools/outdated-website-checker/page.tsx",
   "src/app/tools/[slug]/r/[id]/page.tsx",
   "src/app/tools/[slug]/r/[id]/not-found.tsx",
   "src/app/tools/website-maintenance-cost/page.tsx",
@@ -32,6 +33,7 @@ const MARKETING_BOUNDARY_FILES = [
   "src/components/sections/Pricing.tsx",
   // s96: the free tools' components that link out of a static or report page.
   "src/components/tools/FindingList.tsx",
+  "src/components/tools/OwnerNextStep.tsx",
   "src/components/tools/ToolCard.tsx",
   "src/components/tools/ToolCta.tsx",
   "src/components/tools/ToolPageLayout.tsx",

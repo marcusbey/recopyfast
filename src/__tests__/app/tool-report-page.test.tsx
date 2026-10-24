@@ -178,6 +178,9 @@ describe("the report page", () => {
       "href",
       "/try?utm_source=tools&utm_medium=free_tool&utm_campaign=outdated-website-checker#install",
     );
+    expect(
+      screen.getByRole("link", { name: /try it on your site/i }),
+    ).toHaveAttribute("data-fast-goal-location", "outdated_checker_result");
   });
 
   /**
@@ -255,6 +258,78 @@ describe("the report page", () => {
       ["eq", "id", ID],
       ["gt", "expires_at", expect.any(String)],
     ]);
+  });
+
+  /**
+   * s121: a report that found something leads with the owner next step —
+   * above the fix CTA, tagged `cta_click` at `<tool>_result`.
+   */
+  it("leads a report with findings with the owner next step", async () => {
+    serviceClient(row());
+
+    await renderReport();
+
+    const heading = screen.getByRole("heading", {
+      name: "Fix these yourself in a minute",
+    });
+    const tryLink = screen.getByRole("link", { name: /try it on your site/i });
+    expect(tryLink).toHaveAttribute(
+      "href",
+      "/try?utm_source=tools&utm_medium=free_tool&utm_campaign=owner_path&utm_content=website-spell-checker#install",
+    );
+    expect(tryLink).toHaveAttribute(
+      "data-fast-goal-location",
+      "typo_finder_result",
+    );
+    expect(tryLink).toHaveAttribute("data-fast-goal-target", "try");
+    const owners = screen.getByRole("link", {
+      name: "How it works for business owners",
+    });
+    expect(owners).toHaveAttribute(
+      "href",
+      "/for/owners?utm_source=tools&utm_medium=free_tool&utm_campaign=owner_path&utm_content=website-spell-checker",
+    );
+    expect(owners).toHaveAttribute("data-fast-goal-target", "owners");
+    const fixCta = screen.getByRole("heading", {
+      name: "Fix it on your live page",
+    });
+    expect(
+      heading.compareDocumentPosition(fixCta) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("keeps the owner step secondary, after the fix CTA, on a clean report", async () => {
+    serviceClient(
+      row(
+        serializeReport(
+          storedReport({
+            summary: {
+              headline: "No likely typos on 1 page of 1",
+              verdict: "pass",
+              facts: [{ label: "Pages checked", value: "1" }],
+            },
+            findings: [],
+          }),
+        ),
+      ),
+    );
+
+    await renderReport();
+
+    expect(
+      screen.queryByRole("heading", { name: "Fix these yourself in a minute" }),
+    ).not.toBeInTheDocument();
+    const heading = screen.getByRole("heading", {
+      name: "Change your own website text",
+    });
+    const fixCta = screen.getByRole("heading", {
+      name: "Fix it on your live page",
+    });
+    expect(
+      fixCta.compareDocumentPosition(heading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("uses neither the anon nor the cookie client", async () => {
