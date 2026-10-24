@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>s99 outdated website checker — low-fidelity reference</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      :root {
+        color-scheme: light;
+        /* Existing s96 marketing aliases: Tailwind slate, sky and amber. */
+        --slate-50: #f8fafc;
+        --slate-100: #f1f5f9;
+        --slate-200: #e2e8f0;
+        --slate-300: #cbd5e1;
+        --slate-500: #64748b;
+        --slate-600: #475569;
+        --slate-700: #334155;
+        --slate-800: #1e293b;
+        --slate-900: #0f172a;
+        --sky-50: #f0f9ff;
+        --sky-100: #e0f2fe;
+        --sky-200: #bae6fd;
+        --sky-700: #0369a1;
+        --amber-100: #fef3c7;
+        --amber-200: #fde68a;
+        --amber-800: #92400e;
+        --red-50: #fef2f2;
+        --red-200: #fecaca;
+        --red-800: #991b1b;
+        --white: #ffffff;
+      }
+
+      body {
+        margin: 0;
+        background: var(--slate-50);
+        color: var(--slate-900);
+        font:
+          16px/1.55 "Instrument Sans",
+          system-ui,
+          sans-serif;
+      }
+
+      a {
+        color: var(--sky-700);
+      }
+
+      .topbar {
+        border-bottom: 1px solid var(--slate-200);
+        background: var(--white);
+      }
+
+      .topbar-inner {
+        width: min(100% - 48px, 1280px);
+        margin: auto;
+        padding: 18px 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .brand {
+        font-weight: 700;
+      }
+
+      .reference {
+        color: var(--slate-500);
+        font-size: 13px;
+      }
+
+      main {
+        width: min(100% - 48px, 1280px);
+        margin: auto;
+        padding: 48px 0 80px;
+      }
+
+      .screen {
+        margin: 0 auto 64px;
+        max-width: 1024px;
+      }
+
+      .screen.report {
+        max-width: 896px;
+      }
+
+      .screen-label {
+        margin: 0 0 14px;
+        color: var(--slate-500);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .frame {
+        overflow: hidden;
+        border: 1px solid var(--slate-200);
+        border-radius: 24px;
+        background: var(--white);
+      }
+
+      .page {
+        padding: 40px;
+      }
+
+      .breadcrumbs {
+        color: var(--slate-600);
+        font-size: 14px;
+      }
+
+      .eyebrow {
+        margin: 32px 0 8px;
+        color: var(--sky-700);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3 {
+        font-family:
+          "Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif;
+        letter-spacing: -0.025em;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: 0;
+        font-size: clamp(38px, 6vw, 64px);
+        line-height: 1.02;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: 28px;
+      }
+
+      h3 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+
+      .intro {
+        max-width: 720px;
+        margin: 20px 0 0;
+        color: var(--slate-600);
+        font-size: 18px;
+      }
+
+      .card {
+        border: 1px solid var(--slate-200);
+        border-radius: 16px;
+        background: var(--white);
+        padding: 24px;
+      }
+
+      .form-card {
+        margin-top: 32px;
+        border-color: var(--sky-200);
+      }
+
+      label {
+        display: block;
+        margin-bottom: 7px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+      }
+
+      input {
+        min-width: 0;
+        height: 48px;
+        border: 1px solid var(--slate-300);
+        border-radius: 9999px;
+        padding: 0 18px;
+        color: var(--slate-900);
+        font: inherit;
+      }
+
+      button,
+      .button {
+        min-height: 48px;
+        border: 1px solid var(--slate-900);
+        border-radius: 9999px;
+        background: var(--slate-900);
+        color: var(--white);
+        padding: 0 22px;
+        font:
+          700 15px/1 "Instrument Sans",
+          system-ui,
+          sans-serif;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .hint,
+      .muted {
+        color: var(--slate-600);
+      }
+
+      .hint {
+        margin: 12px 0 0;
+        font-size: 13px;
+      }
+
+      .state-grid,
+      .two-column,
+      .facts {
+        display: grid;
+        gap: 16px;
+      }
+
+      .state-grid {
+        grid-template-columns: repeat(4, 1fr);
+        margin-top: 20px;
+      }
+
+      .state {
+        min-height: 108px;
+        border: 1px solid var(--slate-200);
+        border-radius: 12px;
+        padding: 14px;
+        background: var(--slate-50);
+        color: var(--slate-600);
+        font-size: 12px;
+      }
+
+      .state strong {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--slate-900);
+        font-size: 13px;
+      }
+
+      .skeleton {
+        height: 9px;
+        border-radius: 2px;
+        background: var(--slate-200);
+        margin: 9px 0;
+      }
+
+      .state.error {
+        border-color: var(--red-200);
+        background: var(--red-50);
+        color: var(--red-800);
+      }
+
+      .two-column {
+        grid-template-columns: 1fr 1fr;
+        margin-top: 24px;
+      }
+
+      ul {
+        margin: 14px 0 0;
+        padding-left: 20px;
+      }
+
+      li + li {
+        margin-top: 7px;
+      }
+
+      .note {
+        margin-top: 18px;
+        border-left: 3px solid var(--sky-700);
+        background: var(--sky-50);
+        padding: 14px 16px;
+        color: var(--slate-700);
+      }
+
+      .faq {
+        margin-top: 32px;
+      }
+
+      .faq-row {
+        border-top: 1px solid var(--slate-200);
+        padding: 18px 0;
+      }
+
+      .faq-row p {
+        margin: 6px 0 0;
+        color: var(--slate-600);
+      }
+
+      .report .page {
+        background: var(--slate-50);
+      }
+
+      .report-header h1 {
+        font-size: clamp(34px, 5vw, 52px);
+        overflow-wrap: anywhere;
+      }
+
+      .summary {
+        margin-top: 28px;
+      }
+
+      .badge {
+        display: inline-flex;
+        border: 1px solid var(--red-200);
+        border-radius: 4px;
+        background: var(--red-50);
+        color: var(--red-800);
+        padding: 6px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .summary h2 {
+        margin-top: 16px;
+      }
+
+      .facts {
+        grid-template-columns: repeat(4, 1fr);
+        margin-top: 22px;
+      }
+
+      .fact dt {
+        color: var(--slate-500);
+        font-size: 12px;
+      }
+
+      .fact dd {
+        margin: 3px 0 0;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .finding-group {
+        margin-top: 32px;
+      }
+
+      .page-url {
+        margin: 0 0 12px;
+        color: var(--sky-700);
+        font-size: 14px;
+        overflow-wrap: anywhere;
+      }
+
+      .finding + .finding {
+        margin-top: 12px;
+      }
+
+      .kind {
+        margin: 0 0 10px;
+        color: var(--slate-500);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+
+      .sentence {
+        margin: 0;
+        color: var(--slate-700);
+        overflow-wrap: anywhere;
+      }
+
+      mark {
+        border-radius: 2px;
+        background: var(--amber-200);
+        color: var(--slate-900);
+        padding: 1px 3px;
+        font-weight: 700;
+      }
+
+      .reason {
+        margin: 10px 0 0;
+        color: var(--slate-600);
+        font-size: 14px;
+      }
+
+      .cta {
+        margin-top: 32px;
+        border: 1px solid var(--sky-200);
+        border-radius: 24px;
+        background: var(--sky-100);
+        padding: 32px;
+      }
+
+      .cta p {
+        max-width: 640px;
+        color: var(--slate-700);
+      }
+
+      .cta-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .button.secondary {
+        border-color: var(--slate-300);
+        background: var(--white);
+        color: var(--slate-900);
+      }
+
+      @media (max-width: 820px) {
+        .state-grid,
+        .facts {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 560px) {
+        .topbar-inner,
+        main {
+          width: min(100% - 32px, 1280px);
+        }
+
+        main {
+          padding-top: 28px;
+        }
+
+        .page {
+          padding: 24px;
+        }
+
+        .form-row,
+        .state-grid,
+        .two-column,
+        .facts {
+          grid-template-columns: 1fr;
+        }
+
+        .form-row button {
+          width: 100%;
+        }
+
+        .reference {
+          max-width: 180px;
+          text-align: right;
+        }
+
+        .cta-actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <span class="brand">ReCopyFast</span>
+        <span class="reference"
+          >Low-fidelity design reference · not production markup</span
+        >
+      </div>
+    </header>
+
+    <main>
+      <section class="screen" aria-labelledby="tool-screen">
+        <p class="screen-label">Screen 1 · tool page and scan states</p>
+        <div class="frame">
+          <div class="page">
+            <nav class="breadcrumbs" aria-label="Breadcrumb">
+              Home / Free tools / Is your website out of date?
+            </nav>
+            <p class="eyebrow">Free tool</p>
+            <h1 id="tool-screen">Is your website out of date?</h1>
+            <p class="intro">
+              Check up to ten public pages for dates, prices and promotions that
+              may have passed. Each result shows the exact line and why it was
+              flagged.
+            </p>
+
+            <section class="card form-card" aria-label="Website scan form">
+              <label for="website">Website address</label>
+              <div class="form-row">
+                <input id="website" type="url" placeholder="example.com" />
+                <button type="button">Check for outdated copy</button>
+              </div>
+              <p class="hint">
+                We read your homepage and up to nine more public pages. Anything
+                after a ? or # in the address is left out, so links with tokens
+                stay private.
+              </p>
+            </section>
+
+            <div class="state-grid" aria-label="Scan states">
+              <div class="state">
+                <strong>Idle</strong>
+                Action remains disabled until an address is present.
+              </div>
+              <div class="state">
+                <strong>Scanning</strong>
+                Scanning your pages. This can take up to 20 seconds.
+                <div class="skeleton"></div>
+                <div class="skeleton"></div>
+              </div>
+              <div class="state error">
+                <strong>Refused or failed</strong>
+                Fixed server message in the existing destructive Alert.
+              </div>
+              <div class="state">
+                <strong>Success</strong>
+                Load the saved report as a new document.
+              </div>
+            </div>
+
+            <div class="two-column">
+              <section class="card">
+                <h2>What it checks</h2>
+                <ul>
+                  <li>Copyright years behind this year</li>
+                  <li>Past dates still described as upcoming</li>
+                  <li>Year-stamped prices, rates, menus and schedules</li>
+                  <li>Past-year and out-of-season promotions</li>
+                  <li>Old “last updated” labels, shown as information</li>
+                </ul>
+              </section>
+              <section class="card">
+                <h2>What it leaves alone</h2>
+                <ul>
+                  <li>Blog dates without future or deadline wording</li>
+                  <li>“Since 2015” and company history</li>
+                  <li>Numeric slash dates such as 03/04/2025</li>
+                  <li>Non-English and browser-added copy</li>
+                </ul>
+                <p class="note">
+                  A warning means “review this line”, not “the page is wrong”.
+                </p>
+              </section>
+            </div>
+
+            <section class="faq" aria-labelledby="faq-heading">
+              <h2 id="faq-heading">Questions</h2>
+              <div class="faq-row">
+                <h3>Does every old date mean the page is outdated?</h3>
+                <p>
+                  No. Nearby wording must still present it as current, upcoming
+                  or promotional.
+                </p>
+              </div>
+              <div class="faq-row">
+                <h3>How are month-only dates treated?</h3>
+                <p>A month is not past until its final UTC day has ended.</p>
+              </div>
+              <div class="faq-row">
+                <h3>Does it read text added by JavaScript?</h3>
+                <p>No. It reads the HTML the server sends.</p>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen report" aria-labelledby="report-screen">
+        <p class="screen-label">Screen 2 · generic report, fail state</p>
+        <div class="frame">
+          <div class="page">
+            <header class="report-header">
+              <p class="eyebrow">Is your website out of date? report</p>
+              <h1 id="report-screen">example.com</h1>
+              <p class="muted">
+                Scanned Mon, 12 Oct 2026 16:00:00 GMT. Public to anyone with
+                this link; kept for up to 30 days.
+              </p>
+            </header>
+
+            <section class="card summary" aria-labelledby="summary-heading">
+              <span class="badge">Needs fixing</span>
+              <h2 id="summary-heading">2 lines look out of date</h2>
+              <dl class="facts">
+                <div class="fact">
+                  <dt>Pages checked</dt>
+                  <dd>6</dd>
+                </div>
+                <div class="fact">
+                  <dt>Copyright year</dt>
+                  <dd>1</dd>
+                </div>
+                <div class="fact">
+                  <dt>Past upcoming dates</dt>
+                  <dd>1</dd>
+                </div>
+                <div class="fact">
+                  <dt>Seasonal promos</dt>
+                  <dd>1</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section class="finding-group" aria-labelledby="page-one">
+              <p class="page-url" id="page-one">https://example.com/</p>
+              <article class="card finding">
+                <p class="kind">Flagged text</p>
+                <p class="sentence">
+                  Trusted by customers since 2015. <mark>© 2025</mark> Example
+                  Company.
+                </p>
+                <p class="reason">The copyright year is behind 2026.</p>
+              </article>
+              <article class="card finding">
+                <p class="kind">Flagged text</p>
+                <p class="sentence">
+                  Join us on <mark>October 10, 2026</mark>. Reserve your seat
+                  today.
+                </p>
+                <p class="reason">
+                  This date has passed, but the nearby copy still asks people to
+                  join and reserve.
+                </p>
+              </article>
+              <article class="card finding">
+                <p class="kind">Flagged text</p>
+                <p class="sentence">
+                  Our <mark>Black Friday sale</mark> is live now.
+                </p>
+                <p class="reason">
+                  This undated promotion is outside its broad review window.
+                </p>
+              </article>
+            </section>
+
+            <section class="cta" aria-labelledby="cta-heading">
+              <h2 id="cta-heading">Fix it on your live page</h2>
+              <p>
+                Opens the existing free preview. Click the line on your own page
+                and retype it; only your tab changes until ReCopyFast is
+                installed.
+              </p>
+              <div class="cta-actions">
+                <a class="button" href="#">Fix it on your live page</a>
+                <a class="button secondary" href="#">Start with ReCopyFast</a>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { FindingList } from "@/components/tools/FindingList";
 import { ReportSummary } from "@/components/tools/ReportSummary";
 import { ToolCta } from "@/components/tools/ToolCta";
+import { OwnerNextStep } from "@/components/tools/OwnerNextStep";
 import { getToolEntry } from "@/lib/tools/catalogue";
 import { loadReport } from "@/lib/tools/report/load-report";
 import { PAGE_SKIP_REASONS } from "@/lib/tools/report/report-schema";
@@ -55,6 +56,8 @@ export default async function ToolReportPage({ params }: ReportRouteProps) {
   );
   const skipped = report.pages.filter((page) => page.status === "skipped");
   const scannedOn = new Date(report.scannedAt).toUTCString();
+  // s121: a report that found something leads with the owner next step.
+  const hasIssues = report.findings.length > 0;
 
   return (
     <div data-theme="light" className="min-h-screen bg-slate-50">
@@ -116,7 +119,19 @@ export default async function ToolReportPage({ params }: ReportRouteProps) {
             </section>
           ) : null}
 
+          {hasIssues ? (
+            <OwnerNextStep slug={entry.slug} hasIssues emphasis="primary" />
+          ) : null}
+
           {entry.cta ? <ToolCta variant={entry.cta} slug={entry.slug} /> : null}
+
+          {hasIssues ? null : (
+            <OwnerNextStep
+              slug={entry.slug}
+              hasIssues={false}
+              emphasis="secondary"
+            />
+          )}
 
           <p>
             {/* A native anchor: the tool page is a static document with its

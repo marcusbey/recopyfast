@@ -48,6 +48,14 @@ export const TOOL_CATALOGUE: readonly ToolEntry[] = [
     lens: null,
     cta: null,
   },
+  {
+    slug: "outdated-website-checker",
+    name: "Is your website out of date?",
+    description:
+      "Check up to ten public pages for dates, prices and promotions that may have passed, with the exact line and reason for each finding.",
+    lens: "outdated",
+    cta: "fix-on-page",
+  },
 ];
 
 /** Own-property lookup: `constructor` or `__proto__` is not a tool. */
