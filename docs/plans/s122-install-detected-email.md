@@ -21,9 +21,11 @@ main `230a0ea6` (#120). Embed allocation 0 bytes.
       service-role only, no web principal privilege (ADR 002 / datafast_visitors shape).
       Claimed before the provider call (ADR 011), `ON CONFLICT DO NOTHING`; not reclaimable,
       because nothing re-fires the trigger and a second email is the defect.
-- [x] Module `src/lib/sites/install-detected-email.ts`: provider check before the claim; owner =
-      earliest `admin` row in `site_permissions`; address via `resolveUserIdentity` (Admin API);
-      claim error (including a missing table) skips the send; Sentry `captureMessage` with stage
+- [x] Module `src/lib/sites/install-detected-email.ts`: provider check first; site, owner
+      (`resolveSiteOwnerId`, billing's definition with its `id` tie-breaker) and address via
+      `resolveUserIdentity` (Admin API) resolved before the claim, bounded at 5 s, claiming
+      nothing on failure; claim error (including a missing table) skips the send; Resend call
+      bounded at 5 s (`provider_timeout`); Sentry `captureMessage` with stage
       and code tags only, never an address or provider message.
 - [x] Renderer `sendInstallDetectedEmail` in `src/lib/email/resend.ts` (existing Resend
       integration): subject "Your site is connected — you can edit it now", domain and site name
@@ -48,3 +50,7 @@ claim fails on the missing table and the send is skipped — those sites get no 
 breaks, nothing is sent twice.
 
 Rollback: revert the code; the table can stay (additive, unused).
+
+Operations: stuck `pending` rows (older than 15 minutes) and `failed` rows by `error_code` —
+queries in [`docs/operations/monitoring.md`](../operations/monitoring.md) § "Install detected"
+email ledger. Review fixes: [`docs/reviews/s122-install-detected-email.md`](../reviews/s122-install-detected-email.md).
