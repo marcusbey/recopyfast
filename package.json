@@ -131,6 +131,9 @@
   },
   "overrides": {
     "sharp": "^0.35.4",
-    "postcss": "^8.5.25"
+    "postcss": "^8.5.25",
+    "openai": {
+      "zod": "4.6.7"
+    }
   }
 }

@@ -107,7 +107,7 @@ describe("server manifest", () => {
     // silently restore the vulnerable tree.
     expect(manifest.dependencies?.express).toBe("^4.22.3");
     expect(lock.packages?.["node_modules/express"]?.version).toBe("4.22.3");
-    expect(lock.packages?.["node_modules/body-parser"]?.version).toBe("1.20.8");
+    expect(lock.packages?.["node_modules/body-parser"]?.version).toBe("1.20.9");
     expect(lock.packages?.["node_modules/qs"]?.version).toBe("6.16.0");
 
     expect(fs.existsSync(SERVER_SECURITY_WORKFLOW)).toBe(true);
