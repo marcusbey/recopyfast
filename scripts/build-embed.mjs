@@ -428,8 +428,48 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * leaving 32 / 52 B headroom under the corrected runtime rather than widening
  * either one after the runtime error was found.
  */
-const MAX_BUNDLE_GZ = 45801;
-const MAX_WIDGET_GZ = 33044;
+/*
+ * RATCHETED DOWN 2026-10-22 (s119-source-drift-conflicts), from 45801 / 33044,
+ * by exactly what the story earned, so the inherited 32 / 52 B headroom is
+ * unchanged. Node 24.14.0 / zlib 1.3.1-e00f703. Embed allocation was 0 net
+ * (docs/stories.md), with 32 B of headroom on the bundle.
+ *
+ *   45769 / 32992  measured on main at 5d42b8e, where s119 branched
+ *   +31 / +33      the drift report (ADR 075): postContentMap claims an id the
+ *                  server holds when its row's `source_seen` differs from the
+ *                  live authored text, and drops `source_seen` on the claim.
+ *                  Re-setting it to the live text instead measured +42 / +42
+ *   -22 / -24      the literal text-node type for `Node.TEXT_NODE` (also one
+ *                  host global fewer to resolve), and `.length` truthiness for
+ *                  `> 0` / `=== 0` in five conditions
+ *   -2 / -2        `events.length` truthiness in the two A/B track paths
+ *   -5 / -4        `slice` for three `substring` calls (constant, ordered,
+ *                  non-negative bounds)
+ *   -3 / -4        `url.href` for `url.toString()` in the staging exit
+ *   -30 / -31      object spread for every `Object.assign` in the widget (key
+ *                  order unchanged; a fresh literal has no setters, and a
+ *                  `__proto__` key in server metadata now stays a plain key).
+ *                  Each site alone measured larger; only removing all of them
+ *                  pays. Tried and rejected, each larger: `this` for the
+ *                  `self` alias in the observer callbacks (+3 / +2) and in the
+ *                  Edit Board's Languages and History tabs (+11 / +8 and
+ *                  +30 / +30); `.href` / `+ ''` for the other three
+ *                  `toString()` calls. The Edit Board's createPanel alias is
+ *                  kept: edit-board-tabs.test.ts evaluates that block with
+ *                  `self` injected
+ *   45742 / 32964  measured on the branch, -27 / -28 net
+ *   +8 / +8        review M1: a live text equal to the row's served copy
+ *                  (`current_content`) is not a drift report (snapshot SSR)
+ *   45750 / 32972  after the review fix, under the unchanged ceilings
+ *
+ * The middle lines are prototype runs in sequence (two of them taken while the
+ * reverted createPanel conversion was still applied, hence a 3 B gap in their
+ * sum) and carry the banner hash's ±2 B; only the two ends are measurements of
+ * shipped bytes.
+ * build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45774;
+const MAX_WIDGET_GZ = 33016;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

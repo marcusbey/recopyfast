@@ -139,6 +139,7 @@ Subordinate to [`architecture.md`](./architecture.md) above.
 | [`edit-needs-a-plan.md`](./operations/edit-needs-a-plan.md)       | Before deploying s51: list paid credits-only accounts to comp or refund                                           |
 | [`blog.md`](./operations/blog.md)                                 | Blog: the cron drafts, an admin reviews and publishes (s89) — `ADMIN_EMAILS`, migration-first, publish/unpublish  |
 | [`free-tools.md`](./operations/free-tools.md)                     | Free tools (s96): scan limits, kill switch, global-cap override, denylist and robots.txt opt-out, storage budget, usage SQL |
+| [`s119-source-drift-deploy-order.md`](./operations/s119-source-drift-deploy-order.md) | Source drift (s119): migration before merge (the visitor content read needs the columns), catalogue checks, rollback |
 
 ### [`gtm/`](./gtm/README.md) — how we sell it
 | File | Contents |

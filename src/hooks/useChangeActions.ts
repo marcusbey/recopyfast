@@ -33,13 +33,21 @@ import { timeoutSignal } from "@/lib/utils/timeout-signal";
  * holds. Tombstone (s70b fix pass, C1): the row was redrawn from what the
  * action meant to do, and Publish promotes every language and variant row of
  * the element, so a sibling kept a draft the server no longer had.
+ *
+ * s119 (ADR 075) adds the one write this page owns a route for: a site admin's
+ * answer to a developer's deploy that an override masks
+ * (`POST /api/content/source-drift`, the same chain and plan gate). It sends
+ * back the observed text the row showed, so a newer observation is refused
+ * (409) and read again rather than resolved unseen.
  */
 
 export type ChangeAction =
   | "revertToDraft"
   | "revertAndPublish"
   | "discardDraft"
-  | "publish";
+  | "publish"
+  | "keepOverride"
+  | "takeNewSource";
 
 export interface ActionOutcome {
   /** What to tell the owner; null when everything asked for landed. */
@@ -98,6 +106,9 @@ const PUBLISH_LOST = lost("it may or may not have been published");
 const REVERT_LOST = lost("the revert may or may not have been saved");
 const DISCARD_LOST = lost("the draft may or may not have been discarded");
 const REVERT_SAVED = "The revert was saved as a draft.";
+const RESOLVE_FAILED = "Could not resolve this change. Try again.";
+const RESOLVE_LOST = lost("it may or may not have been resolved");
+const NO_DRIFT = "There is no open source change on this text.";
 /** The page disables these rows; this is the hook's own guard behind it. */
 const ELEMENT_BUSY =
   "A change to this text is still being saved. Try again once it has finished.";
@@ -243,7 +254,11 @@ async function send(
   url: string,
   method: "PUT" | "POST",
   body: unknown,
-  { refused, lostMessage }: { refused: string; lostMessage: string },
+  {
+    refused,
+    lostMessage,
+    staleStatuses = [409],
+  }: { refused: string; lostMessage: string; staleStatuses?: number[] },
 ): Promise<WriteFailure | null> {
   let response: Response;
   try {
@@ -260,7 +275,7 @@ async function send(
   return {
     error: await refusalMessage(response, refused),
     isUncertain: false,
-    isStale: response.status === 409,
+    isStale: staleStatuses.includes(response.status),
   };
 }
 
@@ -301,6 +316,32 @@ const publishElement = (row: ContentChange): Promise<WriteFailure | null> =>
     "POST",
     { siteId: row.siteId, elementIds: [row.elementId] },
     { refused: PUBLISH_FAILED, lostMessage: PUBLISH_LOST },
+  );
+
+/**
+ * Keep the override or use the new source (ADR 075). 404 is stale too: the
+ * drift is gone (resolved elsewhere, or the developer reverted the deploy),
+ * so the row is read again rather than left showing a conflict that is over.
+ */
+const resolveDrift = (
+  row: ContentChange,
+  resolution: "keep" | "drop",
+  observed: string,
+): Promise<WriteFailure | null> =>
+  send(
+    "/api/content/source-drift",
+    "POST",
+    {
+      siteId: row.siteId,
+      contentElementId: row.id,
+      resolution,
+      expectedObserved: observed,
+    },
+    {
+      refused: RESOLVE_FAILED,
+      lostMessage: RESOLVE_LOST,
+      staleStatuses: [404, 409],
+    },
   );
 
 /** One write from this page, from its first request to its re-read. */
@@ -510,11 +551,37 @@ export function useChangeActions({ reread }: ChangeActionsOptions = {}) {
     [track],
   );
 
+  const keepOverride = useCallback(
+    (row: ContentChange) =>
+      track(row, "keepOverride", async () => {
+        if (!row.sourceDrift) return refusal(NO_DRIFT);
+        return outcomeOf(
+          "keepOverride",
+          await resolveDrift(row, "keep", row.sourceDrift.observed),
+        );
+      }),
+    [track],
+  );
+
+  const takeNewSource = useCallback(
+    (row: ContentChange) =>
+      track(row, "takeNewSource", async () => {
+        if (!row.sourceDrift) return refusal(NO_DRIFT);
+        return outcomeOf(
+          "takeNewSource",
+          await resolveDrift(row, "drop", row.sourceDrift.observed),
+        );
+      }),
+    [track],
+  );
+
   return {
     revertToDraft,
     revertAndPublish,
     discardDraft,
     publish,
+    keepOverride,
+    takeNewSource,
     /** Every write in flight; see `isElementWriting` and `busyActionOf`. */
     inFlight,
   };

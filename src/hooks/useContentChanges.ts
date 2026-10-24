@@ -60,6 +60,19 @@ export interface DraftAttribute {
   live: string | null;
 }
 
+/**
+ * s119 (ADR 075): the developer deployed new text for an element whose
+ * override visitors still see. The override keeps showing; a site admin
+ * decides (POST /api/content/source-drift).
+ */
+export interface SourceDrift {
+  /** The authored text the override was written against. */
+  baseline: string | null;
+  /** What the page's own source says now. */
+  observed: string;
+  detectedAt: string | null;
+}
+
 export interface ContentChange {
   id: string;
   siteId: string;
@@ -90,6 +103,11 @@ export interface ContentChange {
   updatedAt: string | null;
   changedBy: string | null;
   createdAt: string;
+  /**
+   * An open source drift on this row. Null or absent when there is none, or
+   * when the answer's value was not well formed (`knownSourceDrift`).
+   */
+  sourceDrift?: SourceDrift | null;
 }
 
 export interface ChangesCounts {
@@ -155,6 +173,29 @@ function knownUpdatedAt(value: unknown): string | null {
   return parsed.ok ? (parsed.value ?? null) : null;
 }
 
+/**
+ * A row's drift as the page may trust it, or null. Only a well-formed value is
+ * drawn: the resolution sends `observed` back as the compare-and-set token, so
+ * a guessed one could only be refused or, worse, match by accident.
+ */
+function knownSourceDrift(value: unknown): SourceDrift | null {
+  const candidate = value as Partial<SourceDrift> | null;
+  if (
+    typeof candidate !== "object" ||
+    candidate === null ||
+    typeof candidate.observed !== "string" ||
+    !(candidate.baseline === null || typeof candidate.baseline === "string") ||
+    !(candidate.detectedAt === null || typeof candidate.detectedAt === "string")
+  ) {
+    return null;
+  }
+  return {
+    baseline: candidate.baseline,
+    observed: candidate.observed,
+    detectedAt: candidate.detectedAt,
+  };
+}
+
 /** A list read: the page's filters, or one element of one site. */
 interface ChangesRead extends ChangesFilters {
   element?: string;
@@ -208,6 +249,7 @@ async function fetchChanges(
       draftAttributes: knownAttributes(row.draftAttributes),
       hasLiveText: row.hasLiveText === true,
       updatedAt: knownUpdatedAt(row.updatedAt),
+      sourceDrift: knownSourceDrift(row.sourceDrift),
     })),
   };
 }

@@ -35,6 +35,8 @@ const ANNOUNCEMENTS: Record<ChangeAction, string> = {
   revertAndPublish: "Reverted and published.",
   discardDraft: "Draft discarded.",
   publish: "Published.",
+  keepOverride: "Override kept. New deploys are compared with this source.",
+  takeNewSource: "The page now shows its new source.",
 };
 
 const NO_ROWS_TITLE: Record<ChangesStateFilter, string> = {
