@@ -27,7 +27,7 @@ https://datafa.st/api/v1/goals` with `Authorization: Bearer <df_ key>` and
 
    | Goal | Where it fires | Params |
    |---|---|---|
-   | `cta_click` | `data-fast-goal` attributes on every signup/checkout/demo/try/docs anchor (hero, header, mobile header, pricing plans, lifetime, founding, final CTA, founding offer, /demo, /try, blog, compare, comparison pages, tool pages, tool CTA; s120: `owners_hero`, `owners_handoff`, `owners_final` on /for/owners, `wp_guide` on /docs/install/wordpress, `dev_guide` on /docs/install/for-developers) — no JS | `location`, `target` (`signup`/`checkout`/`demo`/`try`/`docs`), `plan` (catalogue id) |
+   | `cta_click` | `data-fast-goal` attributes on every signup/checkout/demo/try/docs anchor (hero, header, mobile header, pricing plans, lifetime, founding, final CTA, founding offer, /demo, /try, blog, compare, comparison pages, tool pages, tool CTA; s120: `owners_hero`, `owners_handoff`, `owners_final` on /for/owners, `wp_guide` on /docs/install/wordpress, `dev_guide` on /docs/install/for-developers; s121: `typo_finder_result`, `outdated_checker_result`, `cost_calculator_result` on tool results) — no JS | `location`, `target` (`signup`/`checkout`/`demo`/`try`/`docs`/`owners`), `plan` (catalogue id) |
    | `demo_edit` | first text edit per page view: `/demo` (`InteractiveHero tracksDemoEdit`), `/try` (a `MutationObserver` on the sample; `rcf-try.js` itself is not instrumented — it also runs on third-party pages) | `surface` |
    | `tool_typo_finder_run` | spell checker scan produced a report (`ToolScanForm`) | — |
    | `tool_cost_calculator_used` | calculator result settled, once per view (`CostCalculator`) | — |

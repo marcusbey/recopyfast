@@ -270,7 +270,7 @@ describe("the report page", () => {
     await renderReport();
 
     const heading = screen.getByRole("heading", {
-      name: "Fix these yourself in a minute",
+      name: "Fix these yourself once ReCopyFast is on your site",
     });
     const tryLink = screen.getByRole("link", { name: /try it on your site/i });
     expect(tryLink).toHaveAttribute(
@@ -318,7 +318,9 @@ describe("the report page", () => {
     await renderReport();
 
     expect(
-      screen.queryByRole("heading", { name: "Fix these yourself in a minute" }),
+      screen.queryByRole("heading", {
+        name: "Fix these yourself once ReCopyFast is on your site",
+      }),
     ).not.toBeInTheDocument();
     const heading = screen.getByRole("heading", {
       name: "Change your own website text",

@@ -19,7 +19,9 @@ describe("OwnerNextStep (s121)", () => {
     );
 
     expect(
-      screen.getByRole("heading", { name: "Fix these yourself in a minute" }),
+      screen.getByRole("heading", {
+        name: "Fix these yourself once ReCopyFast is on your site",
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText(OWNER_FIX_BODY)).toBeInTheDocument();
     const links = screen.getAllByRole("link");

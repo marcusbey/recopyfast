@@ -100,10 +100,11 @@ export function ownerPathUtm(slug: string): string {
   return `utm_source=tools&utm_medium=free_tool&utm_campaign=owner_path&utm_content=${encodeURIComponent(slug)}`;
 }
 
-export const OWNER_FIX_HEADING = "Fix these yourself in a minute";
+export const OWNER_FIX_HEADING =
+  "Fix these yourself once ReCopyFast is on your site";
 
 export const OWNER_FIX_BODY =
-  "Own the business? You don't need to wait on your developer for a few words. Our free preview runs on your own page: on desktop, click the line and retype it. To keep the change, add ReCopyFast once, yourself or through your developer.";
+  "Own the business? Our free preview runs on your own page: on desktop, click the line and retype it. To keep the change, add ReCopyFast once, yourself or through your developer. After that, small fixes like these are yours to make.";
 
 export const OWNER_GENERAL_HEADING = "Change your own website text";
 
@@ -126,20 +127,19 @@ export function ownerCtaCopyFor(
   hasIssues: boolean,
 ): OwnerCtaCopy {
   const utm = ownerPathUtm(slug);
+  const tryLink: CtaLink = {
+    label: "Try it on your site",
+    href: `/try?${utm}#install`,
+    isAppDocument: false,
+  };
+  const ownersLink: CtaLink = {
+    label: "How it works for business owners",
+    href: `/for/owners?${utm}`,
+    isAppDocument: false,
+  };
   return {
     heading: hasIssues ? OWNER_FIX_HEADING : OWNER_GENERAL_HEADING,
     body: hasIssues ? OWNER_FIX_BODY : OWNER_GENERAL_BODY,
-    links: [
-      {
-        label: "Try it on your site",
-        href: `/try?${utm}#install`,
-        isAppDocument: false,
-      },
-      {
-        label: "How it works for business owners",
-        href: `/for/owners?${utm}`,
-        isAppDocument: false,
-      },
-    ],
+    links: [tryLink, ownersLink],
   };
 }
