@@ -172,6 +172,29 @@ describe("CostCalculator", () => {
     ).toBeInTheDocument();
   });
 
+  // s121: the owner next step follows the result, secondary to the page CTA.
+  it("shows the owner next step under a result, and hides it while a field is empty", async () => {
+    const user = setup();
+
+    const tryLink = screen.getByRole("link", { name: /try it on your site/i });
+    expect(tryLink).toHaveAttribute(
+      "href",
+      "/try?utm_source=tools&utm_medium=free_tool&utm_campaign=owner_path&utm_content=website-maintenance-cost#install",
+    );
+    expect(tryLink).toHaveAttribute(
+      "data-fast-goal-location",
+      "cost_calculator_result",
+    );
+    expect(
+      screen.getByRole("link", { name: "How it works for business owners" }),
+    ).toHaveAttribute("data-fast-goal-target", "owners");
+
+    await user.clear(screen.getByLabelText("Minutes per change"));
+    expect(
+      screen.queryByRole("link", { name: /try it on your site/i }),
+    ).toBeNull();
+  });
+
   it("does not write an incomplete form to the URL", async () => {
     const user = setup();
 

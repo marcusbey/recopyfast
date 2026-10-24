@@ -8,6 +8,7 @@ import {
   DATAFAST_RESERVED_GOAL_NAMES,
   dataFastCtaAttributes,
   dataFastToolGoal,
+  dataFastToolResultLocation,
   sanitizeGoalParams,
 } from "@/lib/analytics/datafast-goals";
 
@@ -103,6 +104,10 @@ describe("dataFastToolGoal", () => {
       name: "tool_cost_calculator_used",
       params: {},
     });
+    expect(dataFastToolGoal("outdated-website-checker")).toEqual({
+      name: "tool_outdated_checker_run",
+      params: {},
+    });
   });
 
   it("falls back to tool_run carrying the slug", () => {
@@ -156,5 +161,35 @@ describe("s120 site-owner path goals", () => {
     expect(
       sanitizeGoalParams({ location: "dashboard_site", body: "short" }),
     ).toEqual({ location: "dashboard_site", body: "short" });
+  });
+});
+
+describe("s121 owner next step on tool results", () => {
+  it("gives each live tool a <tool>_result cta location", () => {
+    expect(dataFastToolResultLocation("website-spell-checker")).toBe(
+      "typo_finder_result",
+    );
+    expect(dataFastToolResultLocation("outdated-website-checker")).toBe(
+      "outdated_checker_result",
+    );
+    expect(dataFastToolResultLocation("website-maintenance-cost")).toBe(
+      "cost_calculator_result",
+    );
+    expect(dataFastToolResultLocation("constructor")).toBeUndefined();
+    for (const location of [
+      "typo_finder_result",
+      "outdated_checker_result",
+      "cost_calculator_result",
+    ]) {
+      expect(DATAFAST_CTA_LOCATIONS).toContain(location);
+    }
+  });
+
+  it("tags an owners-page link with the owners target", () => {
+    expect(dataFastCtaAttributes("typo_finder_result", "owners")).toEqual({
+      "data-fast-goal": "cta_click",
+      "data-fast-goal-location": "typo_finder_result",
+      "data-fast-goal-target": "owners",
+    });
   });
 });

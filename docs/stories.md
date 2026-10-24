@@ -5436,6 +5436,29 @@ Acceptance:
 Research: `docs/research/s120-owner-path.md`. Plan: `docs/plans/s120-owner-path.md` (owner
 validated in chat on October 22, 2026). Review: `docs/reviews/s120-owner-path.md`.
 
+## Story s121-tools-owner-ctas — after a free tool's result, a site owner sees how to fix it themselves
+
+Requested by the owner in chat on October 24, 2026 (14-day plan experiment 5: owner versions of
+the free tools; experiment 4: ship s99). As a business owner who just ran the Typo Finder, the
+outdated website checker or the cost calculator, I see an owner next step under the result: "Try
+it on your site" (`/try`) and "How it works for business owners" (`/for/owners`). Complexity 1;
+dependencies: s96, s98, s99, s120 (`/for/owners`), ADR 074. Ships on the s99 branch
+`feature/s99-outdated-checker-ship`; embed allocation 0 bytes. No backend, migration or
+dependency.
+
+Acceptance:
+- [x] A scan report with findings leads with the owner step ("Fix these yourself once ReCopyFast is on your site"),
+      above the existing fix CTA; a clean report shows it after the fix CTA, as a quieter card.
+- [x] The calculator shows the owner step under a complete result, secondary to its freelancer
+      CTA. No owner mode: its inputs, formula, card and FAQ are freelancer arithmetic, and an
+      honest owner version is a separate calculator (out of scope).
+- [x] Links carry `utm_source=tools&utm_medium=free_tool&utm_campaign=owner_path&utm_content=<slug>`;
+      each anchor is a `cta_click` with location `<tool>_result` and target `try` or `owners`.
+- [x] DataFast goal `tool_outdated_checker_run` replaces the `tool_run` fallback for s99.
+- [ ] Required checks and independent review pass; merge and deployment are manual and separate.
+
+Plan: `docs/plans/s121-tools-owner-ctas.md`.
+
 ## Story s122-install-detected-email — the owner hears that the line is installed
 
 Requested by the owner in chat on October 24, 2026 ("can we start implementing the solutions",
