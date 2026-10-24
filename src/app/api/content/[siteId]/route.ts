@@ -10,6 +10,7 @@ import {
 import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
 import { DATAFAST_GOALS } from "@/lib/analytics/datafast-goals";
 import { sendSiteOwnerGoal } from "@/lib/analytics/datafast-server";
+import { notifyOwnerOfInstall } from "@/lib/sites/install-detected-email";
 import {
   redactControlCharacters,
   validateDiscoveredElement,
@@ -622,6 +623,11 @@ export async function POST(
       // DATAFAST_API_KEY; never throws.
       if (becameLive) {
         after(() => sendSiteOwnerGoal(siteId, DATAFAST_GOALS.scriptInstalled));
+        // s122: the owner's one "Install detected" email, on the same single
+        // transition. After the response, so the check-in's latency is
+        // untouched; never throws; the `site_install_emails` claim makes a
+        // second send for this site impossible however often this runs.
+        after(() => notifyOwnerOfInstall(siteId));
       }
     });
 

@@ -104,6 +104,21 @@ function describePermissions(permissions: EditorPermission[]): string {
     .join(", ");
 }
 
+/**
+ * An owner-controlled label (site name, domain) made safe for a mail header.
+ *
+ * Registration historically imposed no length or control-character bound, so
+ * one value could otherwise inject a header line or create an oversized
+ * message. Collapses whitespace and caps the rendered length.
+ */
+function singleLineLabel(value: string, maxLength = 120): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
 function tokenFreeHubUrl(value: string): string | null {
   try {
     const url = new URL(value);
@@ -143,11 +158,7 @@ export async function sendEditorInvitationEmail(params: {
   // Site names are owner-controlled and registration historically imposed no
   // length or control-character bound. Keep them out of mail headers and cap
   // the rendered label so one name cannot create an oversized message.
-  const siteName = params.siteName
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
+  const siteName = singleLineLabel(params.siteName);
   const subject = `${params.inviterEmail} invited you to edit ${siteName}`;
   const text = [
     `${params.inviterEmail} invited you to edit ${siteName} (${params.siteDomain}) in ReCopyFast.`,
@@ -232,4 +243,71 @@ export async function sendEditorAccessCode(
       <p style="margin:16px 0 0;color:#94a3b8;font-size:13px">Expires in 10 minutes and can be used once. If you didn't ask to edit, ignore this email — nothing has changed.</p>
     </div>`;
   return send({ to: email, subject, html, text });
+}
+
+/**
+ * Tell a site's owner that the line is installed and the site is editable
+ * (s122). Sent once per site, on the request that flipped it to `live` —
+ * `src/lib/sites/install-detected-email.ts` owns that guarantee; this only
+ * renders and sends.
+ *
+ * THE BUTTON IS THE DASHBOARD, NEVER AN EDIT LINK. The owner may have been
+ * forwarded this by their developer, or forward it on. Anything carrying a
+ * site token, staging token or session would turn a "you're connected" note
+ * into a reusable credential (s76, ADR 027), so the URL is stripped to origin
+ * and path exactly like the editor invitation's, and editing is reached by
+ * signing in.
+ *
+ * Copy stays inside what the product does: no claim that edits survive a
+ * redesign or a developer's redeploy (s120 messaging rules).
+ */
+export async function sendInstallDetectedEmail(params: {
+  to: string;
+  siteName: string;
+  siteDomain: string;
+  dashboardUrl: string;
+}): Promise<SendResult> {
+  const dashboardUrl = tokenFreeHubUrl(params.dashboardUrl);
+  if (!dashboardUrl) {
+    console.error(
+      "[email] Refusing install-detected email with an invalid dashboard URL.",
+    );
+    return { sent: false, error: "Invalid dashboard URL" };
+  }
+
+  const siteName = singleLineLabel(params.siteName);
+  const siteDomain = singleLineLabel(params.siteDomain, 253);
+  const subject = "Your site is connected — you can edit it now";
+  const tips = [
+    "Open your site from the dashboard with Edit website, then click any text on the page to change it.",
+    "Visitors see nothing new until you choose Publish.",
+    "Every change is listed under Changes in your dashboard, where you can revert it to the original text.",
+  ];
+  const thanks =
+    "If your developer installed it, thank them — they won't need to touch it again.";
+
+  const text = [
+    `ReCopyFast is now installed on ${siteName} (${siteDomain}).`,
+    "",
+    "We received the first check-in from your site, so you can start editing its words.",
+    "",
+    `Open your dashboard: ${dashboardUrl}`,
+    "",
+    "Three tips:",
+    ...tips.map((tip, index) => `${index + 1}. ${tip}`),
+    "",
+    thanks,
+  ].join("\n");
+  const html = `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
+      <h2 style="margin:0 0 12px;font-size:20px">Your site is connected</h2>
+      <p style="margin:0 0 12px;color:#475569">ReCopyFast is now installed on <strong>${escapeHtml(siteName)}</strong> (${escapeHtml(siteDomain)}). We received the first check-in from your site, so you can start editing its words.</p>
+      <a href="${escapeHtml(dashboardUrl)}" style="display:inline-block;margin:8px 0 20px;padding:10px 16px;border-radius:6px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600">Open your dashboard</a>
+      <ol style="margin:0 0 20px;padding-left:20px;color:#475569">
+        ${tips.map((tip) => `<li style="margin:0 0 6px">${escapeHtml(tip)}</li>`).join("\n        ")}
+      </ol>
+      <p style="margin:0;color:#475569">${escapeHtml(thanks)}</p>
+    </div>`;
+
+  return send({ to: params.to, subject, html, text });
 }

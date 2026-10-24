@@ -5435,3 +5435,28 @@ Acceptance:
 
 Research: `docs/research/s120-owner-path.md`. Plan: `docs/plans/s120-owner-path.md` (owner
 validated in chat on October 22, 2026). Review: `docs/reviews/s120-owner-path.md`.
+
+## Story s122-install-detected-email — the owner hears that the line is installed
+
+Requested by the owner in chat on October 24, 2026 ("can we start implementing the solutions",
+from the s120 research: the owner gets an "Install detected" email after their developer
+installs). As a site owner whose developer installed the line, I get one email when my site
+first checks in, telling me it is connected and how to start editing, so I never have to ask
+or keep checking. Complexity 2; dependencies: s02 install status (ADR 006), ADR 074
+`script_installed` hook point, s120 developer handoff. Branch
+`feature/s122-install-detected-email`; embed allocation 0 bytes. One additive migration.
+
+Acceptance:
+- [x] The site's first flip to `live` — the one request `markSiteLive` reports — schedules one
+      email to the owner's account address, after the response; later check-ins and
+      already-live sites schedule nothing.
+- [x] A `site_install_emails` row per site is claimed before the provider call; retries and
+      concurrent check-ins cannot send twice; a failed send is recorded, not retried.
+- [x] The body names the domain, says the line is installed, links only to the dashboard (no
+      edit, staging or session link), gives three tips and thanks the developer; no claim that
+      edits survive a redesign.
+- [x] Email failure, a missing table or a missing owner never breaks the check-in; failures go
+      to Sentry with stage and code only, no address.
+- [ ] Required checks and independent review pass; merge and deployment are manual and separate.
+
+Plan: `docs/plans/s122-install-detected-email.md`.

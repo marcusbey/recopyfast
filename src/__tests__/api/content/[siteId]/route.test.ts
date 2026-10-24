@@ -8,11 +8,16 @@ import {
   SiteAuthError,
 } from "@/lib/security/site-auth";
 import { sendSiteOwnerGoal } from "@/lib/analytics/datafast-server";
+import { notifyOwnerOfInstall } from "@/lib/sites/install-detected-email";
 
 jest.mock("@/lib/supabase/service");
 // ADR 074: the script_installed goal is asserted, never sent.
 jest.mock("@/lib/analytics/datafast-server", () => ({
   sendSiteOwnerGoal: jest.fn(),
+}));
+// s122: the owner email has its own suite; here only when it is scheduled.
+jest.mock("@/lib/sites/install-detected-email", () => ({
+  notifyOwnerOfInstall: jest.fn(),
 }));
 // Only authorization is stubbed, and only because it needs a database. This file
 // used to add `sanitizeIncomingContent: jest.fn((value) => value)` — an identity
@@ -858,6 +863,46 @@ describe("/api/content/[siteId]", () => {
         await postContentMap();
         for (const [task] of mockAfter.mock.calls) await runAfterTask(task);
         expect(sendSiteOwnerGoal).not.toHaveBeenCalled();
+      });
+
+      it("schedules the owner's install email after the response, only for the report that flipped the site", async () => {
+        // Same guarded-update stub as the DataFast case: one matched row for
+        // the transition, none for a site that is already live.
+        let matched = true;
+        let flipPending = false;
+        mockServiceClient.update.mockImplementation((patch) => {
+          flipPending = (patch as { status?: string })?.status === "live";
+          return mockServiceClient;
+        });
+        mockServiceClient.select.mockImplementation((columns) => {
+          if (flipPending && columns === "id") {
+            flipPending = false;
+            return Promise.resolve({
+              data: matched ? [{ id: "site-123" }] : [],
+              error: null,
+            });
+          }
+          return mockServiceClient;
+        });
+        const mockNotify = notifyOwnerOfInstall as jest.Mock;
+        mockNotify.mockClear();
+
+        const first = await postContentMap();
+        expect(first.status).toBe(200);
+        // Not on the response path: nothing ran before the deferred tasks.
+        expect(mockNotify).not.toHaveBeenCalled();
+        for (const [task] of mockAfter.mock.calls) await runAfterTask(task);
+        expect(mockNotify).toHaveBeenCalledTimes(1);
+        expect(mockNotify).toHaveBeenCalledWith("site-123");
+
+        // Every later check-in from the already-live site: nothing scheduled.
+        mockNotify.mockClear();
+        mockAfter.mockClear();
+        matched = false;
+        const later = await postContentMap();
+        expect(later.status).toBe(200);
+        for (const [task] of mockAfter.mock.calls) await runAfterTask(task);
+        expect(mockNotify).not.toHaveBeenCalled();
       });
     });
 
