@@ -8,10 +8,12 @@
  */
 
 import type { Lens } from "@/lib/tools/lens";
+import { outdatedLens } from "./outdated/outdated-lens";
 import { typoLens } from "./typos/typo-lens";
 
 export const LENSES: Readonly<Record<string, Lens>> = Object.freeze({
   typos: typoLens,
+  outdated: outdatedLens,
 });
 
 export function getLens(id: string): Lens | undefined {
