@@ -84,6 +84,9 @@ const REPLAY_SUITES = [
   "src/__tests__/db/tool-reports-privileges.test.ts",
   // ADR 074: datafast_visitors is service-role only. Plain Postgres is enough.
   "src/__tests__/db/datafast-visitors.test.ts",
+  // s122: site_install_emails is the owner install email's idempotency key —
+  // one claim wins a race, no web principal holds any privilege on it.
+  "src/__tests__/db/site-install-emails.test.ts",
 ];
 
 function run(command, args, options = {}) {
