@@ -355,6 +355,11 @@ export default function OwnersPage() {
               </p>
             </div>
           </div>
+          {/* s123: the owner guides answer the same questions without us. */}
+          <p className={styles.prose}>
+            More plain answers, platform by platform:{" "}
+            <Link href="/guides">Guides for owners</Link>.
+          </p>
         </section>
 
         <section className={styles.finalCta} aria-labelledby="owners-final">

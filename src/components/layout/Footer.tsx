@@ -13,6 +13,8 @@ const footerLinks = {
   Product: [
     { name: "Product overview", href: "/product" },
     { name: "For business owners", href: "/for/owners" },
+    // s123: the owner guides cluster.
+    { name: "Guides for owners", href: "/guides" },
     { name: "Features", href: "/#features" },
     { name: "Installation guide", href: "/docs/install" },
     { name: "Pricing", href: "/#pricing" },

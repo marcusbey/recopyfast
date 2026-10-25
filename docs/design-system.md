@@ -76,8 +76,8 @@ border-tone-<name>-border`. Every status treatment in the product resolves to on
 a status reads identically whether drawn as a dot, a bar or a badge.
 
 **Marketing exception (documented, keep):** landing, demo, privacy and terms — plus the SEO
-cluster routes `/compare` and `/compare/*`, `/cms-for/*`, `/for/*` and `/agencies/*` per
-[ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md) — sit on the WebGL sky and use
+cluster routes `/compare` and `/compare/*`, `/guides` and `/guides/*` (s123), `/cms-for/*`,
+`/for/*` and `/agencies/*` per [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md) — sit on the WebGL sky and use
 the legacy `--sky-*` / `--slate-*` palette. Accent moments there use teal or `sky` — never
 emerald, purple, or a second saturated hue.
 

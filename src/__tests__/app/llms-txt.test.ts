@@ -24,6 +24,7 @@ jest.mock("@/lib/supabase/anon", () => ({
 import { GET, dynamic } from "@/app/llms.txt/route";
 import sitemap from "@/app/sitemap";
 import { comparisonList } from "@/lib/compare/comparisons";
+import { guideList } from "@/lib/guides/guides";
 import { TOOL_CATALOGUE } from "@/lib/tools/catalogue";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
 
@@ -103,6 +104,17 @@ describe("GET /llms.txt", () => {
 
     for (const comparison of comparisonList) {
       expect(linked).toContain(`${siteUrl}/compare/${comparison.slug}`);
+    }
+  });
+
+  it("has one Guides for owners section listing /guides and every guide (s123)", async () => {
+    const text = await body();
+    const linked = await links();
+
+    expect(text.match(/^## Guides for owners$/gm)).toHaveLength(1);
+    expect(linked).toContain(`${siteUrl}/guides`);
+    for (const guide of guideList) {
+      expect(linked).toContain(`${siteUrl}/guides/${guide.slug}`);
     }
   });
 

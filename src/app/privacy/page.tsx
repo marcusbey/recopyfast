@@ -475,13 +475,14 @@ export default function Privacy() {
                 Google Analytics
               </h3>
               <p className="text-slate-600 mb-4">
-                On our public pages — the homepage, comparisons, free tools, the
-                /try preview, the blog, the documentation, pricing, the demo and
-                these legal pages — we use Google Analytics 4, provided by
-                Google LLC, to count visits and see which pages and links are
-                used. It never runs in your dashboard, on our sign-in and
-                sign-up pages, in the editor, on a free tool&apos;s scan report,
-                or in the ReCopyFast script on your website.
+                On our public pages — the homepage, comparisons, owner guides,
+                free tools, the /try preview, the blog, the documentation,
+                pricing, the demo and these legal pages — we use Google
+                Analytics 4, provided by Google LLC, to count visits and see
+                which pages and links are used. It never runs in your dashboard,
+                on our sign-in and sign-up pages, in the editor, on a free
+                tool&apos;s scan report, or in the ReCopyFast script on your
+                website.
               </p>
               <ul className="list-disc pl-6 mb-4 text-slate-600 space-y-2">
                 <li>

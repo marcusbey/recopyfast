@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { createAnonClient } from "@/lib/supabase/anon";
 import { comparisonList } from "@/lib/compare/comparisons";
+import { guideList } from "@/lib/guides/guides";
 import { TOOL_CATALOGUE, toolPath } from "@/lib/tools/catalogue";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
 
@@ -38,10 +39,14 @@ type StaticRoute = {
  * The free tools come from their catalogue (s96): `/tools` and every live
  * tool page. A tool REPORT is never listed — reports are noindex, and a
  * stranger's scanned site is not ours to submit.
+ *
+ * The owner guides come from their registry (s123): `/guides` and every
+ * guide, the same array their route's `generateStaticParams` reads.
  */
 export function buildStaticSitemapRoutes(
   comparisons: readonly { readonly slug: string }[] = comparisonList,
   tools: readonly { readonly slug: string }[] = TOOL_CATALOGUE,
+  guides: readonly { readonly slug: string }[] = guideList,
 ): readonly StaticRoute[] {
   return [
     { path: "/", changeFrequency: "weekly", priority: 1 },
@@ -75,6 +80,15 @@ export function buildStaticSitemapRoutes(
       (tool) =>
         ({
           path: toolPath(tool.slug),
+          changeFrequency: "monthly",
+          priority: 0.6,
+        }) as const,
+    ),
+    { path: "/guides", changeFrequency: "monthly", priority: 0.7 },
+    ...guides.map(
+      (guide) =>
+        ({
+          path: `/guides/${guide.slug}`,
           changeFrequency: "monthly",
           priority: 0.6,
         }) as const,

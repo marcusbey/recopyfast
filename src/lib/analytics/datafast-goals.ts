@@ -108,6 +108,15 @@ export const DATAFAST_CTA_LOCATIONS = [
   "typo_finder_result",
   "outdated_checker_result",
   "cost_calculator_result",
+  // s123: the owner guides. One location per guide, `guide_<slug>` with the
+  // slug's hyphens as underscores (`dataFastGuideLocation`); a guide whose
+  // location is missing here fails its registry at module load.
+  "guides_index",
+  "guide_update_website_hours_without_a_developer",
+  "guide_edit_wordpress_text_without_elementor",
+  "guide_change_prices_on_your_website_yourself",
+  "guide_edit_a_website_someone_else_built",
+  "guide_how_much_does_a_small_website_change_cost",
 ] as const;
 
 export type DataFastCtaLocation = (typeof DATAFAST_CTA_LOCATIONS)[number];
@@ -294,5 +303,20 @@ export function dataFastToolResultLocation(
 ): DataFastCtaLocation | undefined {
   return Object.prototype.hasOwnProperty.call(TOOL_RESULT_LOCATIONS, slug)
     ? TOOL_RESULT_LOCATIONS[slug]
+    : undefined;
+}
+
+/**
+ * The `cta_click` location of an owner guide's CTA block (s123):
+ * `guide_<slug with underscores>`, but only when that string is a listed
+ * location. An unlisted guide gets `undefined`, and the guide registry refuses
+ * to load without one, so a new guide cannot ship a goal nobody declared.
+ */
+export function dataFastGuideLocation(
+  slug: string,
+): DataFastCtaLocation | undefined {
+  const candidate = `guide_${slug.replace(/-/g, "_")}`;
+  return (DATAFAST_CTA_LOCATIONS as readonly string[]).includes(candidate)
+    ? (candidate as DataFastCtaLocation)
     : undefined;
 }

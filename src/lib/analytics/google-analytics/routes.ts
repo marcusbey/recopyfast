@@ -26,7 +26,14 @@ const EXACT_PATHS = new Set([
 ]);
 
 /** Sections: the index and everything below it, but see `FREE_TOOL_REPORT`. */
-const SECTION_PREFIXES = ["/compare", "/tools", "/blog", "/docs"] as const;
+// s123: `/guides`, the owner guides — static marketing pages like /compare.
+const SECTION_PREFIXES = [
+  "/compare",
+  "/guides",
+  "/tools",
+  "/blog",
+  "/docs",
+] as const;
 
 /**
  * s96's free-tool reports, `/tools/<slug>/r/<id>`, and anything below a

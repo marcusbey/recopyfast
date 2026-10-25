@@ -32,6 +32,8 @@ describe("isAnalyticsRoute", () => {
     "/docs/install/wordpress",
     "/compare",
     "/compare/webflow-editor",
+    "/guides",
+    "/guides/update-website-hours-without-a-developer",
     "/tools",
     "/tools/website-maintenance-cost",
     "/blog",
