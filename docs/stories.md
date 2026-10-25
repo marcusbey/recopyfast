@@ -5507,7 +5507,7 @@ Acceptance:
       counts, after-load delivery and the redesign caveat on every guide; the validator rejects
       banned phrases, uncited external links and unknown internal routes at module load.
 - [x] Every guide ends with `/for/owners`, `/try` and "Start your free trial" (`/signup`) CTAs
-      carrying `utm_source=guides&utm_medium=organic&utm_campaign=owner_guides&utm_content=<slug>`,
+      carrying `utm_source=guides&utm_medium=guide&utm_campaign=owner_guides&utm_content=<slug>`,
       each a `cta_click` with location `guide_<slug_underscored>` (or `guides_index`) declared in
       `datafast-goals.ts`; ADR 074 amended.
 - [x] Canonicals, Article + BreadcrumbList + FAQPage JSON-LD, footer link, `/for/owners` link,
