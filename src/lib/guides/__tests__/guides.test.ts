@@ -29,7 +29,7 @@ import { getGuide, guideList, guides } from "../guides";
 
 const HOURS = "update-website-hours-without-a-developer";
 const UTM =
-  /^utm_source=guides&utm_medium=organic&utm_campaign=owner_guides&utm_content=[a-z0-9-]+$/;
+  /^utm_source=guides&utm_medium=guide&utm_campaign=owner_guides&utm_content=[a-z0-9-]+$/;
 
 function withGuide(overrides: Partial<Guide>, slug: string = HOURS) {
   return {
@@ -252,7 +252,7 @@ describe("guide CTAs", () => {
   it("tags the /guides index CTA with its own location and utm_content", () => {
     expect(GUIDES_INDEX_CTA.location).toBe("guides_index");
     expect(GUIDES_INDEX_CTA.owners).toBe(
-      "/for/owners?utm_source=guides&utm_medium=organic&utm_campaign=owner_guides&utm_content=index",
+      "/for/owners?utm_source=guides&utm_medium=guide&utm_campaign=owner_guides&utm_content=index",
     );
   });
 

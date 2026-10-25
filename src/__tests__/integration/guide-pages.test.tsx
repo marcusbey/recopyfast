@@ -140,6 +140,7 @@ describe.each(guideList.map((guide) => [guide.slug, guide] as const))(
         (block) => block["@type"] === "BreadcrumbList",
       ) as { itemListElement: { item: string }[] };
       expect(breadcrumbs.itemListElement.map((item) => item.item)).toEqual([
+        "http://localhost:3000",
         "http://localhost:3000/guides",
         `http://localhost:3000/guides/${slug}`,
       ]);
@@ -184,13 +185,28 @@ describe("/guides", () => {
     }
   });
 
+  it("states a Home → Guides BreadcrumbList", () => {
+    const { container } = render(<GuidesIndexPage />);
+    const breadcrumbs = jsonLd(container).find(
+      (block) => block["@type"] === "BreadcrumbList",
+    ) as { itemListElement: { name: string; item: string }[] };
+
+    expect(breadcrumbs.itemListElement).toEqual([
+      expect.objectContaining({ name: "Home", item: "http://localhost:3000" }),
+      expect.objectContaining({
+        name: "Guides",
+        item: "http://localhost:3000/guides",
+      }),
+    ]);
+  });
+
   it("tags its CTA block with the guides_index location", () => {
     render(<GuidesIndexPage />);
 
     const trial = screen.getByRole("link", { name: "Start your free trial" });
     expect(trial).toHaveAttribute("data-fast-goal-location", "guides_index");
     expect(trial.getAttribute("href")).toBe(
-      "/signup?utm_source=guides&utm_medium=organic&utm_campaign=owner_guides&utm_content=index",
+      "/signup?utm_source=guides&utm_medium=guide&utm_campaign=owner_guides&utm_content=index",
     );
   });
 });

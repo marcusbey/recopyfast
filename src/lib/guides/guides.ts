@@ -18,8 +18,8 @@ import {
  *   vendor help pages checked on 2026-10-25 (docs/research/s123-owner-seo-guides.md).
  *   Platform UI is described at the level those pages state it; anything the
  *   vendor varies by theme or editor version is said to vary.
- * - Money: "$50–150" (freelance hourly / per change) and "$100–250 a month"
- *   (care plans with 1–2 hours of edits) are the brief's cited typical ranges,
+ * - Money: "$50–150" (freelance hourly) and "$100–250 a month" (care plans
+ *   that include regular content edits) are the brief's cited typical ranges,
  *   labelled as typical ranges. "$75" appears only as an example inside the
  *   range, in arithmetic the reader can redo. No ReCopyFast price is typed
  *   here (AGENTS.md non-negotiable 7): the guides link to /#pricing.
@@ -151,7 +151,7 @@ export const guides = defineGuideRegistry({
           {
             kind: "paragraph",
             text: [
-              "Wrong hours cost visits: in a 2022 survey commissioned by Yext, a listings company, 44% of US consumers said they had gone to a closed business because the hours online were wrong (",
+              "Wrong hours cost visits: in a 2022 survey commissioned by Yext, a listings company, 44% of 1,000+ US respondents had visited a closed location in the past year because the business hours online were inaccurate (",
               link(SOURCES.yextHours, "Yext, 2022"),
               ").",
             ],
@@ -314,7 +314,7 @@ export const guides = defineGuideRegistry({
       {
         question: "Can I change my hours from my phone?",
         answer:
-          "Often. Google Business Profile can be edited from Google Search and the Maps app, and the Squarespace app can edit existing text blocks. Most other website editors are easier on a computer.",
+          "Often. Google Business Profile can be edited from Google Search and the Maps app. Most website editors are easier on a computer.",
       },
     ],
     sources: [
@@ -763,11 +763,11 @@ export const guides = defineGuideRegistry({
     slug: "how-much-does-a-small-website-change-cost",
     title: "How much does a small website change cost?",
     description:
-      "Typical costs of small website edits: per-change freelance rates, care plans and marketplaces, what drives the price, and when doing it yourself is cheaper.",
+      "Typical costs of small website edits: hourly freelance rates, care plans and marketplaces, what drives the price, and when doing it yourself is cheaper.",
     hubDescription:
-      "Typical per-change and care-plan prices, what drives them, and when paying is worth it.",
+      "Typical hourly and care-plan prices, what drives them, and when paying is worth it.",
     shortAnswer:
-      "Typically $50–150 an hour when you pay a freelancer as you go, and about $100–250 a month for a maintenance plan that includes an hour or two of edits; cheaper basic plans often include no content edits at all. Those are typical published ranges, not quotes. Paying is worth it for design and technical work. For words that change often, doing it yourself is usually cheaper.",
+      "Typically $50–150 an hour when you pay a freelancer as you go, and about $100–250 a month for a care plan that includes regular content edits; cheaper basic plans often include no content edits at all. Those are typical published ranges, not quotes. Paying is worth it for design and technical work. For words that change often, doing it yourself is usually cheaper.",
     reviewedOn: REVIEWED_ON,
     sections: [
       {
@@ -783,14 +783,14 @@ export const guides = defineGuideRegistry({
                 ").",
               ],
               [
-                "A maintenance or care plan: basic plans at about $35–100 a month often include no content edits; plans with one or two hours of edits run about $100–250 a month (",
+                "A maintenance or care plan: basic plans at about $35–100 a month often include no content edits; care plans that include regular content edits run about $100–250 a month (",
                 link(SOURCES.maintenanceCost, "WebsiteMaintenance.com"),
                 ", ",
                 link(SOURCES.fatlabPackages, "FatLab"),
                 ").",
               ],
               [
-                "Freelance marketplaces: small edits are listed from around $10–30, but you usually have to hand a stranger your admin login (",
+                "Freelance marketplaces: small website-edit gigs are commonly listed from under $50 (starting prices, checked October 2026), but you usually have to hand a stranger your admin login (",
                 link(SOURCES.fiverrEditing, "Fiverr listings"),
                 ").",
               ],
@@ -833,7 +833,7 @@ export const guides = defineGuideRegistry({
                 label: "website maintenance cost calculator",
                 href: "/tools/website-maintenance-cost",
               },
-              " was built for freelancers pricing their own time, but the sum is the same from your side: changes a year, times time per change, times the hourly rate.",
+              " was built for freelancers pricing their own time. It asks how many sites, copy changes per site a month, minutes per change, the hourly rate, and the share of changes billed. Enter your developer's rate, set the billed share to 0% so every change counts as unbilled, and the yearly figure it shows is what those changes cost you.",
             ],
           },
         ],
@@ -876,7 +876,7 @@ export const guides = defineGuideRegistry({
     ],
     recopyfastFit: [
       [
-        "ReCopyFast is a monthly subscription for changing the words on a site you already have, after your developer adds one line once. It doesn't replace a care plan for security updates, backups or design work. ",
+        "ReCopyFast is a subscription (monthly or yearly), with a lifetime option, for changing the words on a site you already have, after your developer adds one line once. It doesn't replace a care plan for security updates, backups or design work. ",
         { label: "See current pricing", href: "/#pricing" },
         ".",
       ],

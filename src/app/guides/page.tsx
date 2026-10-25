@@ -14,6 +14,7 @@ import {
 import { guideList } from "@/lib/guides/guides";
 import { buildBreadcrumbListLd, serializeJsonLd } from "@/lib/seo/json-ld";
 import { SITE_NAME } from "@/lib/seo/site-identity";
+import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 const TITLE = "Website guides for business owners";
 const DESCRIPTION =
@@ -46,6 +47,7 @@ type GuidesIndexContentProps = {
 
 export function GuidesIndexContent({ guides }: GuidesIndexContentProps) {
   const breadcrumbs = buildBreadcrumbListLd([
+    { name: "Home", url: resolveSiteUrl() },
     { name: "Guides", url: guideSiteUrl(GUIDES_PATH) },
   ]);
 

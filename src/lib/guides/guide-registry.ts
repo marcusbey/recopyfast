@@ -344,9 +344,11 @@ export function guideSiteUrl(path: string): string {
 /**
  * Campaign tags on every guide CTA (s123). `utm_content` is the guide slug,
  * or `index` on /guides, so DataFast and GA can tell the pages apart.
+ * `utm_medium=guide`, not `organic`: GA4's default channel grouping reads
+ * `organic` as Organic Search, and these are clicks from our own pages.
  */
 export function guideUtmQuery(content: string): string {
-  return `utm_source=guides&utm_medium=organic&utm_campaign=owner_guides&utm_content=${encodeURIComponent(content)}`;
+  return `utm_source=guides&utm_medium=guide&utm_campaign=owner_guides&utm_content=${encodeURIComponent(content)}`;
 }
 
 export type GuideCtaLinks = {

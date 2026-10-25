@@ -28,9 +28,9 @@ import styles from "./owners-page.module.css";
  *   detector ships.
  * - Price: read from /api/pricing at view time (OwnerStarterPrice), never
  *   typed here (AGENTS.md non-negotiable 7).
- * - Money figures: "$50–150" is the typical freelance hourly rate or
- *   per-change cost for small website edits, from the research brief's cited
- *   sources (WebsiteMaintenance.com, r/webdev rate threads). The "$75" in the
+ * - Money figures: "$50–150" is the typical freelance hourly rate for website
+ *   work, from the research brief's cited sources (WebsiteMaintenance.com:
+ *   "Freelancers charge $50 to $150 an hour"). The "$75" in the
  *   problem headline is owner-approved messaging (headline option 2 of the
  *   brief), an illustrative point inside that sourced range — not a measured
  *   price of ours. The sentence under it carries the sourced range; keep the
@@ -100,10 +100,10 @@ export default function OwnersPage() {
           <p className={styles.eyebrow}>The problem</p>
           <h2 id="owners-problem">Stop paying $75 to fix a typo.</h2>
           <p className={styles.prose}>
-            Small website edits typically cost $50–150 each when you pay your
-            developer per change, so even a one-line fix costs real money, and
-            it waits for their schedule. Meanwhile the old hours stay up and
-            last month&apos;s special is still on the homepage.
+            Freelance web developers typically charge $50–150 an hour, so even a
+            small change can cost more than the edit itself, and it waits for
+            their schedule. Meanwhile the old hours stay up and last
+            month&apos;s special is still on the homepage.
           </p>
           <ul className={styles.ruledList}>
             <li>Waiting days for a change that takes a minute.</li>
@@ -332,8 +332,8 @@ export default function OwnersPage() {
               <h3>How much does it cost compared with paying per change?</h3>
               <OwnerStarterPrice />
               <p>
-                For comparison, small website edits typically cost $50–150 each
-                when you pay your developer per change.
+                For comparison, freelance web developers typically charge
+                $50–150 an hour.
               </p>
             </div>
             <div>

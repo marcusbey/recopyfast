@@ -20,6 +20,7 @@ import {
   serializeJsonLd,
 } from "@/lib/seo/json-ld";
 import { SITE_NAME } from "@/lib/seo/site-identity";
+import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 type GuidePageProps = {
   guide: Guide;
@@ -109,6 +110,7 @@ export function GuidePage({ guide }: GuidePageProps) {
     publisherUrl: guideSiteUrl("/"),
   });
   const breadcrumbs = buildBreadcrumbListLd([
+    { name: "Home", url: resolveSiteUrl() },
     { name: "Guides", url: guideSiteUrl(GUIDES_PATH) },
     { name: guide.title, url },
   ]);
@@ -240,12 +242,12 @@ export function GuidePage({ guide }: GuidePageProps) {
                 >
                   {GUIDE_DELIVERY_SOURCE.label}
                 </a>
-                ), but other crawlers and AI tools that don&apos;t run it see
-                the original text, so keep your main headline and key search
-                text in the site itself. We don&apos;t promise any SEO benefit.
-                If your developer later moves things around or redesigns a page,
-                some of your changes can stop showing, and we don&apos;t warn
-                you about that yet.
+                ), but Google also notes that not all bots can run JavaScript,
+                and those see the original text, so keep your main headline and
+                key search text in the site itself. We don&apos;t promise any
+                SEO benefit. If your developer later moves things around or
+                redesigns a page, some of your changes can stop showing, and we
+                don&apos;t warn you about that yet.
               </p>
             </div>
           </section>
