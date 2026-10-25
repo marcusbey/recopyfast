@@ -37,6 +37,7 @@ import { createAnonClient } from "@/lib/supabase/anon";
 import { createClient as createCookieClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { comparisonList } from "@/lib/compare/comparisons";
+import { guideList } from "@/lib/guides/guides";
 import { TOOL_CATALOGUE } from "@/lib/tools/catalogue";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
 
@@ -119,6 +120,9 @@ const INDEXABLE_STATIC = [
   // s96: the free tools, from their catalogue. Never a report (noindex).
   "/tools",
   ...TOOL_CATALOGUE.map((tool) => `/tools/${tool.slug}`),
+  // s123: the owner guides, from their registry.
+  "/guides",
+  ...guideList.map((guide) => `/guides/${guide.slug}`),
   "/blog",
   "/privacy",
   "/terms",

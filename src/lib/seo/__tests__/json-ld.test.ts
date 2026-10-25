@@ -1,4 +1,5 @@
 import {
+  buildArticleLd,
   buildBreadcrumbListLd,
   buildFAQPageLd,
   buildSoftwareApplicationLd,
@@ -189,5 +190,43 @@ describe("buildWebApplicationLd", () => {
 
     expect(ld).not.toHaveProperty("aggregateRating");
     expect(ld).not.toHaveProperty("review");
+  });
+});
+
+describe("buildArticleLd (s123)", () => {
+  it("states an Article by the organisation, with only a modified date", () => {
+    const article = buildArticleLd({
+      headline: "A guide",
+      description: "What it says.",
+      url: "https://recopyfa.st/guides/a-guide",
+      dateModified: "2026-10-25",
+      publisherName: "ReCopyFast",
+      publisherUrl: "https://recopyfa.st/",
+    });
+
+    expect(article).toEqual({
+      "@context": "https://schema.org",
+      "@type": "Article",
+      headline: "A guide",
+      description: "What it says.",
+      url: "https://recopyfa.st/guides/a-guide",
+      mainEntityOfPage: {
+        "@type": "WebPage",
+        "@id": "https://recopyfa.st/guides/a-guide",
+      },
+      dateModified: "2026-10-25",
+      author: {
+        "@type": "Organization",
+        name: "ReCopyFast",
+        url: "https://recopyfa.st/",
+      },
+      publisher: {
+        "@type": "Organization",
+        name: "ReCopyFast",
+        url: "https://recopyfa.st/",
+      },
+    });
+    expect(article).not.toHaveProperty("datePublished");
+    expect(JSON.stringify(article)).not.toMatch(/Person|review|rating/i);
   });
 });

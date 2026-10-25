@@ -5483,3 +5483,36 @@ Acceptance:
 - [ ] Required checks and independent review pass; merge and deployment are manual and separate.
 
 Plan: `docs/plans/s122-install-detected-email.md`.
+
+## Story s123-owner-seo-guides — a site owner searching how to change hours, prices or WordPress text gets a useful answer, then the owner path
+
+Requested by the owner in chat on October 25, 2026 ("Build owner-intent SEO pages (e.g. update
+website hours without a developer, edit WordPress text without Elementor) linking to /for/owners,
+with DataFast goals, reviewed and merged"). As a business owner who searches how to update my
+website hours, change my prices or edit WordPress text without opening Elementor, I land on a
+guide that answers the question first, platform by platform (including "you don't need us" where
+my platform's editor is enough), and then shows honestly where ReCopyFast fits. Complexity 2;
+dependencies: s17 cluster engine (ADR 012/013/020), s88 sitemap/canonicals/llms.txt, s120
+`/for/owners`, ADR 074 DataFast goals. Branch `feature/s123-owner-seo-guides`; embed allocation
+0 bytes. No backend, migration, dependency or billing change.
+
+Acceptance:
+- [x] `/guides` and `/guides/<slug>` are static (SSG) Marketing-surface pages built from one typed,
+      validated registry (`src/lib/guides/`); the registry also feeds the sitemap, llms.txt and the
+      Lighthouse URL list.
+- [x] Five guides: website hours, WordPress text without Elementor, prices, a site someone else
+      built, the cost of a small website change. Each answers first, cites external facts only from
+      its listed sources (rel="noopener noreferrer"), and links related guides.
+- [x] No claim exceeds the s120 rules: no "take control", no SEO promise, no testimonials or
+      counts, after-load delivery and the redesign caveat on every guide; the validator rejects
+      banned phrases, uncited external links and unknown internal routes at module load.
+- [x] Every guide ends with `/for/owners`, `/try` and "Start your free trial" (`/signup`) CTAs
+      carrying `utm_source=guides&utm_medium=guide&utm_campaign=owner_guides&utm_content=<slug>`,
+      each a `cta_click` with location `guide_<slug_underscored>` (or `guides_index`) declared in
+      `datafast-goals.ts`; ADR 074 amended.
+- [x] Canonicals, Article + BreadcrumbList + FAQPage JSON-LD, footer link, `/for/owners` link,
+      Google Analytics page allowlist and privacy page list include the guides.
+- [x] `/guides` and one guide join the ADR 013 Lighthouse gate (10 routes).
+- [ ] Required checks and independent review pass; merge and deployment are manual and separate.
+
+Research: `docs/research/s123-owner-seo-guides.md`. Plan: `docs/plans/s123-owner-seo-guides.md`.

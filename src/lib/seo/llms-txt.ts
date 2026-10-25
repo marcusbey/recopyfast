@@ -1,4 +1,6 @@
 import { comparisonList, type Comparison } from "@/lib/compare/comparisons";
+import { guideList } from "@/lib/guides/guides";
+import type { Guide } from "@/lib/guides/guide-registry";
 import {
   TOOL_CATALOGUE,
   toolPath,
@@ -21,6 +23,7 @@ import { SITE_DESCRIPTION, SITE_NAME } from "./site-identity";
  * routes and the sitemap are built from (ADR 012 §4), so a new comparison is
  * listed here without touching this file. The free tools come the same way
  * from their catalogue (s96), which also drives `/tools` and the sitemap.
+ * The owner guides (s123) come from their registry the same way.
  */
 function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
@@ -30,12 +33,21 @@ export function buildLlmsTxt(
   siteUrl: string,
   comparisonEntries: readonly Comparison[] = comparisonList,
   toolEntries: readonly ToolEntry[] = TOOL_CATALOGUE,
+  guideEntries: readonly Guide[] = guideList,
 ): string {
   const link = (label: string, path: string, note: string) =>
     `- [${label}](${siteUrl}${path}): ${note}`;
 
   const toolLinks = toolEntries.map((tool) =>
     link(tool.name, toolPath(tool.slug), lowerFirst(tool.description)),
+  );
+
+  const guideLinks = guideEntries.map((guide) =>
+    link(
+      guide.title,
+      `/guides/${guide.slug}`,
+      lowerFirst(guide.hubDescription),
+    ),
   );
 
   const comparisonLinks = comparisonEntries.map((comparison) =>
@@ -109,6 +121,15 @@ export function buildLlmsTxt(
       "how ReCopyFast compares with other ways to let clients edit a website, including where the others are the better choice.",
     ),
     ...comparisonLinks,
+    "",
+    "## Guides for owners",
+    "",
+    link(
+      "Website guides for business owners",
+      "/guides",
+      "plain answers to the website jobs owners ask about most, platform by platform, including when the built-in editor is enough.",
+    ),
+    ...guideLinks,
     "",
     "## Free tools",
     "",

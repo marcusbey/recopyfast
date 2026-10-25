@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { chromium } from "@playwright/test";
 import { buildComparisonLighthouseUrls } from "@/lib/compare/lighthouse";
+import { buildGuideLighthouseUrls } from "@/lib/guides/lighthouse";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:4175";
 const LIGHTHOUSE_CONFIG_FILE = "lighthouserc.cjs";
@@ -100,11 +101,16 @@ export function parseLoopbackBaseUrl(value: string): URL {
 /**
  * URL ownership stays in the comparison registry. A hand-maintained CI list
  * passed while a newly-added page escaped the gate during the September WIP;
- * this wrapper therefore accepts only the registry helper's output.
+ * this wrapper therefore accepts only the registry helpers' output: the
+ * comparison cluster, then the owner guides (s123), which inherit ADR 013's
+ * gate rather than standing up a second job.
  */
 export function buildLighthouseRunPlan(baseUrl: string, cwd = process.cwd()) {
   const origin = parseLoopbackBaseUrl(baseUrl);
-  const urls = buildComparisonLighthouseUrls(origin.origin);
+  const urls = [
+    ...buildComparisonLighthouseUrls(origin.origin),
+    ...buildGuideLighthouseUrls(origin.origin),
+  ];
   const lhciExecutable = process.platform === "win32" ? "lhci.cmd" : "lhci";
   const lhciPath = path.join(cwd, "node_modules", ".bin", lhciExecutable);
   const configPath = path.join(cwd, LIGHTHOUSE_CONFIG_FILE);
@@ -330,9 +336,9 @@ function validateLighthouseReport(
 
 /**
  * LHCI exits successfully after filesystem upload, but that alone does not
- * prove all eight routes produced five usable reports. Validate its manifest,
- * the representative median selection and every referenced file before the CI
- * step can turn green.
+ * prove every route (ten since s123) produced five usable reports. Validate
+ * its manifest, the representative median selection and every referenced file
+ * before the CI step can turn green.
  */
 export function validateLighthouseManifest(
   outputDirectory: string,

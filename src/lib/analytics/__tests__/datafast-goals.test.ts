@@ -7,6 +7,7 @@ import {
   DATAFAST_GOALS,
   DATAFAST_RESERVED_GOAL_NAMES,
   dataFastCtaAttributes,
+  dataFastGuideLocation,
   dataFastToolGoal,
   dataFastToolResultLocation,
   sanitizeGoalParams,
@@ -191,5 +192,31 @@ describe("s121 owner next step on tool results", () => {
       "data-fast-goal-location": "typo_finder_result",
       "data-fast-goal-target": "owners",
     });
+  });
+});
+
+describe("s123 owner guide locations", () => {
+  it("maps a listed guide slug to guide_<slug with underscores>", () => {
+    expect(
+      dataFastGuideLocation("update-website-hours-without-a-developer"),
+    ).toBe("guide_update_website_hours_without_a_developer");
+    expect(DATAFAST_CTA_LOCATIONS).toContain("guides_index");
+  });
+
+  it("gives an unlisted or hostile slug no location", () => {
+    for (const slug of ["missing-guide", "constructor", "__proto__", ""]) {
+      expect(dataFastGuideLocation(slug)).toBeUndefined();
+    }
+  });
+
+  it("keeps every guide location a lowercase slug of at most 64 characters", () => {
+    const guideLocations = DATAFAST_CTA_LOCATIONS.filter((location) =>
+      location.startsWith("guide"),
+    );
+    expect(guideLocations.length).toBeGreaterThanOrEqual(2);
+    for (const location of guideLocations) {
+      expect(location).toMatch(/^[a-z0-9_-]{1,64}$/);
+      expect(sanitizeGoalParams({ location })).toEqual({ location });
+    }
   });
 });
