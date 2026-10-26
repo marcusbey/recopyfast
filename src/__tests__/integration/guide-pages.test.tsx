@@ -134,7 +134,8 @@ describe.each(guideList.map((guide) => [guide.slug, guide] as const))(
       expect(article).toMatchObject({
         headline: guide.title,
         url: `http://localhost:3000/guides/${slug}`,
-        dateModified: guide.reviewedOn,
+        dateModified: `${guide.reviewedOn}T00:00:00Z`,
+        image: ["http://localhost:3000/opengraph-image"],
       });
       const breadcrumbs = blocks.find(
         (block) => block["@type"] === "BreadcrumbList",

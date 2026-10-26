@@ -106,6 +106,7 @@ export function GuidePage({ guide }: GuidePageProps) {
     description: guide.description,
     url,
     dateModified: guide.reviewedOn,
+    image: guideSiteUrl("/opengraph-image"),
     publisherName: SITE_NAME,
     publisherUrl: guideSiteUrl("/"),
   });
