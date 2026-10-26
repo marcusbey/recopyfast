@@ -200,6 +200,7 @@ describe("buildArticleLd (s123)", () => {
       description: "What it says.",
       url: "https://recopyfa.st/guides/a-guide",
       dateModified: "2026-10-25",
+      image: "https://recopyfa.st/opengraph-image",
       publisherName: "ReCopyFast",
       publisherUrl: "https://recopyfa.st/",
     });
@@ -214,7 +215,8 @@ describe("buildArticleLd (s123)", () => {
         "@type": "WebPage",
         "@id": "https://recopyfa.st/guides/a-guide",
       },
-      dateModified: "2026-10-25",
+      image: ["https://recopyfa.st/opengraph-image"],
+      dateModified: "2026-10-25T00:00:00Z",
       author: {
         "@type": "Organization",
         name: "ReCopyFast",

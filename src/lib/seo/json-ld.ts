@@ -117,6 +117,8 @@ type ArticleInput = {
   readonly url: string;
   /** ISO date (YYYY-MM-DD) the content was last reviewed. */
   readonly dateModified: string;
+  /** Absolute URL of the page's social image. */
+  readonly image: string;
   /** The organisation that writes and publishes the article. */
   readonly publisherName: string;
   readonly publisherUrl: string;
@@ -142,7 +144,10 @@ export function buildArticleLd(input: ArticleInput) {
     description: input.description,
     url: input.url,
     mainEntityOfPage: { "@type": "WebPage", "@id": input.url },
-    dateModified: input.dateModified,
+    image: [input.image],
+    // A bare date trips Google's Rich Results Test ("invalid datetime",
+    // "missing a timezone"); state the review date as midnight UTC.
+    dateModified: `${input.dateModified}T00:00:00Z`,
     author: organization,
     publisher: organization,
   };

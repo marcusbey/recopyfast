@@ -102,6 +102,13 @@ export const metadata: Metadata = {
       "max-video-preview": -1,
     },
   },
+  // Google Search Console ownership for the URL-prefix property
+  // https://www.recopyfa.st/ (HTML-tag method; DNS for recopyfa.st is at the
+  // .st registrar). The token is public by design — it is meant to be in the
+  // page — and must stay after verification or the property is unverified.
+  verification: {
+    google: "11TVG96egKlqbMSfAc36hJ9oPUab5CfjN9M4S--NaKQ",
+  },
   // NOTE: do not add an `icons` field here. Next.js skips the file-based
   // `icon.tsx` / `apple-icon.tsx` routes whenever `metadata.icons` is set
   // (see the `if (!resolvedMetadata.icons)` guard in Next's resolve-metadata),
