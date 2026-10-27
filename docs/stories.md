@@ -5550,3 +5550,43 @@ Acceptance:
       review pass; merge and deployment are manual.
 
 Research: `docs/research/s124-lifetime-spots.md`. Design: `docs/designs/s124-lifetime-spots.md`.
+
+## Story s126-site-token-write-paths — public site tokens cannot publish discovered copy or store images
+
+Requested by the owner in chat on October 27, 2026, from the security audit (findings H2 and
+M5; L1 evaluated and deferred). As a site owner, I can install discovery for ordinary visitors
+without granting them authority to change my public copy or upload files. Complexity 4;
+dependencies: discovery and page-scoped reads, s65a public snapshot (ADR 046), editor authority
+(ADR 035/047), owner entitlement (ADR 041), service-role write boundary (ADR 002/042).
+Branch `feature/s126-site-token-write-paths`; embed allocation 0 net additional gzipped bytes
+against the checked-in build ceilings. No new dependency or planned migration. No new UI.
+
+Not in scope: s125's `credit_purchases`, `copy_styles`, and `src/app/api/edit-board/styles/*`;
+C1 rotation or any other audit finding; L1 A/B telemetry/automatic winner policy; historical
+content cleanup, deleting uploaded assets, changing editor credential semantics, or production
+access. H2's text-defacement premise is only partially true: the current widget suppresses
+unchanged discovery text, but applies discovery attributes; server rendering also trusts the
+public projection. See research before implementation.
+
+Acceptance:
+
+- [ ] Discovery inserts `published_content: null`, retains the captured original/current text
+      for editor review, and cannot replace an existing row or its published copy/attributes.
+- [ ] Both public delivery routes omit NULL-published rows, including their href/alt metadata;
+      no fallback to untrusted discovered originals reaches a public renderer. A token-only
+      attack leaves host text, image source, href and alt unchanged on first load and rescan.
+- [ ] Editor staging still finds newly discovered rows; an authorized save and publish makes
+      the intended text/image/attributes publicly available. Existing non-NULL publications,
+      page/shared scoping, public delivery during plan lapse, and CDN freshness remain intact.
+- [ ] Upload requires `validateEditorTokenFromRequest`, `edit` permission, a fail-closed
+      canonical per-site limiter, then `checkOwnerCanEdit`, before image processing/storage.
+      Public-token-only, invalid, expired, revoked, wrong-site and view-only callers cannot store
+      files or inspect entitlement. Both upload limiters remain fail closed.
+- [ ] Device grants use `X-RCF-Editor-Grant`; edit-session/staging tokens use multipart fields,
+      never new query credentials. Cross-origin preflight permits the grant header, without
+      cookies. Existing file validation, progress, error handling and immutable storage survive.
+- [ ] Source changes rebuild `/embed/recopyfast.js` with `scripts/build-embed.mjs`; its URL and
+      byte ceilings remain unchanged. Required tests and independent review pass before a PR.
+
+Research: [s126-site-token-write-paths](research/s126-site-token-write-paths.md).
+Plan: [s126-site-token-write-paths](plans/s126-site-token-write-paths.md), awaiting owner validation.
