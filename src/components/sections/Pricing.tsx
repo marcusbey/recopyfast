@@ -12,6 +12,8 @@ import type { LucideIcon } from "lucide-react";
 import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
 import FoundingOfferCard from "./FoundingOfferCard";
 import { foundingOfferTrustLead } from "./founding-offer-copy";
+import SpotMeter from "./SpotMeter";
+import { parseSpotAvailability } from "./spot-meter";
 import { dataFastCtaAttributes } from "@/lib/analytics/datafast-goals";
 
 /**
@@ -52,7 +54,7 @@ interface PricingResponse {
 
 interface FoundingAgencyAvailability {
   remaining: number;
-  limit: 50;
+  limit: number;
   soldOut: boolean;
 }
 
@@ -122,6 +124,17 @@ export default function Pricing({
   );
   const lifetimePro = pricing?.oneTimeProducts.find(
     (product) => product.id === "lifetime_pro",
+  );
+  // Re-validated here, not trusted as typed (s124). The server read
+  // (`getFoundingAgencyAvailability`) passes the RPC row through without a
+  // bounds check, and before s124 this card printed whatever arrived: a bad
+  // row or a proxy's body rendered "-1 of 50", "5000 of 5000" or "undefined of
+  // undefined founding spots left". The meter now draws `limit` DOM nodes from
+  // the same field, so an unchecked value is also a page-weight bug. `null` —
+  // what `/api/pricing` serves with the cached catalogue after a failed
+  // refresh — and anything out of bounds land on the same "unknown" path.
+  const agencySpots = parseSpotAvailability(
+    pricing?.foundingAgencyAvailability,
   );
   const creditsProduct = pricing?.oneTimeProducts.find(
     (product) => product.id === "credits",
@@ -456,16 +469,35 @@ export default function Pricing({
                       </span>
                       <span className="text-slate-600">once</span>
                     </div>
-                    <p className="mt-1 text-sm font-medium text-teal-800">
-                      {pricing.foundingAgencyAvailability == null
+                    {agencySpots && (
+                      <div className="mt-4">
+                        <SpotMeter
+                          limit={agencySpots.limit}
+                          remaining={agencySpots.remaining}
+                          label={`${agencySpots.remaining} of ${agencySpots.limit} spots left`}
+                        />
+                      </div>
+                    )}
+                    <p
+                      className={`tabular text-sm font-medium text-teal-800 ${agencySpots ? "mt-2" : "mt-1"}`}
+                    >
+                      {agencySpots == null
                         ? "Availability temporarily unavailable"
-                        : pricing.foundingAgencyAvailability.soldOut
+                        : agencySpots.soldOut
                           ? "Sold out"
-                          : `${pricing.foundingAgencyAvailability.remaining} of ${pricing.foundingAgencyAvailability.limit} founding spots left`}
+                          : agencySpots.remaining === 1
+                            ? `Last spot left at $${foundingAgency.price}`
+                            : `${agencySpots.remaining} of ${agencySpots.limit} spots left at $${foundingAgency.price}`}
                     </p>
-                    {pricing.foundingAgencyAvailability != null &&
-                    !pricing.foundingAgencyAvailability.soldOut ? (
+                    {agencySpots != null && !agencySpots.soldOut ? (
                       <>
+                        {/* "Remaining" counts completed sales only: an open
+                            Checkout holds a reservation without moving it, so
+                            "1 left" can still meet `capacity_busy` at checkout
+                            (20260924065000_agency_plan_and_founding_capacity.sql). */}
+                        <p className="mt-1 text-[13px] text-slate-500">
+                          An open checkout can hold a spot for a short time.
+                        </p>
                         {/* Same static-to-app boundary as Lifetime Pro above. */}
                         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                         <a
@@ -478,7 +510,7 @@ export default function Pricing({
                           )}
                           className={`pressable mt-5 block bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800 ${isEditorial ? "rounded-[3px]" : "rounded-xl"}`}
                         >
-                          Buy founding access
+                          Get lifetime access
                         </a>
                       </>
                     ) : (
@@ -487,7 +519,7 @@ export default function Pricing({
                         disabled
                         className={`mt-5 w-full bg-slate-200 px-6 py-3 font-semibold text-slate-500 ${isEditorial ? "rounded-[3px]" : "rounded-xl"}`}
                       >
-                        {pricing.foundingAgencyAvailability?.soldOut
+                        {agencySpots?.soldOut
                           ? "Sold out"
                           : "Availability unavailable"}
                       </button>

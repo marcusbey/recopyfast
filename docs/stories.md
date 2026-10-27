@@ -5516,3 +5516,37 @@ Acceptance:
 - [ ] Required checks and independent review pass; merge and deployment are manual and separate.
 
 Research: `docs/research/s123-owner-seo-guides.md`. Plan: `docs/plans/s123-owner-seo-guides.md`.
+
+## Story s124-lifetime-spots — the capped lifetime card shows how many spots are left, as a simple meter
+
+Requested by the owner in chat on October 26, 2026 (shared a Wow Keywords "lifetime access" pricing
+screen: "can we build something similar?", then narrowed it: "only for the lifetime offer … make it
+simple and make it fit into your traditional pricing section"). As a freelancer or small agency
+scanning the pricing section, I see on the capped lifetime Agency card a row of its real spots,
+taken and left, with "N of 50 spots left at $P" — so the limit reads at a glance and every number is
+one the database or Stripe holds. Complexity 1; dependencies: s13 Agency plan + capped lifetime
+product (ADR 029). Branch `feature/s124-lifetime-spots`; embed allocation 0 bytes. No backend route,
+migration, dependency, Stripe, price or `plans` change.
+
+Not in scope: the section layout, the plan cards, Lifetime Pro, the first-20 offer card, any new
+headline, and a stepped price ladder (the catalogue has one lifetime price; tiers would be new
+prices, an owner pricing decision).
+
+Acceptance:
+- [ ] Only the `lifetime_agency` card in `Pricing` changes; it keeps its place in the existing
+      lifetime row beside Lifetime Pro, its catalogue name, description, features and price.
+- [ ] A `SpotMeter` draws exactly `limit` equal cells under the price: taken, next, left. It renders
+      nothing unless `1 ≤ limit`, `0 ≤ remaining ≤ limit`, integers, `soldOut === (remaining === 0)`.
+- [ ] `/api/pricing`'s `foundingAgencyAvailability` is parsed on the client with those bounds; a
+      malformed value shows today's "Availability temporarily unavailable" and disabled button.
+- [ ] Open: "`remaining` of `limit` spots left at $`price`" (last one: "Last spot left at $`price`"),
+      plus one muted line "An open checkout can hold a spot for a short time." Sold out: full meter,
+      "Sold out", disabled button. No added "founding" wording; the CTA reads "Get lifetime access"
+      and keeps its `pricing_founding_agency` analytics location.
+- [ ] Editorial and default variants both render; meter has `role="img"` and an `aria-label` with
+      the count; no animation; 50 cells wrap to two rows on narrow cards.
+- [ ] Copy stays inside launch kit §11.
+- [ ] Changed Pricing test strings are called out in the PR; required checks and independent
+      review pass; merge and deployment are manual.
+
+Research: `docs/research/s124-lifetime-spots.md`. Design: `docs/designs/s124-lifetime-spots.md`.
