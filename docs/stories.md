@@ -5658,3 +5658,39 @@ Acceptance:
 
 Research: [s126-site-token-write-paths](research/s126-site-token-write-paths.md).
 Plan: [s126-site-token-write-paths](plans/s126-site-token-write-paths.md), validated by the owner on 2026-10-28.
+
+## Story s127-embed-current-script — host markup cannot redirect embed credentials or the legacy script loader
+
+Requested by the owner in chat on October 27, 2026, from the security audit (findings H3;
+L7 noted only as out of scope), `docs/reviews/security-audit-2026-10.md`. As a site owner,
+I can load the widget beside CMS/user HTML without a named element becoming its configuration
+source, redirecting editor credentials, loading attacker JavaScript, or throwing into my page.
+Complexity 3; dependencies: s67 startup endpoint guards (ADR 049), s76 edit-link/grant handling
+(ADR 036/055), s06a embed byte gate and s06b built-artifact fixture harness.
+Branch `feature/s127-embed-current-script`; embed allocation: existing gate headroom only,
+no ceiling increase. No UI design phase: startup security behaviour only.
+
+Not in scope: L7 token transport changes; other audit findings; s125's `credit_purchases`,
+`copy_styles` and `src/app/api/edit-board/styles/*`; database, backend authorization, migrations,
+provider configuration, arbitrary hostile JavaScript, and removal of either public embed URL.
+
+Acceptance:
+- [ ] Both embed entry points obtain their executing script synchronously through
+      `Object.getOwnPropertyDescriptor(Document.prototype, 'currentScript').get.call(document)`
+      and require `instanceof HTMLScriptElement` before reading configuration or credentials.
+- [ ] Missing/throwing getter, null or non-script results cause a silent return, with no widget
+      API/WS request, legacy script insertion, host exception, or authored-copy mutation.
+- [ ] One and two `<img name="currentScript">` elements before the real script cannot supply
+      API/WS endpoints, site identity, tokens, or the legacy loader's script URL; normal boot
+      still works and editor credential sentinels never reach the attacker destination.
+- [ ] Existing same-origin string globals and genuine script `data-*` configuration retain
+      their semantics; the legacy URL still loads its sibling canonical widget, preserving
+      query strings and non-src attributes, including nonce and site configuration.
+- [ ] Source Jest regressions plus real-markup browser tests of the generated artifact and
+      legacy loader prove the boundary; existing embed tests retain their behavioural assertions.
+- [ ] Rebuild only through `scripts/build-embed.mjs`; staleness and gzip gates pass without
+      raising ceilings. s06b fixture coverage and strict test-count enforcement remain intact.
+- [ ] Required checks and independent review pass before a later PR; merge/deploy are separate.
+
+Research: [s127-embed-current-script](research/s127-embed-current-script.md).
+Plan: [s127-embed-current-script](plans/s127-embed-current-script.md).
