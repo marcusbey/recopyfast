@@ -5550,3 +5550,40 @@ Acceptance:
       review pass; merge and deployment are manual.
 
 Research: `docs/research/s124-lifetime-spots.md`. Design: `docs/designs/s124-lifetime-spots.md`.
+
+## Story s125-credit-and-style-grants — a buyer cannot rewrite their purchase record, and a customer cannot publish a style to every tenant
+
+Requested by the owner in chat on October 27, 2026, from the security audit
+(`docs/reviews/security-audit-2026-10.md`, findings H1 and M1): "Start the pipeline (story → plan)
+for H1 + M1: the credit_purchases column grants and the copy_styles preset policy, in one
+migration." As the operator, I know a signed-in customer holding the public Supabase key cannot
+change anything on their own `credit_purchases` row except spending credits down, so refunds and
+chargebacks always find and claw back the purchase; and a customer cannot create or edit a copy
+style that other tenants see as a preset or can apply. Complexity 2; dependencies: s38 column
+allowlists (ADR 033/034), s48 credit integrity (ADR 040), Edit Board (`20251230100000`). Branch
+`feature/s125-credit-and-style-grants`; embed allocation 0 bytes. One additive migration; no route
+behaviour change for legitimate callers, no Stripe, price, `plans` or UI change.
+
+Not in scope: the other audit findings (C1 is an owner rotation; H2–H4, M2–M9 and the lows are
+separate stories), removing the `credit_purchases` web-role UPDATE entirely (the spend path still
+needs `credits_remaining`), and the wider default-privilege revoke (audit L13).
+
+Acceptance:
+- [ ] After the migration, `anon` and `authenticated` hold no UPDATE on any `credit_purchases`
+      column except `credits_remaining`, and no INSERT/DELETE; `service_role` is unchanged.
+- [ ] A non-service role that changes any column other than `credits_remaining`, or raises it, is
+      refused by the trigger even if a broader grant is later restored by mistake.
+- [ ] Spending purchased credits as the signed-in user still works (`spend_credits` / the credit
+      system's decrement path), and webhook refund/dispute clawback still finds the row.
+- [ ] `copy_styles`: a web role can never insert or update a row with `is_preset = true`, nor move
+      a style to another site; a constraint pins `is_preset = (site_id IS NULL)` for new rows;
+      web-role writes are revoked if every write path already uses the service role.
+- [ ] `GET /api/edit-board/styles` lists presets only where `site_id IS NULL`; `styles/apply`
+      refuses a style that is neither a preset nor owned by the target site.
+- [ ] Existing rows are checked: any `is_preset = true` row with a non-null `site_id` in
+      production is reported (read-only query in the PR), not silently deleted.
+- [ ] DB suite (`src/__tests__/db/`) proves both boundaries against a real replay, including the
+      restore-the-dangerous-grant pattern from s38; required checks and independent review pass;
+      merge and deployment are manual.
+
+Research: `docs/research/s125-credit-and-style-grants.md`. Plan: `docs/plans/s125-credit-and-style-grants.md`.
