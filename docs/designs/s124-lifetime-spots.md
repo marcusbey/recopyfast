@@ -13,10 +13,10 @@ The **`lifetime_agency` card** is the right-hand card in the existing lifetime r
 unchanged: icon tile, `h3` catalogue name, description, features, price "once". Three things are
 added under the price:
 
-1. **SpotMeter**: `limit` equal cells in one row (2px gap, 18px tall, 1px radius).
+1. **SpotMeter**: `limit` equal cells (2px gap, 18px tall, 1px radius).
    - Taken cells are muted ink at 45%, the next cell is solid teal, and the remaining cells are a
      22% teal tint.
-   - On narrow cards the row wraps to 2 rows of 25.
+   - When `limit > 25` the cells wrap to rows of 25 at every width (amended during execute: the card's right column is ~224px at md+, so one row of 50 would be ~2.5px cells).
    - It has `role="img"` and `aria-label="<remaining> of <limit> spots left"`.
    - There is no animation.
 2. **Count line**, in the same place and style as today's count, `teal-800`, tabular:
