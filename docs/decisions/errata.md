@@ -127,3 +127,13 @@ body moved verbatim to `src/app/dashboard/DashboardFrame.tsx` (`DashboardFrame`)
 the gutters are now written there. The decision is unchanged: the layout — through the one frame
 it renders — owns width and gutters, and no page may. The page-shell guard's skip-link exemption
 (`FOCUS_SHADOW_FILE`) names the new file.
+
+## ADR 042 — applies also to `copy_styles` (s125, 2026-10-27)
+
+**Says:** the content tables take no direct writes; the service role is the only writer.
+
+**Scope note.** Since `20261027120000_credit_purchase_and_copy_style_grants.sql`, the same rule
+applies to `copy_styles`: its member write policies are dropped and web-role INSERT/UPDATE/DELETE
+are revoked. The decision is recorded in
+[ADR 075](./075-billing-rows-are-column-scoped-for-web-roles.md) (Decision 3); ADR 042's body is
+unchanged.

@@ -5569,21 +5569,46 @@ separate stories), removing the `credit_purchases` web-role UPDATE entirely (the
 needs `credits_remaining`), and the wider default-privilege revoke (audit L13).
 
 Acceptance:
-- [ ] After the migration, `anon` and `authenticated` hold no UPDATE on any `credit_purchases`
+- [x] After the migration, `anon` and `authenticated` hold no UPDATE on any `credit_purchases`
       column except `credits_remaining`, and no INSERT/DELETE; `service_role` is unchanged.
-- [ ] A non-service role that changes any column other than `credits_remaining`, or raises it, is
+      — `credit-purchase-privileges.test.ts`: "authenticated may UPDATE credits_remaining only; anon
+      may UPDATE nothing", "%s holds no INSERT or DELETE on credit_purchases", "service_role keeps
+      INSERT, UPDATE and DELETE", "the row's owner cannot change %s".
+- [x] A non-service role that changes any column other than `credits_remaining`, or raises it, is
       refused by the trigger even if a broader grant is later restored by mistake.
-- [ ] Spending purchased credits as the signed-in user still works (`spend_credits` / the credit
+      — `credit-purchase-privileges.test.ts`: "negative control: with UPDATE
+      (stripe_payment_intent_id) restored, …", "negative control: with table-wide UPDATE restored,
+      the trigger still refuses a change to %s"; `credit-spend.test.ts`: "the monotonicity trigger
+      still refuses an authenticated self-refill".
+- [x] Spending purchased credits as the signed-in user still works (`spend_credits` / the credit
       system's decrement path), and webhook refund/dispute clawback still finds the row.
-- [ ] `copy_styles`: a web role can never insert or update a row with `is_preset = true`, nor move
+      — `credit-purchase-privileges.test.ts`: "the owner still spends down credits_remaining
+      directly and through spend_credits", "service_role still zeroes, restores and rewrites the
+      row (clawback and restore paths)"; `credit-spend.test.ts` unchanged and green.
+- [x] `copy_styles`: a web role can never insert or update a row with `is_preset = true`, nor move
       a style to another site; a constraint pins `is_preset = (site_id IS NULL)` for new rows;
       web-role writes are revoked if every write path already uses the service role.
-- [ ] `GET /api/edit-board/styles` lists presets only where `site_id IS NULL`; `styles/apply`
+      — `copy-style-privileges.test.ts`: "a site admin acting as authenticated cannot insert a
+      preset for its own site", "that admin cannot insert, update or delete any copy_styles row",
+      "%s holds SELECT but no INSERT, UPDATE or DELETE on copy_styles", "no member write policy is
+      left on copy_styles", "the constraint refuses %s even from service_role".
+- [x] `GET /api/edit-board/styles` lists presets only where `site_id IS NULL`; `styles/apply`
       refuses a style that is neither a preset nor owned by the target site.
+      — `styles-scope.test.ts`: "GET lists only global rows as presets, never another site's
+      planted preset", "apply refuses %s with the same 404 and calls no AI", "apply still applies
+      %s".
 - [ ] Existing rows are checked: any `is_preset = true` row with a non-null `site_id` in
       production is reported (read-only query in the PR), not silently deleted.
+      — Migration side done: the migration counts violating rows, `RAISE WARNING`s and leaves the
+      constraint `NOT VALID`, deleting nothing ("the constraint is validated, so every existing
+      row … satisfies it" covers the clean case). Open: the owner runs the read-only production
+      query in the PR body.
 - [ ] DB suite (`src/__tests__/db/`) proves both boundaries against a real replay, including the
       restore-the-dangerous-grant pattern from s38; required checks and independent review pass;
       merge and deployment are manual.
+      — DB half done: both suites are in `REPLAY_SUITES`; `node scripts/run-db-invariants.mjs`
+      ran all 25 named suites on PostgreSQL 17. Open: required checks on the PR and `/ks-review`.
 
 Research: `docs/research/s125-credit-and-style-grants.md`. Plan: `docs/plans/s125-credit-and-style-grants.md`.
+Decision: `docs/decisions/075-billing-rows-are-column-scoped-for-web-roles.md`. Source review:
+`docs/reviews/security-audit-2026-10.md` (H1, M1).

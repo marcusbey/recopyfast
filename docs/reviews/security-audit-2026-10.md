@@ -178,6 +178,8 @@ cron routes. A live Postgres password is direct database access.
 
 #### H1. A buyer can rewrite their own `credit_purchases` row and escape refund/chargeback clawback
 
+- [x] **Status:** fixed in s125 (PR pending), ADR 075.
+
 **Evidence**
 
 - `supabase/migrations/20260731003000_missing_tables_billing_credits.sql:101-107` — the update
@@ -315,6 +317,8 @@ per-site message budget alongside the per-socket one.
 ### MEDIUM
 
 #### M1. Any customer can publish a "preset" copy style every tenant sees (cross-tenant prompt injection)
+
+- [x] **Status:** fixed in s125 (PR pending), ADR 075.
 
 **Evidence**
 

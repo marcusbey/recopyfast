@@ -105,11 +105,14 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServiceRoleClient();
 
-    // Get preset styles (site_id is NULL)
+    // Get preset styles. A preset is global: `site_id IS NULL` is required, not
+    // implied — the service role bypasses RLS, so a row some site planted with
+    // `is_preset = true` would otherwise be listed to every tenant (s125, M1).
     const { data: presets, error: presetError } = await supabase
       .from("copy_styles")
       .select("id, name, description, prompt, is_preset, created_at")
       .eq("is_preset", true)
+      .is("site_id", null)
       .order("name");
 
     if (presetError) {

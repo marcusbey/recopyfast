@@ -24,7 +24,7 @@ Both ship in one migration plus two route filters (acceptance criteria in `docs/
 
 ## Tasks (ordered)
 
-1. [ ] **RED — `credit_purchases` boundary on real Postgres.** Add
+1. [x] **RED — `credit_purchases` boundary on real Postgres.** Add
    `src/__tests__/db/credit-purchase-privileges.test.ts`. Use `describeDb` and copy the
    `asRole` / `effectiveColumns` shapes from `credit-spend.test.ts` and `column-privileges.test.ts`.
    Assert:
@@ -43,7 +43,7 @@ Both ship in one migration plus two route filters (acceptance criteria in `docs/
      clawback and restore paths).
 
    Run the suite against a fresh replay; (a)–(d) fail today.
-2. [ ] **RED — `copy_styles` boundary on real Postgres.** In the same suite (one `describe`
+2. [x] **RED — `copy_styles` boundary on real Postgres.** In the same suite (one `describe`
    each), or in `copy-style-privileges.test.ts`, assert:
    - (a) A site admin acting as `authenticated` cannot INSERT `{site_id: own, is_preset: true}`.
    - (b) That admin cannot INSERT or UPDATE any row; web-role writes are gone.
@@ -55,7 +55,7 @@ Both ship in one migration plus two route filters (acceptance criteria in `docs/
      more. Then roll back.
 
    (a), (b) and (c) fail today.
-3. [ ] **GREEN — the migration.** Add
+3. [x] **GREEN — the migration.** Add
    `supabase/migrations/20261027120000_credit_purchase_and_copy_style_grants.sql`. It is
    idempotent and safe to replay, with a header comment citing the audit and ADRs 033/042/075.
    1. `credit_purchases`:
@@ -79,7 +79,7 @@ Both ship in one migration plus two route filters (acceptance criteria in `docs/
         report, not delete.
 
    Tasks 1–2 go green, and `node scripts/run-db-invariants.mjs` is green on PG17.
-4. [ ] **RED → GREEN — routes.** Add `src/__tests__/api/edit-board/styles-scope.test.ts`,
+4. [x] **RED → GREEN — routes.** Add `src/__tests__/api/edit-board/styles-scope.test.ts`,
    mocking the service client as the sibling suites do. Cover:
    - (a) `GET /api/edit-board/styles` queries presets with `site_id IS NULL`, so a planted
      `(otherSite, true)` row returned by a loose query never appears.
@@ -92,19 +92,19 @@ Both ship in one migration plus two route filters (acceptance criteria in `docs/
    - `styles/apply/route.ts`: select `site_id, is_preset` too, and refuse unless
      `style.site_id === siteId || style.site_id === null`, with the same 404 so the response is
      not an oracle.
-5. [ ] **Register the suites.**
+5. [x] **Register the suites.**
    - Add each new DB suite to `REPLAY_SUITES` in `scripts/run-db-invariants.mjs`, so
      `verifyReplayReport` requires at least one pass.
    - Add any named-CI-step or inventory entry the s110 test-inventory gate demands.
    - Proof: the inventory check and `node scripts/run-node-tests.mjs` pass.
-6. [ ] **Docs.**
+6. [x] **Docs.**
    - Write `docs/decisions/075-billing-rows-are-column-scoped-for-web-roles.md` (see below).
    - Add a one-line pointer in `docs/architecture.md` under "Data access".
    - Extend ADR 042's scope note to name `copy_styles` (errata line in `docs/decisions/errata.md`,
      or "applies also to").
    - Link the plan and review in the story.
    - Tick the audit's H1/M1 lines with "fixed in s125 (PR #…)".
-7. [ ] **Gates.**
+7. [x] **Gates.**
    - `npm ci`, then `lint`, `type-check`, `format:check`, the full `test`,
      `node scripts/run-db-invariants.mjs` and `build`, all green.
    - Record the counts in the PR.
