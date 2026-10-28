@@ -171,8 +171,8 @@ pass or opened PR must never be reported as a deployed security fix.
 
 ## Phase 2 execution evidence — October 28, 2026
 
-- Focused realtime inventory: 4 suites, 193 tests passed
-  (`server.integration`, `connection-limits`, `auth-parity`, `server-manifest`). The `server/`
+- Focused realtime inventory: 5 suites, 230 tests passed
+  (`server.integration`, `connection-limits`, `rate-limit`, `auth-parity`, `server-manifest`). The `server/`
   package has no test script or standalone test files; the root websocket suites execute its real
   modules and transports.
 - Full Jest with coverage: 574 suites passed, 1 skipped; 8,589 tests passed, 2 skipped. Coverage:
@@ -205,3 +205,13 @@ pass or opened PR must never be reported as a deployed security fix.
   a passing normal hook. No hook bypass, push, PR, production access or implementation occurred.
 - Subsequent Phase 1 retry committed the documentation as `7a9a2a3c`; Phase 2 executes from that
   commit, so the preceding HEAD/staged state remains dated evidence rather than the current state.
+
+## Review fix-run evidence — October 28, 2026
+
+- All 10 targeted guard mutations went red and were restored; see the review Fix run table.
+- Focused websocket: 5 suites, 238 tests passed. Full Jest: 574 suites / 8,598 tests passed;
+  1 suite / 2 tests skipped. No timing retry was needed.
+- Lint: zero errors, 34 existing warnings. Type-check, format:check, server JS syntax checks,
+  diff check and credential-cleared build passed.
+- The review findings and verdict remain unchanged; only its Fix run placeholder was replaced.
+  No push, PR, production access or deployment.

@@ -17,7 +17,7 @@ const {
   createRedisRateLimitStore,
 } = require('./rate-limit');
 const {
-  DEFAULT_MAX_CONNECTIONS_PER_ADDRESS,
+  DEFAULT_MAX_CONCURRENT_TRANSPORTS_PER_ADDRESS,
   createConnectionLimiter,
 } = require('./connection-limits');
 const { securityHeaders } = require('./security-headers');
@@ -98,8 +98,12 @@ function createRealtimeServer(options = {}) {
     revalidationIntervalMs = DEFAULT_REVALIDATION_INTERVAL_MS,
     connectTimeout = DEFAULT_CONNECT_TIMEOUT_MS,
     maxHttpBufferSize = DEFAULT_MAX_HTTP_BUFFER_SIZE,
-    maxConnectionsPerAddress = DEFAULT_MAX_CONNECTIONS_PER_ADDRESS,
+    maxConcurrentTransportsPerAddress = DEFAULT_MAX_CONCURRENT_TRANSPORTS_PER_ADDRESS,
     connectionReservationTimeoutMs = connectTimeout,
+    // Test-only fault seam. The real limiter intentionally converts store
+    // failures into denied verdicts, so no production dependency can exercise
+    // the wrapper's rejected-limiter boundary without weakening fail-closed
+    // behavior. Runtime callers never set this option.
     messageRateLimitCheck = null,
     // True only behind Fly's proxy (startFromCli: FLY_APP_NAME is set on
     // every Fly Machine). See resolveClientAddress.
@@ -115,7 +119,7 @@ function createRealtimeServer(options = {}) {
   const app = express();
   const httpServer = createServer(app);
   const connectionLimiter = createConnectionLimiter({
-    maxConnectionsPerAddress,
+    maxConcurrentTransportsPerAddress,
     reservationTimeoutMs: connectionReservationTimeoutMs,
     trustFlyClientIp,
   });

@@ -105,6 +105,31 @@ function waitForRawClose(socket: WebSocket): Promise<number> {
   });
 }
 
+function blockingRateLimitStore(blockCall: number) {
+  let releaseBlockedCall: () => void = () => undefined;
+  let markBlockedCallStarted: () => void = () => undefined;
+  const blockedCallStarted = new Promise<void>((resolve) => {
+    markBlockedCallStarted = resolve;
+  });
+  const blockedCall = new Promise<void>((resolve) => {
+    releaseBlockedCall = resolve;
+  });
+  const calls: string[] = [];
+  return {
+    calls,
+    blockedCallStarted,
+    releaseBlockedCall,
+    async increment(key: string) {
+      calls.push(key);
+      if (calls.length === blockCall) {
+        markBlockedCallStarted();
+        await blockedCall;
+      }
+      return 1;
+    },
+  };
+}
+
 /**
  * One token, built once, reused for the handshake AND for every message that
  * echoes it back.
@@ -350,13 +375,33 @@ describe("Engine.IO transport bounds", () => {
       port: 0,
       supabase: db,
       connectTimeout: 5_000,
-      maxConnectionsPerAddress: 1,
+      maxConcurrentTransportsPerAddress: 1,
     });
     const port = await server.listen();
     const first = await openRawEngineSocket(port);
 
     await expect(openRawEngineSocket(port)).rejects.toBeInstanceOf(Error);
     expect(db.reads).toEqual([]);
+
+    const closed = waitForRawClose(first);
+    first.close();
+    await closed;
+    const replacement = await openRawEngineSocket(port);
+    replacement.close();
+    await server.close();
+  });
+
+  it("keeps an open transport reserved after the pending-upgrade timeout and frees it on close", async () => {
+    const server = createRealtimeServer({
+      port: 0,
+      maxConcurrentTransportsPerAddress: 1,
+      connectionReservationTimeoutMs: 30,
+    });
+    const port = await server.listen();
+    const first = await openRawEngineSocket(port);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await expect(openRawEngineSocket(port)).rejects.toBeInstanceOf(Error);
 
     const closed = waitForRawClose(first);
     first.close();
@@ -501,6 +546,212 @@ describe("refusal closes the underlying transport", () => {
         "the refused raw transport to leave Engine.IO",
       );
     }
+    await server.close();
+  });
+});
+
+describe("mid-admission disconnects", () => {
+  function stagingRows() {
+    return [
+      {
+        id: "mid-admission-access",
+        token: "mid-admission-token",
+        site_id: SITE_ID,
+        is_active: true,
+        revoked_at: null,
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        email_verified: true,
+        email: "mid-admission@example.com",
+        ...boundToTestBrowser(),
+        permissions: ["edit"],
+      },
+    ];
+  }
+
+  async function disconnectDuringAdmission(
+    server: ReturnType<typeof createRealtimeServer>,
+    socket: Socket,
+  ) {
+    const serverSocket = [...server.io.sockets.sockets.values()].find(
+      (candidate) => !socket.id || candidate.id === socket.id,
+    );
+    if (!serverSocket)
+      throw new Error("Expected the mid-admission server socket");
+    const socketId = serverSocket.id;
+    socket.io.engine?.close();
+    await waitFor(
+      () => socket.disconnected,
+      "the mid-admission client to disconnect",
+    );
+    await waitFor(
+      () => !serverSocket.connected,
+      "the server socket to observe the mid-admission disconnect",
+    );
+    return socketId;
+  }
+
+  async function captureLateMembership(
+    server: ReturnType<typeof createRealtimeServer>,
+    socketId: string | undefined,
+    release: () => void,
+  ) {
+    let lateAdds = 0;
+    const originalAdd = Set.prototype.add;
+    const addSpy = jest
+      .spyOn(Set.prototype, "add")
+      .mockImplementation(function (this: Set<unknown>, value: unknown) {
+        if (value === socketId) lateAdds += 1;
+        return originalAdd.call(this, value);
+      });
+    try {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    } finally {
+      addSpy.mockRestore();
+    }
+    expect(lateAdds).toBe(0);
+    expect(
+      server.io.sockets.adapter.rooms.get(`site:${SITE_ID}`),
+    ).toBeUndefined();
+    expect(
+      server.io.sockets.adapter.rooms.get(`site:${SITE_ID}:staging`),
+    ).toBeUndefined();
+  }
+
+  it("stops before the site read when the client leaves during checkHandshake", async () => {
+    const store = blockingRateLimitStore(1);
+    const db = new RecordingSupabase({ sites: seedSites() });
+    const server = createRealtimeServer({
+      port: 0,
+      supabase: db,
+      rateLimitStore: store,
+    });
+    const port = await server.listen();
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: { siteId: SITE_ID, token: SITE_TOKEN },
+    });
+
+    await store.blockedCallStarted;
+    await disconnectDuringAdmission(server, socket);
+    store.releaseBlockedCall();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(db.reads).toEqual([]);
+    await server.close();
+  });
+
+  it("stops before the site limiter when the client leaves during the site lookup", async () => {
+    const store = blockingRateLimitStore(Number.POSITIVE_INFINITY);
+    const db = new RecordingSupabase({ sites: seedSites() });
+    let releaseSiteRead: () => void = () => undefined;
+    db.readBarriers.set(
+      "sites",
+      new Promise<void>((resolve) => {
+        releaseSiteRead = resolve;
+      }),
+    );
+    const server = createRealtimeServer({
+      port: 0,
+      supabase: db,
+      rateLimitStore: store,
+    });
+    const port = await server.listen();
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: { siteId: SITE_ID, token: SITE_TOKEN },
+    });
+
+    await waitFor(
+      () => db.reads.includes("sites"),
+      "the blocked site lookup to start",
+    );
+    await disconnectDuringAdmission(server, socket);
+    releaseSiteRead();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(store.calls).toHaveLength(1);
+    await server.close();
+  });
+
+  it("stops before grant resolution when the client leaves during the site limiter", async () => {
+    const store = blockingRateLimitStore(2);
+    const db = new RecordingSupabase({
+      sites: seedSites(),
+      staging_access: stagingRows(),
+    });
+    const server = createRealtimeServer({
+      port: 0,
+      supabase: db,
+      rateLimitStore: store,
+    });
+    const port = await server.listen();
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: "mid-admission-token",
+      },
+    });
+
+    await store.blockedCallStarted;
+    await disconnectDuringAdmission(server, socket);
+    store.releaseBlockedCall();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(db.reads).not.toContain("staging_access");
+    await server.close();
+  });
+
+  it("does not join a room or restore bookkeeping after resolveGrant finishes", async () => {
+    const db = new RecordingSupabase({
+      sites: seedSites(),
+      staging_access: stagingRows(),
+    });
+    let releaseGrantRead: () => void = () => undefined;
+    db.readBarriers.set(
+      "staging_access",
+      new Promise<void>((resolve) => {
+        releaseGrantRead = resolve;
+      }),
+    );
+    const server = createRealtimeServer({ port: 0, supabase: db });
+    const port = await server.listen();
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: "mid-admission-token",
+      },
+    });
+
+    await waitFor(
+      () => db.reads.includes("staging_access"),
+      "the blocked grant lookup to start",
+    );
+    const socketId = await disconnectDuringAdmission(server, socket);
+    await captureLateMembership(server, socketId, releaseGrantRead);
+    await server.close();
+  });
+
+  it("does not join a degraded room or restore bookkeeping after its site limiter finishes", async () => {
+    const store = blockingRateLimitStore(2);
+    const server = createRealtimeServer({ port: 0, rateLimitStore: store });
+    const port = await server.listen();
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: { siteId: SITE_ID, token: SITE_TOKEN },
+    });
+
+    await store.blockedCallStarted;
+    const socketId = await disconnectDuringAdmission(server, socket);
+    await captureLateMembership(server, socketId, store.releaseBlockedCall);
     await server.close();
   });
 });
@@ -1590,6 +1841,117 @@ describe("the common event failure boundary", () => {
     },
   );
 
+  it.each([
+    "synchronous dependency throw",
+    "asynchronous dependency rejection",
+  ])(
+    "contains a %s from a real join-dashboard handler dependency",
+    async (failureKind) => {
+      const stagingToken = `handler-dependency-${failureKind}`;
+      const db = new RecordingSupabase({
+        sites: seedSites(),
+        staging_access: [
+          {
+            id: `handler-dependency-${failureKind}`,
+            token: stagingToken,
+            site_id: SITE_ID,
+            is_active: true,
+            revoked_at: null,
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            email_verified: true,
+            email: "handler-dependency@example.com",
+            ...boundToTestBrowser(),
+            permissions: ["edit"],
+          },
+        ],
+      });
+      const server = createRealtimeServer({ port: 0, supabase: db });
+      const port = await server.listen();
+      const query = {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken,
+      };
+      const failing = openSocket({ port, origin: ORIGIN, query });
+      const healthy = openSocket({ port, origin: ORIGIN, query });
+      await waitFor(
+        () => roomSize(server, `site:${SITE_ID}:staging`) === 2,
+        "both clients around the real handler dependency failure",
+      );
+      const failingId = failing.id;
+      if (!failingId) throw new Error("Expected the failing socket id");
+      const serverSocket = server.io.sockets.sockets.get(failingId);
+      if (!serverSocket) throw new Error("Expected the failing server socket");
+      const packetTransport = serverSocket as unknown as {
+        packet: (packet: { type: number }, options?: unknown) => void;
+      };
+      const sendPacket = packetTransport.packet.bind(packetTransport);
+      let acknowledgementPackets = 0;
+      packetTransport.packet = (
+        packet: { type: number },
+        options?: unknown,
+      ) => {
+        if (packet.type === 3) acknowledgementPackets += 1;
+        sendPacket(packet, options);
+      };
+
+      if (failureKind === "synchronous dependency throw") {
+        serverSocket.join = () => {
+          throw new Error("sensitive room-adapter detail");
+        };
+      } else {
+        Object.defineProperty(db, "from", {
+          configurable: true,
+          value: () => {
+            const queryBuilder = {
+              select: () => queryBuilder,
+              eq: () => queryBuilder,
+              async maybeSingle() {
+                await Promise.resolve();
+                return {
+                  data: { id: SITE_ID, api_key: Symbol("malformed-key") },
+                  error: null,
+                };
+              },
+            };
+            return queryBuilder;
+          },
+        });
+      }
+
+      const replies: unknown[] = [];
+      const failures: unknown[] = [];
+      failing.on("message-error", (value) => failures.push(value));
+      failing.emit("join-dashboard", { siteId: SITE_ID }, (value: unknown) =>
+        replies.push(value),
+      );
+      let waitFailure: unknown;
+      try {
+        await waitFor(
+          () => replies.length === 1 && failures.length === 1,
+          "one generic response from the real handler dependency failure",
+          5_000,
+        );
+      } catch (error) {
+        waitFailure = error;
+      }
+      const bothSocketsStayedAlive = failing.connected && healthy.connected;
+      const healthStatus = (await fetch(`http://127.0.0.1:${port}/health`))
+        .status;
+      failing.close();
+      healthy.close();
+      await server.close();
+      if (waitFailure) throw waitFailure;
+
+      expect(replies).toEqual([{ ok: false, error: "Request failed" }]);
+      expect(failures).toEqual([{ error: "Request failed" }]);
+      expect(acknowledgementPackets).toBe(1);
+      expect(bothSocketsStayedAlive).toBe(true);
+      expect(healthStatus).toBe(200);
+    },
+  );
+
   it("does not acknowledge twice when a successful handler is followed by a contained failure", async () => {
     const stagingToken = "failure-boundary-staging";
     const db = new RecordingSupabase({
@@ -1640,7 +2002,9 @@ describe("the common event failure boundary", () => {
     };
     const sendPacket = packetTransport.packet.bind(packetTransport);
     let didThrowAfterAck = false;
+    let acknowledgementPackets = 0;
     packetTransport.packet = (packet: { type: number }, options?: unknown) => {
+      if (packet.type === 3) acknowledgementPackets += 1;
       sendPacket(packet, options);
       if (!didThrowAfterAck && packet.type === 3) {
         didThrowAfterAck = true;
@@ -1670,6 +2034,7 @@ describe("the common event failure boundary", () => {
     expect(replies).toEqual([{ ok: true }]);
     expect(failures).toEqual([{ error: "Internal server error" }]);
     expect(updates).toHaveLength(1);
+    expect(acknowledgementPackets).toBe(1);
     expect(bothSocketsStayedAlive).toBe(true);
   });
 });

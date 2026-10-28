@@ -27,7 +27,9 @@ function request(address: string, flyAddress?: string) {
 
 describe("realtime transport connection limits", () => {
   it("counts overlapping pending and established transports and releases idempotently", () => {
-    const limiter = createConnectionLimiter({ maxConnectionsPerAddress: 2 });
+    const limiter = createConnectionLimiter({
+      maxConcurrentTransportsPerAddress: 2,
+    });
     const first = request("203.0.113.1");
     const second = request("203.0.113.1");
     const third = request("203.0.113.1");
@@ -44,15 +46,17 @@ describe("realtime transport connection limits", () => {
     expect(limiter.reserve(third.req).allowed).toBe(true);
 
     engine.emit("close");
-    engine.emit("close");
+    a.release?.();
+    expect(limiter.count("203.0.113.1")).toBe(1);
     third.socket.emit("close");
+    expect(limiter.count("203.0.113.1")).toBe(0);
     expect(limiter.size).toBe(0);
   });
 
   it("releases failed, errored, timed-out and shutdown reservations", () => {
     jest.useFakeTimers();
     const limiter = createConnectionLimiter({
-      maxConnectionsPerAddress: 5,
+      maxConcurrentTransportsPerAddress: 5,
       reservationTimeoutMs: 100,
     });
     const failed = request("203.0.113.2");
