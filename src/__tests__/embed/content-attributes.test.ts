@@ -147,39 +147,75 @@ describe("embed content attributes", () => {
   });
 
   it("keeps host text, image, href and alt when discovery candidates are unpublished", async () => {
-    document.body.innerHTML =
+    const hostMarkup =
       '<h1 data-rcf-id="shared-heading">Host heading</h1>' +
-      '<a href="/host">Host link</a>' +
+      '<a class="rcf-editable-link" href="/host">Host link</a>' +
       '<img src="/host.png" alt="Host alt">';
+    document.body.innerHTML = hostMarkup;
+    const discoveryRecorded: Array<{
+      url: string;
+      method: string;
+      body?: string;
+    }> = [];
+
+    // First boot asks the shipped widget for its real authored and computed
+    // ids. The second boot uses those stable ids as hostile server rows. This
+    // avoids copying the widget's hash/path algorithm into the test, which
+    // would let the fixture drift while claiming to cover computed ids.
+    await boot(() => [], discoveryRecorded);
+    const discovery = discoveryRecorded.find(
+      (request) =>
+        request.url.endsWith(`/content/${SITE_ID}`) &&
+        request.method === "POST",
+    );
+    const reported = JSON.parse(discovery?.body ?? "{}") as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const idsByType = Object.fromEntries(
+      Object.entries(reported).map(([id, entry]) => [entry.type, id]),
+    ) as Record<string, string>;
+
+    expect(idsByType.h1).toBe("shared-heading");
+    expect(idsByType.a).toMatch(/^rcf-/);
+    expect(idsByType.img).toMatch(/^rcf-/);
+
+    (
+      (window as unknown as Record<string, unknown>).ReCopyFast as {
+        destroy(): void;
+      }
+    ).destroy();
+    delete (window as unknown as Record<string, unknown>).ReCopyFast;
+    document.head.innerHTML = "";
+    document.body.innerHTML = hostMarkup;
+    installScriptTag();
     const recorded: Array<{ url: string; method: string; body?: string }> = [];
+    let projectedRows: StoredRow[] = [];
 
     await boot(() => {
-      const elements = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-rcf-id]"),
-      );
-      const hostile = elements.map((element, index) => ({
+      const hostile = (["h1", "a", "img"] as const).map((type, index) => ({
         id: `candidate-${index}`,
         site_id: SITE_ID,
-        element_id: element.getAttribute("data-rcf-id")!,
-        selector: element.tagName.toLowerCase(),
+        element_id: idsByType[type],
+        selector: type,
         original_content:
-          element.tagName === "IMG"
-            ? "https://evil.example/planted.png"
-            : "Planted copy",
+          type === "img" ? "https://evil.example/planted.png" : "Planted copy",
         published_content: null,
         language: "en",
         variant: "default",
-        page_path: element.hasAttribute("data-rcf-id") ? null : "/pricing",
+        page_path: type === "h1" ? null : "/pricing",
         metadata: {
-          type: element.tagName.toLowerCase(),
+          type,
           href: "https://evil.example/phish",
           alt: "Planted alt",
         },
         published_at: null,
       })) satisfies PublicContentSourceRow[];
-      return toPublicRows(hostile) ?? [];
+      projectedRows = toPublicRows(hostile) ?? [];
+      return projectedRows;
     }, recorded);
 
+    expect(projectedRows).toEqual([]);
     expect(document.querySelector("h1")?.textContent).toBe("Host heading");
     expect(document.querySelector("a")?.textContent).toBe("Host link");
     expect(document.querySelector("a")?.getAttribute("href")).toBe("/host");
@@ -188,17 +224,17 @@ describe("embed content attributes", () => {
     );
     expect(document.querySelector("img")?.getAttribute("alt")).toBe("Host alt");
 
-    const discoveries = recorded.filter(
+    const discoveries = discoveryRecorded.filter(
       (request) =>
         request.url.endsWith(`/content/${SITE_ID}`) &&
         request.method === "POST",
     );
     expect(discoveries.length).toBeLessThanOrEqual(1);
-    const reported = JSON.parse(discoveries[0]?.body ?? "{}") as Record<
-      string,
-      Record<string, unknown>
-    >;
     expect(reported["shared-heading"]?.page_path).toBeNull();
+    const computedIds = [idsByType.a, idsByType.img];
+    expect(computedIds).toHaveLength(2);
+    expect(computedIds.every(Boolean)).toBe(true);
+    expect(computedIds.every((id) => id.startsWith("rcf-"))).toBe(true);
     expect(
       Object.values(reported).some((entry) => entry.page_path === "/pricing"),
     ).toBe(true);

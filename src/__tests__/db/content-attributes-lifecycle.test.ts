@@ -15,6 +15,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { buildDiscoveryRows } from "@/lib/content/discovery-rows";
 
 interface QueryResult<R> {
   rows: R[];
@@ -814,6 +815,85 @@ if (!DB_URL) {
         published_content: "Editor-approved copy",
         staging_content: null,
         metadata: { type: "a", href: "/approved" },
+      });
+    });
+
+    test("route-built discovery metadata cannot promote hostile attributes on a text-only publish", async () => {
+      const { rows: sites } = await query<{ id: string }>(
+        "INSERT INTO sites (domain, name) VALUES ($1, 's126 hostile attribute boundary') RETURNING id",
+        [`s126-hostile-${Date.now()}-${Math.random()}.invalid`],
+      );
+      const siteId = sites[0].id;
+      const discovered = buildDiscoveryRows(siteId, {
+        "rcf-hostile-link": {
+          selector: "a",
+          content: "Observed host copy",
+          type: "a",
+          href: "https://evil.example/phish",
+          alt: "Hostile alternate text",
+        },
+      });
+      expect(discovered.ok).toBe(true);
+      if (!discovered.ok) throw new Error(discovered.error);
+      expect(discovered.rows).toHaveLength(1);
+
+      const row = discovered.rows[0];
+      await query(
+        `INSERT INTO content_elements
+           (site_id, element_id, selector, original_content, current_content,
+            published_content, language, variant, page_path, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
+        [
+          row.site_id,
+          row.element_id,
+          row.selector,
+          row.original_content,
+          row.current_content,
+          row.published_content,
+          row.language,
+          row.variant,
+          row.page_path,
+          JSON.stringify(row.metadata),
+        ],
+      );
+
+      await query(
+        `SELECT * FROM save_staging_content_atomic(
+          $1, 'rcf-hostile-link', 'en', 'default', 'Editor-approved copy',
+          NULL, NULL, 'editor@example.com'
+        )`,
+        [siteId],
+      );
+      const { rows: published } = await query<{
+        element_id: string;
+        content: string;
+        attributes: Record<string, string>;
+      }>(
+        `SELECT * FROM publish_staging_content_with_attributes_atomic(
+          $1, NULL, NULL, 'editor@example.com', NULL
+        )`,
+        [siteId],
+      );
+      expect(published).toEqual([
+        {
+          element_id: "rcf-hostile-link",
+          content: "Editor-approved copy",
+          attributes: {},
+        },
+      ]);
+
+      const { rows: stored } = await query<{
+        published_content: string;
+        metadata: Record<string, unknown>;
+      }>(
+        `SELECT published_content, metadata
+           FROM content_elements
+          WHERE site_id = $1 AND element_id = 'rcf-hostile-link'`,
+        [siteId],
+      );
+      expect(stored[0]).toEqual({
+        published_content: "Editor-approved copy",
+        metadata: { type: "a" },
       });
     });
 

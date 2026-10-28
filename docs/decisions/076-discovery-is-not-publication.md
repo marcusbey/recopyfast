@@ -26,6 +26,15 @@ The content GET uses this projection for session callers too; authenticated cand
 belongs to the staging/site-content APIs. Staging may fall back to original content for review,
 never as an implicit public override. Existing authorized save/publish remains the promotion path.
 
+`GET /api/v1/content` follows the same delivery rule: it omits NULL-publication candidates rather
+than returning them with fallback text or an "unpublished" flag. API-key integrations therefore
+receive only rows that have an explicit publication, including an intentional empty string.
+
+Discovery metadata retains only non-publishable bookkeeping such as element type and page
+provenance. It does not store caller-supplied href or alt: the publish RPC merges existing
+metadata on a text-only publish, so keeping those attributes would let a site-token holder plant
+a destination that an editor later promoted without reviewing it.
+
 This is a correction to ADR 046 only, not a new authorization mechanism. Upload adopts ADR 035's
 existing editor credential pattern and ADR 041's owner gate; those do not need new decisions.
 
@@ -47,6 +56,12 @@ existing editor credential pattern and ADR 041's owner gate; those do not need n
 New discovery cannot affect either public renderer before authorized publication. Existing
 non-NULL records are preserved; this does not remediate historical poisoning or certify it absent.
 L1 A/B auto-completion remains a separate indirect-publication risk.
+
+`POST /api/ai/translate` writes translated rows without `published_content`. Those rows are now
+omitted from the widget read, the unauthenticated snapshot and v1 delivery until an editor
+publishes them. This is intentional: the route has no live product caller (s40 research), and
+translation output is candidate content rather than authority to publish. Making translation
+publish immediately would create a new authorization contract outside this security repair.
 
 NULL rows no longer populate the widget's server-known-id set on a later page load, so visitors
 may re-report those discoveries until publication. Existing client coalescing and fail-closed

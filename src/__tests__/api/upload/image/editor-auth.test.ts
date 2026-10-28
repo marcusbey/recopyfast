@@ -67,14 +67,29 @@ const STAGING_TOKEN = "staging-token";
 interface Op {
   table: string;
   kind: "select" | "update";
-  filters: Array<[string, unknown]>;
+  filters: Array<["eq" | "gte", string, unknown]>;
 }
 
 function makeClient(rows: Partial<Record<string, unknown>>) {
   function from(table: string) {
     const op: Op = { table, kind: "select", filters: [] };
-    const resolve = () =>
-      Promise.resolve({ data: rows[table] ?? null, error: null });
+    const resolve = () => {
+      const source = rows[table];
+      const candidates = Array.isArray(source) ? source : [source];
+      const data = candidates.find((candidate) => {
+        if (typeof candidate !== "object" || candidate === null) return false;
+        return op.filters.every(([operator, column, expected]) => {
+          const actual = (candidate as Record<string, unknown>)[column];
+          if (operator === "eq") return actual === expected;
+          return (
+            typeof actual === "string" &&
+            typeof expected === "string" &&
+            actual >= expected
+          );
+        });
+      });
+      return Promise.resolve({ data: data ?? null, error: null });
+    };
     const builder: Record<string, unknown> = {
       select: () => builder,
       update: () => {
@@ -82,10 +97,13 @@ function makeClient(rows: Partial<Record<string, unknown>>) {
         return builder;
       },
       eq: (column: string, value: unknown) => {
-        op.filters.push([column, value]);
+        op.filters.push(["eq", column, value]);
         return builder;
       },
-      gte: () => builder,
+      gte: (column: string, value: unknown) => {
+        op.filters.push(["gte", column, value]);
+        return builder;
+      },
       single: resolve,
       maybeSingle: resolve,
       then: (
@@ -294,12 +312,19 @@ describe("POST /api/upload/image — real editor credentials", () => {
       makeClient({
         edit_sessions: {
           id: "session-1",
+          site_id: SITE_ID,
+          token: EDIT_TOKEN,
+          is_active: true,
           user_id: "collaborator-1",
           permissions: ["edit"],
           created_at: new Date(Date.now() - 60 * 1000).toISOString(),
           expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         },
-        site_permissions: { permission: "edit" },
+        site_permissions: {
+          site_id: SITE_ID,
+          user_id: "collaborator-1",
+          permission: "edit",
+        },
       }),
     );
 
@@ -307,6 +332,35 @@ describe("POST /api/upload/image — real editor credentials", () => {
 
     expect(response.status).toBe(200);
     expect(mockUpload).toHaveBeenCalled();
+  });
+
+  it("refuses an edit session bound to another site", async () => {
+    mockService.mockReturnValue(
+      makeClient({
+        edit_sessions: {
+          id: "session-1",
+          site_id: OTHER_SITE_ID,
+          token: EDIT_TOKEN,
+          is_active: true,
+          user_id: "collaborator-1",
+          permissions: ["edit"],
+          created_at: new Date(Date.now() - 60 * 1000).toISOString(),
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+        site_permissions: {
+          site_id: SITE_ID,
+          user_id: "collaborator-1",
+          permission: "edit",
+        },
+      }),
+    );
+
+    const response = await upload({ tokens: { editToken: EDIT_TOKEN } });
+
+    expect(response.status).toBe(401);
+    expect(mockOwnerGate).not.toHaveBeenCalled();
+    expect(mockNormalize).not.toHaveBeenCalled();
+    expect(mockUpload).not.toHaveBeenCalled();
   });
 
   it("uploads with a verified staging token", async () => {

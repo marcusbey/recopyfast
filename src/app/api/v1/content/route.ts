@@ -171,6 +171,16 @@ export async function GET(req: NextRequest) {
       throw queryError;
     }
 
+    // ADR 076 applies to every read that callers can use as current/public
+    // copy, including this API-key surface. Discovery is authenticated only by
+    // the public site token, so its NULL-published rows can contain attacker
+    // supplied originals and metadata. Omit the whole candidate instead of
+    // manufacturing a fallback that an integration could render. An explicit
+    // empty string is still a publication and remains in the response.
+    const publishedElements = (contentElements || []).filter(
+      (element) => element.published_content !== null,
+    );
+
     // Track API usage
     await analytics.trackAPIUsage({
       apiKeyId: apiKey.id,
@@ -184,13 +194,12 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({
-      data: (contentElements || []).map((element) => ({
+      data: publishedElements.map((element) => ({
         ...element,
-        current_content:
-          element.published_content ?? element.original_content ?? "",
+        current_content: element.published_content,
       })),
       meta: {
-        count: contentElements?.length || 0,
+        count: publishedElements.length,
         site_id: siteId,
         language,
         variant,

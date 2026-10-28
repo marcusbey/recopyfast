@@ -688,7 +688,7 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       expect(storedFor(rows, "rcf-headline").metadata).toEqual({ type: "h1" });
     });
 
-    it("captures safe authored href and alt values as private discovery metadata", async () => {
+    it("does not retain authored href and alt values from public discovery", async () => {
       const rows = await postContentMap({
         "rcf-link": {
           selector: "a",
@@ -701,8 +701,22 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
 
       expect(storedFor(rows, "rcf-link").metadata).toEqual({
         type: "a",
-        href: "/docs/getting-started",
-        alt: "Product documentation",
+      });
+    });
+
+    it("does not store caller-supplied href or alt where publish can promote them", async () => {
+      const rows = await postContentMap({
+        "rcf-hostile-link": {
+          selector: "a",
+          content: "Observed link text",
+          type: "a",
+          href: "https://evil.example/phish",
+          alt: "Hostile alternate text",
+        },
+      });
+
+      expect(storedFor(rows, "rcf-hostile-link").metadata).toEqual({
+        type: "a",
       });
     });
 
@@ -722,7 +736,7 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       });
     });
 
-    it("normalizes authored alt tabs and newlines without dropping the image", async () => {
+    it("drops authored alt text without dropping the discovered image", async () => {
       const rows = await postContentMap({
         "rcf-image": {
           selector: "img",
@@ -734,7 +748,6 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
 
       expect(storedFor(rows, "rcf-image").metadata).toEqual({
         type: "img",
-        alt: "Product team reviewing the launch",
       });
     });
 
