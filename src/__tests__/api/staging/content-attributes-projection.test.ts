@@ -89,6 +89,17 @@ const equalValueRow = {
   },
 };
 
+const unpublishedDiscoveryRow = {
+  ...attributeOnlyRow,
+  id: "row-candidate",
+  element_id: "rcf-candidate",
+  staging_content: null,
+  published_content: null,
+  published_at: null,
+  original_content: "Host-authored candidate",
+  metadata: { type: "a", href: "/observed-candidate" },
+};
+
 describe("staged href/alt projections", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -125,6 +136,34 @@ describe("staged href/alt projections", () => {
       analytics_key: "keep-me",
     });
     expect(body.content[0].has_staging_changes).toBe(true);
+  });
+
+  it("shows a private discovery candidate to an authenticated editor", async () => {
+    mockCreateServiceRoleClient.mockReturnValue({
+      from: jest.fn(() =>
+        queryResult({ data: [unpublishedDiscoveryRow], error: null }),
+      ),
+    });
+
+    const response = await getStagingContent(
+      new NextRequest(
+        "https://www.recopyfa.st/api/staging/content/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      ),
+      {
+        params: Promise.resolve({
+          siteId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        }),
+      },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.content[0]).toMatchObject({
+      current_content: "Host-authored candidate",
+      published_content: null,
+      metadata: { type: "a", href: "/observed-candidate" },
+      has_staging_changes: false,
+    });
   });
 
   it("includes attribute-only edits in the publish preview", async () => {

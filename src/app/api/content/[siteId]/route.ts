@@ -27,7 +27,7 @@ interface ContentElementRow {
   selector: string;
   original_content: string;
   current_content: string;
-  published_content: string;
+  published_content: string | null;
   language: string;
   variant: string;
   page_path: string | null;
@@ -93,9 +93,8 @@ function idExcerpt(elementId: string): string {
  * than the truncation this fix replaced: truncation at least landed the rest.
  *
  * Cap-exempting such a value would be worse again: content is copied into
- * `original_content`, `current_content` AND `published_content`, and then served to
- * every visitor on every page load, so a 100 KB data URI is 300 KB of row and 100 KB
- * on the wire, forever. The element is skipped instead — it is simply not editable —
+ * `original_content` and `current_content`, so a 100 KB data URI is still 200 KB of
+ * permanent row data before an editor ever sees it. The element is skipped instead — it is simply not editable —
  * and the skip is reported rather than swallowed, which is the whole point of the
  * audit this fix belongs to.
  *
@@ -147,10 +146,12 @@ function buildDiscoveryRows(
       pagePath = path.value;
     }
 
-    // Discovery reports what the author already put on the page. A disallowed
-    // destination still must not become a published href, but dropping the
-    // entire element made its safe text impossible to edit. Validate each
-    // optional attribute independently and omit only the offending value.
+    // Discovery reports what a public site-token holder claims the author put
+    // on the page. October 2026's H2 audit showed that the token and Origin are
+    // forgeable outside a browser, so these values are candidates for an
+    // editor to review, never a publication. Validate each optional attribute
+    // independently for storage, but keep every candidate private until the
+    // existing authenticated publish path promotes it.
     if (reported.href !== undefined) {
       const href = validateContentAttributePatch({ href: reported.href });
       if (href.ok && href.value.href !== undefined) {
@@ -174,7 +175,7 @@ function buildDiscoveryRows(
       selector: element.value.selector,
       original_content: element.value.content,
       current_content: element.value.content,
-      published_content: element.value.content,
+      published_content: null,
       language: "en",
       variant: "default",
       page_path: pagePath,
@@ -422,29 +423,33 @@ export async function GET(
       );
     }
 
-    // Transform: use published_content as current_content for backward compatibility
-    // Fall back to original_content if published_content is null (for existing data)
-    const transformedContent = (contentElements || []).map((element) => {
-      // Draft attributes share the metadata JSONB column with published ones,
-      // but they are private to staging until the atomic publish promotes them.
-      // Removing the nested patch here prevents a public visitor from learning
-      // or applying a destination that an editor has not published yet.
-      const metadata =
-        typeof element.metadata === "object" &&
-        element.metadata !== null &&
-        !Array.isArray(element.metadata)
-          ? (element.metadata as Record<string, unknown>)
-          : {};
-      const publishedMetadata = { ...metadata };
-      delete publishedMetadata.staging_attributes;
+    // ADR 076: a NULL publication is a private discovery candidate, not a
+    // visitor override. Omit the entire row so its text and href/alt metadata
+    // cannot reach the widget or an SSR consumer. Existing non-NULL values,
+    // including the empty string and legacy publications without timestamps,
+    // retain their public contract.
+    const transformedContent = (contentElements || [])
+      .filter((element) => element.published_content !== null)
+      .map((element) => {
+        // Draft attributes share the metadata JSONB column with published ones,
+        // but they are private to staging until the atomic publish promotes them.
+        // Removing the nested patch here prevents a public visitor from learning
+        // or applying a destination that an editor has not published yet.
+        const metadata =
+          typeof element.metadata === "object" &&
+          element.metadata !== null &&
+          !Array.isArray(element.metadata)
+            ? (element.metadata as Record<string, unknown>)
+            : {};
+        const publishedMetadata = { ...metadata };
+        delete publishedMetadata.staging_attributes;
 
-      return {
-        ...element,
-        metadata: publishedMetadata,
-        current_content:
-          element.published_content ?? element.original_content ?? "",
-      };
-    });
+        return {
+          ...element,
+          metadata: publishedMetadata,
+          current_content: element.published_content ?? "",
+        };
+      });
 
     // The one ongoing "this site is still running our script" signal.
     //
@@ -657,8 +662,10 @@ export async function POST(
       );
     }
 
-    // Insert newly discovered elements only. Existing rows may already carry
-    // published edits, so content discovery must not overwrite published_content.
+    // Insert newly discovered elements only. Discovery is deliberately unable
+    // to publish: a public site token identifies the site but does not prove an
+    // editor chose this copy or these attributes. Existing rows may already
+    // carry published edits, so duplicate reports must not overwrite them.
     //
     // Guarded on there being something to write: a map whose every entry was
     // skipped is not a reason to spend a service-role round trip on an empty

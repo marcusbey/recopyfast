@@ -179,6 +179,7 @@ suites passed analytics-context but reproduced the extraction failure (102 tests
 failed). The extraction case requires completion within two seconds; observed host load was
 326–404, so resource sensitivity is plausible, not proven as the sole cause.
 
-The hook refused the commit. No code, tests, timing thresholds or hooks were modified; no commit
-was created, no push/PR attempted. Documentation remains staged pending a clean normal hook run.
-Owner plan validation remains pending independently of that operational blocker.
+The hook refused the Phase 1 commit on that run. No code, tests, timing thresholds or hooks were
+modified in that attempt. The owner subsequently validated the plan in chat on 2026-10-28,
+accepted ADR 076's omission/repeat-discovery tradeoff, split historical investigation into a
+separate story, and kept L1 out of scope; Phase 2 execution is therefore authorized.

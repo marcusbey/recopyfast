@@ -7,6 +7,10 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  toPublicRows,
+  type PublicContentSourceRow,
+} from "@/lib/content/public-rows";
 
 const WIDGET_SOURCE = readFileSync(
   path.join(process.cwd(), "public", "embed", "recopyfast.src.js"),
@@ -140,6 +144,64 @@ describe("embed content attributes", () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it("keeps host text, image, href and alt when discovery candidates are unpublished", async () => {
+    document.body.innerHTML =
+      '<h1 data-rcf-id="shared-heading">Host heading</h1>' +
+      '<a href="/host">Host link</a>' +
+      '<img src="/host.png" alt="Host alt">';
+    const recorded: Array<{ url: string; method: string; body?: string }> = [];
+
+    await boot(() => {
+      const elements = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-rcf-id]"),
+      );
+      const hostile = elements.map((element, index) => ({
+        id: `candidate-${index}`,
+        site_id: SITE_ID,
+        element_id: element.getAttribute("data-rcf-id")!,
+        selector: element.tagName.toLowerCase(),
+        original_content:
+          element.tagName === "IMG"
+            ? "https://evil.example/planted.png"
+            : "Planted copy",
+        published_content: null,
+        language: "en",
+        variant: "default",
+        page_path: element.hasAttribute("data-rcf-id") ? null : "/pricing",
+        metadata: {
+          type: element.tagName.toLowerCase(),
+          href: "https://evil.example/phish",
+          alt: "Planted alt",
+        },
+        published_at: null,
+      })) satisfies PublicContentSourceRow[];
+      return toPublicRows(hostile) ?? [];
+    }, recorded);
+
+    expect(document.querySelector("h1")?.textContent).toBe("Host heading");
+    expect(document.querySelector("a")?.textContent).toBe("Host link");
+    expect(document.querySelector("a")?.getAttribute("href")).toBe("/host");
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(
+      "/host.png",
+    );
+    expect(document.querySelector("img")?.getAttribute("alt")).toBe("Host alt");
+
+    const discoveries = recorded.filter(
+      (request) =>
+        request.url.endsWith(`/content/${SITE_ID}`) &&
+        request.method === "POST",
+    );
+    expect(discoveries.length).toBeLessThanOrEqual(1);
+    const reported = JSON.parse(discoveries[0]?.body ?? "{}") as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(reported["shared-heading"]?.page_path).toBeNull();
+    expect(
+      Object.values(reported).some((entry) => entry.page_path === "/pricing"),
+    ).toBe(true);
   });
 
   it("hydrates every allowed href form and trims alt when text is unchanged", async () => {

@@ -738,6 +738,85 @@ if (!DB_URL) {
       expect(indexes).toHaveLength(1);
     });
 
+    test("a NULL-publication discovery candidate stays private until atomic save and publish", async () => {
+      const { rows: sites } = await query<{ id: string }>(
+        "INSERT INTO sites (domain, name) VALUES ($1, 's126 candidate lifecycle') RETURNING id",
+        [`s126-${Date.now()}-${Math.random()}.invalid`],
+      );
+      const siteId = sites[0].id;
+      await query(
+        `INSERT INTO content_elements
+           (site_id, element_id, selector, original_content, current_content,
+            published_content, metadata)
+         VALUES ($1, 'rcf-candidate-link', 'a', 'Observed host copy',
+                 'Observed host copy', NULL,
+                 '{"type":"a","href":"/observed"}'::jsonb)`,
+        [siteId],
+      );
+
+      await query(
+        `SELECT * FROM save_staging_content_atomic(
+          $1, 'rcf-candidate-link', 'en', 'default', 'Editor-approved copy',
+          '{"href":"/approved"}'::jsonb, NULL, 'editor@example.com'
+        )`,
+        [siteId],
+      );
+
+      const { rows: beforePublish } = await query<{
+        published_content: string | null;
+        staging_content: string | null;
+        metadata: Record<string, unknown>;
+      }>(
+        `SELECT published_content, staging_content, metadata
+           FROM content_elements
+          WHERE site_id = $1 AND element_id = 'rcf-candidate-link'`,
+        [siteId],
+      );
+      expect(beforePublish[0]).toEqual({
+        published_content: null,
+        staging_content: "Editor-approved copy",
+        metadata: {
+          type: "a",
+          href: "/observed",
+          staging_attributes: { href: "/approved" },
+        },
+      });
+
+      const { rows: published } = await query<{
+        element_id: string;
+        content: string;
+        attributes: Record<string, string>;
+      }>(
+        `SELECT * FROM publish_staging_content_with_attributes_atomic(
+          $1, NULL, NULL, 'editor@example.com', NULL
+        )`,
+        [siteId],
+      );
+      expect(published).toEqual([
+        {
+          element_id: "rcf-candidate-link",
+          content: "Editor-approved copy",
+          attributes: { href: "/approved" },
+        },
+      ]);
+
+      const { rows: afterPublish } = await query<{
+        published_content: string;
+        staging_content: string | null;
+        metadata: Record<string, unknown>;
+      }>(
+        `SELECT published_content, staging_content, metadata
+           FROM content_elements
+          WHERE site_id = $1 AND element_id = 'rcf-candidate-link'`,
+        [siteId],
+      );
+      expect(afterPublish[0]).toEqual({
+        published_content: "Editor-approved copy",
+        staging_content: null,
+        metadata: { type: "a", href: "/approved" },
+      });
+    });
+
     test("atomic staging save rolls back the content update when history insertion fails", async () => {
       const { siteId, rowId } = await seedElement({ type: "p" });
       await query(`

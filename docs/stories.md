@@ -5570,23 +5570,29 @@ public projection. See research before implementation.
 
 Acceptance:
 
-- [ ] Discovery inserts `published_content: null`, retains the captured original/current text
+- [x] Discovery inserts `published_content: null`, retains the captured original/current text
       for editor review, and cannot replace an existing row or its published copy/attributes.
-- [ ] Both public delivery routes omit NULL-published rows, including their href/alt metadata;
+      (`discovery-fidelity.test.ts`: private candidate, caller-field and duplicate-conflict cases.)
+- [x] Both public delivery routes omit NULL-published rows, including their href/alt metadata;
       no fallback to untrusted discovered originals reaches a public renderer. A token-only
       attack leaves host text, image source, href and alt unchanged on first load and rescan.
-- [ ] Editor staging still finds newly discovered rows; an authorized save and publish makes
+      (`public-rows.test.ts`, `published/route.test.ts`, `content-attributes.test.ts`.)
+- [x] Editor staging still finds newly discovered rows; an authorized save and publish makes
       the intended text/image/attributes publicly available. Existing non-NULL publications,
       page/shared scoping, public delivery during plan lapse, and CDN freshness remain intact.
-- [ ] Upload requires `validateEditorTokenFromRequest`, `edit` permission, a fail-closed
+      (`content-attributes-projection.test.ts`, `content-attributes-lifecycle.test.ts`.)
+- [x] Upload requires `validateEditorTokenFromRequest`, `edit` permission, a fail-closed
       canonical per-site limiter, then `checkOwnerCanEdit`, before image processing/storage.
       Public-token-only, invalid, expired, revoked, wrong-site and view-only callers cannot store
       files or inspect entitlement. Both upload limiters remain fail closed.
-- [ ] Device grants use `X-RCF-Editor-Grant`; edit-session/staging tokens use multipart fields,
+      (`upload/image/route.test.ts`, `upload/image/editor-auth.test.ts`.)
+- [x] Device grants use `X-RCF-Editor-Grant`; edit-session/staging tokens use multipart fields,
       never new query credentials. Cross-origin preflight permits the grant header, without
       cookies. Existing file validation, progress, error handling and immutable storage survive.
-- [ ] Source changes rebuild `/embed/recopyfast.js` with `scripts/build-embed.mjs`; its URL and
-      byte ceilings remain unchanged. Required tests and independent review pass before a PR.
+      (`image-upload-credentials.test.ts`, `upload/image/route.test.ts`.)
+- [x] Source changes rebuild `/embed/recopyfast.js` with `scripts/build-embed.mjs`; its URL and
+      byte ceilings remain unchanged (45,799 B bundle / 33,020 B widget gzipped).
+- [ ] Independent review passes before a PR; merge and deployment remain separate.
 
 Research: [s126-site-token-write-paths](research/s126-site-token-write-paths.md).
-Plan: [s126-site-token-write-paths](plans/s126-site-token-write-paths.md), awaiting owner validation.
+Plan: [s126-site-token-write-paths](plans/s126-site-token-write-paths.md), validated by the owner on 2026-10-28.

@@ -1,9 +1,10 @@
 # ADR 076 — Discovery candidates are omitted from public delivery until published
 
-- Status: proposed — awaiting owner validation of s126; not implemented
+- Status: accepted
 - Date: 2026-10-27
 - Scope: story s126-site-token-write-paths
-- Amends on acceptance: ADR 046's original-content fallback and inclusion of unpublished rows.
+- Accepted by: owner in chat, 2026-10-28
+- Amends: ADR 046's original-content fallback and inclusion of unpublished rows.
 - Numbering: highest checked-in numbered ADR is 074; 075 is reserved by s125. Recheck at merge.
 
 ## Context
@@ -17,7 +18,7 @@ published integration contract.
 
 ## Decision
 
-Propose: discovery inserts NULL `published_content`. Both public read surfaces omit rows with
+Discovery inserts NULL `published_content`. Both public read surfaces omit rows with
 NULL `published_content` entirely, including their metadata, and never derive public display
 content from a discovered original. Non-NULL values, including empty strings and legacy values
 without `published_at`, keep the existing projection. Private-field rejection precedes filtering.
@@ -49,10 +50,10 @@ L1 A/B auto-completion remains a separate indirect-publication risk.
 
 NULL rows no longer populate the widget's server-known-id set on a later page load, so visitors
 may re-report those discoveries until publication. Existing client coalescing and fail-closed
-server limits bound this, but high traffic can delay genuinely new discoveries. This tradeoff
-requires owner acceptance; an optimized discovery acknowledgement protocol is separate work.
+server limits bound this, but high traffic can delay genuinely new discoveries. The owner accepted
+this tradeoff on 2026-10-28; an optimized discovery acknowledgement protocol is separate work.
 
 Editor staging needs a private original-text fallback. Regression coverage must prove a newly
 NULL row can still be reviewed, saved and published with text/attributes. Public caching,
 retraction bounds and page/shared scoping do not change. No migration or retrospective cleanup
-is authorized by this proposal.
+is authorized by this decision.

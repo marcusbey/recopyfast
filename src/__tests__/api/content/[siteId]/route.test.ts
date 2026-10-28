@@ -127,6 +127,7 @@ describe("/api/content/[siteId]", () => {
         element_id: "header-1",
         selector: "h1",
         original_content: "Welcome",
+        published_content: "Welcome",
         current_content: "Welcome",
         language: "en",
         variant: "default",
@@ -570,7 +571,7 @@ describe("/api/content/[siteId]", () => {
             // rewritten (angle brackets, tag-shaped prose, long paragraphs).
             original_content: "Welcome to our site",
             current_content: "Welcome to our site",
-            published_content: "Welcome to our site",
+            published_content: null,
           }),
         ]),
         {

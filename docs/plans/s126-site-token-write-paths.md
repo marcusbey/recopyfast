@@ -1,14 +1,17 @@
 ---
-validated: no
+validated: yes
 story: s126-site-token-write-paths
 ---
 # Plan — Story s126-site-token-write-paths
+
+Validation source: owner in chat, 2026-10-28 ("Validate" on the s126–s128 plan checkpoint, Codex-authored plans).
 
 Branch: `feature/s126-site-token-write-paths`
 Research: [s126-site-token-write-paths](../research/s126-site-token-write-paths.md) — read first.
 Decision proposal: [ADR 076](../decisions/076-discovery-is-not-publication.md).
 
-**Phase 1 only. Owner validation is pending; no implementation is authorized by this file.**
+Owner validation authorizes Phase 2 implementation. Historical investigation is a separate story;
+L1 remains out of scope.
 
 ## Target story
 
@@ -20,20 +23,20 @@ Acceptance: `docs/stories.md` → s126. No new UI/design artifact is needed.
 
 ## Tasks (ordered)
 
-1. [ ] **Discovery boundary, red → green.** Add route tests for token-only discovery of new text,
+1. [x] **Discovery boundary, red → green.** Add route tests for token-only discovery of new text,
        link and image ids: published is NULL; original/current and normalized provenance remain;
        caller-supplied publication/staging fields cannot promote a row. Assert duplicate reports
        leave existing text/attributes unchanged, with the same conflict key and limits. Then set
        the builder's publication to NULL and update the incident comment. Update old tests that
        intentionally expected discovery to publish; record the behavior change in the later PR.
-2. [ ] **Public projection, red → green.** Add a mixed fixture to `public-rows` and both public
+2. [x] **Public projection, red → green.** Add a mixed fixture to `public-rows` and both public
        route suites: hostile NULL rows disappear entirely; non-NULL rows (including empty text,
        no timestamp, shared ids and non-default language/variant) preserve their contract. Keep
        private-field contamination fail-closed **before** filtering. Then omit NULL rows in the
        shared projection and the content GET's inline transform; do not broaden SELECTs or turn
        this into the postponed s65c refactor. Verify route parity, scoping, 304/ETag retraction,
        body cap and public reads during a plan lapse.
-3. [ ] **Editor continuity and publish round trip, red → green.** Add editor-read coverage for a
+3. [x] **Editor continuity and publish round trip, red → green.** Add editor-read coverage for a
        NULL-publication discovery row, and expose its original text only through the authenticated
        staging GET fallback (`staging ?? published ?? original`). Use the existing route/database
        harness to save and publish text and attribute edits from such a row, confirming no public
@@ -41,7 +44,7 @@ Acceptance: `docs/stories.md` → s126. No new UI/design artifact is needed.
        discovery after publish. The staging save already requires content; preserve the atomic
        RPC. If the real lifecycle cannot satisfy these tests without schema changes, stop and
        revise this plan; do not add an unreviewed migration or publish a stored original implicitly.
-4. [ ] **Upload authorization, red → green.** Extend upload route tests and add a real-validator
+4. [x] **Upload authorization, red → green.** Extend upload route tests and add a real-validator
        suite patterned after AI suggest. Token-only/absent, wrong-site, expired, revoked,
        unverified-device and view-only credentials refuse before entitlement, image processing
        and storage. Test successful device-grant, edit-session and staging-token uploads; lapsed
@@ -52,36 +55,43 @@ Acceptance: `docs/stories.md` → s126. No new UI/design artifact is needed.
        → credential validation → edit grade → per-site limiter → owner gate → processing/storage.
        Keep both limits fail closed and assert casing shares a bucket. Update the storage helper's
        authority comment only; its behavior stays unchanged.
-5. [ ] **Upload transport/CORS, red → green.** Execute the real embed source with a fake XHR:
+5. [x] **Upload transport/CORS, red → green.** Execute the real embed source with a fake XHR:
        device grant header, edit token field, staging token field; no public-site bearer as upload
        authority, no credential query parameters, no cookie mode, correct `this` binding inside
        the Promise. Then use `editorAuthHeaders()` and `editorTokenBody()` in `uploadImage`,
        adding only nonempty string fields. Reuse public CORS helpers for POST and bodyless 204
        OPTIONS (`POST, OPTIONS`); test the grant header allowance and absence of Allow-Credentials.
        Keep browser-generated multipart boundaries, progress, timeout and error messages.
-6. [ ] **Host-markup regression, red → green.** A fixture drives token-only POST → public read →
+6. [x] **Host-markup regression, red → green.** A fixture drives token-only POST → public read →
        real widget boot/rescan, and a snapshot-host rendering check. Host text, image src, href
        and alt stay unchanged despite hostile candidate values. Authorized staged edits remain
        private until publish; afterward the existing application behavior works. Test authored
        and computed ids plus a page/shared-row case. Verify repeated discovery is coalesced and
        capped; do not add an unbounded retry or a new endpoint to recover omitted known ids.
-7. [ ] **Contract documentation and build.** Update the snapshot integration document and the
+7. [x] **Contract documentation and build.** Update the snapshot integration document and the
        relevant architecture paragraph with the NULL-row omission and editor-only upload rule;
        retain old ADRs unchanged and accept ADR 076 only after owner validation. Document the
        repeated-discovery tradeoff and historical-content limitation. Rebuild using
        `node scripts/build-embed.mjs`, then `node scripts/build-embed.mjs --check`; measure the
        resulting sizes against unchanged ceilings. If over budget, make the scoped transport
        change smaller; do not borrow unrelated refactors or raise the gate.
-8. [ ] **Verify and hand off for independent review.** Run focused suites, then lint, full
+8. [x] **Verify and prepare the independent-review handoff.** Run focused suites, then lint, full
        type-check, production type-check, format:check, full Jest and coverage, and a local build
        using explicit test-only configuration. Run the relevant scratch-PostgreSQL lifecycle
        tests with a loopback-only disposable DB; no hosted DB. Report unavailable checks honestly.
        Review the complete story diff against the actual branch base; obtain `/ks-review` and
        `Ship allowed: yes` before a later authorized `/ks-ship`. No push/PR in Phase 1.
 
+Implementation verification is complete. Independent `/ks-review` remains pending and no
+`docs/reviews/s126-site-token-write-paths.md` exists yet, as required for a fresh-context review.
+The host-markup proof is split across the real token-only discovery route test, the shared public
+projection/route parity tests, and the shipped-source widget fixture rather than one large
+database-mocked test. The disposable PostgreSQL test separately proves the authenticated
+save/publish round trip.
+
 ## Run interdicts
 
-- Until the owner validates this plan, the diff is documentation only; `validated: no` stays.
+- The owner validated this plan on 2026-10-28; the prior documentation-only interdict is satisfied.
 - No production access of any kind: no Supabase/Fly/Vercel/Stripe calls, deploys, linked database
   operations or production URLs. Never read `.env*`; use explicit synthetic configuration.
 - No edits to existing migrations, no historical row/object deletion, no new dependencies.
@@ -155,10 +165,8 @@ passing (or explicit blockers), exact generated artifact fresh and within budget
 review ending `Ship allowed: yes`, one scoped PR under the manual merge strategy. Deployment and
 production verification require their own authority and evidence; they are not part of this run.
 
-## Owner questions before validation
+## Owner answers recorded at validation
 
-1. Accept ADR 076's omission of NULL rows, including the bounded increase in discovery requests?
-2. Queue historical-content/storage inspection separately, with explicit production authority?
-3. Keep L1's automatic A/B promotion as a separate follow-up?
-
-Plan awaiting validation. Rerun `/ks-plan s126-site-token-write-paths` to validate.
+1. ADR 076's omission of NULL rows and bounded repeat discovery are accepted.
+2. Historical-content/storage inspection is a separate story with separate production authority.
+3. L1's automatic A/B promotion remains a separate follow-up.
