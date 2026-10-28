@@ -19,8 +19,11 @@
 -- which looks the row up by that column, found nothing to claw back. The only
 -- web-role writer is the SECURITY INVOKER `spend_credits`, which locks the row
 -- (`FOR UPDATE` needs UPDATE on at least one column) and decrements
--- `credits_remaining`. That one column is all it gets back.
-REVOKE INSERT, UPDATE, DELETE ON public.credit_purchases
+-- `credits_remaining`. That one column is all it gets back. TRUNCATE,
+-- REFERENCES and TRIGGER go too (ADR 042/034/047): TRUNCATE ignores RLS and
+-- fires no row trigger, so it would bypass both walls below.
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+  ON public.credit_purchases
   FROM PUBLIC, anon, authenticated;
 GRANT UPDATE (credits_remaining) ON public.credit_purchases TO authenticated;
 
@@ -58,7 +61,8 @@ DROP POLICY IF EXISTS "Site admins can create styles" ON public.copy_styles;
 DROP POLICY IF EXISTS "Site admins can update styles" ON public.copy_styles;
 DROP POLICY IF EXISTS "Site admins can delete styles" ON public.copy_styles;
 
-REVOKE INSERT, UPDATE, DELETE ON public.copy_styles
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+  ON public.copy_styles
   FROM PUBLIC, anon, authenticated;
 
 -- A preset is global and a global style is a preset, for every writer. IS NOT

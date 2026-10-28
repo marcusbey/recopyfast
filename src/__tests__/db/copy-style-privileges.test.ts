@@ -97,7 +97,14 @@ describeDb(
 
     async function hasTablePrivilege(
       role: string,
-      privilege: "SELECT" | "INSERT" | "UPDATE" | "DELETE",
+      privilege:
+        | "SELECT"
+        | "INSERT"
+        | "UPDATE"
+        | "DELETE"
+        | "TRUNCATE"
+        | "REFERENCES"
+        | "TRIGGER",
     ): Promise<boolean> {
       const { rows } = await query<{ allowed: boolean }>(
         "SELECT has_table_privilege($1, 'public.copy_styles', $2) AS allowed",
@@ -159,6 +166,41 @@ describeDb(
         expect(await writableColumns(role)).toEqual([]);
       },
     );
+
+    test.each(["anon", "authenticated"])(
+      "%s holds no TRUNCATE, REFERENCES or TRIGGER on copy_styles",
+      async (role) => {
+        // TRUNCATE ignores RLS: with it, a web role could wipe every tenant's
+        // styles and the seeded presets.
+        expect(await hasTablePrivilege(role, "TRUNCATE")).toBe(false);
+        expect(await hasTablePrivilege(role, "REFERENCES")).toBe(false);
+        expect(await hasTablePrivilege(role, "TRIGGER")).toBe(false);
+      },
+    );
+
+    test("authenticated cannot TRUNCATE copy_styles", async () => {
+      await expect(
+        inRolledBackTx("authenticated", (runner) =>
+          runner.query("TRUNCATE public.copy_styles"),
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+    });
+
+    test("service_role keeps INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES and TRIGGER", async () => {
+      for (const privilege of [
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "TRUNCATE",
+        "REFERENCES",
+        "TRIGGER",
+      ] as const) {
+        expect([
+          privilege,
+          await hasTablePrivilege("service_role", privilege),
+        ]).toEqual([privilege, true]);
+      }
+    });
 
     test("no member write policy is left on copy_styles", async () => {
       const { rows } = await query<{ polname: string }>(

@@ -133,7 +133,7 @@ it renders — owns width and gutters, and no page may. The page-shell guard's s
 **Says:** the content tables take no direct writes; the service role is the only writer.
 
 **Scope note.** Since `20261027120000_credit_purchase_and_copy_style_grants.sql`, the same rule
-applies to `copy_styles`: its member write policies are dropped and web-role INSERT/UPDATE/DELETE
-are revoked. The decision is recorded in
+applies to `copy_styles`: its member write policies are dropped and web-role INSERT, UPDATE, DELETE,
+TRUNCATE, REFERENCES and TRIGGER are revoked. The decision is recorded in
 [ADR 075](./075-billing-rows-are-column-scoped-for-web-roles.md) (Decision 3); ADR 042's body is
 unchanged.

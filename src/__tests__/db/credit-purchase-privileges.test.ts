@@ -38,6 +38,21 @@ const FROZEN_COLUMNS: ReadonlyArray<[string, string]> = [
 
 const ONLY_REMAINING = /only credits_remaining may change/;
 
+type TablePrivilege =
+  | "INSERT"
+  | "UPDATE"
+  | "DELETE"
+  | "TRUNCATE"
+  | "REFERENCES"
+  | "TRIGGER";
+
+/** TRUNCATE ignores RLS and fires no row trigger, so it bypasses both walls. */
+const NON_DML_PRIVILEGES: ReadonlyArray<TablePrivilege> = [
+  "TRUNCATE",
+  "REFERENCES",
+  "TRIGGER",
+];
+
 describeDb(
   "credit_purchases column boundary for web roles (s125)",
   ({ query, withClient }) => {
@@ -156,7 +171,7 @@ describeDb(
 
     async function hasTablePrivilege(
       role: string,
-      privilege: "INSERT" | "UPDATE" | "DELETE",
+      privilege: TablePrivilege,
     ): Promise<boolean> {
       const { rows } = await query<{ allowed: boolean }>(
         "SELECT has_table_privilege($1, 'public.credit_purchases', $2) AS allowed",
@@ -180,6 +195,38 @@ describeDb(
         expect(await hasTablePrivilege(role, "DELETE")).toBe(false);
       },
     );
+
+    test.each(["anon", "authenticated"])(
+      "%s holds no TRUNCATE, REFERENCES or TRIGGER on credit_purchases",
+      async (role) => {
+        for (const privilege of NON_DML_PRIVILEGES) {
+          expect([privilege, await hasTablePrivilege(role, privilege)]).toEqual(
+            [privilege, false],
+          );
+        }
+      },
+    );
+
+    test("authenticated cannot TRUNCATE credit_purchases", async () => {
+      const userId = await createUser("truncate");
+      const purchaseId = await addPurchase(userId);
+
+      await expect(
+        inRolledBackTx("authenticated", userId, (runner) =>
+          runner.query("TRUNCATE public.credit_purchases CASCADE"),
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect(await row(purchaseId)).toBeDefined();
+    });
+
+    test("service_role keeps TRUNCATE, REFERENCES and TRIGGER", async () => {
+      for (const privilege of NON_DML_PRIVILEGES) {
+        expect([
+          privilege,
+          await hasTablePrivilege("service_role", privilege),
+        ]).toEqual([privilege, true]);
+      }
+    });
 
     test("service_role keeps INSERT, UPDATE and DELETE", async () => {
       expect(await hasTablePrivilege("service_role", "INSERT")).toBe(true);

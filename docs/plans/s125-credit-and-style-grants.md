@@ -49,7 +49,7 @@ Both ship in one migration plus two route filters (acceptance criteria in `docs/
    - (b) That admin cannot INSERT or UPDATE any row; web-role writes are gone.
    - (c) `service_role` inserting `(site_id, is_preset = true)` or `(NULL, false)` violates the
      new constraint.
-   - (d) The 7 seeded presets `(NULL, true)` and route-shaped rows `(site, false)` are accepted.
+   - (d) The 6 seeded presets `(NULL, true)` and route-shaped rows `(site, false)` are accepted.
    - (e) **Negative control:** re-`GRANT INSERT ON copy_styles TO authenticated` in a
      transaction. The planted preset must still fail, because no member write policy exists any
      more. Then roll back.

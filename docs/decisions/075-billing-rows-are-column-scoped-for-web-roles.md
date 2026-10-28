@@ -30,8 +30,10 @@ code writes `copy_styles` as a web role.
 
 ## Decision
 
-1. **A web role's write to a billing row is column-scoped.** The table-level INSERT, UPDATE and
-   DELETE are revoked from `PUBLIC`, `anon` and `authenticated` first (ADR 033: a column grant
+1. **A web role's write to a billing row is column-scoped.** The table-level INSERT, UPDATE,
+   DELETE, TRUNCATE, REFERENCES and TRIGGER are revoked from `PUBLIC`, `anon` and
+   `authenticated` first (TRUNCATE ignores RLS and fires no row trigger, so it would bypass both
+   walls) (ADR 033: a column grant
    does not subtract a table grant). Only the column a user-side RPC needs is granted back — for
    `credit_purchases`, `UPDATE (credits_remaining)` to `authenticated`.
 2. **And trigger-pinned.** A `BEFORE UPDATE` trigger refuses, for every role outside the
@@ -39,7 +41,8 @@ code writes `copy_styles` as a web role.
    it. The comparison is `to_jsonb(NEW) - '<column>' IS DISTINCT FROM to_jsonb(OLD) - '<column>'`,
    so a column added later is covered with no list to maintain.
 3. **`copy_styles` takes no web-role write** (ADR 042's rule, applied to this table). The three
-   member write policies are dropped, table writes are revoked from web roles, and the constraint
+   member write policies are dropped, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES and TRIGGER
+   are revoked from web roles, and the constraint
    `copy_styles_preset_is_global CHECK (is_preset IS NOT DISTINCT FROM (site_id IS NULL))` pins a
    preset to a global row for every writer, the service role included. Existing violating rows are
    reported by the migration, never deleted; the constraint stays `NOT VALID` until they are
