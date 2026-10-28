@@ -2888,11 +2888,12 @@ Complexity: 4. Dependencies: **s66b1-app-shell merged** (`PageShell`, the page-s
 > rules R5 (flat), R6 (no 700) and R7 (1px borders) to `page-shell-guard.test.ts`, with this
 > story's offenders pending, shrink-only: `sites/page.tsx` [R1, R2, R5],
 > `EditWebsiteButton.tsx` [R5], `VersionTimelineItem.tsx` [R5: the hover shadow and, since the
+>
 > > s66b2 review widened R5 to rings, the `ring-4` / `ring-2` halos on its status dots],
-> `SiteDetailView.tsx` [R6]. When s66c deletes or renames a pending file, it deletes the PENDING
-> entry together with the file, in the same change: the guard fails on an entry whose file is
-> gone and names it. When a pending file passes its rule, the shrink-only check fails until the
-> rule is removed from its entry.
+> > `SiteDetailView.tsx` [R6]. When s66c deletes or renames a pending file, it deletes the PENDING
+> > entry together with the file, in the same change: the guard fails on an entry whose file is
+> > gone and names it. When a pending file passes its rule, the shrink-only check fails until the
+> > rule is removed from its entry.
 
 Embed allocation: 0 bytes.
 
@@ -5379,7 +5380,6 @@ runtime-state assertions remain. Fixture status, 106/7 test counts, timeout/retr
 zero-flaky enforcement remain unchanged. Independent review and complete hosted gates are
 required. No product/dependency/migration/production-data changes. Merge is manual.
 
-
 ## Story s118-homepage-product-tour — see the workflow before signing up
 
 Draft requested October 19, 2026. As a prospect, I can see setup, editing, publishing and
@@ -5388,6 +5388,7 @@ existing install/Changes flows. Branch feature/s118-homepage-product-tour; embed
 Within existing PRD acquisition/core-loop scope. No backend feature or new dependency.
 
 Acceptance:
+
 - [x] Hero outline visible on all sides at 320/390/768/901/1280/1440px; preserve three lines,
       long-text scrolling, local edits, reduced motion and keyboard editing.
 - [x] “See how it works” opens a six-chapter tour with actual UI: register/generate snippet,
@@ -5414,6 +5415,7 @@ allocation 0 bytes. Within the PRD acquisition and activation scope; no backend,
 dependency or billing change.
 
 Acceptance:
+
 - [x] `/for/owners` is a static marketing page: owner headline, sourced per-change cost, three
       steps, the real interactive demo, what can and can't be changed, the handoff, platform fit
       and honest FAQ (SEO after load, edits after a redesign, a developer who disappeared).
@@ -5447,6 +5449,7 @@ dependencies: s96, s98, s99, s120 (`/for/owners`), ADR 074. Ships on the s99 bra
 dependency.
 
 Acceptance:
+
 - [x] A scan report with findings leads with the owner step ("Fix these yourself once ReCopyFast is on your site"),
       above the existing fix CTA; a clean report shows it after the fix CTA, as a quieter card.
 - [x] The calculator shows the owner step under a complete result, secondary to its freelancer
@@ -5470,6 +5473,7 @@ or keep checking. Complexity 2; dependencies: s02 install status (ADR 006), ADR 
 `feature/s122-install-detected-email`; embed allocation 0 bytes. One additive migration.
 
 Acceptance:
+
 - [x] The site's first flip to `live` — the one request `markSiteLive` reports — schedules one
       email to the owner's account address, after the response; later check-ins and
       already-live sites schedule nothing.
@@ -5497,6 +5501,7 @@ dependencies: s17 cluster engine (ADR 012/013/020), s88 sitemap/canonicals/llms.
 0 bytes. No backend, migration, dependency or billing change.
 
 Acceptance:
+
 - [x] `/guides` and `/guides/<slug>` are static (SSG) Marketing-surface pages built from one typed,
       validated registry (`src/lib/guides/`); the registry also feeds the sitemap, llms.txt and the
       Lighthouse URL list.
@@ -5533,6 +5538,7 @@ headline, and a stepped price ladder (the catalogue has one lifetime price; tier
 prices, an owner pricing decision).
 
 Acceptance:
+
 - [ ] Only the `lifetime_agency` card in `Pricing` changes; it keeps its place in the existing
       lifetime row beside Lifetime Pro, its catalogue name, description, features and price.
 - [ ] A `SpotMeter` draws exactly `limit` equal cells under the price: taken, next, left. It renders
@@ -5551,7 +5557,6 @@ Acceptance:
 
 Research: `docs/research/s124-lifetime-spots.md`. Design: `docs/designs/s124-lifetime-spots.md`.
 
-
 ## Story s128-realtime-load-bounds — realtime abuse cannot amplify public tokens into unbounded database work
 
 Requested by the owner in chat on October 27, 2026, from the security audit (findings H4,
@@ -5567,22 +5572,30 @@ verified but deferred: moving a bucket alone does not isolate editors from publi
 No UI design phase is needed. Phase 1 ends at documentation committed with an unvalidated plan.
 
 Acceptance:
-- [ ] Visitor/degraded sockets' content-map events cause no database read, Redis increment or
+
+- [x] Visitor/degraded sockets' content-map events cause no database read, Redis increment or
       fan-out; only server-verified staging sockets may reach that path.
-- [ ] Content-map has a local per-socket budget of 5/minute and fail-closed per-site budget
+      Test: `content-map load bounds › drops visitor content maps before Redis, database reads, or fan-out`.
+- [x] Content-map has a local per-socket budget of 5/minute and fail-closed per-site budget
       of 30/minute before revalidation; concurrent content-map revalidation shares only an
       in-flight promise, never a completed authorization verdict.
-- [ ] Site-token equality, live grant/device/permission checks and the 60-second all-socket
+      Tests: `content-map load bounds › allows five maps per socket per fixed window before any extra shared work`,
+      `shares the fail-closed per-site map budget across sockets`, and `shares only an in-flight revalidation and checks rotation again later`.
+- [x] Site-token equality, live grant/device/permission checks and the 60-second all-socket
       sweep remain; content-update and join-dashboard never use a TTL authorization cache.
-- [ ] Socket.IO uses connectTimeout 5000 and maxHttpBufferSize 65536. allowRequest caps
+      Test: `content-map load bounds › drops degraded-mode and wrong-message-token maps before shared work`; existing auth-parity and revocation suites remain green.
+- [x] Socket.IO uses connectTimeout 5000 and maxHttpBufferSize 65536. allowRequest caps
       pending plus open transports at 20 per normalized address (IPv6 /64); lifecycle cleanup
       releases each reservation exactly once, including failed upgrades and timeout paths.
-- [ ] All server authentication/rate refusals close the Engine.IO transport with disconnect(true).
-- [ ] The common message wrapper catches synchronous throws and rejected promises, gives
+      Tests: `Engine.IO transport bounds` and `realtime transport connection limits`.
+- [x] All server authentication/rate refusals close the Engine.IO transport with disconnect(true).
+      Test: `refusal closes the underlying transport › returns Engine.IO bookkeeping to zero across the refusal matrix`.
+- [x] The common message wrapper catches synchronous throws and rejected promises, gives
       at most one generic failure ack, and keeps unrelated sockets and health alive.
+      Tests: `the common event failure boundary`.
 - [ ] Local real-transport regressions prove the limits, cleanup, no writes, room isolation,
       revocation and HTTP independence; all required checks and independent review pass.
-- [ ] L21 remains explicitly open until a separately validated admission-isolation design exists.
+- [x] L21 remains explicitly open until a separately validated admission-isolation design exists.
 
 Research: [s128-realtime-load-bounds](research/s128-realtime-load-bounds.md).
 Plan: [s128-realtime-load-bounds](plans/s128-realtime-load-bounds.md).

@@ -16,6 +16,10 @@ const {
   createRateLimiter,
   createRedisRateLimitStore,
 } = require('./rate-limit');
+const {
+  DEFAULT_MAX_CONNECTIONS_PER_ADDRESS,
+  createConnectionLimiter,
+} = require('./connection-limits');
 const { securityHeaders } = require('./security-headers');
 const { initSentry, reportFatalAndExit } = require('./sentry');
 
@@ -47,6 +51,9 @@ function isValidUrl(string) {
  * stopped receiving" are the same event to a human.
  */
 const DEFAULT_REVALIDATION_INTERVAL_MS = 60 * 1000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
+const DEFAULT_MAX_HTTP_BUFFER_SIZE = 64 * 1024;
+const MAX_CONTENT_MAPS_PER_SOCKET = 5;
 
 /**
  * The client's address, for the per-address rate-limit buckets.
@@ -89,6 +96,11 @@ function createRealtimeServer(options = {}) {
     rateLimitStore = createMemoryRateLimitStore(),
     rateLimit = {},
     revalidationIntervalMs = DEFAULT_REVALIDATION_INTERVAL_MS,
+    connectTimeout = DEFAULT_CONNECT_TIMEOUT_MS,
+    maxHttpBufferSize = DEFAULT_MAX_HTTP_BUFFER_SIZE,
+    maxConnectionsPerAddress = DEFAULT_MAX_CONNECTIONS_PER_ADDRESS,
+    connectionReservationTimeoutMs = connectTimeout,
+    messageRateLimitCheck = null,
     // True only behind Fly's proxy (startFromCli: FLY_APP_NAME is set on
     // every Fly Machine). See resolveClientAddress.
     trustFlyClientIp = false,
@@ -102,6 +114,11 @@ function createRealtimeServer(options = {}) {
 
   const app = express();
   const httpServer = createServer(app);
+  const connectionLimiter = createConnectionLimiter({
+    maxConnectionsPerAddress,
+    reservationTimeoutMs: connectionReservationTimeoutMs,
+    trustFlyClientIp,
+  });
 
   // A static origin allowlist cannot work here. The widget runs on EVERY
   // customer's own domain, so a fixed list would mean adding each new customer to
@@ -119,6 +136,12 @@ function createRealtimeServer(options = {}) {
   // Credentials stay off: nothing here authenticates by cookie — the site token
   // travels in the handshake query.
   const io = new Server(httpServer, {
+    connectTimeout,
+    maxHttpBufferSize,
+    allowRequest(request, callback) {
+      const reservation = connectionLimiter.reserve(request);
+      callback(reservation.allowed ? null : 'Too many connections', reservation.allowed);
+    },
     cors: {
       origin: true,
       methods: ['GET', 'POST'],
@@ -144,6 +167,13 @@ function createRealtimeServer(options = {}) {
     // loses realtime with no fallback. HTTP stays authoritative and realtime is
     // additive, so that degrades an enhancement rather than breaking the product.
     transports: ['websocket']
+  });
+
+  // Engine.IO creates its client only after allowRequest returns. Move the
+  // pending reservation onto that client's close event at the first possible
+  // lifecycle hook; failed upgrades remain owned by the request cleanup paths.
+  io.engine.on('connection', (engineSocket) => {
+    connectionLimiter.transfer(engineSocket.request, engineSocket);
   });
 
   // TOMBSTONE — s79 (s69 L13). `app.use(cors())` stood here: every HTTP
@@ -181,7 +211,7 @@ function createRealtimeServer(options = {}) {
 
   function refuse(socket, error) {
     socket.emit('auth-error', { error });
-    socket.disconnect();
+    socket.disconnect(true);
   }
 
   /**
@@ -332,7 +362,7 @@ function createRealtimeServer(options = {}) {
     const isStaging = stagingMode === 'true' || stagingMode === true;
 
     if (!siteId) {
-      socket.disconnect();
+      socket.disconnect(true);
       return;
     }
 
@@ -341,8 +371,7 @@ function createRealtimeServer(options = {}) {
     });
 
     function refuseOverLimit() {
-      socket.emit('auth-error', { error: 'Rate limit exceeded' });
-      socket.disconnect();
+      refuse(socket, 'Rate limit exceeded');
     }
 
     // RATE LIMIT BEFORE AUTHORIZATION (AGENTS.md).
@@ -360,6 +389,7 @@ function createRealtimeServer(options = {}) {
     const handshakeVerdict = await rateLimiter.checkHandshake({
       address: clientAddress,
     });
+    if (!socket.connected) return;
     if (!handshakeVerdict.allowed) {
       refuseOverLimit();
       return;
@@ -380,8 +410,7 @@ function createRealtimeServer(options = {}) {
     }
 
     if (!token) {
-      socket.emit('auth-error', { error: 'Missing site token' });
-      socket.disconnect();
+      refuse(socket, 'Missing site token');
       return;
     }
 
@@ -392,29 +421,27 @@ function createRealtimeServer(options = {}) {
           .select('id, domain, api_key')
           .eq('id', siteId)
           .single();
+        if (!socket.connected) return;
 
         if (error || !site) {
-          socket.emit('auth-error', { error: 'Site not found' });
-          socket.disconnect();
+          refuse(socket, 'Site not found');
           return;
         }
 
         if (!verifySiteToken(siteId, site.api_key, token)) {
-          socket.emit('auth-error', { error: 'Invalid site token' });
-          socket.disconnect();
+          refuse(socket, 'Invalid site token');
           return;
         }
 
         // The pin is unconditional — see the A-2 comment on isOriginAllowed().
         if (!isOriginAllowed(site.domain, originHeader)) {
-          socket.emit('auth-error', { error: 'Origin not allowed' });
-          socket.disconnect();
+          refuse(socket, 'Origin not allowed');
           return;
         }
 
         // Verified: only now may this handshake spend the site's bucket —
         // and before the grant lookup below, which is a second round trip.
-        if (!(await admitToSiteBuckets())) return;
+        if (!(await admitToSiteBuckets()) || !socket.connected) return;
 
         socket.data.siteToken = token;
         socket.data.siteId = siteId;
@@ -428,10 +455,10 @@ function createRealtimeServer(options = {}) {
             editToken,
             userAgent,
           });
+          if (!socket.connected) return;
 
           if (!grant.valid) {
-            socket.emit('auth-error', { error: grant.error || 'Invalid editor access' });
-            socket.disconnect();
+            refuse(socket, grant.error || 'Invalid editor access');
             return;
           }
 
@@ -452,8 +479,7 @@ function createRealtimeServer(options = {}) {
         }
       } catch (error) {
         console.error('Site verification failed:', error);
-        socket.emit('auth-error', { error: 'Site verification failed' });
-        socket.disconnect();
+        if (socket.connected) refuse(socket, 'Site verification failed');
         return;
       }
     } else {
@@ -473,7 +499,7 @@ function createRealtimeServer(options = {}) {
       console.warn(
         'Supabase not configured - running degraded: no token verification, no staging rooms'
       );
-      if (!(await admitToSiteBuckets())) return;
+      if (!(await admitToSiteBuckets()) || !socket.connected) return;
     }
 
     // Join appropriate room based on staging mode
@@ -498,20 +524,95 @@ function createRealtimeServer(options = {}) {
      * answered rather than dropped silently: a client left waiting on an ack
      * that will never come is a hang, not a refusal.
      */
-    function onMessage(event, handler) {
+    function onMessage(event, handler, options = {}) {
       socket.on(event, async (...args) => {
-        const ack =
+        const originalAck =
           typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+        let hasAcknowledged = false;
+        const ack = originalAck
+          ? (payload) => {
+              if (hasAcknowledged) return;
+              hasAcknowledged = true;
+              originalAck(payload);
+            }
+          : null;
+        if (ack) args[args.length - 1] = ack;
 
-        const verdict = await rateLimiter.checkMessage({ socketId: socket.id });
-        if (!verdict.allowed) {
-          socket.emit('rate-limit-error', { error: 'Rate limit exceeded' });
-          if (ack) ack({ ok: false, error: 'Rate limit exceeded' });
-          return;
+        try {
+          // H4: a visitor's public site token must not buy even one shared-store
+          // increment. Event-specific local gates run synchronously before every
+          // Redis-backed budget and before any authorization read.
+          if (options.beforeLimit && !options.beforeLimit(args[0], ack)) return;
+
+          if (options.contentMapSiteBudget) {
+            const siteVerdict = await rateLimiter.checkContentMap({ siteId });
+            if (!siteVerdict.allowed) {
+              socket.emit('rate-limit-error', { error: 'Rate limit exceeded' });
+              if (ack) ack({ ok: false, error: 'Rate limit exceeded' });
+              return;
+            }
+          }
+
+          const verdict = await (messageRateLimitCheck
+            ? messageRateLimitCheck({ socketId: socket.id, event })
+            : rateLimiter.checkMessage({ socketId: socket.id }));
+          if (!verdict.allowed) {
+            socket.emit('rate-limit-error', { error: 'Rate limit exceeded' });
+            if (ack) ack({ ok: false, error: 'Rate limit exceeded' });
+            return;
+          }
+
+          await handler(...args);
+        } catch (error) {
+          const category =
+            error && typeof error.name === 'string' && /^[A-Za-z0-9]+$/.test(error.name)
+              ? error.name
+              : 'UnknownError';
+          // L22: diagnostics identify the bounded event and error class only.
+          // Exception messages can contain provider detail or credentials, and
+          // payloads are customer content, so neither belongs in this log line.
+          console.error(`[message:${event}] contained ${category}`);
+          socket.emit('message-error', { error: 'Request failed' });
+          if (ack) ack({ ok: false, error: 'Request failed' });
         }
-
-        return handler(...args);
       });
+    }
+
+    let contentMapWindow = -1;
+    let contentMapCount = 0;
+    let contentMapRevalidation = null;
+    function admitLocalContentMap(data, ack) {
+      if (socket.data.siteToken && socket.data.siteToken !== (data && data.token)) {
+        socket.emit('auth-error', { error: 'Invalid site token' });
+        if (ack) ack({ ok: false, error: 'Invalid site token' });
+        return false;
+      }
+      if (!socket.data.isStaging) {
+        if (ack) ack({ ok: false, error: 'Editor access required' });
+        return false;
+      }
+
+      const window = Math.floor(Date.now() / (60 * 1000));
+      if (window !== contentMapWindow) {
+        contentMapWindow = window;
+        contentMapCount = 0;
+      }
+      contentMapCount += 1;
+      if (contentMapCount > MAX_CONTENT_MAPS_PER_SOCKET) {
+        socket.emit('rate-limit-error', { error: 'Rate limit exceeded' });
+        if (ack) ack({ ok: false, error: 'Rate limit exceeded' });
+        return false;
+      }
+      return true;
+    }
+
+    function revalidateContentMap() {
+      if (contentMapRevalidation) return contentMapRevalidation;
+      const pending = revalidateSocket(socket).finally(() => {
+        if (contentMapRevalidation === pending) contentMapRevalidation = null;
+      });
+      contentMapRevalidation = pending;
+      return pending;
     }
 
     // Handle content map from embed script.
@@ -545,7 +646,7 @@ function createRealtimeServer(options = {}) {
         // 60-second sweep. Re-resolve before the emit, exactly as the other
         // message paths do; a rotated token or failed site read disconnects
         // and nothing reaches the dashboard room.
-        if (!(await revalidateSocket(socket))) {
+        if (!(await revalidateContentMap()) || !socket.connected) {
           return;
         }
 
@@ -559,6 +660,9 @@ function createRealtimeServer(options = {}) {
       } catch (error) {
         console.error('Error processing content map:', error);
       }
+    }, {
+      beforeLimit: admitLocalContentMap,
+      contentMapSiteBudget: true,
     });
 
     // Handle content updates from dashboard or staging
@@ -753,6 +857,9 @@ function createRealtimeServer(options = {}) {
 
     // Handle disconnection
     socket.on('disconnect', () => {
+      contentMapWindow = -1;
+      contentMapCount = 0;
+      contentMapRevalidation = null;
       // Remove from site connections
       if (siteConnections.has(siteId)) {
         siteConnections.get(siteId).delete(socket.id);
@@ -798,6 +905,7 @@ function createRealtimeServer(options = {}) {
     if (revalidationTimer) {
       clearInterval(revalidationTimer);
     }
+    connectionLimiter.releaseAll();
     return new Promise((resolve) => {
       io.close(() => {
         httpServer.close(() => resolve());

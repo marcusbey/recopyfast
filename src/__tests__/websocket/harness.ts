@@ -83,6 +83,7 @@ export class RecordingSupabase {
    * read doing exactly that (fail open) while its HTTP twin failed closed.
    */
   readonly failingReads = new Set<string>();
+  readonly readBarriers = new Map<string, Promise<void>>();
 
   constructor(seed: Record<string, Row[]> = {}) {
     for (const [table, rows] of Object.entries(seed)) {
@@ -190,6 +191,7 @@ function createQueryBuilder(db: RecordingSupabase, table: string) {
     },
     async single() {
       if (op) return settle();
+      await db.readBarriers.get(table);
       if (db.failingReads.has(table)) return readFailure();
       const found = builder.matching();
       if (found.length !== 1) {
@@ -199,6 +201,7 @@ function createQueryBuilder(db: RecordingSupabase, table: string) {
     },
     async maybeSingle() {
       if (op) return settle();
+      await db.readBarriers.get(table);
       if (db.failingReads.has(table)) return readFailure();
       const found = builder.matching();
       return { data: found.length > 0 ? { ...found[0] } : null, error: null };
@@ -226,8 +229,11 @@ export function throwingStore() {
 /** An in-memory counter store with the same contract as the Redis one. */
 export function memoryStore() {
   const counters = new Map<string, number>();
+  const calls: string[] = [];
   return {
+    calls,
     async increment(key: string): Promise<number> {
+      calls.push(key);
       const next = (counters.get(key) ?? 0) + 1;
       counters.set(key, next);
       return next;

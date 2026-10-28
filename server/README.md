@@ -78,7 +78,14 @@ machine as covering both.
 
 ## Admission, the HTTP surface and key rotation (s79)
 
-**A handshake is admitted in this order** (`io.on('connection', …)` in `index.js`):
+**Engine.IO bounds the transport before Socket.IO admission.** `allowRequest` reserves pending
+and open transports against a 20-per-normalized-address cap, then transfers the reservation to
+the Engine.IO close lifecycle. Aborted upgrades, timeouts, refusals and shutdown release it once.
+Clients that never send Socket.IO CONNECT are closed after 5 seconds, and Engine.IO rejects a
+message over 64 KiB. These are deliberately process-local limits: ADR 026 fixes the service at one
+machine, and a many-address attack still needs an upstream control.
+
+**A handshake is then admitted in this order** (`io.on('connection', …)` in `index.js`):
 
 1. `siteId` present, else dropped.
 2. **The pre-authorization bucket**, per client address across all sites
@@ -111,13 +118,19 @@ and the live connection count to anyone (s69 L13). Engine.IO answers `/socket.io
 Express middleware, so its own error/handshake responses do not receive this fixed set; that
 surface and its CORS stayed outside s79.
 
+**Inventory messages are editor-only and bounded.** A visitor or degraded socket's `content-map`
+is dropped before Redis or Supabase. A verified staging socket gets five maps per minute locally,
+then shares a fail-closed 30-per-site-per-minute Redis budget. Concurrent accepted maps on one
+socket share only the pending credential revalidation; the promise is cleared on settlement, so a
+later map still observes a rotated key or revoked grant immediately. Fixed windows permit the
+documented adjacent-window burst. HTTP discovery remains authoritative if realtime drops a map.
+
 **Rotating a site's key closes the sockets opened with the old one** — ADR 027's follow-up. The
 sweep (`revalidateAll`, every 60 s) re-verifies every socket's site token against the current
 `sites.api_key`, reading `sites` once per site per pass and sharing the answer among that site's
 sockets (the widget opens a socket for every visitor of a page with `data-ws-url`); an editor's
-`content-update`, a viewer's `content-map`, and `join-dashboard` re-check it on the spot before
-fan-out. The extra `sites` read on those message paths is bounded by the per-socket message
-limiter. A missing row or a token that no longer verifies → `auth-error` "Site token revoked",
+`content-update`, staging `content-map`, and `join-dashboard` re-check it on the spot before
+fan-out. A missing row or a token that no longer verifies → `auth-error` "Site token revoked",
 then disconnect; a lookup that fails →
 "Site verification failed", then disconnect (fail closed, like the grant). The grant re-resolution
 for editors is unchanged and runs after the token check.

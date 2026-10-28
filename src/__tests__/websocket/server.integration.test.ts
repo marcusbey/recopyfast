@@ -22,6 +22,7 @@ import { createServer, type Server as HttpServer } from "node:net";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import type { Socket } from "socket.io-client";
+import WebSocket from "ws";
 
 import { hashUserAgent } from "@/lib/auth/editor-crypto";
 import { createRealtimeServer } from "../../../server/index.js";
@@ -61,6 +62,48 @@ const ORIGIN = "https://example.com";
 const DAY_SECONDS = 24 * 60 * 60;
 
 const NO_DOMAIN_SITE_ID = "44444444-4444-4444-8444-444444444444";
+
+function openRawEngineSocket(port: number): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/socket.io/?EIO=4&transport=websocket`,
+      { headers: { Origin: ORIGIN } },
+    );
+    socket.once("open", () => resolve(socket));
+    socket.once("error", reject);
+  });
+}
+
+function openRawSocketIoClient(
+  port: number,
+  query: Record<string, string>,
+  origin = ORIGIN,
+): Promise<WebSocket> {
+  const params = new URLSearchParams({
+    EIO: "4",
+    transport: "websocket",
+    ...query,
+  });
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/socket.io/?${params}`,
+      {
+        headers: { Origin: origin, "User-Agent": TEST_USER_AGENT },
+      },
+    );
+    socket.once("open", () => {
+      socket.send("40");
+      resolve(socket);
+    });
+    socket.once("error", reject);
+  });
+}
+
+function waitForRawClose(socket: WebSocket): Promise<number> {
+  return new Promise((resolve) => {
+    socket.once("close", (code) => resolve(code));
+  });
+}
 
 /**
  * One token, built once, reused for the handshake AND for every message that
@@ -277,6 +320,189 @@ describe("realtime service lifecycle", () => {
 
     await blocked.release();
   }, 30_000);
+});
+
+describe("Engine.IO transport bounds", () => {
+  it("pins the production transport defaults", async () => {
+    const server = createRealtimeServer({ port: 0 });
+    expect(server.io._opts.connectTimeout).toBe(5_000);
+    expect(server.io._opts.maxHttpBufferSize).toBe(64 * 1024);
+    expect(server.io._opts.transports).toEqual(["websocket"]);
+    await server.close();
+  });
+
+  it("closes a raw transport that never sends Socket.IO CONNECT at the injected deadline", async () => {
+    const server = createRealtimeServer({ port: 0, connectTimeout: 40 });
+    const port = await server.listen();
+    const raw = await openRawEngineSocket(port);
+
+    const closeCode = await Promise.race([
+      waitForRawClose(raw),
+      new Promise<number>((resolve) => setTimeout(() => resolve(-1), 250)),
+    ]);
+    expect(closeCode).toBeGreaterThanOrEqual(1000);
+    await server.close();
+  });
+
+  it("caps pending and open transports per normalized address before database work", async () => {
+    const db = new RecordingSupabase({ sites: seedSites() });
+    const server = createRealtimeServer({
+      port: 0,
+      supabase: db,
+      connectTimeout: 5_000,
+      maxConnectionsPerAddress: 1,
+    });
+    const port = await server.listen();
+    const first = await openRawEngineSocket(port);
+
+    await expect(openRawEngineSocket(port)).rejects.toBeInstanceOf(Error);
+    expect(db.reads).toEqual([]);
+
+    const closed = waitForRawClose(first);
+    first.close();
+    await closed;
+    const replacement = await openRawEngineSocket(port);
+    replacement.close();
+    await server.close();
+  });
+
+  it("closes an over-64-KiB event before handler reads while allowing a smaller event", async () => {
+    const db = new RecordingSupabase({
+      sites: seedSites(),
+      staging_access: [
+        {
+          id: "payload-access",
+          token: "payload-staging-token",
+          site_id: SITE_ID,
+          is_active: true,
+          revoked_at: null,
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          email_verified: true,
+          email: "payload@example.com",
+          ...boundToTestBrowser(),
+          permissions: ["edit"],
+        },
+      ],
+    });
+    const server = createRealtimeServer({ port: 0, supabase: db });
+    const port = await server.listen();
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: "payload-staging-token",
+      },
+    });
+    const outcome = track(socket);
+    await waitForHandshake(
+      outcome,
+      () => socket.connected,
+      "the bounded socket to connect",
+    );
+    const readsAfterHandshake = db.reads.length;
+
+    socket.emit("content-map", {
+      token: SITE_TOKEN,
+      url: "https://example.com/small",
+      contentMap: {},
+    });
+    await waitFor(
+      () => db.reads.length > readsAfterHandshake,
+      "the small frame to reach its handler",
+    );
+    const readsAfterSmallFrame = db.reads.length;
+    socket.emit("content-map", {
+      token: SITE_TOKEN,
+      url: "https://example.com/large",
+      contentMap: { huge: "x".repeat(70 * 1024) },
+    });
+
+    await waitForHandshake(
+      outcome,
+      () => socket.disconnected,
+      "the oversized frame to close",
+    );
+    expect(db.reads).toHaveLength(readsAfterSmallFrame);
+    await server.close();
+  });
+});
+
+describe("refusal closes the underlying transport", () => {
+  it("closes a hostile raw client after application authentication refuses it", async () => {
+    const server = createRealtimeServer({
+      port: 0,
+      supabase: new RecordingSupabase({ sites: seedSites() }),
+    });
+    const port = await server.listen();
+    const raw = await openRawSocketIoClient(port, { siteId: SITE_ID });
+
+    const closeCode = await Promise.race([
+      waitForRawClose(raw),
+      new Promise<number>((resolve) => setTimeout(() => resolve(-1), 250)),
+    ]);
+    if (raw.readyState !== WebSocket.CLOSED) raw.terminate();
+    await waitFor(
+      () => server.io.engine.clientsCount === 0,
+      "the refused Engine.IO client to leave bookkeeping",
+    );
+    await server.close();
+    expect(closeCode).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("returns Engine.IO bookkeeping to zero across the refusal matrix", async () => {
+    const server = createRealtimeServer({
+      port: 0,
+      supabase: new RecordingSupabase({ sites: seedSites() }),
+      // Missing site id is rejected before the pre-auth bucket. The next four
+      // consume it; the final valid handshake is therefore the limiter denial.
+      rateLimit: { maxHandshakesPerAddress: 4 },
+    });
+    const port = await server.listen();
+    const attempts: Array<[string, Record<string, string>, string]> = [
+      ["missing id", { token: SITE_TOKEN }, ORIGIN],
+      ["missing token", { siteId: SITE_ID }, ORIGIN],
+      [
+        "bad HMAC",
+        { siteId: SITE_ID, token: buildSiteToken(SITE_ID, "wrong") },
+        ORIGIN,
+      ],
+      [
+        "bad Origin",
+        { siteId: SITE_ID, token: SITE_TOKEN },
+        "https://evil.example",
+      ],
+      [
+        "invalid grant",
+        {
+          siteId: SITE_ID,
+          token: SITE_TOKEN,
+          stagingMode: "true",
+          stagingToken: "invalid-grant",
+        },
+        ORIGIN,
+      ],
+      ["limiter denial", { siteId: SITE_ID, token: SITE_TOKEN }, ORIGIN],
+    ];
+
+    for (const [label, query, origin] of attempts) {
+      const raw = await openRawSocketIoClient(port, query, origin);
+      const closeCode = await Promise.race([
+        waitForRawClose(raw),
+        new Promise<number>((resolve) => setTimeout(() => resolve(-1), 2_000)),
+      ]);
+      if (raw.readyState !== WebSocket.CLOSED) raw.terminate();
+      if (closeCode < 1000)
+        throw new Error(`${label} left the raw transport open`);
+      await waitFor(
+        () => server.io.engine.clientsCount === 0,
+        "the refused raw transport to leave Engine.IO",
+      );
+    }
+    await server.close();
+  });
 });
 
 /**
@@ -993,7 +1219,12 @@ describe("rate limiting", () => {
       ...boundToTestBrowser(),
       permissions: ["view"],
     });
-    const sender = connect(port);
+    const sender = connect(port, {
+      siteId: SITE_ID,
+      token: SITE_TOKEN,
+      stagingMode: "true",
+      stagingToken: "staging-token-relay-listener",
+    });
     const listenerSocket = openSocket({
       port,
       origin: ORIGIN,
@@ -1007,9 +1238,7 @@ describe("rate limiting", () => {
     open.push(listenerSocket);
     const listener = track(listenerSocket);
     await waitFor(
-      () =>
-        roomSize(server, `site:${SITE_ID}`) === 1 &&
-        roomSize(server, `site:${SITE_ID}:staging`) === 1,
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 2,
       "both sockets to be admitted",
     );
 
@@ -1039,6 +1268,409 @@ describe("rate limiting", () => {
     expect(relayed).toHaveLength(1);
 
     await server.close();
+  });
+});
+
+describe("content-map load bounds", () => {
+  const STAGING_TOKEN = "staging-token-content-map";
+  let db: RecordingSupabase;
+  let store: ReturnType<typeof memoryStore>;
+  let server: ReturnType<typeof createRealtimeServer>;
+  let port: number;
+  const open: Socket[] = [];
+
+  async function boot(rateLimit: Record<string, number> = {}) {
+    db = new RecordingSupabase({
+      sites: seedSites(),
+      staging_access: [
+        {
+          id: "access-content-map",
+          token: STAGING_TOKEN,
+          site_id: SITE_ID,
+          is_active: true,
+          revoked_at: null,
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          email_verified: true,
+          email: "map-editor@example.com",
+          ...boundToTestBrowser(),
+          permissions: ["edit"],
+        },
+      ],
+    });
+    store = memoryStore();
+    server = createRealtimeServer({
+      port: 0,
+      supabase: db,
+      rateLimitStore: store,
+      rateLimit,
+    });
+    port = await server.listen();
+  }
+
+  async function connectEditor() {
+    const expected = roomSize(server, `site:${SITE_ID}:staging`) + 1;
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: STAGING_TOKEN,
+      },
+    });
+    open.push(socket);
+    const outcome = track(socket);
+    await waitForHandshake(
+      outcome,
+      () => roomSize(server, `site:${SITE_ID}:staging`) >= expected,
+      "the content-map editor to connect",
+    );
+    return outcome;
+  }
+
+  afterEach(async () => {
+    while (open.length > 0) open.pop()?.close();
+    if (server) await server.close();
+  });
+
+  it("drops visitor content maps before Redis, database reads, or fan-out", async () => {
+    await boot();
+    const visitor = openSocket({
+      port,
+      origin: ORIGIN,
+      query: { siteId: SITE_ID, token: SITE_TOKEN },
+    });
+    open.push(visitor);
+    await waitFor(() => visitor.connected, "the visitor to connect");
+    const reads = db.reads.length;
+    const increments = store.calls.length;
+    const acknowledgements: unknown[] = [];
+
+    visitor.emit(
+      "content-map",
+      { token: SITE_TOKEN, stagingMode: true, contentMap: { fake: {} } },
+      (reply: unknown) => acknowledgements.push(reply),
+    );
+    await waitFor(
+      () => acknowledgements.length === 1,
+      "the visitor map to be dropped with a bounded acknowledgement",
+      500,
+    );
+
+    expect(db.reads).toHaveLength(reads);
+    expect(store.calls).toHaveLength(increments);
+  });
+
+  it("drops degraded-mode and wrong-message-token maps before shared work", async () => {
+    const degradedStore = memoryStore();
+    server = createRealtimeServer({
+      port: 0,
+      supabase: null,
+      rateLimitStore: degradedStore,
+    });
+    port = await server.listen();
+    const degraded = openSocket({
+      port,
+      origin: ORIGIN,
+      query: { siteId: SITE_ID, token: SITE_TOKEN, stagingMode: "true" },
+    });
+    open.push(degraded);
+    await waitFor(() => degraded.connected, "the degraded visitor to connect");
+    const degradedCalls = degradedStore.calls.length;
+    const degradedReplies: unknown[] = [];
+    degraded.emit("content-map", { token: SITE_TOKEN }, (value: unknown) =>
+      degradedReplies.push(value),
+    );
+    await waitFor(() => degradedReplies.length === 1, "the degraded map drop");
+    expect(degradedStore.calls).toHaveLength(degradedCalls);
+    await server.close();
+
+    await boot();
+    const editor = await connectEditor();
+    const reads = db.reads.length;
+    const increments = store.calls.length;
+    const replies: unknown[] = [];
+    editor.socket.emit(
+      "content-map",
+      { token: "not-the-handshake-token" },
+      (value: unknown) => replies.push(value),
+    );
+    await waitFor(() => replies.length === 1, "the token mismatch drop");
+    expect(db.reads).toHaveLength(reads);
+    expect(store.calls).toHaveLength(increments);
+  });
+
+  it("allows five maps per socket per fixed window before any extra shared work", async () => {
+    await boot();
+    const editor = await connectEditor();
+    editor.socket.emit("join-dashboard", { siteId: SITE_ID });
+    await waitFor(
+      () => roomSize(server, `dashboard:${SITE_ID}`) === 1,
+      "the content-map dashboard room",
+    );
+    const updates: unknown[] = [];
+    const errors: unknown[] = [];
+    editor.socket.on("content-map-updated", (value) => updates.push(value));
+    editor.socket.on("rate-limit-error", (value) => errors.push(value));
+
+    for (let index = 0; index < 6; index += 1) {
+      editor.socket.emit("content-map", {
+        token: SITE_TOKEN,
+        url: `https://example.com/${index}`,
+        contentMap: {},
+      });
+    }
+    await waitFor(
+      () => updates.length === 5 && errors.length === 1,
+      "the local map budget",
+    );
+    expect(updates).toHaveLength(5);
+  });
+
+  it("shares the fail-closed per-site map budget across sockets", async () => {
+    await boot({ maxContentMapsPerSite: 2 });
+    const first = await connectEditor();
+    const second = await connectEditor();
+    first.socket.emit("join-dashboard", { siteId: SITE_ID });
+    await waitFor(
+      () => roomSize(server, `dashboard:${SITE_ID}`) === 1,
+      "the shared-budget dashboard room",
+    );
+    const updates: unknown[] = [];
+    const errors: unknown[] = [];
+    first.socket.on("content-map-updated", (value) => updates.push(value));
+    second.socket.on("rate-limit-error", (value) => errors.push(value));
+
+    first.socket.emit("content-map", { token: SITE_TOKEN, contentMap: {} });
+    second.socket.emit("content-map", { token: SITE_TOKEN, contentMap: {} });
+    second.socket.emit("content-map", { token: SITE_TOKEN, contentMap: {} });
+    await waitFor(
+      () => updates.length === 2 && errors.length === 1,
+      "the shared site budget",
+    );
+  });
+
+  it("shares only an in-flight revalidation and checks rotation again later", async () => {
+    await boot();
+    const editor = await connectEditor();
+    editor.socket.emit("join-dashboard", { siteId: SITE_ID });
+    await waitFor(
+      () => roomSize(server, `dashboard:${SITE_ID}`) === 1,
+      "the memoization dashboard room",
+    );
+    const updates: unknown[] = [];
+    editor.socket.on("content-map-updated", (value) => updates.push(value));
+    let releaseLookup: () => void = () => undefined;
+    db.readBarriers.set(
+      "sites",
+      new Promise<void>((resolve) => {
+        releaseLookup = resolve;
+      }),
+    );
+    const reads = db.reads.filter((table) => table === "sites").length;
+
+    editor.socket.emit("content-map", { token: SITE_TOKEN, contentMap: {} });
+    editor.socket.emit("content-map", { token: SITE_TOKEN, contentMap: {} });
+    await waitFor(
+      () => db.reads.filter((table) => table === "sites").length === reads + 1,
+      "one shared in-flight site lookup",
+    );
+    releaseLookup();
+    db.readBarriers.delete("sites");
+    await waitFor(
+      () => updates.length === 2,
+      "both maps after shared validation",
+    );
+
+    const site = db.rows("sites").find((row) => row.id === SITE_ID);
+    if (!site) throw new Error("Expected seeded site");
+    site.api_key = "rotated-content-map-key";
+    editor.socket.emit("content-map", { token: SITE_TOKEN, contentMap: {} });
+    expect(await editor.refused()).toBe("Site token revoked");
+    expect(updates).toHaveLength(2);
+  });
+
+  it("closes on a failed map read and suppresses fan-out after disconnect during validation", async () => {
+    await boot();
+    const sender = await connectEditor();
+    const listener = await connectEditor();
+    listener.socket.emit("join-dashboard", { siteId: SITE_ID });
+    await waitFor(
+      () => roomSize(server, `dashboard:${SITE_ID}`) === 1,
+      "the deferred-validation dashboard room",
+    );
+    const updates: unknown[] = [];
+    listener.socket.on("content-map-updated", (value) => updates.push(value));
+    let releaseLookup: () => void = () => undefined;
+    db.readBarriers.set(
+      "sites",
+      new Promise<void>((resolve) => {
+        releaseLookup = resolve;
+      }),
+    );
+    const reads = db.reads.filter((table) => table === "sites").length;
+    sender.socket.emit("content-map", { token: SITE_TOKEN, contentMap: {} });
+    await waitFor(
+      () => db.reads.filter((table) => table === "sites").length === reads + 1,
+      "the deferred map validation",
+    );
+    sender.socket.close();
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 1,
+      "the disconnected sender to leave before validation resolves",
+    );
+    releaseLookup();
+    db.readBarriers.delete("sites");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(updates).toEqual([]);
+
+    const failed = await connectEditor();
+    db.failingReads.add("sites");
+    failed.socket.emit("content-map", { token: SITE_TOKEN, contentMap: {} });
+    expect(await failed.refused()).toBe("Site verification failed");
+  });
+});
+
+describe("the common event failure boundary", () => {
+  it.each([
+    [
+      "synchronous throw",
+      () => {
+        throw new Error("sensitive sync detail");
+      },
+    ],
+    [
+      "async rejection",
+      async () => {
+        throw new Error("sensitive async detail");
+      },
+    ],
+  ])(
+    "contains a %s from the message limiter and keeps other clients healthy",
+    async (_label, fail) => {
+      const db = new RecordingSupabase({ sites: seedSites() });
+      const server = createRealtimeServer({
+        port: 0,
+        supabase: db,
+        messageRateLimitCheck: fail,
+      });
+      const port = await server.listen();
+      const first = openSocket({
+        port,
+        origin: ORIGIN,
+        query: { siteId: SITE_ID, token: SITE_TOKEN },
+      });
+      const second = openSocket({
+        port,
+        origin: ORIGIN,
+        query: { siteId: SITE_ID, token: SITE_TOKEN },
+      });
+      await waitFor(
+        () => first.connected && second.connected,
+        "both clients around the failure boundary",
+      );
+      const replies: unknown[] = [];
+      first.emit("join-dashboard", { siteId: SITE_ID }, (value: unknown) =>
+        replies.push(value),
+      );
+      await waitFor(
+        () => replies.length === 1,
+        "the contained failure acknowledgement",
+        500,
+      );
+
+      expect(replies).toEqual([{ ok: false, error: "Request failed" }]);
+      expect(first.connected).toBe(true);
+      expect(second.connected).toBe(true);
+      expect((await fetch(`http://127.0.0.1:${port}/health`)).status).toBe(200);
+      first.close();
+      second.close();
+      await server.close();
+    },
+  );
+
+  it("does not acknowledge twice when a successful handler is followed by a contained failure", async () => {
+    const stagingToken = "failure-boundary-staging";
+    const db = new RecordingSupabase({
+      sites: seedSites(),
+      staging_access: [
+        {
+          id: "failure-boundary-access",
+          token: stagingToken,
+          site_id: SITE_ID,
+          is_active: true,
+          revoked_at: null,
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          email_verified: true,
+          email: "failure@example.com",
+          ...boundToTestBrowser(),
+          permissions: ["edit"],
+        },
+      ],
+    });
+    const server = createRealtimeServer({
+      port: 0,
+      supabase: db,
+    });
+    const port = await server.listen();
+    const query = {
+      siteId: SITE_ID,
+      token: SITE_TOKEN,
+      stagingMode: "true",
+      stagingToken,
+    };
+    const sender = openSocket({ port, origin: ORIGIN, query });
+    const listener = openSocket({ port, origin: ORIGIN, query });
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 2,
+      "both coeditors around the post-handler fault",
+    );
+    const replies: unknown[] = [];
+    const failures: unknown[] = [];
+    const updates: unknown[] = [];
+    sender.on("update-error", (value) => failures.push(value));
+    listener.on("content-update", (value) => updates.push(value));
+    const senderId = sender.id;
+    if (!senderId) throw new Error("Expected the sender's socket id");
+    const serverSocket = server.io.sockets.sockets.get(senderId);
+    if (!serverSocket) throw new Error("Expected the sender's server socket");
+    const packetTransport = serverSocket as unknown as {
+      packet: (packet: { type: number }, options?: unknown) => void;
+    };
+    const sendPacket = packetTransport.packet.bind(packetTransport);
+    let didThrowAfterAck = false;
+    packetTransport.packet = (packet: { type: number }, options?: unknown) => {
+      sendPacket(packet, options);
+      if (!didThrowAfterAck && packet.type === 3) {
+        didThrowAfterAck = true;
+        throw new Error("sensitive acknowledgement transport detail");
+      }
+    };
+    sender.emit(
+      "content-update",
+      { elementId: "headline", content: "still broadcast", token: SITE_TOKEN },
+      (value: unknown) => replies.push(value),
+    );
+    let waitFailure: unknown;
+    try {
+      await waitFor(
+        () => failures.length === 1,
+        "the acknowledgement transport failure",
+        5_000,
+      );
+    } catch (error) {
+      waitFailure = error;
+    }
+    const bothSocketsStayedAlive = sender.connected && listener.connected;
+    sender.close();
+    listener.close();
+    await server.close();
+    if (waitFailure) throw waitFailure;
+    expect(replies).toEqual([{ ok: true }]);
+    expect(failures).toEqual([{ error: "Internal server error" }]);
+    expect(updates).toHaveLength(1);
+    expect(bothSocketsStayedAlive).toBe(true);
   });
 });
 
@@ -2259,7 +2891,7 @@ describe("key rotation reaches a live socket", () => {
    * how many elements it saw until the next sweep. It re-checks the token
    * against the current key now, as `content-update` does.
    */
-  it("refuses a viewer's next content-map after rotation, and notifies no dashboard", async () => {
+  it("refuses an editor's next content-map after rotation, and notifies no dashboard", async () => {
     await boot(60 * 60 * 1000);
     const dashboard = await connectEditor();
     dashboard.socket.emit("join-dashboard", { siteId: SITE_ID });
@@ -2269,16 +2901,16 @@ describe("key rotation reaches a live socket", () => {
     );
     const notified: unknown[] = [];
     dashboard.socket.on("content-map-updated", (data) => notified.push(data));
-    const viewer = await connectViewer();
+    const editor = await connectEditor();
 
     site().api_key = ROTATED_KEY;
-    viewer.socket.emit("content-map", {
+    editor.socket.emit("content-map", {
       url: "https://example.com/pricing",
       token: SITE_TOKEN,
       contentMap: { headline: { selector: "h1", content: "Hi", type: "text" } },
     });
 
-    expect(await viewer.refused()).toBe("Site token revoked");
+    expect(await editor.refused()).toBe("Site token revoked");
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(notified).toEqual([]);
   });
