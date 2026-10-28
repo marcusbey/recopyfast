@@ -105,8 +105,18 @@ grants (finding 1). It was fixed in this PR before shipping; see "Fix run" below
 
 ## Fix run
 
-Finding 1 and minor 4 were sent back to the implementer, test-first, as a separate commit on
-this branch. Its result is recorded below once it lands.
+Finding 1 and minor 4 were fixed in `8c1aa1e8`, test-first.
+
+- **RED:** 6 new tests failed against the previous migration. They assert that anon and
+  authenticated hold no TRUNCATE, REFERENCES or TRIGGER on either table, and that a real
+  `TRUNCATE … CASCADE` run as `authenticated` is refused.
+- **Over-revoke guard:** 2 new tests assert that `service_role` keeps every privilege.
+- **GREEN:** both REVOKEs now cover `INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER`.
+  ADR 075 and the errata wording were updated to match.
+- **Gates:** `run-db-invariants` on PG17 passed 25/25 suites (240 passed, 1 skipped). The
+  pre-commit hook passed (8,579 tests, 0 failed).
+
+Finding 1 is resolved. Open: minors 2 and 3, both mitigated as described.
 
 Max severity: major
 Ship allowed: yes
