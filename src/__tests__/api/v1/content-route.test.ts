@@ -182,6 +182,60 @@ describe("/api/v1/content answers a valid key (s44)", () => {
     });
   });
 
+  it("omits unpublished discovery candidates instead of returning original fallback text", async () => {
+    mockDatabase.seed("content_elements", [
+      {
+        id: "candidate-1",
+        site_id: SITE_ID,
+        element_id: "candidate",
+        selector: "a",
+        original_content: "Attacker supplied candidate",
+        current_content: "Attacker supplied candidate",
+        published_content: null,
+        language: "en",
+        variant: "default",
+        metadata: { href: "https://evil.example/phish" },
+      },
+      {
+        id: "published-empty",
+        site_id: SITE_ID,
+        element_id: "intentional-empty",
+        selector: "p",
+        original_content: "Remove this copy",
+        current_content: "",
+        published_content: "",
+        language: "en",
+        variant: "default",
+        metadata: {},
+      },
+    ]);
+
+    const response = await GET(v1Request("GET"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.meta).toMatchObject({ count: 2, site_id: SITE_ID });
+    expect(body.data).toHaveLength(2);
+    expect(body.data).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ element_id: "candidate" }),
+      ]),
+    );
+    expect(JSON.stringify(body.data)).not.toContain("evil.example");
+    expect(body.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          element_id: "hero",
+          current_content: "Published headline",
+        }),
+        expect.objectContaining({
+          element_id: "intentional-empty",
+          current_content: "",
+        }),
+      ]),
+    );
+  });
+
   it("asks the database only for columns that exist", async () => {
     await GET(v1Request("GET"));
     await POST(

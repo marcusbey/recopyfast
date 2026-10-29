@@ -4,7 +4,7 @@
  * The widget reports `element.textContent` — plain text, never markup
  * (public/embed/recopyfast.src.js:2363). POST /api/content/[siteId] used to push
  * that plain text through an *HTML* sanitizer and store the HTML serialization
- * into `original_content`, `current_content` and `published_content`
+ * into `original_content` and `current_content`
  * (route.ts:188-200 -> site-auth.ts:195-197 -> content-sanitizer.ts:80-86).
  *
  * A sanitizer is the right tool for markup and the wrong tool for prose. Every
@@ -71,7 +71,7 @@ interface StoredRow {
   selector: string;
   original_content: string;
   current_content: string;
-  published_content: string;
+  published_content: string | null;
   language: string;
   variant: string;
   page_path: string | null;
@@ -316,7 +316,7 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
     );
   });
 
-  it("writes all three content columns on the same row", async () => {
+  it("records the candidate without publishing it", async () => {
     const rows = await postContentMap({
       "rcf-headline": {
         selector: "h1",
@@ -327,10 +327,10 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
     const row = storedFor(rows, "rcf-headline");
 
     expect(row.original_content).toBe(row.current_content);
-    expect(row.current_content).toBe(row.published_content);
+    expect(row.published_content).toBeNull();
   });
 
-  it("writes the same verbatim value to all three content columns", async () => {
+  it("keeps the verbatim candidate private until an editor publishes", async () => {
     // original_content is the restore target. Poisoning it meant version
     // history could not recover the customer's real copy either — the damage
     // survived a rollback.
@@ -343,7 +343,43 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
 
     expect(row.original_content).toBe(content);
     expect(row.current_content).toBe(content);
-    expect(row.published_content).toBe(content);
+    expect(row.published_content).toBeNull();
+  });
+
+  it("ignores caller-supplied publication and staging fields", async () => {
+    const rows = await postContentMap({
+      "rcf-headline": {
+        selector: "h1",
+        content: "Observed host copy",
+        type: "text",
+        published_content: "Attacker publication",
+        staging_content: "Attacker draft",
+      } as ContentMap[string] & Record<string, unknown>,
+    });
+
+    expect(storedFor(rows, "rcf-headline")).toMatchObject({
+      original_content: "Observed host copy",
+      current_content: "Observed host copy",
+      published_content: null,
+    });
+    expect(storedFor(rows, "rcf-headline")).not.toHaveProperty(
+      "staging_content",
+    );
+  });
+
+  it("keeps first-writer duplicate protection on the full content identity", async () => {
+    await postContentMap({
+      "rcf-headline": {
+        selector: "h1",
+        content: "Observed host copy",
+        type: "text",
+      },
+    });
+
+    expect(serviceClient.upsert).toHaveBeenCalledWith(expect.any(Array), {
+      onConflict: "site_id,element_id,language,variant",
+      ignoreDuplicates: true,
+    });
   });
 
   it("persists a row for an over-length paragraph", async () => {
@@ -652,7 +688,7 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       expect(storedFor(rows, "rcf-headline").metadata).toEqual({ type: "h1" });
     });
 
-    it("captures safe authored href and alt values as the published baseline", async () => {
+    it("does not retain authored href and alt values from public discovery", async () => {
       const rows = await postContentMap({
         "rcf-link": {
           selector: "a",
@@ -665,8 +701,22 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
 
       expect(storedFor(rows, "rcf-link").metadata).toEqual({
         type: "a",
-        href: "/docs/getting-started",
-        alt: "Product documentation",
+      });
+    });
+
+    it("does not store caller-supplied href or alt where publish can promote them", async () => {
+      const rows = await postContentMap({
+        "rcf-hostile-link": {
+          selector: "a",
+          content: "Observed link text",
+          type: "a",
+          href: "https://evil.example/phish",
+          alt: "Hostile alternate text",
+        },
+      });
+
+      expect(storedFor(rows, "rcf-hostile-link").metadata).toEqual({
+        type: "a",
       });
     });
 
@@ -686,7 +736,7 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       });
     });
 
-    it("normalizes authored alt tabs and newlines without dropping the image", async () => {
+    it("drops authored alt text without dropping the discovered image", async () => {
       const rows = await postContentMap({
         "rcf-image": {
           selector: "img",
@@ -698,7 +748,6 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
 
       expect(storedFor(rows, "rcf-image").metadata).toEqual({
         type: "img",
-        alt: "Product team reviewing the launch",
       });
     });
 

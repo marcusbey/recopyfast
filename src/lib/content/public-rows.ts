@@ -101,17 +101,23 @@ function toPublicRow(row: PublicContentSourceRow): PublicContentRow {
     page_path: row.page_path,
     metadata: publishedMetadata(row.metadata),
     published_at: row.published_at,
-    current_content: row.published_content ?? row.original_content ?? "",
+    current_content: row.published_content ?? "",
   };
 }
 
 /**
- * Map database rows to visitor rows, or `null` when any row carries a private
- * column. The caller must treat `null` as a server fault and serve nothing.
+ * Map published database rows to visitor rows, or `null` when any input row
+ * carries a private column. The private-field check deliberately runs before
+ * the publication filter: a widened select is a server fault even if the
+ * leaking field happens to sit on an unpublished row.
+ *
+ * ADR 076: discovery candidates are stored with `published_content = NULL`.
+ * Omitting the whole row is the only backward-compatible way to keep its text
+ * and attributes from SSR consumers that render every returned row.
  */
 export function toPublicRows(
   rows: readonly PublicContentSourceRow[],
 ): PublicContentRow[] | null {
   if (rows.some(carriesPrivateField)) return null;
-  return rows.map(toPublicRow);
+  return rows.filter((row) => row.published_content !== null).map(toPublicRow);
 }

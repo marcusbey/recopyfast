@@ -86,10 +86,10 @@ const response = await fetch(
 }
 ```
 
-- **Render `current_content`.** It is what the embed applies: the published value, falling back
-  to the authored value, then to an empty string. Treat it as **text** and escape it into your
-  HTML — the embed applies it as `textContent`, never as markup. Skip a row whose
-  `current_content` is empty; the embed does the same.
+- **Render `current_content`.** It is the published value. Treat it as **text** and escape it into
+  your HTML — the embed applies it as `textContent`, never as markup. An intentionally published
+  empty string remains a row with `current_content: ""`; skip that row if the host should retain
+  its authored copy.
 - `rows` holds the page's own rows plus **all** of the site's shared rows (`page_path: null`),
   ordered by `element_id`. Every author-written `data-rcf-id` anchor is a shared row (see
   [Anchoring](#anchoring-data-rcf-id)), so an unknown page is `200` with the site's shared rows,
@@ -99,6 +99,10 @@ const response = await fetch(
   for an image, `current_content` is the `src`.
 - The rows are the same, field for field, as the embed's own read for that page. Staging drafts,
   unpublished link targets and publisher identity are never included.
+- Discovery candidates with `published_content: null` are omitted as whole rows, including their
+  text and href/alt metadata. They may be reported again by later visitors until an editor saves
+  and publishes them; existing client coalescing and fail-closed server limits bound those
+  reports. This leaves the host's own markup unchanged (ADR 076).
 
 Other statuses: `400` for another parameter order or set, or an invalid value (never cached),
 `404` with `{ "error": "Site not found" }` for an unknown or deleted site (cached like a `200`),
@@ -140,7 +144,9 @@ your site, or prefix them with the page.
 Keep the embed installed: it is still the editor, the fallback when your render could not fetch
 the snapshot, and how new elements are discovered. With the published text already in the HTML,
 it leaves the element alone. Discovery only inserts rows that do not exist yet, so an existing
-row's `original_content` is never overwritten with the published text you rendered.
+row's `original_content` is never overwritten with the published text you rendered. A new
+discovery stays private until an authenticated editor publishes it; historical non-NULL rows are
+preserved and are not classified or cleaned up by ADR 076.
 
 ## Freshness and retraction
 

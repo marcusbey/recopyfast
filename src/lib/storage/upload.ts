@@ -5,8 +5,9 @@
  * deliberate: the storage policies grant *no* insert/update/delete to anon or
  * authenticated roles (see the storage bucket migration), so this module is the
  * only path by which an object can be created. Authorisation therefore happens
- * once, in the route handler, against the site token — there is no second,
- * weaker door into the bucket for a client to find.
+ * once, in the route handler, against a verified editor credential plus the
+ * site owner's live entitlement — there is no second, weaker door into the
+ * bucket for a client to find. The public site token is never storage authority.
  */
 
 import { createServiceRoleClient } from "@/lib/supabase/service";

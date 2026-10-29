@@ -80,15 +80,33 @@ describe("toPublicRows", () => {
     ]);
   });
 
-  it("falls back to original_content, then to an empty string", () => {
+  it("omits unpublished discovery candidates instead of exposing fallback text", () => {
     const rows = toPublicRows([
-      sourceRow({ id: "a", published_content: null }),
+      sourceRow({
+        id: "a",
+        element_id: "hostile-link",
+        published_content: null,
+        metadata: { attributes: { href: "https://phish.example" } },
+      }),
       sourceRow({ id: "b", published_content: null, original_content: null }),
+      sourceRow({
+        id: "c",
+        published_content: "",
+        published_at: null,
+        language: "fr",
+        variant: "Spring Promo",
+      }),
     ]);
 
-    expect(rows?.map((row) => row.current_content)).toEqual([
-      "Authored headline",
-      "",
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: "c",
+        published_content: "",
+        current_content: "",
+        published_at: null,
+        language: "fr",
+        variant: "Spring Promo",
+      }),
     ]);
   });
 
@@ -146,6 +164,15 @@ describe("toPublicRows", () => {
       expect(toPublicRows([sourceRow({ id: "clean" }), leaking])).toBeNull();
     },
   );
+
+  it("refuses a private field before it can hide on an unpublished row", () => {
+    const unpublishedLeak = {
+      ...sourceRow({ published_content: null }),
+      staging_content: "private candidate",
+    } as PublicContentSourceRow;
+
+    expect(toPublicRows([unpublishedLeak])).toBeNull();
+  });
 
   it("rebuilds rows from the allow-list, dropping unknown columns", () => {
     const widened = {

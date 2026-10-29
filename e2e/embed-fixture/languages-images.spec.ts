@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 import {
   FIXTURE_ELEMENT_IDS,
   FIXTURE_SITE_ID,
-  FIXTURE_SITE_TOKEN,
   FIXTURE_STAGING_TOKEN,
   startFixtureServers,
   type FixtureServers,
@@ -150,8 +149,13 @@ test.describe("built embed fixture: languages and images", () => {
     expect(await image.getAttribute("src")).not.toBe(previousSrc);
 
     const upload = fixture.api.latestRequest("/api/upload/image", "POST");
-    expect(upload?.headers.authorization).toBe(`Bearer ${FIXTURE_SITE_TOKEN}`);
-    expect(upload?.multipart?.fields).toEqual({ siteId: FIXTURE_SITE_ID });
+    // s126: the public site token no longer authorises uploads. A staging-link
+    // editor sends its staging credential as a form field and no bearer.
+    expect(upload?.headers.authorization).toBeUndefined();
+    expect(upload?.multipart?.fields).toEqual({
+      siteId: FIXTURE_SITE_ID,
+      stagingToken: FIXTURE_STAGING_TOKEN,
+    });
     expect(upload?.multipart?.files).toEqual([
       {
         fieldName: "file",
