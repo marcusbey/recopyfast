@@ -76,8 +76,8 @@ border-tone-<name>-border`. Every status treatment in the product resolves to on
 a status reads identically whether drawn as a dot, a bar or a badge.
 
 **Marketing exception (documented, keep):** landing, demo, privacy and terms — plus the SEO
-cluster routes `/compare` and `/compare/*`, `/cms-for/*`, `/for/*` and `/agencies/*` per
-[ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md) — sit on the WebGL sky and use
+cluster routes `/compare` and `/compare/*`, `/guides` and `/guides/*` (s123), `/cms-for/*`,
+`/for/*` and `/agencies/*` per [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md) — sit on the WebGL sky and use
 the legacy `--sky-*` / `--slate-*` palette. Accent moments there use teal or `sky` — never
 emerald, purple, or a second saturated hue.
 
@@ -318,6 +318,15 @@ created, in that story.
 | `Metric` | icon slot | A number with a label, `.text-metric .tabular`. Square from s66a. Flat from s66b2: no `.surface-interactive`; a linked metric changes its border colour only (`hover:border-primary/40`, as Card `interactive`) | s66a / s66b2 |
 | `IconTile` | `neutral` `accent` `info` `success` `warning` `danger` × `sm` `default` `lg` | The brand's icon container, square. Use it instead of a circle around an icon. `bg-primary text-primary-foreground` for the `<>` mark | s66a |
 | `ContentValue` | — | Rendering stored content safely. Square | s66a |
+
+**SpotMeter (marketing only, s124).** `src/components/sections/SpotMeter.tsx`, not a `ui/`
+primitive: used once, under the `lifetime_agency` price in `Pricing`. One cell per capped spot
+(`limit` cells): taken `bg-slate-500/45`, next `bg-teal-700`, left `bg-teal-700/20`; `h-[18px]`,
+`gap-0.5`, `rounded-[1px]`; rows of 25 at every breakpoint when `limit > 25` (it sits in the
+card's ~224px right column). `role="img"` with the count as its `aria-label`, cells
+`aria-hidden`. No motion. It draws only a count that passed
+`parseSpotAvailability` (`spot-meter.ts`: integers, `1 ≤ limit ≤ 100`, `0 ≤ remaining ≤ limit`,
+`soldOut === (remaining === 0)`); anything else shows the card's unknown state and no meter.
 
 **Brand mark:** the `<>` glyph on a solid `primary` tile. No gradient, ever — including logos,
 favicons and OG images.

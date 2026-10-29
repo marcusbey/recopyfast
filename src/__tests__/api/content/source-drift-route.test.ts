@@ -201,12 +201,15 @@ describe("GET /api/content/:siteId — source_seen", () => {
     expect(row).not.toHaveProperty("source_seen");
   });
 
-  it("treats a NULL published copy the way the widget does: unedited", async () => {
+  // ADR 076 (s126) superseded this case's old contract: a NULL published copy
+  // used to be served as `current_content = original_content`, unedited. It is
+  // now an unpublished discovery candidate and never reaches the widget at all,
+  // so it can carry no `source_seen` either.
+  it("omits an unpublished candidate, so it can never report drift", async () => {
     serve([{ ...uneditedRow, published_content: null }]);
-    const [row] = await (await widgetGet()).json();
+    const rows = await (await widgetGet()).json();
 
-    expect(row.current_content).toBe("Hello");
-    expect(row).not.toHaveProperty("source_seen");
+    expect(rows).toEqual([]);
   });
 
   it("does not hand the raw baseline and drift columns to the page", async () => {

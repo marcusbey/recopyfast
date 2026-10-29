@@ -3,7 +3,7 @@
 s119 ([ADR 075](../decisions/075-source-drift-is-flagged-not-enforced.md)) records when a
 developer's deploy changes the source text of an element whose override visitors still see, and
 lets a site admin resolve it from the Changes page. Migration:
-`supabase/migrations/20261023120000_content_source_drift.sql` — three nullable columns on
+`supabase/migrations/20261029120000_content_source_drift.sql` — three nullable columns on
 `content_elements`, a replaced row-version trigger body, and two service-role functions
 (`record_content_source_drift`, `resolve_content_source_drift`).
 
@@ -40,7 +40,7 @@ supabase migration list --linked
 supabase db push --linked --dry-run
 ```
 
-The dry run must list **only** `20261023120000` (plus any other reviewed pending migration you
+The dry run must list **only** `20261029120000` (plus any other reviewed pending migration you
 intend to ship in the same step). Stop if the project identity or the list differs. Then:
 
 ```bash

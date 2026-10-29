@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>s124 Lifetime spots — design reference</title>
+<!--
+  REFERENCE ONLY. Execute edits the lifetime_agency card inside the real Pricing component.
+  Editorial tokens: cream #f0ecdf section, white cards, ink #142024, teal #287f7c, divider #d9d3c6,
+  muted #4c5552, tile #ebe7dc, 3px radius. Numbers = live payload 2026-10-26.
+  Everything except the right-hand lifetime card is today's section, drawn for context.
+-->
+<style>
+  :root { --ink:#142024; --teal:#287f7c; --line:#d9d3c6; --muted:#4c5552; --tile:#ebe7dc; --sec:#f0ecdf; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--sec); color:var(--ink);
+    font:16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width:1152px; margin:0 auto; padding:64px 24px; }
+  .note { font-size:14px; color:var(--muted); background:#fff; border:1px dashed var(--teal);
+    border-radius:3px; padding:12px 16px; margin-bottom:40px; }
+  .eyebrow { color:var(--teal); font-size:14px; font-weight:600; letter-spacing:.075em; text-transform:uppercase; }
+  .head { text-align:center; margin-bottom:48px; }
+  .head h2 { font:500 48px/1.08 Georgia, "Times New Roman", serif; letter-spacing:-0.045em; margin:16px 0; }
+  .head h2 span { color:var(--muted); }
+  .head p { color:#475569; font-size:19px; margin:0 0 24px; }
+  .toggle { display:inline-flex; border:1px solid var(--line); background:#fff; border-radius:3px; padding:4px; gap:4px; font-size:14px; }
+  .toggle span { padding:8px 22px; border-radius:2px; }
+  .toggle .on { background:var(--teal); color:#fff; }
+  .plans { display:grid; grid-template-columns:repeat(3,1fr); gap:28px; }
+  .life { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:32px; }
+  @media (max-width:900px){ .plans,.life{ grid-template-columns:1fr; } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:3px; padding:32px; }
+  .card.hl { border:2px solid var(--teal); }
+  .context { opacity:.55; }
+  .tile { width:48px; height:48px; border-radius:3px; background:var(--tile); display:grid; place-items:center; color:var(--teal); font-weight:700; margin-bottom:16px; }
+  h3 { font-size:24px; font-weight:600; margin:0 0 6px; }
+  .desc { color:#475569; font-size:14px; margin:0; }
+  .amt { display:flex; align-items:baseline; gap:4px; margin:24px 0; }
+  .amt b { font-size:44px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .amt small { color:#475569; }
+  ul { list-style:none; padding:0; margin:20px 0 0; display:grid; gap:10px; font-size:14px; color:#334155; }
+  li::before { content:"✓"; color:var(--teal); font-weight:700; margin-right:10px; }
+  .btn { display:block; margin-top:20px; text-align:center; background:var(--teal); color:#fff; border-radius:3px;
+    padding:12px 24px; font-weight:600; text-decoration:none; }
+  .btn.off { background:#e2e8f0; color:#64748b; }
+  .btn.ghost { background:none; color:var(--teal); border:1px solid var(--teal); }
+
+  /* ---- the only new thing: the spot meter + its two lines ---- */
+  .new { outline:2px dashed var(--teal); outline-offset:6px; }
+  .meter { display:grid; grid-template-columns:repeat(var(--n),1fr); gap:2px; margin-top:-8px; }
+  .cell { height:18px; border-radius:1px; background:color-mix(in srgb, var(--teal) 22%, transparent); }
+  .cell.taken { background:var(--muted); opacity:.45; }
+  .cell.next { background:var(--teal); }
+  .count { margin:10px 0 0; font-size:14px; font-weight:600; color:#115e59; font-variant-numeric:tabular-nums; }
+  .hold { margin:2px 0 0; font-size:13px; color:var(--muted); }
+  .narrow .meter { grid-template-columns:repeat(25,1fr); row-gap:4px; }
+
+  .label { margin:48px 0 12px; font-size:12px; font-weight:600; letter-spacing:.075em; text-transform:uppercase; color:var(--teal); }
+  .states { display:grid; grid-template-columns:repeat(3,1fr); gap:24px; }
+  @media (max-width:900px){ .states{ grid-template-columns:1fr; } }
+  .phone { width:343px; max-width:100%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note"><b>s124, revised.</b> Today's pricing section, unchanged, except the dashed card. That card
+    gains a row of its 50 real spots (taken / next / left) and one count line. No new headline, no layout change,
+    no new "founding" copy; button reads "Get lifetime access". Faded = context only.</div>
+
+  <div class="head context">
+    <div class="eyebrow">Pricing</div>
+    <h2>Simple pricing,<br><span>no surprises</span></h2>
+    <p>Choose the plan that fits your needs. Upgrade anytime.</p>
+    <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+  </div>
+
+  <div class="plans context">
+    <div class="card"><div class="tile">✦</div><h3>Starter</h3><p class="desc">1 website</p>
+      <div class="amt"><b>$9</b><small>/month</small></div><a class="btn ghost">Get started</a></div>
+    <div class="card hl"><div class="tile">↑</div><h3>Pro</h3><p class="desc">Up to 5 websites</p>
+      <div class="amt"><b>$19</b><small>/month</small></div><a class="btn">Get started</a></div>
+    <div class="card"><div class="tile">↑</div><h3>Agency</h3><p class="desc">10 client websites</p>
+      <div class="amt"><b>$49</b><small>/month</small></div><a class="btn ghost">Get started</a></div>
+  </div>
+
+  <div class="life">
+    <div class="card context"><div class="tile">∞</div><h3>Lifetime Pro</h3>
+      <p class="desc">Pay once, keep every Pro feature forever — 5 websites and AI features. No recurring billing.</p>
+      <ul><li>Everything in Pro</li><li>One payment, no renewal</li></ul>
+      <div class="amt"><b>$199</b><small>once</small></div><a class="btn">Buy Lifetime Pro</a></div>
+
+    <div class="card new"><div class="tile">∞</div><h3>Founding Agency (lifetime)</h3>
+      <p class="desc">Pay once for permanent Agency access with 250 AI credits a month; limited to the first 50 completed sales</p>
+      <ul><li>Everything in Agency, with 250 AI credits a month</li><li>One payment, no renewal</li><li>Founding offer limited to 50 completed sales</li></ul>
+      <div class="amt"><b>$299</b><small>once</small></div>
+      <div class="meter" style="--n:50" data-n="50" data-taken="0" role="img" aria-label="50 of 50 spots left"></div>
+      <p class="count">50 of 50 spots left at $299</p>
+      <p class="hold">An open checkout can hold a spot for a short time.</p>
+      <a class="btn">Get lifetime access</a></div>
+  </div>
+
+  <div class="label">States of the same card (illustrative counts)</div>
+  <div class="states">
+    <div class="card"><div class="amt"><b>$299</b><small>once</small></div>
+      <div class="meter" style="--n:50" data-n="50" data-taken="17" role="img" aria-label="33 of 50 spots left"></div>
+      <p class="count">33 of 50 spots left at $299</p><p class="hold">An open checkout can hold a spot for a short time.</p>
+      <a class="btn">Get lifetime access</a></div>
+    <div class="card"><div class="amt"><b>$299</b><small>once</small></div>
+      <div class="meter" style="--n:50" data-n="50" data-taken="50" role="img" aria-label="All 50 spots taken"></div>
+      <p class="count">Sold out</p>
+      <a class="btn off">Sold out</a></div>
+    <div class="card"><div class="amt"><b>$299</b><small>once</small></div>
+      <p class="count">Availability temporarily unavailable</p>
+      <p class="hold">No meter when the count is missing or out of bounds (today's behaviour).</p>
+      <a class="btn off">Availability unavailable</a></div>
+  </div>
+
+  <div class="label">Narrow card (mobile): 2 rows of 25</div>
+  <div class="card phone narrow"><div class="amt"><b>$299</b><small>once</small></div>
+    <div class="meter" data-n="50" data-taken="0" role="img" aria-label="50 of 50 spots left"></div>
+    <p class="count">50 of 50 spots left at $299</p><a class="btn">Get lifetime access</a></div>
+</div>
+<script>
+  // Mockup only. Production derives cells from the validated count.
+  document.querySelectorAll(".meter").forEach((el) => {
+    const n = +el.dataset.n, t = +el.dataset.taken;
+    for (let i = 0; i < n; i++) {
+      const c = document.createElement("span");
+      c.className = "cell" + (i < t ? " taken" : i === t ? " next" : "");
+      el.appendChild(c);
+    }
+  });
+</script>
+</body>
+</html>

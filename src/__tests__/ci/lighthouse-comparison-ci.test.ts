@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildComparisonLighthouseUrls } from "@/lib/compare/lighthouse";
+import { buildGuideLighthouseUrls } from "@/lib/guides/lighthouse";
 import {
   buildLighthouseRunPlan,
   parseLoopbackBaseUrl,
@@ -18,7 +19,11 @@ import {
 
 const ROOT = process.cwd();
 const BASE_URL = "http://127.0.0.1:4175";
-const EXPECTED_URLS = buildComparisonLighthouseUrls(BASE_URL);
+// s123: the owner guides joined the gate (index + one template page).
+const EXPECTED_URLS = [
+  ...buildComparisonLighthouseUrls(BASE_URL),
+  ...buildGuideLighthouseUrls(BASE_URL),
+];
 const EXPECTED_PROFILE = {
   formFactor: "mobile",
   throttlingMethod: "devtools",
@@ -176,9 +181,9 @@ describe("comparison Lighthouse CI contract", () => {
     const plan = buildLighthouseRunPlan(BASE_URL);
 
     expect(plan.urls).toEqual(EXPECTED_URLS);
-    expect(plan.urls).toHaveLength(8);
+    expect(plan.urls).toHaveLength(10);
     expect(plan.urls[0]).toBe(`${BASE_URL}/compare`);
-    expect(new Set(plan.urls).size).toBe(8);
+    expect(new Set(plan.urls).size).toBe(10);
     expect(plan.lhciPath).toBe(join(ROOT, "node_modules", ".bin", "lhci"));
     expect(plan.args.slice(0, 3)).toEqual([
       "autorun",
@@ -278,9 +283,9 @@ describe("comparison Lighthouse CI contract", () => {
     writeManifestFixture(outputDir, EXPECTED_URLS);
 
     expect(validateLighthouseManifest(outputDir, EXPECTED_URLS, 5)).toEqual({
-      routes: 8,
-      reports: 40,
-      representativeRuns: 8,
+      routes: 10,
+      reports: 50,
+      representativeRuns: 10,
     });
   });
 
@@ -291,7 +296,7 @@ describe("comparison Lighthouse CI contract", () => {
     writeFileSync(manifestPath, JSON.stringify(manifest.slice(0, -1)));
     expect(() =>
       validateLighthouseManifest(outputDir, EXPECTED_URLS, 5),
-    ).toThrow(/40 reports/);
+    ).toThrow(/50 reports/);
 
     writeFileSync(
       manifestPath,
@@ -427,10 +432,10 @@ describe("comparison Lighthouse CI contract", () => {
     expect(workflow).toContain("npm run build");
     expect(workflow).toContain("npm run lighthouse:ci");
     expect(workflow).toContain(
-      "Comparison Lighthouse (applied mobile, 8 routes)",
+      "Comparison and guide Lighthouse (applied mobile, 10 routes)",
     );
     expect(workflow).toContain(
-      "Run five applied-mobile Lighthouse passes on all comparison routes",
+      "Run five applied-mobile Lighthouse passes on all comparison and guide routes",
     );
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/lighthouse");

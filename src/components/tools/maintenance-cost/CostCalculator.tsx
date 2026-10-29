@@ -31,6 +31,7 @@ import { track } from "@/lib/analytics/google-analytics/gtag";
 import { trackToolGoal } from "@/lib/analytics/datafast-client";
 import { CostResultCard } from "./CostResultCard";
 import { EmbedSnippet } from "./EmbedSnippet";
+import { OwnerNextStep } from "../OwnerNextStep";
 
 /** How long typing must pause before the address bar follows. */
 const URL_SYNC_DEBOUNCE_MS = 300;
@@ -264,6 +265,16 @@ export function CostCalculator({ siteOrigin }: { siteOrigin: string }) {
             <CostResultCard result={result} />
             <EmbedSnippet result={result} siteOrigin={siteOrigin} />
           </section>
+        ) : null}
+
+        {/* s121: secondary — the calculator is framed for freelancers, and
+            the page's own CTA stays the main one. */}
+        {isComplete ? (
+          <OwnerNextStep
+            slug={TOOL_SLUG}
+            hasIssues={false}
+            emphasis="secondary"
+          />
         ) : null}
       </div>
     </div>

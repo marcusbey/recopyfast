@@ -2957,22 +2957,27 @@
      *
      * Contract (owned by the API agent):
      *   POST /api/upload/image
-     *     multipart/form-data: file=<File>, siteId=<uuid>
-     *     Authorization: Bearer <site token>
+     *     multipart/form-data: file=<File>, siteId=<uuid>, editToken/stagingToken
+     *     X-RCF-Editor-Grant when a device grant is active
      *   -> 200 { url, width, height } | 400 | 401 | 413
      *
      * XMLHttpRequest rather than fetch because fetch still cannot report upload
      * progress, and a multi-megabyte photo with no feedback reads as a hang.
      */
     uploadImage(file, onProgress) {
+      const tokenBody = this.editorTokenBody();
+      const authHeaders = this.editorAuthHeaders();
       return new Promise(function(resolve, reject) {
         const form = new FormData();
         form.append('file', file);
         form.append('siteId', SITE_ID);
+        for (const [key, value] of Object.entries(tokenBody)) {
+          if (value) form.append(key, value);
+        }
 
         const xhr = new XMLHttpRequest();
         xhr.open('POST', RECOPYFAST_API + '/upload/image');
-        xhr.setRequestHeader('Authorization', 'Bearer ' + SITE_TOKEN);
+        for (const [name, value] of Object.entries(authHeaders)) xhr.setRequestHeader(name, value);
         xhr.timeout = 120000;
 
         if (xhr.upload && typeof onProgress === 'function') {
@@ -2991,12 +2996,8 @@
             /* fall through to the status-based message */
           }
 
-          if (xhr.status === 200 && body.url) {
-            resolve({ url: body.url, width: body.width, height: body.height });
-            return;
-          }
-
-          if (xhr.status === 401) reject(new Error('Not authorised to upload to this site.'));
+          if (xhr.status === 200 && body.url) resolve({ url: body.url, width: body.width, height: body.height });
+          else if (xhr.status === 401) reject(new Error('Not authorised to upload to this site.'));
           else if (xhr.status === 413) reject(new Error('Image is too large for the server.'));
           else if (xhr.status === 400) reject(new Error(body.error || 'Server rejected this file.'));
           else if (xhr.status === 404) reject(new Error('Image uploads are not enabled yet for this deployment.'));

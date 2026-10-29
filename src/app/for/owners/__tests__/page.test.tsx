@@ -91,14 +91,14 @@ describe("/for/owners", () => {
     );
   });
 
-  it("backs the $75 headline with the sourced per-change range", () => {
+  it("backs the $75 headline with the sourced hourly range", () => {
     render(<ForOwnersPage />);
     const problem = screen.getByRole("region", {
       name: "Stop paying $75 to fix a typo.",
     });
 
     expect(problem).toHaveTextContent(
-      "Small website edits typically cost $50–150 each when you pay your developer per change",
+      "Freelance web developers typically charge $50–150 an hour, so even a small change can cost more than the edit itself",
     );
   });
 

@@ -157,11 +157,17 @@ export async function POST(request: NextRequest) {
     // Get the style
     const { data: style, error: styleError } = await supabase
       .from("copy_styles")
-      .select("id, name, prompt")
+      .select("id, name, prompt, site_id, is_preset")
       .eq("id", styleId)
       .single();
 
-    if (styleError || !style) {
+    // Only a global preset or this site's own style may be applied (s125, M1).
+    // Another site's style gets the same 404 as an unknown id, so the response
+    // is no oracle for which style ids exist.
+    const isApplicable =
+      style !== null && (style.site_id === siteId || style.site_id === null);
+
+    if (styleError || !style || !isApplicable) {
       return withCors(
         NextResponse.json({ error: "Style not found" }, { status: 404 }),
         origin,

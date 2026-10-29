@@ -87,6 +87,14 @@ const REPLAY_SUITES = [
   "src/__tests__/db/content-source-drift.test.ts",
   // ADR 074: datafast_visitors is service-role only. Plain Postgres is enough.
   "src/__tests__/db/datafast-visitors.test.ts",
+  // s122: site_install_emails is the owner install email's idempotency key —
+  // one claim wins a race, no web principal holds any privilege on it.
+  "src/__tests__/db/site-install-emails.test.ts",
+  // s125 (ADR 075): credit_purchases is column-scoped and trigger-pinned for
+  // web roles; copy_styles takes no web-role write and pins is_preset to
+  // site_id IS NULL. Both include a restore-the-dangerous-grant control.
+  "src/__tests__/db/credit-purchase-privileges.test.ts",
+  "src/__tests__/db/copy-style-privileges.test.ts",
 ];
 
 function run(command, args, options = {}) {

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   lighthouse:
-    name: Comparison Lighthouse (applied mobile, 8 routes)
+    name: Comparison and guide Lighthouse (applied mobile, 10 routes)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -53,7 +53,7 @@ jobs:
       - name: Build production app
         run: npm run build
 
-      - name: Run five applied-mobile Lighthouse passes on all comparison routes
+      - name: Run five applied-mobile Lighthouse passes on all comparison and guide routes
         run: npm run lighthouse:ci
 
       - name: Upload credential-free Lighthouse reports

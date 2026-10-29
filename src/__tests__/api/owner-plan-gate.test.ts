@@ -565,7 +565,14 @@ function seedDatabase() {
     content_versions: { id: VERSION, site_id: SITE, version_number: 1 },
     // The A/B test PUT reads back its own site before the gate (s56).
     ab_tests: { id: AB_TEST, site_id: SITE },
-    copy_styles: { id: STYLE, name: "Bold", prompt: "Make it bold" },
+    // s125: styles/apply only applies a global preset or the site's own style.
+    copy_styles: {
+      id: STYLE,
+      site_id: null,
+      is_preset: true,
+      name: "Bold",
+      prompt: "Make it bold",
+    },
     billing_subscriptions: null,
   };
   mockDb.rows = {

@@ -109,3 +109,42 @@ They exist (10589293 for the app, 10589296 for the realtime service). Enabling e
 free uptime seat: upgrade the plan or release the seat the other project holds. Check each one's
 URL against the table at the top before enabling it. Keep the GitHub workflow running
 until a Sentry monitor has fired on a real outage at least once.
+
+## "Install detected" email ledger (s122)
+
+`public.site_install_emails` holds one row per site that has been mailed (or tried). It is
+service-role only, so run these in the Supabase SQL editor. No row ever holds an address.
+
+A row is written only after the site, its owner (`resolveSiteOwnerId`, the same owner billing
+charges) and the owner's address are resolved. A failure or 5 s timeout before that point writes
+**no row** — it shows in Sentry as `install_email_stage:resolve` with its
+`install_email_code` (`owner_lookup_error`, `lookup_timeout`, `no_owner`, ...). After the row is
+written, a failure ends it as `failed`.
+
+**Stuck `pending`** — the invocation died between the claim and the status write (function
+killed mid-send). The mail may or may not have gone out; the row blocks a resend either way.
+
+```sql
+SELECT site_id, created_at
+FROM public.site_install_emails
+WHERE status = 'pending' AND created_at < NOW() - INTERVAL '15 minutes'
+ORDER BY created_at;
+```
+
+**Failures by code** — `provider_rejected` (Resend refused; its own log has the code),
+`provider_timeout` (no answer in 5 s; the mail may still have arrived), `exception`.
+
+```sql
+SELECT error_code, COUNT(*) AS sites, MAX(updated_at) AS latest
+FROM public.site_install_emails
+WHERE status = 'failed'
+GROUP BY error_code
+ORDER BY sites DESC;
+```
+
+Nothing re-sends: the trigger fires once per site, on its flip to `live`. Treat stuck and
+failed rows as a list of owners to check on (confirm in Resend first whether a mail went out);
+the site itself is live and editable either way.
+
+Not part of `/api/health`: that endpoint is anonymous and reports component state only (s84), so
+a backlog count from a service-role table does not fit it.

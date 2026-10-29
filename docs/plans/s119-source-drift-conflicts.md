@@ -10,7 +10,7 @@ Goal and semantics: [ADR 075](../decisions/075-source-drift-is-flagged-not-enfor
 - [x] Human validation: owner's standing directive for this work, relayed by the parent session on
       October 22, 2026 ("Claude acts as architect, implementation goes to subagents"; done = PR open
       with tests). Independent review remains the gate.
-- [x] **Migration** `supabase/migrations/20261023120000_content_source_drift.sql`: add
+- [x] **Migration** `supabase/migrations/20261029120000_content_source_drift.sql`: add
       `source_baseline TEXT`, `source_drift_content TEXT`, `source_drift_detected_at TIMESTAMPTZ`
       to `content_elements` (nullable, no default). Functions, `SECURITY DEFINER`,
       `SET search_path = public, pg_temp`, `REVOKE ALL ... FROM PUBLIC, anon, authenticated`,
@@ -139,7 +139,7 @@ ADR's decision.
 - **Migration first, then deploy** — runbook:
   [`docs/operations/s119-source-drift-deploy-order.md`](../operations/s119-source-drift-deploy-order.md)
   (review M2). The visitor content GET now selects the three new columns:
-  an app deployed before `20261023120000_content_source_drift.sql` is applied answers that read
+  an app deployed before `20261029120000_content_source_drift.sql` is applied answers that read
   with a 500, and every widget falls back to the authored page (published copy disappears until
   the migration lands). The migration is additive and safe to apply ahead of the code.
 

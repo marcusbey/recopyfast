@@ -330,11 +330,11 @@ describe("GET /api/published/[siteId] — a served snapshot", () => {
     });
     expect(body.rows.map((row) => row.element_id)).toEqual([
       "cta-link",
-      "empty-row",
       "hero-title",
       "nav-home",
-      "never-published",
     ]);
+    expect(JSON.stringify(body.rows)).not.toContain("never-published");
+    expect(JSON.stringify(body.rows)).not.toContain("empty-row");
   });
 
   it("serves only the public projection, never staging or publisher data", async () => {
@@ -435,7 +435,7 @@ describe("GET /api/published/[siteId] — a served snapshot", () => {
     const response = await published(CANONICAL_PRICING);
 
     expect(response.status).toBe(200);
-    expect((await bodyOf(response)).rows).toHaveLength(5);
+    expect((await bodyOf(response)).rows).toHaveLength(3);
     expect(new Set(tablesRead())).toEqual(
       new Set(["sites", "content_elements"]),
     );
@@ -475,6 +475,21 @@ describe("GET /api/published/[siteId] — a served snapshot", () => {
 });
 
 describe("retraction and freshness at the origin", () => {
+  it("retracts a row and changes the ETag when publication becomes null", async () => {
+    const before = await published(CANONICAL_PRICING);
+    const beforeTag = before.headers.get("etag");
+    db.content_elements = db.content_elements.map((row) =>
+      row.id === "p-1" ? { ...row, published_content: null } : row,
+    );
+
+    const after = await published(CANONICAL_PRICING);
+    const afterTag = after.headers.get("etag");
+    const { rows } = await bodyOf(after);
+
+    expect(rows.map((row) => row.id)).not.toContain("p-1");
+    expect(afterTag).not.toBe(beforeTag);
+  });
+
   it("serves the current value once a published value is superseded", async () => {
     const before = await published(CANONICAL_PRICING);
     const beforeTag = before.headers.get("etag");

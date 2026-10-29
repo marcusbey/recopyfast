@@ -25,6 +25,8 @@ export const DATAFAST_GOALS = {
   toolTypoFinderRun: "tool_typo_finder_run",
   /** The maintenance cost calculator produced the visitor's own result. */
   toolCostCalculatorUsed: "tool_cost_calculator_used",
+  /** The outdated website checker produced its report (s99). */
+  toolOutdatedCheckerRun: "tool_outdated_checker_run",
   /** Any future /tools entry without a dedicated goal (param: its slug). */
   toolRun: "tool_run",
   /** The install snippet (or the agent brief) was copied. */
@@ -102,6 +104,19 @@ export const DATAFAST_CTA_LOCATIONS = [
   "owners_final",
   "wp_guide",
   "dev_guide",
+  // s121: the owner next step under each free tool's result.
+  "typo_finder_result",
+  "outdated_checker_result",
+  "cost_calculator_result",
+  // s123: the owner guides. One location per guide, `guide_<slug>` with the
+  // slug's hyphens as underscores (`dataFastGuideLocation`); a guide whose
+  // location is missing here fails its registry at module load.
+  "guides_index",
+  "guide_update_website_hours_without_a_developer",
+  "guide_edit_wordpress_text_without_elementor",
+  "guide_change_prices_on_your_website_yourself",
+  "guide_edit_a_website_someone_else_built",
+  "guide_how_much_does_a_small_website_change_cost",
 ] as const;
 
 export type DataFastCtaLocation = (typeof DATAFAST_CTA_LOCATIONS)[number];
@@ -136,6 +151,7 @@ export interface DataFastGoalParams {
   demo_edit: { surface: "demo" | "try" };
   tool_typo_finder_run: NoParams;
   tool_cost_calculator_used: NoParams;
+  tool_outdated_checker_run: NoParams;
   tool_run: { tool: string };
   install_snippet_copied: { location: DataFastSnippetLocation };
   install_method_selected: {
@@ -165,6 +181,7 @@ export type DataFastClientGoal =
   | "demo_edit"
   | "tool_typo_finder_run"
   | "tool_cost_calculator_used"
+  | "tool_outdated_checker_run"
   | "tool_run"
   | "install_snippet_copied"
   | "install_method_selected"
@@ -204,10 +221,17 @@ export function sanitizeGoalParams(params: unknown): Record<string, string> {
 }
 
 /**
- * Where the CTA leads: the signup form, checkout, a try-it surface, or an
- * install guide (s120: the owner page's "send this to your developer").
+ * Where the CTA leads: the signup form, checkout, a try-it surface, an
+ * install guide (s120: the owner page's "send this to your developer"), or
+ * the site-owner page `/for/owners` (s121).
  */
-export type DataFastCtaTarget = "signup" | "checkout" | "demo" | "try" | "docs";
+export type DataFastCtaTarget =
+  | "signup"
+  | "checkout"
+  | "demo"
+  | "try"
+  | "docs"
+  | "owners";
 
 export type DataFastCtaAttributes = {
   "data-fast-goal": "cta_click";
@@ -238,18 +262,19 @@ export function dataFastCtaAttributes(
   };
 }
 
-const TOOL_GOALS: Readonly<
-  Record<string, "tool_typo_finder_run" | "tool_cost_calculator_used">
-> = {
+type DedicatedToolGoal =
+  | "tool_typo_finder_run"
+  | "tool_cost_calculator_used"
+  | "tool_outdated_checker_run";
+
+const TOOL_GOALS: Readonly<Record<string, DedicatedToolGoal>> = {
   "website-spell-checker": DATAFAST_GOALS.toolTypoFinderRun,
   "website-maintenance-cost": DATAFAST_GOALS.toolCostCalculatorUsed,
+  "outdated-website-checker": DATAFAST_GOALS.toolOutdatedCheckerRun,
 };
 
 export type DataFastToolGoal =
-  | {
-      name: "tool_typo_finder_run" | "tool_cost_calculator_used";
-      params: NoParams;
-    }
+  | { name: DedicatedToolGoal; params: NoParams }
   | { name: "tool_run"; params: { tool: string } };
 
 /** The goal a successful run of the tool at `slug` sends. */
@@ -260,4 +285,38 @@ export function dataFastToolGoal(slug: string): DataFastToolGoal {
   return dedicated
     ? { name: dedicated, params: {} }
     : { name: DATAFAST_GOALS.toolRun, params: { tool: slug } };
+}
+
+/**
+ * The `cta_click` location of the owner next step under a tool's result
+ * (s121). A tool without one gets no location, so its owner links carry no
+ * goal rather than a wrong one.
+ */
+const TOOL_RESULT_LOCATIONS: Readonly<Record<string, DataFastCtaLocation>> = {
+  "website-spell-checker": "typo_finder_result",
+  "outdated-website-checker": "outdated_checker_result",
+  "website-maintenance-cost": "cost_calculator_result",
+};
+
+export function dataFastToolResultLocation(
+  slug: string,
+): DataFastCtaLocation | undefined {
+  return Object.prototype.hasOwnProperty.call(TOOL_RESULT_LOCATIONS, slug)
+    ? TOOL_RESULT_LOCATIONS[slug]
+    : undefined;
+}
+
+/**
+ * The `cta_click` location of an owner guide's CTA block (s123):
+ * `guide_<slug with underscores>`, but only when that string is a listed
+ * location. An unlisted guide gets `undefined`, and the guide registry refuses
+ * to load without one, so a new guide cannot ship a goal nobody declared.
+ */
+export function dataFastGuideLocation(
+  slug: string,
+): DataFastCtaLocation | undefined {
+  const candidate = `guide_${slug.replace(/-/g, "_")}`;
+  return (DATAFAST_CTA_LOCATIONS as readonly string[]).includes(candidate)
+    ? (candidate as DataFastCtaLocation)
+    : undefined;
 }

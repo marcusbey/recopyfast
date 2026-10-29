@@ -2,8 +2,14 @@ import sharp from "sharp";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { OPTIONS, POST } from "@/app/api/upload/image/route";
-import { authorizeSiteRequest } from "@/lib/security/site-auth";
-import { extractSiteToken } from "@/lib/security/ingest-auth";
+import {
+  requireEditorPermission,
+  validateEditorTokenFromRequest,
+} from "@/lib/auth/editor-access";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 
@@ -46,11 +52,18 @@ jest.mock("next/server", () => {
   return { NextRequest: class {}, NextResponse: MockNextResponse };
 });
 
-jest.mock("@/lib/security/site-auth", () => ({
-  authorizeSiteRequest: jest.fn(),
+jest.mock("@/lib/auth/editor-access", () => ({
+  validateEditorTokenFromRequest: jest.fn(),
+  requireEditorPermission: jest.fn(),
 }));
-jest.mock("@/lib/security/ingest-auth", () => ({
-  extractSiteToken: jest.fn(),
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  checkOwnerCanEdit: jest.fn(),
+  ownerCanEditRefusal: jest.fn((result) =>
+    NextResponse.json(
+      { error: result.reason },
+      { status: result.reason === "unavailable" ? 503 : 402 },
+    ),
+  ),
 }));
 jest.mock("@/lib/api/rate-limit", () => ({
   enforceRateLimit: jest.fn(),
@@ -64,11 +77,19 @@ const PUBLIC_URL =
   "https://test.supabase.co/storage/v1/object/public/assets/stored.png";
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 
-const mockAuthorizeSiteRequest = authorizeSiteRequest as jest.MockedFunction<
-  typeof authorizeSiteRequest
+const mockValidateEditorToken =
+  validateEditorTokenFromRequest as jest.MockedFunction<
+    typeof validateEditorTokenFromRequest
+  >;
+const mockRequireEditorPermission =
+  requireEditorPermission as jest.MockedFunction<
+    typeof requireEditorPermission
+  >;
+const mockCheckOwnerCanEdit = checkOwnerCanEdit as jest.MockedFunction<
+  typeof checkOwnerCanEdit
 >;
-const mockExtractSiteToken = extractSiteToken as jest.MockedFunction<
-  typeof extractSiteToken
+const mockOwnerCanEditRefusal = ownerCanEditRefusal as jest.MockedFunction<
+  typeof ownerCanEditRefusal
 >;
 const mockEnforceRateLimit = enforceRateLimit as jest.MockedFunction<
   typeof enforceRateLimit
@@ -118,10 +139,15 @@ function buildRequest(
 function buildForm(
   file: Blob | string | null,
   siteId: string | null = SITE_ID,
+  tokens: { editToken?: unknown; stagingToken?: unknown } = {},
 ): FormData {
-  const entries = new Map<string, Blob | string>();
+  const entries = new Map<string, Blob | string | unknown>();
   if (siteId !== null) entries.set("siteId", siteId);
   if (file !== null) entries.set("file", file);
+  if (tokens.editToken !== undefined)
+    entries.set("editToken", tokens.editToken);
+  if (tokens.stagingToken !== undefined)
+    entries.set("stagingToken", tokens.stagingToken);
 
   return {
     get: (name: string) => entries.get(name) ?? null,
@@ -161,12 +187,16 @@ describe("POST /api/upload/image", () => {
 
     mockGetClientIp.mockReturnValue(CLIENT_IP);
     mockEnforceRateLimit.mockResolvedValue(null);
-    mockExtractSiteToken.mockReturnValue("site-token");
-    mockAuthorizeSiteRequest.mockResolvedValue({
-      siteId: SITE_ID,
-      domain: "example.com",
-      apiKey: "test-api-key",
-    } as unknown as Awaited<ReturnType<typeof authorizeSiteRequest>>);
+    mockValidateEditorToken.mockResolvedValue({
+      valid: true,
+      access: {
+        kind: "device-grant",
+        permissions: ["edit"],
+        verified: true,
+      },
+    } as unknown as Awaited<ReturnType<typeof validateEditorTokenFromRequest>>);
+    mockRequireEditorPermission.mockReturnValue(true);
+    mockCheckOwnerCanEdit.mockResolvedValue({ ok: true, ownerId: "owner-1" });
 
     uploadMock.mockResolvedValue({ data: { path: "stored.png" }, error: null });
     getPublicUrlMock.mockReturnValue({ data: { publicUrl: PUBLIC_URL } });
@@ -284,7 +314,7 @@ describe("POST /api/upload/image", () => {
       const response = await POST(request);
 
       expect(response.status).toBe(400);
-      expect(mockAuthorizeSiteRequest).not.toHaveBeenCalled();
+      expect(mockValidateEditorToken).not.toHaveBeenCalled();
       expect(uploadMock).not.toHaveBeenCalled();
     });
 
@@ -401,41 +431,79 @@ describe("POST /api/upload/image", () => {
   });
 
   describe("authorization", () => {
-    it("returns 401 with the auth failure reason when the site token is bad", async () => {
-      mockAuthorizeSiteRequest.mockRejectedValue(
-        new Error("Invalid site token"),
-      );
+    it("refuses a public site token before entitlement or storage", async () => {
+      mockValidateEditorToken.mockResolvedValue({
+        valid: false,
+        error: "Invalid editor token",
+        status: 401,
+      });
       const { request } = buildRequest({
         form: buildForm(blobOf(await pngBytes())),
+        headers: { Authorization: "Bearer public-site-token" },
       });
 
       const response = await POST(request);
 
       expect(response.status).toBe(401);
       await expect(response.json()).resolves.toEqual({
-        error: "Invalid site token",
+        error: "Invalid editor token",
       });
+      expect(mockCheckOwnerCanEdit).not.toHaveBeenCalled();
       expect(uploadMock).not.toHaveBeenCalled();
     });
 
-    it("authorizes with the token, origin, and referer from the request", async () => {
+    it("passes only string multipart editor tokens to the shared validator", async () => {
       const { request } = buildRequest({
-        form: buildForm(blobOf(await pngBytes())),
-        headers: {
-          origin: "https://example.com",
-          referer: "https://example.com/pricing",
-        },
+        form: buildForm(blobOf(await pngBytes()), SITE_ID, {
+          editToken: "edit-session-token",
+          stagingToken: new Blob(["not-a-token"]),
+        }),
       });
 
       await POST(request);
 
-      expect(mockAuthorizeSiteRequest).toHaveBeenCalledWith({
+      expect(mockValidateEditorToken).toHaveBeenCalledWith({
+        request,
         siteId: SITE_ID,
-        token: "site-token",
-        origin: "https://example.com",
-        referer: "https://example.com/pricing",
+        body: { editToken: "edit-session-token" },
       });
     });
+
+    it("refuses a view-only editor before entitlement or storage", async () => {
+      mockRequireEditorPermission.mockReturnValue(false);
+      const { request } = buildRequest({
+        form: buildForm(blobOf(await pngBytes())),
+      });
+
+      const response = await POST(request);
+
+      expect(response.status).toBe(403);
+      expect(mockCheckOwnerCanEdit).not.toHaveBeenCalled();
+      expect(uploadMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["plan_ended", 402],
+      ["no_owner", 402],
+      ["unavailable", 503],
+    ] as const)(
+      "refuses owner gate result %s before image processing and storage",
+      async (reason, status) => {
+        mockCheckOwnerCanEdit.mockResolvedValue({ ok: false, reason });
+        const { request } = buildRequest({
+          form: buildForm(blobOf(await pngBytes())),
+        });
+
+        const response = await POST(request);
+
+        expect(response.status).toBe(status);
+        expect(mockOwnerCanEditRefusal).toHaveBeenCalledWith({
+          ok: false,
+          reason,
+        });
+        expect(uploadMock).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe("rate limiting", () => {
@@ -451,7 +519,7 @@ describe("POST /api/upload/image", () => {
 
       expect(response.status).toBe(429);
       expect(formDataMock).not.toHaveBeenCalled();
-      expect(mockAuthorizeSiteRequest).not.toHaveBeenCalled();
+      expect(mockValidateEditorToken).not.toHaveBeenCalled();
       expect(mockEnforceRateLimit).toHaveBeenCalledWith(
         request,
         expect.objectContaining({
@@ -462,14 +530,14 @@ describe("POST /api/upload/image", () => {
       );
     });
 
-    it("throttles by site after authorization, keyed on the site not the IP", async () => {
+    it("throttles by canonical site id after editor authorization", async () => {
       mockEnforceRateLimit
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(
           NextResponse.json({ error: "Too many uploads" }, { status: 429 }),
         );
       const { request } = buildRequest({
-        form: buildForm(blobOf(await pngBytes())),
+        form: buildForm(blobOf(await pngBytes()), SITE_ID.toUpperCase()),
       });
 
       const response = await POST(request);
@@ -572,8 +640,9 @@ describe("OPTIONS /api/upload/image", () => {
     expect(response.headers.get("Access-Control-Allow-Methods")).toBe(
       "POST, OPTIONS",
     );
-    expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
-      "Authorization, Content-Type, X-Site-Token",
+    expect(response.headers.get("Access-Control-Allow-Headers")).toContain(
+      "X-RCF-Editor-Grant",
     );
+    expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
   });
 });

@@ -54,9 +54,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Mirror the embed route's shape so both callers see the same contract:
-    // published content is the live value, original_content the fallback for
-    // rows that have never been published.
+    // This is a private dashboard read, so candidates remain visible and use
+    // their discovered original for editor review. ADR 076 means that fallback
+    // is private only: visitors keep the host page's own markup until an editor
+    // publishes; callers must not describe current_content here as public/live.
     const elements = (contentElements || []).map((element) => ({
       ...element,
       current_content:

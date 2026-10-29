@@ -111,6 +111,48 @@ export function buildWebApplicationLd(input: WebApplicationInput) {
   };
 }
 
+type ArticleInput = {
+  readonly headline: string;
+  readonly description: string;
+  readonly url: string;
+  /** ISO date (YYYY-MM-DD) the content was last reviewed. */
+  readonly dateModified: string;
+  /** Absolute URL of the page's social image. */
+  readonly image: string;
+  /** The organisation that writes and publishes the article. */
+  readonly publisherName: string;
+  readonly publisherUrl: string;
+};
+
+/**
+ * schema.org `Article` for an editorial guide (s123). The author and the
+ * publisher are the organisation: no guide has a named person behind it, and
+ * a byline invented for structured data would be a false claim. Only
+ * `dateModified` is stated, because a guide records when its facts were last
+ * checked against its sources, not when it was first drafted.
+ */
+export function buildArticleLd(input: ArticleInput) {
+  const organization = {
+    "@type": "Organization",
+    name: input.publisherName,
+    url: input.publisherUrl,
+  };
+  return {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: input.headline,
+    description: input.description,
+    url: input.url,
+    mainEntityOfPage: { "@type": "WebPage", "@id": input.url },
+    image: [input.image],
+    // A bare date trips Google's Rich Results Test ("invalid datetime",
+    // "missing a timezone"); state the review date as midnight UTC.
+    dateModified: `${input.dateModified}T00:00:00Z`,
+    author: organization,
+    publisher: organization,
+  };
+}
+
 export function buildBreadcrumbListLd(items: readonly BreadcrumbItem[]) {
   return {
     "@context": "https://schema.org",

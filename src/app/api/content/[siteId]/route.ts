@@ -10,34 +10,14 @@ import {
 import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
 import { DATAFAST_GOALS } from "@/lib/analytics/datafast-goals";
 import { sendSiteOwnerGoal } from "@/lib/analytics/datafast-server";
+import { notifyOwnerOfInstall } from "@/lib/sites/install-detected-email";
 import {
-  redactControlCharacters,
-  validateDiscoveredElement,
-  validateElementId,
-} from "@/lib/security/discovered-text";
+  buildDiscoveryRows,
+  type SkippedDiscoveryElement,
+} from "@/lib/content/discovery-rows";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { validateContentAttributePatch } from "@/lib/api/validation";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 import { normalizePagePath } from "@/lib/content/page-path";
-
-interface ContentElementRow {
-  site_id: string;
-  element_id: string;
-  selector: string;
-  original_content: string;
-  current_content: string;
-  published_content: string;
-  language: string;
-  variant: string;
-  page_path: string | null;
-  metadata: Record<string, unknown>;
-}
-
-/** One element that could not be stored, and why. */
-interface SkippedElement {
-  elementId: string;
-  reason: string;
-}
 
 /**
  * How many skips a response will list.
@@ -48,145 +28,6 @@ interface SkippedElement {
  */
 const MAX_REPORTED_SKIPS = 50;
 
-/** Longest element id a report will echo, for the same reason. */
-const MAX_ECHOED_ID_LENGTH = 64;
-
-type DiscoveryRows =
-  | { ok: true; rows: ContentElementRow[]; skipped: SkippedElement[] }
-  | { ok: false; error: string };
-
-/**
- * Make a rejected element id safe to repeat back.
- *
- * Redaction comes first, then the cut. `validateElementId` refuses an id carrying
- * control characters — but this excerpt appears in that very refusal, in the
- * response body and in a `console.warn`, so an id containing CR/LF would forge a
- * log line on its way to being rejected for containing CR/LF.
- */
-function idExcerpt(elementId: string): string {
-  const safe = redactControlCharacters(elementId);
-
-  return safe.length > MAX_ECHOED_ID_LENGTH
-    ? `${safe.slice(0, MAX_ECHOED_ID_LENGTH)}...`
-    : safe;
-}
-
-/**
- * Turn a reported content map into rows, skipping the entries that cannot be
- * stored and naming them.
- *
- * The customer's text is stored exactly as the widget read it off their page.
- * It is not markup and no consumer treats it as markup, so it is not sanitized
- * as markup — see `@/lib/security/discovered-text` for why that mattered, and for
- * what every field is checked against instead (A-1). Nothing reaches the
- * service-role upsert unvalidated, including the element id, which is part of the
- * upsert's conflict key.
- *
- * WHY ONE BAD ELEMENT DOES NOT SINK THE MAP. The widget reports an `<img>` by its
- * `src` (recopyfast.src.js:2362) and only skips images under 48px (:2400-2404), so
- * a visible inline `data:` URI arrives as one enormous "text" value. Refusing the
- * whole map for it meant a single base64 image blocked every heading and paragraph
- * on that page from ever being discovered — permanently, because the widget claims
- * its report before sending and only releases the claim on a network error, so
- * every later visitor re-sent the same map and got the same refusal. That is worse
- * than the truncation this fix replaced: truncation at least landed the rest.
- *
- * Cap-exempting such a value would be worse again: content is copied into
- * `original_content`, `current_content` AND `published_content`, and then served to
- * every visitor on every page load, so a 100 KB data URI is 300 KB of row and 100 KB
- * on the wire, forever. The element is skipped instead — it is simply not editable —
- * and the skip is reported rather than swallowed, which is the whole point of the
- * audit this fix belongs to.
- *
- * A malformed map is still refused whole: null, an array or a scalar is not a
- * partially-valid content map, it is a caller that is not the widget.
- */
-function buildDiscoveryRows(
-  siteId: string,
-  contentMap: unknown,
-): DiscoveryRows {
-  // `Object.entries(null)` throws, and the outer catch would turn a malformed
-  // body into a 500 — an answer that reads as "our fault" for a request that was
-  // never well-formed. An array passes `typeof === "object"` and would index its
-  // members as element ids, so it is refused by name.
-  if (
-    typeof contentMap !== "object" ||
-    contentMap === null ||
-    Array.isArray(contentMap)
-  ) {
-    return { ok: false, error: "Content map must be an object" };
-  }
-
-  const rows: ContentElementRow[] = [];
-  const skipped: SkippedElement[] = [];
-
-  for (const [elementId, data] of Object.entries(contentMap)) {
-    const id = validateElementId(elementId);
-    if (!id.ok) {
-      skipped.push({ elementId: idExcerpt(elementId), reason: id.error });
-      continue;
-    }
-
-    const element = validateDiscoveredElement(data);
-    if (!element.ok) {
-      skipped.push({ elementId: id.value, reason: element.error });
-      continue;
-    }
-
-    const reported = data as Record<string, unknown>;
-    const attributes: Record<string, string> = {};
-
-    let pagePath: string | null = null;
-    if (reported.page_path !== undefined && reported.page_path !== null) {
-      const path = normalizePagePath(reported.page_path);
-      if (!path.ok) {
-        skipped.push({ elementId: id.value, reason: path.error });
-        continue;
-      }
-      pagePath = path.value;
-    }
-
-    // Discovery reports what the author already put on the page. A disallowed
-    // destination still must not become a published href, but dropping the
-    // entire element made its safe text impossible to edit. Validate each
-    // optional attribute independently and omit only the offending value.
-    if (reported.href !== undefined) {
-      const href = validateContentAttributePatch({ href: reported.href });
-      if (href.ok && href.value.href !== undefined) {
-        attributes.href = href.value.href;
-      }
-    }
-    if (reported.alt !== undefined && reported.alt !== null) {
-      const normalizedAlt =
-        typeof reported.alt === "string"
-          ? reported.alt.replace(/\s+/g, " ").trim()
-          : reported.alt;
-      const alt = validateContentAttributePatch({ alt: normalizedAlt });
-      if (alt.ok && alt.value.alt !== undefined) {
-        attributes.alt = alt.value.alt;
-      }
-    }
-
-    rows.push({
-      site_id: siteId,
-      element_id: id.value,
-      selector: element.value.selector,
-      original_content: element.value.content,
-      current_content: element.value.content,
-      published_content: element.value.content,
-      language: "en",
-      variant: "default",
-      page_path: pagePath,
-      metadata: {
-        ...(element.value.type ? { type: element.value.type } : {}),
-        ...attributes,
-      },
-    });
-  }
-
-  return { ok: true, rows, skipped };
-}
-
 /**
  * The answer to a discovery report.
  *
@@ -195,7 +36,7 @@ function buildDiscoveryRows(
  * Skips are additive, and counted separately from the list because the list is
  * capped.
  */
-function discoveryResult(skipped: SkippedElement[]) {
+function discoveryResult(skipped: SkippedDiscoveryElement[]) {
   if (skipped.length === 0) {
     return { success: true };
   }
@@ -461,46 +302,52 @@ export async function GET(
       );
     }
 
-    // Transform: use published_content as current_content for backward compatibility
-    // Fall back to original_content if published_content is null (for existing data)
-    const transformedContent = (contentElements || []).map((element) => {
-      // Draft attributes share the metadata JSONB column with published ones,
-      // but they are private to staging until the atomic publish promotes them.
-      // Removing the nested patch here prevents a public visitor from learning
-      // or applying a destination that an editor has not published yet.
-      const metadata =
-        typeof element.metadata === "object" &&
-        element.metadata !== null &&
-        !Array.isArray(element.metadata)
-          ? (element.metadata as Record<string, unknown>)
-          : {};
-      const publishedMetadata = { ...metadata };
-      delete publishedMetadata.staging_attributes;
+    // ADR 076: a NULL publication is a private discovery candidate, not a
+    // visitor override. Omit the entire row so its text and href/alt metadata
+    // cannot reach the widget or an SSR consumer. Existing non-NULL values,
+    // including the empty string and legacy publications without timestamps,
+    // retain their public contract.
+    const transformedContent = (contentElements || [])
+      .filter((element) => element.published_content !== null)
+      .map((element) => {
+        // Draft attributes share the metadata JSONB column with published ones,
+        // but they are private to staging until the atomic publish promotes them.
+        // Removing the nested patch here prevents a public visitor from learning
+        // or applying a destination that an editor has not published yet.
+        const metadata =
+          typeof element.metadata === "object" &&
+          element.metadata !== null &&
+          !Array.isArray(element.metadata)
+            ? (element.metadata as Record<string, unknown>)
+            : {};
+        const publishedMetadata = { ...metadata };
+        delete publishedMetadata.staging_attributes;
 
-      // The raw drift columns never leave: they are folded into `source_seen`
-      // below, the one value the widget compares against.
-      const publicElement: Record<string, unknown> = { ...element };
-      delete publicElement.source_baseline;
-      delete publicElement.source_drift_content;
-      delete publicElement.source_drift_detected_at;
-      const currentContent =
-        element.published_content ?? element.original_content ?? "";
-      const sourceSeen = sourceSeenFor({
-        language,
-        variant,
-        originalContent: element.original_content,
-        currentContent,
-        sourceBaseline: element.source_baseline,
-        sourceDriftContent: element.source_drift_content,
+        // The raw drift columns never leave: they are folded into `source_seen`
+        // below, the one value the widget compares against (ADR 075).
+        const publicElement: Record<string, unknown> = { ...element };
+        delete publicElement.source_baseline;
+        delete publicElement.source_drift_content;
+        delete publicElement.source_drift_detected_at;
+        // ADR 076: only published rows reach here, so there is no
+        // original_content fallback any more.
+        const currentContent = element.published_content ?? "";
+        const sourceSeen = sourceSeenFor({
+          language,
+          variant,
+          originalContent: element.original_content,
+          currentContent,
+          sourceBaseline: element.source_baseline,
+          sourceDriftContent: element.source_drift_content,
+        });
+
+        return {
+          ...publicElement,
+          metadata: publishedMetadata,
+          current_content: currentContent,
+          ...(sourceSeen === null ? {} : { source_seen: sourceSeen }),
+        };
       });
-
-      return {
-        ...publicElement,
-        metadata: publishedMetadata,
-        current_content: currentContent,
-        ...(sourceSeen === null ? {} : { source_seen: sourceSeen }),
-      };
-    });
 
     // The one ongoing "this site is still running our script" signal.
     //
@@ -671,7 +518,10 @@ export async function POST(
     // unconditional: it is the liveness signal, and it has to keep landing.
     await bestEffortSiteWrite("install status update", siteId, async () => {
       const becameLive = await markSiteLive(supabase, siteId);
-      await recordSiteReport(supabase, siteId);
+      // Scheduled BEFORE `recordSiteReport` (s122 review): the flip has
+      // already committed, and nothing re-fires it, so a throw from the
+      // liveness bump must not cost the owner their email or the goal.
+      //
       // DataFast `script_installed` (ADR 074): exactly the one request whose
       // guarded update matched. This request comes from the customer's domain
       // and carries no cookie of ours, so the goal is attributed to the
@@ -679,7 +529,13 @@ export async function POST(
       // DATAFAST_API_KEY; never throws.
       if (becameLive) {
         after(() => sendSiteOwnerGoal(siteId, DATAFAST_GOALS.scriptInstalled));
+        // s122: the owner's one "Install detected" email, on the same single
+        // transition. After the response, so the check-in's latency is
+        // untouched; never throws; the `site_install_emails` claim makes a
+        // second send for this site impossible however often this runs.
+        after(() => notifyOwnerOfInstall(siteId));
       }
+      await recordSiteReport(supabase, siteId);
     });
 
     const discovered = buildDiscoveryRows(siteId, contentMap);
@@ -704,8 +560,10 @@ export async function POST(
       );
     }
 
-    // Insert newly discovered elements only. Existing rows may already carry
-    // published edits, so content discovery must not overwrite published_content.
+    // Insert newly discovered elements only. Discovery is deliberately unable
+    // to publish: a public site token identifies the site but does not prove an
+    // editor chose this copy or these attributes. Existing rows may already
+    // carry published edits, so duplicate reports must not overwrite them.
     //
     // Guarded on there being something to write: a map whose every entry was
     // skipped is not a reason to spend a service-role round trip on an empty

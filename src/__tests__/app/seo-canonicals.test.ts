@@ -37,6 +37,8 @@ import { accumulateMetadata } from "next/dist/lib/metadata/resolve-metadata";
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import nextConfig from "../../../next.config";
 import * as comparisonDetailRoute from "@/app/compare/[competitor]/page";
+import * as guideDetailRoute from "@/app/guides/[slug]/page";
+import { guideList } from "@/lib/guides/guides";
 import { metadata as rootMetadata } from "@/app/layout";
 import { comparisonList } from "@/lib/compare/comparisons";
 import { resolveSiteUrl } from "@/lib/seo/site-url";
@@ -111,6 +113,12 @@ const comparisonRoutes: Route[] = comparisonList.map((comparison) => ({
   ],
 }));
 
+// s123: the owner guides, from their registry.
+const guideRoutes: Route[] = guideList.map((guide) => ({
+  path: `/guides/${guide.slug}`,
+  layers: async () => [layerOf(guideDetailRoute, { slug: guide.slug })],
+}));
+
 /** Every page a search engine should index, with its segment chain. */
 const INDEXABLE: Route[] = [
   { path: "/", layers: async () => [layerOf(await import("@/app/page"))] },
@@ -132,6 +140,11 @@ const INDEXABLE: Route[] = [
     layers: async () => [layerOf(await import("@/app/compare/page"))],
   },
   ...comparisonRoutes,
+  {
+    path: "/guides",
+    layers: async () => [layerOf(await import("@/app/guides/page"))],
+  },
+  ...guideRoutes,
   // s96: the free tools hub and the Website Typo Finder.
   {
     path: "/tools",

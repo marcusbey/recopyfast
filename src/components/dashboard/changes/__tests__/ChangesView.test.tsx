@@ -1035,6 +1035,11 @@ describe("ChangesView — actions by state and grant", () => {
     const region = await expand(user, "Essai gratuit de 14 jours");
 
     expect(actionNames(region)).toEqual(["Publish", "Edit on page"]);
+    expect(within(region).getByText("Visitors see")).toBeInTheDocument();
+    expect(
+      within(region).getByText("Host page's own copy (no RecopyFast override)"),
+    ).toBeInTheDocument();
+    expect(within(region).queryByText("Live now")).not.toBeInTheDocument();
     expect(
       within(region).getByText(
         "This text was never published, so its draft can't be discarded here. Edit or publish it on the page.",

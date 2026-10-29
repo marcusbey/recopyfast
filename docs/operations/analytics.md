@@ -124,7 +124,7 @@ not establish activation or actual GA receipt. QA fixtures use the separate QA d
 |---|---|---|---|
 | `page_view` | each allowlisted pathname (client navigations included) | `page_location`, `page_referrer` | — |
 | `generate_lead` | click on a same-origin link to `/signup` | `cta_location` | yes |
-| `begin_checkout` | click on a same-origin link to `/dashboard/billing` (Pricing's "Buy Lifetime Pro", "Buy founding access") | `cta_location` | yes |
+| `begin_checkout` | click on a same-origin link to `/dashboard/billing` (Pricing's "Buy Lifetime Pro", "Get lifetime access") | `cta_location` | yes |
 | `try_started` | the `/try` sample preview becomes active | — | no |
 | `tool_scan_completed` | a free tool produced the visitor's own result. Scanning tools (s96, `ToolScanForm`): on the tool page, when the scan succeeds, just before the report opens. The calculator: once per page view, the first time the inputs settle while analytics is active (`track` returns whether it sent; a result before consent does not use the event up) | `tool_slug` (never the scanned address) | yes |
 | `sign_up` | the server worker claims an eligible frozen initial signup/invite source after verified authentication; repeat logins and unproven initial confirmations do not qualify (s111) | `method: email` | yes |

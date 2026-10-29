@@ -5467,3 +5467,226 @@ Acceptance:
 
 Research: `docs/research/s120-owner-path.md`. Plan: `docs/plans/s120-owner-path.md` (owner
 validated in chat on October 22, 2026). Review: `docs/reviews/s120-owner-path.md`.
+
+## Story s121-tools-owner-ctas — after a free tool's result, a site owner sees how to fix it themselves
+
+Requested by the owner in chat on October 24, 2026 (14-day plan experiment 5: owner versions of
+the free tools; experiment 4: ship s99). As a business owner who just ran the Typo Finder, the
+outdated website checker or the cost calculator, I see an owner next step under the result: "Try
+it on your site" (`/try`) and "How it works for business owners" (`/for/owners`). Complexity 1;
+dependencies: s96, s98, s99, s120 (`/for/owners`), ADR 074. Ships on the s99 branch
+`feature/s99-outdated-checker-ship`; embed allocation 0 bytes. No backend, migration or
+dependency.
+
+Acceptance:
+- [x] A scan report with findings leads with the owner step ("Fix these yourself once ReCopyFast is on your site"),
+      above the existing fix CTA; a clean report shows it after the fix CTA, as a quieter card.
+- [x] The calculator shows the owner step under a complete result, secondary to its freelancer
+      CTA. No owner mode: its inputs, formula, card and FAQ are freelancer arithmetic, and an
+      honest owner version is a separate calculator (out of scope).
+- [x] Links carry `utm_source=tools&utm_medium=free_tool&utm_campaign=owner_path&utm_content=<slug>`;
+      each anchor is a `cta_click` with location `<tool>_result` and target `try` or `owners`.
+- [x] DataFast goal `tool_outdated_checker_run` replaces the `tool_run` fallback for s99.
+- [ ] Required checks and independent review pass; merge and deployment are manual and separate.
+
+Plan: `docs/plans/s121-tools-owner-ctas.md`.
+
+## Story s122-install-detected-email — the owner hears that the line is installed
+
+Requested by the owner in chat on October 24, 2026 ("can we start implementing the solutions",
+from the s120 research: the owner gets an "Install detected" email after their developer
+installs). As a site owner whose developer installed the line, I get one email when my site
+first checks in, telling me it is connected and how to start editing, so I never have to ask
+or keep checking. Complexity 2; dependencies: s02 install status (ADR 006), ADR 074
+`script_installed` hook point, s120 developer handoff. Branch
+`feature/s122-install-detected-email`; embed allocation 0 bytes. One additive migration.
+
+Acceptance:
+- [x] The site's first flip to `live` — the one request `markSiteLive` reports — schedules one
+      email to the owner's account address, after the response; later check-ins and
+      already-live sites schedule nothing.
+- [x] A `site_install_emails` row per site is claimed before the provider call; retries and
+      concurrent check-ins cannot send twice; a failed send is recorded, not retried.
+- [x] The body names the domain, says the line is installed, links only to the dashboard (no
+      edit, staging or session link), gives three tips and thanks the developer; no claim that
+      edits survive a redesign.
+- [x] Email failure, a missing table or a missing owner never breaks the check-in; failures go
+      to Sentry with stage and code only, no address.
+- [ ] Required checks and independent review pass; merge and deployment are manual and separate.
+
+Plan: `docs/plans/s122-install-detected-email.md`.
+
+## Story s123-owner-seo-guides — a site owner searching how to change hours, prices or WordPress text gets a useful answer, then the owner path
+
+Requested by the owner in chat on October 25, 2026 ("Build owner-intent SEO pages (e.g. update
+website hours without a developer, edit WordPress text without Elementor) linking to /for/owners,
+with DataFast goals, reviewed and merged"). As a business owner who searches how to update my
+website hours, change my prices or edit WordPress text without opening Elementor, I land on a
+guide that answers the question first, platform by platform (including "you don't need us" where
+my platform's editor is enough), and then shows honestly where ReCopyFast fits. Complexity 2;
+dependencies: s17 cluster engine (ADR 012/013/020), s88 sitemap/canonicals/llms.txt, s120
+`/for/owners`, ADR 074 DataFast goals. Branch `feature/s123-owner-seo-guides`; embed allocation
+0 bytes. No backend, migration, dependency or billing change.
+
+Acceptance:
+- [x] `/guides` and `/guides/<slug>` are static (SSG) Marketing-surface pages built from one typed,
+      validated registry (`src/lib/guides/`); the registry also feeds the sitemap, llms.txt and the
+      Lighthouse URL list.
+- [x] Five guides: website hours, WordPress text without Elementor, prices, a site someone else
+      built, the cost of a small website change. Each answers first, cites external facts only from
+      its listed sources (rel="noopener noreferrer"), and links related guides.
+- [x] No claim exceeds the s120 rules: no "take control", no SEO promise, no testimonials or
+      counts, after-load delivery and the redesign caveat on every guide; the validator rejects
+      banned phrases, uncited external links and unknown internal routes at module load.
+- [x] Every guide ends with `/for/owners`, `/try` and "Start your free trial" (`/signup`) CTAs
+      carrying `utm_source=guides&utm_medium=guide&utm_campaign=owner_guides&utm_content=<slug>`,
+      each a `cta_click` with location `guide_<slug_underscored>` (or `guides_index`) declared in
+      `datafast-goals.ts`; ADR 074 amended.
+- [x] Canonicals, Article + BreadcrumbList + FAQPage JSON-LD, footer link, `/for/owners` link,
+      Google Analytics page allowlist and privacy page list include the guides.
+- [x] `/guides` and one guide join the ADR 013 Lighthouse gate (10 routes).
+- [ ] Required checks and independent review pass; merge and deployment are manual and separate.
+
+Research: `docs/research/s123-owner-seo-guides.md`. Plan: `docs/plans/s123-owner-seo-guides.md`.
+
+## Story s124-lifetime-spots — the capped lifetime card shows how many spots are left, as a simple meter
+
+Requested by the owner in chat on October 26, 2026 (shared a Wow Keywords "lifetime access" pricing
+screen: "can we build something similar?", then narrowed it: "only for the lifetime offer … make it
+simple and make it fit into your traditional pricing section"). As a freelancer or small agency
+scanning the pricing section, I see on the capped lifetime Agency card a row of its real spots,
+taken and left, with "N of 50 spots left at $P" — so the limit reads at a glance and every number is
+one the database or Stripe holds. Complexity 1; dependencies: s13 Agency plan + capped lifetime
+product (ADR 029). Branch `feature/s124-lifetime-spots`; embed allocation 0 bytes. No backend route,
+migration, dependency, Stripe, price or `plans` change.
+
+Not in scope: the section layout, the plan cards, Lifetime Pro, the first-20 offer card, any new
+headline, and a stepped price ladder (the catalogue has one lifetime price; tiers would be new
+prices, an owner pricing decision).
+
+Acceptance:
+- [ ] Only the `lifetime_agency` card in `Pricing` changes; it keeps its place in the existing
+      lifetime row beside Lifetime Pro, its catalogue name, description, features and price.
+- [ ] A `SpotMeter` draws exactly `limit` equal cells under the price: taken, next, left. It renders
+      nothing unless `1 ≤ limit`, `0 ≤ remaining ≤ limit`, integers, `soldOut === (remaining === 0)`.
+- [ ] `/api/pricing`'s `foundingAgencyAvailability` is parsed on the client with those bounds; a
+      malformed value shows today's "Availability temporarily unavailable" and disabled button.
+- [ ] Open: "`remaining` of `limit` spots left at $`price`" (last one: "Last spot left at $`price`"),
+      plus one muted line "An open checkout can hold a spot for a short time." Sold out: full meter,
+      "Sold out", disabled button. No added "founding" wording; the CTA reads "Get lifetime access"
+      and keeps its `pricing_founding_agency` analytics location.
+- [ ] Editorial and default variants both render; meter has `role="img"` and an `aria-label` with
+      the count; no animation; 50 cells wrap to two rows on narrow cards.
+- [ ] Copy stays inside launch kit §11.
+- [ ] Changed Pricing test strings are called out in the PR; required checks and independent
+      review pass; merge and deployment are manual.
+
+Research: `docs/research/s124-lifetime-spots.md`. Design: `docs/designs/s124-lifetime-spots.md`.
+
+## Story s125-credit-and-style-grants — a buyer cannot rewrite their purchase record, and a customer cannot publish a style to every tenant
+
+Requested by the owner in chat on October 27, 2026, from the security audit
+(`docs/reviews/security-audit-2026-10.md`, findings H1 and M1): "Start the pipeline (story → plan)
+for H1 + M1: the credit_purchases column grants and the copy_styles preset policy, in one
+migration." As the operator, I know a signed-in customer holding the public Supabase key cannot
+change anything on their own `credit_purchases` row except spending credits down, so refunds and
+chargebacks always find and claw back the purchase; and a customer cannot create or edit a copy
+style that other tenants see as a preset or can apply. Complexity 2; dependencies: s38 column
+allowlists (ADR 033/034), s48 credit integrity (ADR 040), Edit Board (`20251230100000`). Branch
+`feature/s125-credit-and-style-grants`; embed allocation 0 bytes. One additive migration; no route
+behaviour change for legitimate callers, no Stripe, price, `plans` or UI change.
+
+Not in scope: the other audit findings (C1 is an owner rotation; H2–H4, M2–M9 and the lows are
+separate stories), removing the `credit_purchases` web-role UPDATE entirely (the spend path still
+needs `credits_remaining`), and the wider default-privilege revoke (audit L13).
+
+Acceptance:
+- [x] After the migration, `anon` and `authenticated` hold no UPDATE on any `credit_purchases`
+      column except `credits_remaining`, and no INSERT/DELETE; `service_role` is unchanged.
+      — `credit-purchase-privileges.test.ts`: "authenticated may UPDATE credits_remaining only; anon
+      may UPDATE nothing", "%s holds no INSERT or DELETE on credit_purchases", "service_role keeps
+      INSERT, UPDATE and DELETE", "the row's owner cannot change %s".
+- [x] A non-service role that changes any column other than `credits_remaining`, or raises it, is
+      refused by the trigger even if a broader grant is later restored by mistake.
+      — `credit-purchase-privileges.test.ts`: "negative control: with UPDATE
+      (stripe_payment_intent_id) restored, …", "negative control: with table-wide UPDATE restored,
+      the trigger still refuses a change to %s"; `credit-spend.test.ts`: "the monotonicity trigger
+      still refuses an authenticated self-refill".
+- [x] Spending purchased credits as the signed-in user still works (`spend_credits` / the credit
+      system's decrement path), and webhook refund/dispute clawback still finds the row.
+      — `credit-purchase-privileges.test.ts`: "the owner still spends down credits_remaining
+      directly and through spend_credits", "service_role still zeroes, restores and rewrites the
+      row (clawback and restore paths)"; `credit-spend.test.ts` unchanged and green.
+- [x] `copy_styles`: a web role can never insert or update a row with `is_preset = true`, nor move
+      a style to another site; a constraint pins `is_preset = (site_id IS NULL)` for new rows;
+      web-role writes are revoked if every write path already uses the service role.
+      — `copy-style-privileges.test.ts`: "a site admin acting as authenticated cannot insert a
+      preset for its own site", "that admin cannot insert, update or delete any copy_styles row",
+      "%s holds SELECT but no INSERT, UPDATE or DELETE on copy_styles", "no member write policy is
+      left on copy_styles", "the constraint refuses %s even from service_role".
+- [x] `GET /api/edit-board/styles` lists presets only where `site_id IS NULL`; `styles/apply`
+      refuses a style that is neither a preset nor owned by the target site.
+      — `styles-scope.test.ts`: "GET lists only global rows as presets, never another site's
+      planted preset", "apply refuses %s with the same 404 and calls no AI", "apply still applies
+      %s".
+- [ ] Existing rows are checked: any `is_preset = true` row with a non-null `site_id` in
+      production is reported (read-only query in the PR), not silently deleted.
+      — Migration side done: the migration counts violating rows, `RAISE WARNING`s and leaves the
+      constraint `NOT VALID`, deleting nothing ("the constraint is validated, so every existing
+      row … satisfies it" covers the clean case). Open: the owner runs the read-only production
+      query in the PR body.
+- [ ] DB suite (`src/__tests__/db/`) proves both boundaries against a real replay, including the
+      restore-the-dangerous-grant pattern from s38; required checks and independent review pass;
+      merge and deployment are manual.
+      — DB half done: both suites are in `REPLAY_SUITES`; `node scripts/run-db-invariants.mjs`
+      ran all 25 named suites on PostgreSQL 17. Open: required checks on the PR and `/ks-review`.
+
+Research: `docs/research/s125-credit-and-style-grants.md`. Plan: `docs/plans/s125-credit-and-style-grants.md`.
+Decision: `docs/decisions/075-billing-rows-are-column-scoped-for-web-roles.md`. Source review:
+`docs/reviews/security-audit-2026-10.md` (H1, M1).
+
+## Story s126-site-token-write-paths — public site tokens cannot publish discovered copy or store images
+
+Requested by the owner in chat on October 27, 2026, from the security audit (findings H2 and
+M5; L1 evaluated and deferred). As a site owner, I can install discovery for ordinary visitors
+without granting them authority to change my public copy or upload files. Complexity 4;
+dependencies: discovery and page-scoped reads, s65a public snapshot (ADR 046), editor authority
+(ADR 035/047), owner entitlement (ADR 041), service-role write boundary (ADR 002/042).
+Branch `feature/s126-site-token-write-paths`; embed allocation 0 net additional gzipped bytes
+against the checked-in build ceilings. No new dependency or planned migration. No new UI.
+
+Not in scope: s125's `credit_purchases`, `copy_styles`, and `src/app/api/edit-board/styles/*`;
+C1 rotation or any other audit finding; L1 A/B telemetry/automatic winner policy; historical
+content cleanup, deleting uploaded assets, changing editor credential semantics, or production
+access. H2's text-defacement premise is only partially true: the current widget suppresses
+unchanged discovery text, but applies discovery attributes; server rendering also trusts the
+public projection. See research before implementation.
+
+Acceptance:
+
+- [x] Discovery inserts `published_content: null`, retains the captured original/current text
+      for editor review, and cannot replace an existing row or its published copy/attributes.
+      (`discovery-fidelity.test.ts`: private candidate, caller-field and duplicate-conflict cases.)
+- [x] Both public delivery routes omit NULL-published rows, including their href/alt metadata;
+      no fallback to untrusted discovered originals reaches a public renderer. A token-only
+      attack leaves host text, image source, href and alt unchanged on first load and rescan.
+      (`public-rows.test.ts`, `published/route.test.ts`, `content-attributes.test.ts`.)
+- [x] Editor staging still finds newly discovered rows; an authorized save and publish makes
+      the intended text/image/attributes publicly available. Existing non-NULL publications,
+      page/shared scoping, public delivery during plan lapse, and CDN freshness remain intact.
+      (`content-attributes-projection.test.ts`, `content-attributes-lifecycle.test.ts`.)
+- [x] Upload requires `validateEditorTokenFromRequest`, `edit` permission, a fail-closed
+      canonical per-site limiter, then `checkOwnerCanEdit`, before image processing/storage.
+      Public-token-only, invalid, expired, revoked, wrong-site and view-only callers cannot store
+      files or inspect entitlement. Both upload limiters remain fail closed.
+      (`upload/image/route.test.ts`, `upload/image/editor-auth.test.ts`.)
+- [x] Device grants use `X-RCF-Editor-Grant`; edit-session/staging tokens use multipart fields,
+      never new query credentials. Cross-origin preflight permits the grant header, without
+      cookies. Existing file validation, progress, error handling and immutable storage survive.
+      (`image-upload-credentials.test.ts`, `upload/image/route.test.ts`.)
+- [x] Source changes rebuild `/embed/recopyfast.js` with `scripts/build-embed.mjs`; its URL and
+      byte ceilings remain unchanged (45,799 B bundle / 33,020 B widget gzipped).
+- [ ] Independent review passes before a PR; merge and deployment remain separate.
+
+Research: [s126-site-token-write-paths](research/s126-site-token-write-paths.md).
+Plan: [s126-site-token-write-paths](plans/s126-site-token-write-paths.md), validated by the owner on 2026-10-28.

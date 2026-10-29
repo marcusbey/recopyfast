@@ -27,10 +27,11 @@ https://datafa.st/api/v1/goals` with `Authorization: Bearer <df_ key>` and
 
    | Goal | Where it fires | Params |
    |---|---|---|
-   | `cta_click` | `data-fast-goal` attributes on every signup/checkout/demo/try/docs anchor (hero, header, mobile header, pricing plans, lifetime, founding, final CTA, founding offer, /demo, /try, blog, compare, comparison pages, tool pages, tool CTA; s120: `owners_hero`, `owners_handoff`, `owners_final` on /for/owners, `wp_guide` on /docs/install/wordpress, `dev_guide` on /docs/install/for-developers) — no JS | `location`, `target` (`signup`/`checkout`/`demo`/`try`/`docs`), `plan` (catalogue id) |
+   | `cta_click` | `data-fast-goal` attributes on every signup/checkout/demo/try/docs anchor (hero, header, mobile header, pricing plans, lifetime, founding, final CTA, founding offer, /demo, /try, blog, compare, comparison pages, tool pages, tool CTA; s120: `owners_hero`, `owners_handoff`, `owners_final` on /for/owners, `wp_guide` on /docs/install/wordpress, `dev_guide` on /docs/install/for-developers; s121: `typo_finder_result`, `outdated_checker_result`, `cost_calculator_result` on tool results; s123: `guides_index` on /guides and `guide_<slug_with_underscores>` on each owner guide) — no JS | `location`, `target` (`signup`/`checkout`/`demo`/`try`/`docs`/`owners`), `plan` (catalogue id) |
    | `demo_edit` | first text edit per page view: `/demo` (`InteractiveHero tracksDemoEdit`), `/try` (a `MutationObserver` on the sample; `rcf-try.js` itself is not instrumented — it also runs on third-party pages) | `surface` |
    | `tool_typo_finder_run` | spell checker scan produced a report (`ToolScanForm`) | — |
    | `tool_cost_calculator_used` | calculator result settled, once per view (`CostCalculator`) | — |
+   | `tool_outdated_checker_run` | s99/s121: outdated website checker scan produced a report (`ToolScanForm`) | — |
    | `tool_run` | any future /tools entry without its own goal | `tool` (slug) |
    | `install_snippet_copied` | a copy that reached the clipboard: dashboard snippet (site page, registration modal, quick setup), /docs/install agent brief | `location` |
    | `install_method_selected` | s120: "Who will add the line?" answered (`InstallMethodChoice`, registration modal and site page) | `method` (`self`/`developer`), `location` (`dashboard_registration`/`dashboard_site`) |
@@ -86,6 +87,21 @@ https://datafa.st/api/v1/goals` with `Authorization: Bearer <df_ key>` and
 s120 (`feature/s120-owner-path`) added the three client goals, the `docs` CTA target and the five
 CTA locations now listed in the table above, all in `datafast-goals.ts` as Decision 1 requires.
 Decision 2 holds: every new param is a fixed category; no address, domain or snippet is sent.
+
+## Amendment (2026-10-24, s121)
+
+s121 (`feature/s99-outdated-checker-ship`) gave the s99 checker its own goal,
+`tool_outdated_checker_run`, instead of the `tool_run` fallback; added the `owners` CTA target
+(`/for/owners`) and the locations `typo_finder_result`, `outdated_checker_result` and
+`cost_calculator_result` for the owner next step under each tool's result. Decision 2 holds.
+
+## Amendment (2026-10-25, s123)
+
+s123 (`feature/s123-owner-seo-guides`) added the owner guides' CTA locations: `guides_index` and
+one `guide_<slug>` per guide (the slug's hyphens as underscores, at most 64 characters), with
+`dataFastGuideLocation(slug)` resolving only listed ones. The guide registry refuses to load a
+guide whose location is missing, so the taxonomy stays in this file. Targets are the existing
+`owners`, `try` and `signup`. Decision 2 holds: every param is a fixed category.
 
 ## Options considered and rejected
 

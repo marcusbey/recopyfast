@@ -247,6 +247,8 @@ function makeServiceClient(accessRow: Record<string, unknown> = verifiedRow()) {
       select: () => builder,
       update: () => builder,
       eq: () => builder,
+      // s125: the preset read also filters `.is("site_id", null)`.
+      is: () => builder,
       gte: () => builder,
       order: () => Promise.resolve(result),
       single: () => Promise.resolve(result),
