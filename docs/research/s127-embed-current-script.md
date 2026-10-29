@@ -171,5 +171,5 @@ configuration precedence, refusal behavior, and credential semantics remain unch
 Rebased bundle: 45,827 → 45,800 B gzipped (45,801 B ceiling); widget: 33,049 → 33,022 B
 (33,044 B ceiling), measured under Node 24.14.0. Full Jest/coverage, lint, both type checks,
 format, build and post-build staleness/size checks pass; detailed evidence is in the plan.
-Browser regressions are authored; executed by Claude outside sandbox — pending. The earlier
+Browser regressions are authored and were executed by Claude outside the sandbox on 2026-10-29 (13/13 green, baseline red proven). The earlier
 browser uncertainty remains unresolved, and independent review is still required before a PR.

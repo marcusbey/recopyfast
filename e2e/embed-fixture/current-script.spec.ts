@@ -94,7 +94,21 @@ test.describe("built embed fixture: trusted currentScript", () => {
         if (clobbers === 1) url.hash = `rcf_edit=${FIXTURE_EDIT_CODE}`;
         if (clobbers === 2)
           url.searchParams.set("rcf_handoff", FIXTURE_HANDOFF_CODE);
+        const canonicalRequests: string[] = [];
+        page.on("request", (request) => {
+          if (new URL(request.url()).pathname === "/embed/recopyfast.js")
+            canonicalRequests.push(request.url());
+        });
         await page.goto(url.toString(), { waitUntil: "networkidle" });
+        if (entry === "legacy") {
+          // The legacy loader must load its canonical sibling with the
+          // original query string intact.
+          expect(
+            canonicalRequests.map((requestUrl) =>
+              new URL(requestUrl).searchParams.get("fixture"),
+            ),
+          ).toContain("1");
+        }
 
         await expect
           .poll(() =>

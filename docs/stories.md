@@ -5707,7 +5707,7 @@ Acceptance:
       `build-size-gate.test.ts` (`holds: the committed artifact is inside both ceilings`,
       `still fails --check when the artifact is stale`), `release-gates.test.ts`, and
       `playwright-ci-contract.test.ts` pass. Bundle 45,800 / 45,801 B; widget 33,022 / 33,044 B.
-      The exact fixture inventory is 13; browser execution is still pending above.
+      The exact fixture inventory is 13; all 13 pass in Chromium (Claude, 2026-10-29).
 - [ ] Required checks and independent review pass before a later PR; merge/deploy are separate.
       Non-browser checks pass: full Jest/coverage (579 suites / 8,621 tests; 2 existing skips),
       lint, both type checks, format, build and artifact check. Independent review is pending.
