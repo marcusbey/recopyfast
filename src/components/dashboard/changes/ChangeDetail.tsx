@@ -62,9 +62,13 @@ function eventLabel(event: ChangeHistoryEvent, row: ContentChange): string {
 }
 
 function Compare({ row }: { row: ContentChange }) {
+  const liveLabel = row.hasLiveText ? "Live now" : "Visitors see";
+  const liveValue = row.hasLiveText
+    ? row.live
+    : "Host page's own copy (no RecopyFast override)";
   const columns: Array<[string, string | null]> = [
     ["Original", row.original],
-    ["Live now", row.live],
+    [liveLabel, liveValue],
   ];
   if (row.state === "pending") columns.push(["Draft", row.draft]);
   const isSameAsOriginal =
@@ -84,7 +88,9 @@ function Compare({ row }: { row: ContentChange }) {
             <p className="text-eyebrow text-muted-foreground">{label}</p>
             <ContentValue
               value={value ?? undefined}
-              metadataType={metadataTypeOf(row)}
+              metadataType={
+                label === "Visitors see" ? undefined : metadataTypeOf(row)
+              }
               label={label}
               expanded
               className="mt-1 [overflow-wrap:anywhere]"

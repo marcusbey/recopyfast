@@ -197,15 +197,21 @@ export async function GET(
       );
     }
 
-    // Transform content: use staging_content if available, otherwise published_content
+    // Private editor projection: a newly discovered candidate has neither
+    // staging nor published content, but the editor still needs to see the
+    // host-authored observation in order to review and deliberately publish
+    // it. ADR 076 permits this original fallback only here; public projections
+    // omit the row entirely.
     const transformedContent = (contentElements || []).map((element) => {
       const projection = stagedMetadata(element.metadata);
 
       return {
         ...element,
         metadata: projection.metadata,
-        // For display, use staging_content if it exists, otherwise published_content
-        current_content: element.staging_content ?? element.published_content,
+        current_content:
+          element.staging_content ??
+          element.published_content ??
+          element.original_content,
         // Attribute-only edits must remain visible and publishable even when the
         // editor did not change the element's text in the same save.
         has_staging_changes:

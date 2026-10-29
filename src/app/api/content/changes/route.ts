@@ -193,14 +193,16 @@ function toRow(row: ViewRow, draftAttributes: DraftAttribute[] | null) {
     language: row.language,
     variant: row.variant,
     original: row.original_content,
-    // "Live now" is the original until the row is first published, as the
-    // widget's read serves it (`published ?? original`).
+    // Keep the discovered original available to the private editor workflow,
+    // but `hasLiveText: false` means visitors receive no RecopyFast override
+    // and continue to see the host page's own markup (ADR 076). The dashboard
+    // must not label this fallback as live.
     live: row.published_content ?? row.original_content,
     draft: row.staging_content,
     draftAttributes,
     // False when the row has no published text of its own (a translation is
-    // written without one: api/ai/translate), and `live` stands in the
-    // original. Its draft cannot be discarded through the staging PUT: any
+    // written without one: api/ai/translate), and `live` carries the original
+    // for private comparison only. Its draft cannot be discarded through the staging PUT: any
     // text it saves still differs from that NULL, so the row stays pending
     // (verification of 63d7ba2, minor 6). The page says so instead.
     hasLiveText: row.published_content !== null,

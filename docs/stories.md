@@ -5613,6 +5613,52 @@ Research: `docs/research/s125-credit-and-style-grants.md`. Plan: `docs/plans/s12
 Decision: `docs/decisions/075-billing-rows-are-column-scoped-for-web-roles.md`. Source review:
 `docs/reviews/security-audit-2026-10.md` (H1, M1).
 
+## Story s126-site-token-write-paths — public site tokens cannot publish discovered copy or store images
+
+Requested by the owner in chat on October 27, 2026, from the security audit (findings H2 and
+M5; L1 evaluated and deferred). As a site owner, I can install discovery for ordinary visitors
+without granting them authority to change my public copy or upload files. Complexity 4;
+dependencies: discovery and page-scoped reads, s65a public snapshot (ADR 046), editor authority
+(ADR 035/047), owner entitlement (ADR 041), service-role write boundary (ADR 002/042).
+Branch `feature/s126-site-token-write-paths`; embed allocation 0 net additional gzipped bytes
+against the checked-in build ceilings. No new dependency or planned migration. No new UI.
+
+Not in scope: s125's `credit_purchases`, `copy_styles`, and `src/app/api/edit-board/styles/*`;
+C1 rotation or any other audit finding; L1 A/B telemetry/automatic winner policy; historical
+content cleanup, deleting uploaded assets, changing editor credential semantics, or production
+access. H2's text-defacement premise is only partially true: the current widget suppresses
+unchanged discovery text, but applies discovery attributes; server rendering also trusts the
+public projection. See research before implementation.
+
+Acceptance:
+
+- [x] Discovery inserts `published_content: null`, retains the captured original/current text
+      for editor review, and cannot replace an existing row or its published copy/attributes.
+      (`discovery-fidelity.test.ts`: private candidate, caller-field and duplicate-conflict cases.)
+- [x] Both public delivery routes omit NULL-published rows, including their href/alt metadata;
+      no fallback to untrusted discovered originals reaches a public renderer. A token-only
+      attack leaves host text, image source, href and alt unchanged on first load and rescan.
+      (`public-rows.test.ts`, `published/route.test.ts`, `content-attributes.test.ts`.)
+- [x] Editor staging still finds newly discovered rows; an authorized save and publish makes
+      the intended text/image/attributes publicly available. Existing non-NULL publications,
+      page/shared scoping, public delivery during plan lapse, and CDN freshness remain intact.
+      (`content-attributes-projection.test.ts`, `content-attributes-lifecycle.test.ts`.)
+- [x] Upload requires `validateEditorTokenFromRequest`, `edit` permission, a fail-closed
+      canonical per-site limiter, then `checkOwnerCanEdit`, before image processing/storage.
+      Public-token-only, invalid, expired, revoked, wrong-site and view-only callers cannot store
+      files or inspect entitlement. Both upload limiters remain fail closed.
+      (`upload/image/route.test.ts`, `upload/image/editor-auth.test.ts`.)
+- [x] Device grants use `X-RCF-Editor-Grant`; edit-session/staging tokens use multipart fields,
+      never new query credentials. Cross-origin preflight permits the grant header, without
+      cookies. Existing file validation, progress, error handling and immutable storage survive.
+      (`image-upload-credentials.test.ts`, `upload/image/route.test.ts`.)
+- [x] Source changes rebuild `/embed/recopyfast.js` with `scripts/build-embed.mjs`; its URL and
+      byte ceilings remain unchanged (45,799 B bundle / 33,020 B widget gzipped).
+- [ ] Independent review passes before a PR; merge and deployment remain separate.
+
+Research: [s126-site-token-write-paths](research/s126-site-token-write-paths.md).
+Plan: [s126-site-token-write-paths](plans/s126-site-token-write-paths.md), validated by the owner on 2026-10-28.
+
 ## Story s128-realtime-load-bounds — realtime abuse cannot amplify public tokens into unbounded database work
 
 Requested by the owner in chat on October 27, 2026, from the security audit (findings H4,

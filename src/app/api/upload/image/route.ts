@@ -9,20 +9,29 @@
  *
  * Contract (agreed with the widget agent):
  *   multipart/form-data: file=<File>, siteId=<uuid>
- *   Authorization: Bearer <site token>
+ *   X-RCF-Editor-Grant header or editToken/stagingToken multipart field
  *   → 200 { url, width, height }
  *   → 400 invalid type/size · 401 unauthorized · 413 too large
  *
- * Threat model: any holder of a site token can reach this route with arbitrary
- * bytes. Nothing the client says about the file is believed — see
- * @/lib/images/sniff and @/lib/images/process.
+ * Threat model: the public site token identifies a site but never authorizes
+ * permanent storage. A verified editor with edit permission and an entitled
+ * site owner is required before bytes are decoded or stored. Nothing the
+ * client says about the file is believed — see @/lib/images/sniff and
+ * @/lib/images/process.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { authorizeSiteRequest } from "@/lib/security/site-auth";
-import { extractSiteToken } from "@/lib/security/ingest-auth";
+import {
+  requireEditorPermission,
+  validateEditorTokenFromRequest,
+} from "@/lib/auth/editor-access";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
-import { requireUuid } from "@/lib/api/validation";
+import { canonicalSiteId } from "@/lib/api/validation";
+import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { isRasterFormat, sniffImageFormat } from "@/lib/images/sniff";
 import { normalizeImage } from "@/lib/images/process";
 import { uploadSiteAsset } from "@/lib/storage/upload";
@@ -45,27 +54,18 @@ export const dynamic = "force-dynamic";
  */
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 
-/**
- * The widget runs on customer domains, so this is a cross-origin call.
- * A wildcard does not widen access: `authorizeSiteRequest` pins the request's
- * Origin to the site's registered domain, and credentials are never allowed.
- */
-function withCors(response: NextResponse): NextResponse {
-  response.headers.set("Access-Control-Allow-Origin", "*");
-  response.headers.set(
-    "Access-Control-Allow-Headers",
-    "Authorization, Content-Type, X-Site-Token",
-  );
-  response.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  return response;
-}
+const ALLOWED_METHODS = "POST, OPTIONS";
 
 function errorResponse(message: string, status: number): NextResponse {
-  return withCors(NextResponse.json({ error: message }, { status }));
+  return withPublicCors(
+    NextResponse.json({ error: message }, { status }),
+    undefined,
+    ALLOWED_METHODS,
+  );
 }
 
-export async function OPTIONS() {
-  return withCors(new NextResponse(null, { status: 204 }));
+export async function OPTIONS(request?: NextRequest) {
+  return publicOptions(request, ALLOWED_METHODS);
 }
 
 export async function POST(request: NextRequest) {
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
       onStoreFailure: "deny",
       message: "Too many uploads. Please wait before uploading again.",
     });
-    if (ipLimited) return withCors(ipLimited);
+    if (ipLimited) return withPublicCors(ipLimited, request, ALLOWED_METHODS);
 
     // ---- 2. Reject oversized bodies before buffering them -------------------
     // Content-Length is attacker-controlled and is re-checked against the real
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       return errorResponse("Request body must be multipart/form-data", 400);
     }
 
-    const siteId = requireUuid({ siteId: form.get("siteId") }, "siteId");
+    const siteId = canonicalSiteId(form.get("siteId"));
     if (!siteId.ok) {
       return errorResponse(siteId.error, 400);
     }
@@ -118,21 +118,34 @@ export async function POST(request: NextRequest) {
       return errorResponse('Field "file" is required', 400);
     }
 
-    // ---- 4. Authenticate the site ------------------------------------------
-    // Proves possession of the site's API key and pins the Origin to the site's
-    // registered domain. `siteId` is only trusted after this returns.
-    try {
-      await authorizeSiteRequest({
-        siteId: siteId.value,
-        token: extractSiteToken(request),
-        origin: request.headers.get("origin"),
-        referer: request.headers.get("referer"),
-      });
-    } catch (error) {
+    // ---- 4. Authenticate an editor -----------------------------------------
+    // October 2026's M5 audit found this route accepting the public site token,
+    // which is printed in page source and forgeable with a matching Origin.
+    // Multipart carries only edit-session/staging credentials; device grants
+    // remain header-only so they never leak into bodies, URLs or logs.
+    const tokenBody: Record<string, string> = {};
+    const editToken = form.get("editToken");
+    const stagingToken = form.get("stagingToken");
+    if (typeof editToken === "string" && editToken.length > 0) {
+      tokenBody.editToken = editToken;
+    }
+    if (typeof stagingToken === "string" && stagingToken.length > 0) {
+      tokenBody.stagingToken = stagingToken;
+    }
+
+    const validation = await validateEditorTokenFromRequest({
+      request,
+      siteId: siteId.value,
+      body: tokenBody,
+    });
+    if (!validation.valid || !validation.access) {
       return errorResponse(
-        error instanceof Error ? error.message : "Unauthorized",
-        401,
+        validation.error || "Invalid editor token",
+        validation.status || 401,
       );
+    }
+    if (!requireEditorPermission(validation.access, "edit")) {
+      return errorResponse("Requires 'edit' permission", 403);
     }
 
     // ---- 5. Per-site throttle ----------------------------------------------
@@ -147,9 +160,23 @@ export async function POST(request: NextRequest) {
       onStoreFailure: "deny",
       message: "Too many uploads for this site. Please wait and try again.",
     });
-    if (siteLimited) return withCors(siteLimited);
+    if (siteLimited)
+      return withPublicCors(siteLimited, request, ALLOWED_METHODS);
 
-    // ---- 6. Size, enforced on the actual bytes ------------------------------
+    // ---- 6. Owner entitlement ----------------------------------------------
+    // Uploads are permanent billed writes. Like every other editor write, the
+    // credential proves who may act and the owner's live plan decides whether
+    // the site may change. A lookup outage fails closed with the shared 503.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId.value);
+    if (!ownerCanEdit.ok) {
+      return withPublicCors(
+        ownerCanEditRefusal(ownerCanEdit),
+        request,
+        ALLOWED_METHODS,
+      );
+    }
+
+    // ---- 7. Size, enforced on the actual bytes ------------------------------
     if (file.size > MAX_UPLOAD_BYTES) {
       return errorResponse(
         `File exceeds the ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB limit`,
@@ -169,7 +196,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ---- 7. Identify the file from its bytes --------------------------------
+    // ---- 8. Identify the file from its bytes --------------------------------
     const sniffed = sniffImageFormat(bytes);
 
     if (!sniffed) {
@@ -194,13 +221,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ---- 8. Decode, strip metadata, re-encode -------------------------------
+    // ---- 9. Decode, strip metadata, re-encode -------------------------------
     const processed = await normalizeImage(bytes, sniffed.format);
     if (!processed.ok) {
       return errorResponse(processed.error, 400);
     }
 
-    // ---- 9. Store -----------------------------------------------------------
+    // ---- 10. Store ----------------------------------------------------------
     const uploaded = await uploadSiteAsset({
       siteId: siteId.value,
       data: processed.value.data,
@@ -212,12 +239,14 @@ export async function POST(request: NextRequest) {
       return errorResponse(uploaded.error, 500);
     }
 
-    return withCors(
+    return withPublicCors(
       NextResponse.json({
         url: uploaded.value.url,
         width: processed.value.width,
         height: processed.value.height,
       }),
+      request,
+      ALLOWED_METHODS,
     );
   } catch (error) {
     console.error("Image upload failed:", error);

@@ -7,6 +7,10 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  toPublicRows,
+  type PublicContentSourceRow,
+} from "@/lib/content/public-rows";
 
 const WIDGET_SOURCE = readFileSync(
   path.join(process.cwd(), "public", "embed", "recopyfast.src.js"),
@@ -140,6 +144,100 @@ describe("embed content attributes", () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it("keeps host text, image, href and alt when discovery candidates are unpublished", async () => {
+    const hostMarkup =
+      '<h1 data-rcf-id="shared-heading">Host heading</h1>' +
+      '<a class="rcf-editable-link" href="/host">Host link</a>' +
+      '<img src="/host.png" alt="Host alt">';
+    document.body.innerHTML = hostMarkup;
+    const discoveryRecorded: Array<{
+      url: string;
+      method: string;
+      body?: string;
+    }> = [];
+
+    // First boot asks the shipped widget for its real authored and computed
+    // ids. The second boot uses those stable ids as hostile server rows. This
+    // avoids copying the widget's hash/path algorithm into the test, which
+    // would let the fixture drift while claiming to cover computed ids.
+    await boot(() => [], discoveryRecorded);
+    const discovery = discoveryRecorded.find(
+      (request) =>
+        request.url.endsWith(`/content/${SITE_ID}`) &&
+        request.method === "POST",
+    );
+    const reported = JSON.parse(discovery?.body ?? "{}") as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const idsByType = Object.fromEntries(
+      Object.entries(reported).map(([id, entry]) => [entry.type, id]),
+    ) as Record<string, string>;
+
+    expect(idsByType.h1).toBe("shared-heading");
+    expect(idsByType.a).toMatch(/^rcf-/);
+    expect(idsByType.img).toMatch(/^rcf-/);
+
+    (
+      (window as unknown as Record<string, unknown>).ReCopyFast as {
+        destroy(): void;
+      }
+    ).destroy();
+    delete (window as unknown as Record<string, unknown>).ReCopyFast;
+    document.head.innerHTML = "";
+    document.body.innerHTML = hostMarkup;
+    installScriptTag();
+    const recorded: Array<{ url: string; method: string; body?: string }> = [];
+    let projectedRows: StoredRow[] = [];
+
+    await boot(() => {
+      const hostile = (["h1", "a", "img"] as const).map((type, index) => ({
+        id: `candidate-${index}`,
+        site_id: SITE_ID,
+        element_id: idsByType[type],
+        selector: type,
+        original_content:
+          type === "img" ? "https://evil.example/planted.png" : "Planted copy",
+        published_content: null,
+        language: "en",
+        variant: "default",
+        page_path: type === "h1" ? null : "/pricing",
+        metadata: {
+          type,
+          href: "https://evil.example/phish",
+          alt: "Planted alt",
+        },
+        published_at: null,
+      })) satisfies PublicContentSourceRow[];
+      projectedRows = toPublicRows(hostile) ?? [];
+      return projectedRows;
+    }, recorded);
+
+    expect(projectedRows).toEqual([]);
+    expect(document.querySelector("h1")?.textContent).toBe("Host heading");
+    expect(document.querySelector("a")?.textContent).toBe("Host link");
+    expect(document.querySelector("a")?.getAttribute("href")).toBe("/host");
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(
+      "/host.png",
+    );
+    expect(document.querySelector("img")?.getAttribute("alt")).toBe("Host alt");
+
+    const discoveries = discoveryRecorded.filter(
+      (request) =>
+        request.url.endsWith(`/content/${SITE_ID}`) &&
+        request.method === "POST",
+    );
+    expect(discoveries.length).toBeLessThanOrEqual(1);
+    expect(reported["shared-heading"]?.page_path).toBeNull();
+    const computedIds = [idsByType.a, idsByType.img];
+    expect(computedIds).toHaveLength(2);
+    expect(computedIds.every(Boolean)).toBe(true);
+    expect(computedIds.every((id) => id.startsWith("rcf-"))).toBe(true);
+    expect(
+      Object.values(reported).some((entry) => entry.page_path === "/pricing"),
+    ).toBe(true);
   });
 
   it("hydrates every allowed href form and trims alt when text is unchanged", async () => {
