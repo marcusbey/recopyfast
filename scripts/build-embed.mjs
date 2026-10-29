@@ -468,8 +468,25 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * shipped bytes.
  * build-size-gate.test.ts pins the same pair.
  */
-const MAX_BUNDLE_GZ = 45774;
-const MAX_WIDGET_GZ = 33016;
+/*
+ * RE-BASED 2026-10-29 (s119, PR #119 CI), from 45774 / 33016 to 45792 / 33033 —
+ * still BELOW main's 45801 / 33044, so the ratchet only went down.
+ *
+ * CI's `node-version: "24"` started resolving to Node 24.22.1 (the 2026-10-21
+ * security release), whose zlib compresses the same bytes differently from the
+ * 24.14.0 every figure above was taken on. Under 24.22.1, measured by CI on the
+ * same commits rather than assumed:
+ *
+ *   45799 / 33020  main (230a0ea / 5efbc0f), against main's 45801 / 33044
+ *   45790 / 33009  this branch after merging main, -9 / -11 net
+ *
+ * The 24.14.0-derived 45774 / 33016 put the branch 16 B over on a build that is
+ * smaller than main's. The ceilings are main's minus what the story earns under
+ * the runtime CI actually runs, which keeps main's own 2 / 24 B headroom. The
+ * runtime itself stays unpinned here; pinning CI's Node is separate work.
+ */
+const MAX_BUNDLE_GZ = 45792;
+const MAX_WIDGET_GZ = 33033;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.
