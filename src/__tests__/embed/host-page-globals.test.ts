@@ -141,10 +141,9 @@ async function boot(url: string, replies: Replies = {}) {
   script.setAttribute("data-site-token", SITE_TOKEN);
   script.setAttribute("data-api-url", API);
   document.head.appendChild(script);
-  Object.defineProperty(document, "currentScript", {
-    configurable: true,
-    get: () => script,
-  });
+  jest
+    .spyOn(Document.prototype, "currentScript", "get")
+    .mockReturnValue(script);
 
   const fetch = installFetch(replies);
   new Function(WIDGET_SOURCE)();

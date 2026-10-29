@@ -3,6 +3,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 export const FIXTURE_SITE_ID = "00000000-0000-4000-8000-000000000006";
 export const FIXTURE_SITE_TOKEN = "fixture.site.token";
 export const FIXTURE_STAGING_TOKEN = "fixture-staging-token";
+export const FIXTURE_EDITOR_GRANT = "fixture-editor-grant-sentinel";
+export const FIXTURE_EDIT_CODE = "fixture-edit-code-sentinel";
+export const FIXTURE_HANDOFF_CODE = "fixture-handoff-code-sentinel";
 
 export const FIXTURE_ELEMENT_IDS = {
   heading: "fixture-heading",
@@ -324,6 +327,30 @@ export class StubApi {
         expiresAt: "2099-01-01T00:00:00.000Z",
         requiresEmail: false,
         requiresVerification: false,
+      });
+      return true;
+    }
+
+    if (url.pathname === "/api/editor/validate-grant" && method === "POST") {
+      const body = this.objectBody(json);
+      this.writeJson(response, 200, {
+        valid: body.grant === FIXTURE_EDITOR_GRANT,
+        email: "fixture@recopyfast.local",
+        permissions: ["view", "edit", "publish"],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        shouldRefresh: false,
+      });
+      return true;
+    }
+
+    if (url.pathname === "/api/editor/handoff/redeem" && method === "POST") {
+      const body = this.objectBody(json);
+      this.writeJson(response, 200, {
+        ok: body.code === FIXTURE_HANDOFF_CODE,
+        grant: FIXTURE_EDITOR_GRANT,
+        email: "fixture@recopyfast.local",
+        permissions: ["view", "edit", "publish"],
+        expiresAt: "2099-01-01T00:00:00.000Z",
       });
       return true;
     }

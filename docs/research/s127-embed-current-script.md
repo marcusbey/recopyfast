@@ -136,7 +136,10 @@ coverage. See the appended story's acceptance criteria. L7 is a separate transpo
 3, matching the story: two small production edits but nontrivial fixture adaptation and browser
 proof, plus a tight byte budget. No split needed; both public entry points must be secured together.
 
-## Phase 1 validation and commit status
+## Phase 1 validation and commit status (historical)
+
+The phase completed in commit `da839bfd`; the owner validated the plan on 2026-10-28. The
+paragraphs below preserve the phase's gate evidence and are no longer the current execution state.
 
 `npm ci` completed once (the initial shell used Node 25 and printed the package's Node 24
 engine warning; subsequent hook runs explicitly used installed Node 24.14.0). The unchanged
@@ -150,3 +153,23 @@ also stopped producing output after Jest startup for nearly three minutes and wa
 No assertions, hooks or code were changed; no hook was bypassed. No commit was created. The four
 documents remain staged for a later unbypassed retry. Logs for this local run are
 `/tmp/s127-phase1-commit.log` and `/tmp/s127-phase1-commit-retry.log` (ephemeral).
+
+## Resume handoff — 2026-10-29
+
+The owner validated execution and later authorized rebasing the unpublished branch onto main
+after s125/#127 and s126/#128. The docs commit was replayed as `35d5a544`; main's audit resolution
+notes and s125/s126 stories were preserved. s126's upload credential implementation and browser
+assertions survived unchanged. Its new Jest upload fixture needed the same prototype getter spy
+as the other hardened-source boot fixtures; credential assertions are unchanged.
+
+The native descriptor/getter and caught `HTMLScriptElement` check remain the identity boundary.
+To fit the unchanged gate, endpoint-global validation and attribute fallback were separated,
+unused catch bindings were removed, and the existing missing-API console warning was removed.
+The warning removal is a deliberate diagnostic change, not a duplicate-message cleanup; normal
+configuration precedence, refusal behavior, and credential semantics remain unchanged.
+
+Rebased bundle: 45,827 → 45,800 B gzipped (45,801 B ceiling); widget: 33,049 → 33,022 B
+(33,044 B ceiling), measured under Node 24.14.0. Full Jest/coverage, lint, both type checks,
+format, build and post-build staleness/size checks pass; detailed evidence is in the plan.
+Browser regressions are authored; executed by Claude outside sandbox — pending. The earlier
+browser uncertainty remains unresolved, and independent review is still required before a PR.

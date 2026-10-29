@@ -9,6 +9,8 @@ interface FixturePageOptions {
   servingOrigin: string;
   hostOrigin: string;
   widget: boolean;
+  entry?: "canonical" | "legacy";
+  currentScriptClobbers?: number;
 }
 
 /**
@@ -20,10 +22,24 @@ export function fixturePage({
   servingOrigin,
   hostOrigin,
   widget,
+  entry = "canonical",
+  currentScriptClobbers = 0,
 }: FixturePageOptions): string {
+  const attackerMarkup = Array.from(
+    { length: currentScriptClobbers },
+    (_, index) => `<img
+      name="currentScript"
+      src="https://attacker.invalid/planted-${index}.svg"
+      data-site-id="attacker-site"
+      data-site-token="attacker-site-token"
+      data-api-url="https://attacker.invalid/api"
+      data-ws-url="wss://attacker.invalid/ws"
+      hidden
+    />`,
+  ).join("\n");
   const embed = widget
     ? `<script
-        src="${servingOrigin}/embed/recopyfast.js"
+        src="${servingOrigin}/embed/${entry === "legacy" ? "recopyfast-secure.js" : "recopyfast.js"}?fixture=1"
         data-site-id="${FIXTURE_SITE_ID}"
         data-site-token="${FIXTURE_SITE_TOKEN}"
         data-api-url="${servingOrigin}/api"
@@ -45,6 +61,7 @@ export function fixturePage({
       p { width: 620px; max-width: 100%; margin: 0 0 28px; }
       img { display: block; width: 320px; height: 180px; object-fit: cover; }
     </style>
+    ${attackerMarkup}
     ${embed}
   </head>
   <body>

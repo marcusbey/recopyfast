@@ -78,10 +78,9 @@ function installScriptTag() {
   });
   document.head.appendChild(script);
 
-  Object.defineProperty(document, "currentScript", {
-    configurable: true,
-    get: () => script,
-  });
+  jest
+    .spyOn(Document.prototype, "currentScript", "get")
+    .mockReturnValue(script);
 }
 
 /** socket.io, stubbed. The transport is not what this test is about. */
