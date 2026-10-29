@@ -173,6 +173,10 @@ Four Supabase clients, and picking the wrong one is a security bug:
 28 of 77 routes use the service-role client. Every one of them owes an explicit authorization
 call before it touches data. See [ADR 002](./decisions/002-rls-tenant-boundary.md).
 
+Billing rows are column-scoped for web roles: `authenticated` may UPDATE only
+`credit_purchases.credits_remaining`, and a trigger refuses any other column change; `copy_styles`
+takes no web-role write ([ADR 075](./decisions/075-billing-rows-are-column-scoped-for-web-roles.md)).
+
 Site ownership is an `admin` row in `site_permissions`, **not** a column on `sites`. Counting
 via `sites.user_id` silently returns 0 and passes every quota check — that bug already
 shipped once; `countOwnedSites` in `feature-gating/permissions.ts` records it.
