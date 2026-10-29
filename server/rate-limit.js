@@ -54,6 +54,8 @@ const DEFAULT_RATE_LIMIT = {
    * not one per keystroke.
    */
   maxMessagesPerSocket: 600,
+  /** Shared inventory budget: copied site tokens cannot multiply database reads by sockets. */
+  maxContentMapsPerSite: 30,
 };
 
 /** IPv6 hextets that name one subscriber: the routing prefix of a /64. */
@@ -296,6 +298,7 @@ function createMemoryRateLimitStore() {
 /**
  * @param {object} options
  * @param {{ increment: (key: string, windowMs: number) => Promise<number> }} options.store
+ * @param {Record<string, number>} [options.limits]
  */
 function createRateLimiter(options = {}) {
   const store = options.store;
@@ -364,6 +367,10 @@ function createRateLimiter(options = {}) {
 
     async checkMessage({ socketId }) {
       return consume('msg', socketId, config.maxMessagesPerSocket);
+    },
+
+    async checkContentMap({ siteId }) {
+      return consume('content-map-site', siteId, config.maxContentMapsPerSite);
     },
   };
 }

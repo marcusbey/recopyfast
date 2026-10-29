@@ -5658,3 +5658,46 @@ Acceptance:
 
 Research: [s126-site-token-write-paths](research/s126-site-token-write-paths.md).
 Plan: [s126-site-token-write-paths](plans/s126-site-token-write-paths.md), validated by the owner on 2026-10-28.
+
+## Story s128-realtime-load-bounds — realtime abuse cannot amplify public tokens into unbounded database work
+
+Requested by the owner in chat on October 27, 2026, from the security audit (findings H4,
+M6, L21 and L22). As a site owner, I retain authoritative HTTP editing while realtime
+rejects visitor inventory events, bounds editor inventory work and unauthenticated transports,
+and contains message failures. Complexity 3; dependencies: s07a/s07b, s68c, s79 credential
+checks and s84 crash reporting; ADRs 004/022/023/026. Branch
+`feature/s128-realtime-load-bounds`; embed allocation 0 bytes.
+
+Not in scope: s125, credit_purchases, copy_styles, edit-board style routes, HTTP discovery,
+new transports, Redis adapter, scaling, migrations, production access or deployment. L21 is
+verified but deferred: moving a bucket alone does not isolate editors from public visitors.
+No UI design phase is needed. Phase 1 ends at documentation committed with an unvalidated plan.
+
+Acceptance:
+
+- [x] Visitor/degraded sockets' content-map events cause no database read, Redis increment or
+      fan-out; only server-verified staging sockets may reach that path.
+      Test: `content-map load bounds › drops visitor content maps before Redis, database reads, or fan-out`.
+- [x] Content-map has a local per-socket budget of 5/minute and fail-closed per-site budget
+      of 30/minute before revalidation; concurrent content-map revalidation shares only an
+      in-flight promise, never a completed authorization verdict.
+      Tests: `content-map load bounds › allows five maps per socket per fixed window before any extra shared work`,
+      `shares the fail-closed per-site map budget across sockets`, and `shares only an in-flight revalidation and checks rotation again later`.
+- [x] Site-token equality, live grant/device/permission checks and the 60-second all-socket
+      sweep remain; content-update and join-dashboard never use a TTL authorization cache.
+      Test: `content-map load bounds › drops degraded-mode and wrong-message-token maps before shared work`; existing auth-parity and revocation suites remain green.
+- [x] Socket.IO uses connectTimeout 5000 and maxHttpBufferSize 65536. allowRequest caps
+      pending plus open transports at 20 per normalized address (IPv6 /64); lifecycle cleanup
+      releases each reservation exactly once, including failed upgrades and timeout paths.
+      Tests: `Engine.IO transport bounds` and `realtime transport connection limits`.
+- [x] All server authentication/rate refusals close the Engine.IO transport with disconnect(true).
+      Test: `refusal closes the underlying transport › returns Engine.IO bookkeeping to zero across the refusal matrix`.
+- [x] The common message wrapper catches synchronous throws and rejected promises, gives
+      at most one generic failure ack, and keeps unrelated sockets and health alive.
+      Tests: `the common event failure boundary`.
+- [ ] Local real-transport regressions prove the limits, cleanup, no writes, room isolation,
+      revocation and HTTP independence; all required checks and independent review pass.
+- [x] L21 remains explicitly open until a separately validated admission-isolation design exists.
+
+Research: [s128-realtime-load-bounds](research/s128-realtime-load-bounds.md).
+Plan: [s128-realtime-load-bounds](plans/s128-realtime-load-bounds.md).
