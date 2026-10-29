@@ -39,7 +39,7 @@ export function fixturePage({
   ).join("\n");
   const embed = widget
     ? `<script
-        src="${servingOrigin}/embed/${entry === "legacy" ? "recopyfast-secure.js" : "recopyfast.js"}?fixture=1"
+        src="${servingOrigin}/embed/${entry === "legacy" ? "recopyfast-secure.js?fixture=1" : "recopyfast.js"}"
         data-site-id="${FIXTURE_SITE_ID}"
         data-site-token="${FIXTURE_SITE_TOKEN}"
         data-api-url="${servingOrigin}/api"

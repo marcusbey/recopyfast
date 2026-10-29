@@ -5687,19 +5687,21 @@ Acceptance:
       null/an image/a collection`, `native getter throws`, and `HTMLScriptElement is unavailable`
       tests, plus the canonical `Document.prototype has no currentScript getter` test; the legacy
       loader uses the same caught descriptor lookup.
-- [ ] One and two `<img name="currentScript">` elements before the real script cannot supply
+- [x] One and two `<img name="currentScript">` elements before the real script cannot supply
       API/WS endpoints, site identity, tokens, or the legacy loader's script URL; normal boot
       still works and editor credential sentinels never reach the attacker destination.
       `current-script.spec.ts` authors canonical/legacy cases for zero, one and two named
-      images; executed by Claude outside sandbox — pending.
+      images; run by Claude outside the sandbox 2026-10-29: 6/6 green on the built artifact,
+      and the 4 clobber cases fail against origin/main's artifacts (baseline red).
 - [x] Existing same-origin string globals and genuine script `data-*` configuration retain
       their semantics; the legacy URL still loads its sibling canonical widget, preserving
       query strings and non-src attributes, including nonce and site configuration. Proved by
       the existing startup endpoint tests and `legacy loader trusted currentScript capture (H3)
       › loads the canonical sibling and preserves query, data, nonce, async and defer`.
-- [ ] Source Jest regressions plus real-markup browser tests of the generated artifact and
+- [x] Source Jest regressions plus real-markup browser tests of the generated artifact and
       legacy loader prove the boundary; existing embed tests retain their behavioural assertions.
-      Jest startup/legacy regressions pass; browser execution and baseline red proof remain pending.
+      Jest startup/legacy regressions pass; built-embed Playwright suite 13/13 green, baseline red
+      proven (see above).
 - [x] Rebuild only through `scripts/build-embed.mjs`; staleness and gzip gates pass without
       raising ceilings. s06b fixture coverage and strict test-count enforcement remain intact.
       `build-size-gate.test.ts` (`holds: the committed artifact is inside both ceilings`,

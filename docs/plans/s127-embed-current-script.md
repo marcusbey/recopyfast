@@ -54,7 +54,7 @@ No UI design or ADR is needed: preserve existing configuration and loading archi
        Keep a normal edit/publish journey. Demonstrate new attack cases fail on baseline bytes
        and pass on the rebuilt fix without weakening assertions. Update strict fixture count
        and its release-gate pin to the exact new count; leave existing seven cases intact.
-       **Status: authored; executed by Claude outside sandbox — pending.** The owner assigned
+       **Status: done 2026-10-29 by Claude outside the sandbox.** Built-embed Playwright 13/13 green; baseline red proof against origin/main artifacts: the 4 clobber cases (canonical+legacy × 1,2) fail, the 2 zero-clobber controls pass. The owner assigned
        browser execution to Claude on 2026-10-28; this resume must not launch Playwright/Chromium.
 6. [x] **Build and verify the non-browser gates (owner's resume scope).** Rebuild with `npm run build:embed`; run
        `node scripts/build-embed.mjs --check` and the size-gate tests. Record before/after Node
