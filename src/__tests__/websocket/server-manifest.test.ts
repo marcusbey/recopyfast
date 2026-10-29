@@ -104,11 +104,12 @@ describe("server manifest", () => {
     // qs 6.15.3. Both active qs advisories were only moderate, so a high-only
     // gate missed them. Pin the compatible Express 4 floor and its reviewed
     // transitive resolution here so regenerating this independent lock cannot
-    // silently restore the vulnerable tree.
+    // silently restore the vulnerable tree. October 2026: qs 6.16.0 -> 6.16.2
+    // for GHSA-6pq8-jhm2-2vcw (moderate, stringify comma-format DoS).
     expect(manifest.dependencies?.express).toBe("^4.22.3");
     expect(lock.packages?.["node_modules/express"]?.version).toBe("4.22.3");
     expect(lock.packages?.["node_modules/body-parser"]?.version).toBe("1.20.9");
-    expect(lock.packages?.["node_modules/qs"]?.version).toBe("6.16.0");
+    expect(lock.packages?.["node_modules/qs"]?.version).toBe("6.16.2");
 
     expect(fs.existsSync(SERVER_SECURITY_WORKFLOW)).toBe(true);
     const workflow = fs.readFileSync(SERVER_SECURITY_WORKFLOW, "utf8");
