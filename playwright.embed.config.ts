@@ -13,7 +13,7 @@ export default defineConfig({
         [
           "./e2e/support/strict-reporter.ts",
           {
-            expected: 7,
+            expected: 13,
             outputFile: "test-results/embed-fixture-summary.json",
           },
         ],

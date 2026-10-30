@@ -10,6 +10,9 @@ import path from "node:path";
 import { fixturePage } from "./fixture-page";
 import {
   FIXTURE_ELEMENT_IDS,
+  FIXTURE_EDITOR_GRANT,
+  FIXTURE_EDIT_CODE,
+  FIXTURE_HANDOFF_CODE,
   FIXTURE_SITE_ID,
   FIXTURE_SITE_TOKEN,
   FIXTURE_STAGING_TOKEN,
@@ -19,6 +22,9 @@ import {
 
 export {
   FIXTURE_ELEMENT_IDS,
+  FIXTURE_EDITOR_GRANT,
+  FIXTURE_EDIT_CODE,
+  FIXTURE_HANDOFF_CODE,
   FIXTURE_SITE_ID,
   FIXTURE_SITE_TOKEN,
   FIXTURE_STAGING_TOKEN,
@@ -48,6 +54,10 @@ export interface FixtureServers {
   readonly api: StubApi;
   stagingUrl(): string;
   liveUrl(options?: { widget?: boolean }): string;
+  currentScriptUrl(options: {
+    entry: "canonical" | "legacy";
+    clobbers: 0 | 1 | 2;
+  }): string;
   close(): Promise<void>;
 }
 
@@ -159,6 +169,10 @@ export async function startFixtureServers(
     process.cwd(),
     "public/embed/socket.io-client.min.js",
   );
+  const legacyLoaderPath = path.resolve(
+    process.cwd(),
+    "public/embed/recopyfast-secure.js",
+  );
   const api = new StubApi(servingOrigin, hostOrigin);
 
   const servingServer = createServer(
@@ -188,6 +202,15 @@ export async function startFixtureServers(
             200,
             "application/javascript; charset=utf-8",
             await readFile(artifactPath),
+          );
+          return;
+        }
+        if (url.pathname === "/embed/recopyfast-secure.js") {
+          respondText(
+            response,
+            200,
+            "application/javascript; charset=utf-8",
+            await readFile(legacyLoaderPath),
           );
           return;
         }
@@ -236,6 +259,13 @@ export async function startFixtureServers(
             servingOrigin,
             hostOrigin,
             widget: url.searchParams.get("widget") !== "0",
+            entry:
+              url.searchParams.get("entry") === "legacy"
+                ? "legacy"
+                : "canonical",
+            currentScriptClobbers: Number(
+              url.searchParams.get("clobbers") || "0",
+            ),
           }),
         );
       } catch (error) {
@@ -267,6 +297,12 @@ export async function startFixtureServers(
     liveUrl({ widget = true } = {}) {
       const url = new URL("/", hostOrigin);
       if (!widget) url.searchParams.set("widget", "0");
+      return url.toString();
+    },
+    currentScriptUrl({ entry, clobbers }) {
+      const url = new URL("/", hostOrigin);
+      url.searchParams.set("entry", entry);
+      url.searchParams.set("clobbers", String(clobbers));
       return url.toString();
     },
     async close() {

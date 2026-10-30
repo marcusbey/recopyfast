@@ -169,10 +169,9 @@ beforeEach(() => {
   script.setAttribute("data-site-token", SITE_TOKEN);
   script.setAttribute("data-api-url", API);
   document.head.appendChild(script);
-  Object.defineProperty(document, "currentScript", {
-    configurable: true,
-    get: () => script,
-  });
+  jest
+    .spyOn(Document.prototype, "currentScript", "get")
+    .mockReturnValue(script);
   jest.spyOn(console, "error").mockImplementation(() => {});
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});

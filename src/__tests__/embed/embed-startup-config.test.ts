@@ -46,10 +46,10 @@ function installScriptTag(
     script.setAttribute(name, value);
   }
   document.head.appendChild(script);
-  Object.defineProperty(document, "currentScript", {
-    configurable: true,
-    get: () => script,
-  });
+  jest
+    .spyOn(Document.prototype, "currentScript", "get")
+    .mockReturnValue(script);
+  return script;
 }
 
 function installFetch() {
@@ -73,6 +73,7 @@ let hostErrors: unknown[] = [];
 const onHostError = (event: ErrorEvent) => hostErrors.push(event.error);
 
 beforeEach(() => {
+  delete (document as unknown as Record<string, unknown>).currentScript;
   document.head.innerHTML = "";
   document.body.innerHTML = "<h1>Hello world</h1><p>Some copy.</p>";
   window.sessionStorage.clear();
@@ -100,6 +101,166 @@ afterEach(() => {
   if (current && typeof current.destroy === "function") current.destroy();
   window.removeEventListener("error", onHostError);
   jest.restoreAllMocks();
+  delete (document as unknown as Record<string, unknown>).currentScript;
+});
+
+describe("trusted currentScript capture (H3)", () => {
+  const ATTACKER_API = "https://evil.test/api";
+
+  function installOwnCurrentScript(value: unknown) {
+    Object.defineProperty(document, "currentScript", {
+      configurable: true,
+      get: () => value,
+    });
+  }
+
+  function attackerImage() {
+    const image = document.createElement("img");
+    image.setAttribute("name", "currentScript");
+    image.src = "https://evil.test/recopyfast.js";
+    image.setAttribute("data-api-url", ATTACKER_API);
+    image.setAttribute("data-ws-url", "wss://evil.test");
+    image.setAttribute("data-site-id", "site-attacker");
+    image.setAttribute("data-site-token", "token-attacker");
+    document.body.prepend(image);
+    return image;
+  }
+
+  it.each([
+    ["one named image", () => attackerImage()],
+    ["two named images", () => [attackerImage(), attackerImage()]],
+  ])("uses the native getter instead of %s", async (_label, clobber) => {
+    const script = installScriptTag({
+      "data-api-url": "https://api.rcf.test/api",
+    });
+    installOwnCurrentScript(clobber());
+    const urls = installFetch();
+
+    new Function(WIDGET_SOURCE)();
+    await settle();
+
+    expect(script).toBeInstanceOf(HTMLScriptElement);
+    expect(urls.length).toBeGreaterThan(0);
+    expect(
+      urls.every((url) => url.startsWith("https://api.rcf.test/api/")),
+    ).toBe(true);
+    expect(urls.some((url) => url.includes("evil.test"))).toBe(false);
+    expect(widget().isInitialized).toBe(true);
+    expect(hostErrors).toEqual([]);
+  });
+
+  it.each([
+    ["null", null],
+    ["an image", document.createElement("img")],
+    [
+      "a collection",
+      [document.createElement("img"), document.createElement("img")],
+    ],
+  ])(
+    "returns silently when the native getter yields %s",
+    async (_label, value) => {
+      const realScript = document.createElement("script");
+      realScript.src = SCRIPT_SRC;
+      realScript.setAttribute("data-api-url", "https://api.rcf.test/api");
+      document.head.appendChild(realScript);
+      installOwnCurrentScript(realScript);
+      jest
+        .spyOn(Document.prototype, "currentScript", "get")
+        .mockReturnValue(value as HTMLScriptElement | null);
+      const urls = installFetch();
+      window.sessionStorage.setItem(
+        "rcf_editor_grant_site-config",
+        "stored-grant",
+      );
+      window.history.replaceState(null, "", "/#rcf_edit=edit-code");
+      const before = document.body.innerHTML;
+
+      expect(() => new Function(WIDGET_SOURCE)()).not.toThrow();
+      await settle();
+
+      expect(urls).toEqual([]);
+      expect(
+        (window as unknown as { ReCopyFast?: unknown }).ReCopyFast,
+      ).toBeUndefined();
+      expect(document.body.innerHTML).toBe(before);
+      expect(
+        window.sessionStorage.getItem("rcf_editor_grant_site-config"),
+      ).toBe("stored-grant");
+      expect(location.hash).toBe("#rcf_edit=edit-code");
+      expect(hostErrors).toEqual([]);
+    },
+  );
+
+  it("returns silently when the native getter throws", async () => {
+    const realScript = document.createElement("script");
+    document.head.appendChild(realScript);
+    installOwnCurrentScript(realScript);
+    jest
+      .spyOn(Document.prototype, "currentScript", "get")
+      .mockImplementation(() => {
+        throw new Error("blocked accessor");
+      });
+    const urls = installFetch();
+
+    expect(() => new Function(WIDGET_SOURCE)()).not.toThrow();
+    await settle();
+
+    expect(urls).toEqual([]);
+    expect(
+      (window as unknown as { ReCopyFast?: unknown }).ReCopyFast,
+    ).toBeUndefined();
+    expect(hostErrors).toEqual([]);
+  });
+
+  it("returns silently when Document.prototype has no currentScript getter", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      Document.prototype,
+      "currentScript",
+    );
+    if (!descriptor)
+      throw new Error("jsdom must expose Document.prototype.currentScript");
+    const realScript = document.createElement("script");
+    document.head.appendChild(realScript);
+    installOwnCurrentScript(realScript);
+    Object.defineProperty(Document.prototype, "currentScript", {
+      configurable: true,
+      value: undefined,
+    });
+    const urls = installFetch();
+
+    try {
+      expect(() => new Function(WIDGET_SOURCE)()).not.toThrow();
+      await settle();
+      expect(urls).toEqual([]);
+      expect(
+        (window as unknown as { ReCopyFast?: unknown }).ReCopyFast,
+      ).toBeUndefined();
+      expect(hostErrors).toEqual([]);
+    } finally {
+      Object.defineProperty(Document.prototype, "currentScript", descriptor);
+    }
+  });
+
+  it("returns silently when HTMLScriptElement is unavailable", async () => {
+    const script = installScriptTag({});
+    installOwnCurrentScript(script);
+    const htmlScriptElement = window.HTMLScriptElement;
+    const urls = installFetch();
+    delete (window as unknown as Record<string, unknown>).HTMLScriptElement;
+
+    try {
+      expect(() => new Function(WIDGET_SOURCE)()).not.toThrow();
+      await settle();
+      expect(urls).toEqual([]);
+      expect(
+        (window as unknown as { ReCopyFast?: unknown }).ReCopyFast,
+      ).toBeUndefined();
+    } finally {
+      (
+        window as unknown as { HTMLScriptElement: typeof HTMLScriptElement }
+      ).HTMLScriptElement = htmlScriptElement;
+    }
+  });
 });
 
 describe("realtime without a bundled socket.io client", () => {
