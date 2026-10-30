@@ -47,10 +47,13 @@ describe("PUBLIC_CONTENT_COLUMNS", () => {
       .map((call) => /"([^"]+)"/.exec(call)?.[1])
       .filter((columns) => columns?.includes("published_content"));
 
-    expect(gettingColumns).toEqual([
-      PUBLIC_CONTENT_COLUMNS,
-      PUBLIC_CONTENT_COLUMNS,
-    ]);
+    // s119 (ADR 075): the content GET also reads the three source-drift
+    // columns, appended AFTER the public list, and folds them into its
+    // widget-only `source_seen` hint; the snapshot serves neither (see the
+    // parity test in src/__tests__/api/published/). The public part stays
+    // byte-identical.
+    const withSourceDrift = `${PUBLIC_CONTENT_COLUMNS}, source_baseline, source_drift_content, source_drift_detected_at`;
+    expect(gettingColumns).toEqual([withSourceDrift, withSourceDrift]);
   });
 
   it("names no private column", () => {

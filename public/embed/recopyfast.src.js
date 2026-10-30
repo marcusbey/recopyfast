@@ -2411,10 +2411,11 @@
         try {
           const response = await fetch(RECOPYFAST_API + '/staging/publish', {
             method: 'POST',
-            headers: Object.assign({ 'Content-Type': 'application/json' }, this.editorAuthHeaders()),
-            body: JSON.stringify(Object.assign({
-              siteId: SITE_ID
-            }, this.editorTokenBody()))
+            headers: { 'Content-Type': 'application/json', ...this.editorAuthHeaders() },
+            body: JSON.stringify({
+              siteId: SITE_ID,
+              ...this.editorTokenBody()
+            })
           });
 
           if (this.handleTerminalWriteFailure(response)) { close(); return; }
@@ -2477,7 +2478,7 @@
         const url = new URL(location.href);
         url.searchParams.delete('rcf_staging');
         url.searchParams.delete('rcf_token');
-        location.href = url.toString();
+        location.href = url.href;
       };
     }
 
@@ -2759,7 +2760,7 @@
       }
 
       const hasOnlyElements = [...element.childNodes].every(node => {
-        return node.nodeType !== Node.TEXT_NODE || !node.textContent.trim();
+        return node.nodeType !== 3 || !node.textContent.trim();
       });
 
       return hasOnlyElements && !element.hasAttribute('data-rcf-content');
@@ -2911,10 +2912,10 @@
       if (['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav'].includes(tagName)) {
         // Check if element has direct text content (not just whitespace)
         const hasDirectText = [...element.childNodes].some(node => {
-          return node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0;
+          return node.nodeType === 3 && node.textContent.trim();
         });
 
-        if (!hasDirectText && element.children.length > 0) {
+        if (!hasDirectText && element.children.length) {
           return 'container'; // Not editable - only has child elements
         }
       }
@@ -2943,7 +2944,7 @@
 
         if (current.className && typeof current.className === 'string') {
           const classes = current.className.trim().split(/\s+/).filter(c => !c.startsWith('rcf-'));
-          if (classes.length > 0) {
+          if (classes.length) {
             selector += '.' + classes.join('.');
           }
         }
@@ -3039,11 +3040,13 @@
       try {
         const response = await fetch(RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery(), {
           method: 'PUT',
-          headers: Object.assign({ 'Content-Type': 'application/json' }, this.editorAuthHeaders()),
-          body: JSON.stringify(Object.assign({
+          headers: { 'Content-Type': 'application/json', ...this.editorAuthHeaders() },
+          body: JSON.stringify({
             elementId: elementId,
-            content: content
-          }, this.editorTokenBody(), extra)),
+            content: content,
+            ...this.editorTokenBody(),
+            ...extra
+          }),
           signal: signal
         });
         const result = await response.json().catch(function(error) {
@@ -3066,15 +3069,16 @@
       this.setEditorSaveStatus('Saved');
       this.rememberRow(elementId, content, extra);
 
-      this.emitRealtimeContentUpdate(Object.assign({
+      this.emitRealtimeContentUpdate({
         siteId: SITE_ID,
         elementId: elementId,
         content: content,
         token: SITE_TOKEN,
         stagingMode: this.stagingMode,
         stagingToken: this.stagingToken || '',
-        editToken: this.editSessionToken || ''
-      }, extra));
+        editToken: this.editSessionToken || '',
+        ...extra
+      });
 
     }
 
@@ -3173,13 +3177,13 @@
       const contentMap = {};
 
       this.elements.forEach((data, elementId) => {
-        const entry = contentMap[elementId] = {
+        contentMap[elementId] = {
           selector: data.selector,
           content: data.originalContent,
           type: data.type,
-          page_path: data.path
+          page_path: data.path,
+          ...data.extras
         };
-        Object.assign(entry, data.extras);
       });
 
       // Report over HTTP, not over the socket.
@@ -3261,8 +3265,32 @@
       // nothing at all; a genuinely new element still reports immediately.
       // The upsert stays `ignoreDuplicates`, so re-reporting remains harmless —
       // this is about not paying for a write that can only be a no-op.
+      //
+      // s119 (ADR 075): an id the server holds also qualifies when its row's
+      // `source_seen` is not the element's live authored text. r/SideProject,
+      // 2026-10-21: original "5 to 10", published "5 to 11", the developer
+      // deployed "5 to 9", and this embed kept writing "5 to 11" with nobody
+      // told. It still writes "5 to 11" — visitors keep the client's words —
+      // but the deployed text now rides this same report, and the server
+      // records the conflict. The content GET sends `source_seen` on EDITED
+      // rows only: an unedited row is never written, so its deploy already
+      // shows, and comparing it would make every element of every page report
+      // on every view. The claim below drops the row's `source_seen` (the live
+      // text is fixed for the page view: `content` is the first-seen authored
+      // copy), so one page view reports one drift once; a later visitor's GET
+      // carries the recorded text and reports nothing. Nor is the row's own
+      // served copy (`current_content`) a deploy (review M1): a site that
+      // server-renders the ADR 046 snapshot puts the override itself into its
+      // HTML, and reporting that flagged every publish there as a conflict.
+      // The server ignores such a report too. Do not move this into
+      // a request of its own: the byte ceilings have no room for one, and the
+      // per-site discovery limit (fail-closed) is shared with this one anyway.
       const known = this.serverKnownElementIds;
-      const claimed = elementIds.filter(id => !known.has(id));
+      const rows = this.index || {};
+      const claimed = elementIds.filter(id => {
+        const row = rows[id] || 0, live = contentMap[id].content;
+        return !known.has(id) || row.source_seen && live != row.source_seen && live != row.current_content;
+      });
       if (!claimed.length) return;
 
       // Coalesced (s67). A page that keeps rendering — a live feed, an
@@ -3302,6 +3330,7 @@
       const report = {};
       claimed.forEach(id => {
         known.add(id);
+        delete (rows[id] || 0).source_seen;
         report[id] = contentMap[id];
       });
 
@@ -3322,8 +3351,11 @@
         // Offline, blocked by an extension, or the site was deleted. Nothing
         // useful to say on a customer's page — but give the claim back, so the
         // next rescan or navigation retries instead of inheriting a report that
-        // never happened. Only the ids this call added are removed; ones the
-        // server already held are not ours to forget.
+        // never happened. Only the ids this call claimed are removed; ones the
+        // server already held are not ours to forget — except a drift report
+        // (s119), whose id is forgotten too so the next rescan re-reports it as
+        // unknown: the upsert ignores the existing row and the drift is still
+        // recorded.
         claimed.forEach(id => known.delete(id));
       });
     }
@@ -3345,7 +3377,7 @@
       for (var i = 0; i < cookies.length; i++) {
         var cookie = cookies[i].trim();
         if (cookie.indexOf('rcf_vid=') === 0) {
-          this.visitorId = cookie.substring(8);
+          this.visitorId = cookie.slice(8);
           return;
         }
       }
@@ -3354,7 +3386,7 @@
       if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         this.visitorId = crypto.randomUUID();
       } else {
-        this.visitorId = 'rcf-' + Date.now() + '-' + Math.random().toString(36).substring(2, 11);
+        this.visitorId = 'rcf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 11);
       }
 
       // Set first-party cookie (1 year)
@@ -3580,7 +3612,7 @@
         });
       });
 
-      if (events.length > 0) {
+      if (events.length) {
         this.sendTrackEvent(events);
       }
     }
@@ -3605,7 +3637,7 @@
         });
       });
 
-      if (events.length > 0) {
+      if (events.length) {
         this.sendTrackEvent(events);
       }
     }
@@ -3907,7 +3939,7 @@
       if (!index) return;
       const row = index[id] || (index[id] = {});
       row.current_content = content;
-      row.metadata = Object.assign({}, row.metadata, attributes);
+      row.metadata = { ...row.metadata, ...attributes };
     }
 
     /** A rescan: map what is new, give it the cached rows and variants, report. */
@@ -3961,7 +3993,7 @@
         // is why the server checks the grant header FIRST: its Bearer branch
         // reads that value as a staging token and would refuse the request.
         const response = await fetch(endpoint, {
-          headers: Object.assign({ 'Authorization': 'Bearer ' + SITE_TOKEN }, this.editorAuthHeaders())
+          headers: { 'Authorization': 'Bearer ' + SITE_TOKEN, ...this.editorAuthHeaders() }
         });
 
         if (!response.ok) {
@@ -5763,14 +5795,15 @@
           // swap `editorTokenBody()` for `editorTokenQuery()` here.
           const response = await fetch(RECOPYFAST_API + '/ai/suggest', {
             method: 'POST',
-            headers: Object.assign({ 'Content-Type': 'application/json' }, self.editorAuthHeaders()),
-            body: JSON.stringify(Object.assign({
+            headers: { 'Content-Type': 'application/json', ...self.editorAuthHeaders() },
+            body: JSON.stringify({
               siteId: SITE_ID,
               text: currentText,
               context: 'website content',
               goal: goal,
-              tone: 'professional'
-            }, self.editorTokenBody())),
+              tone: 'professional',
+              ...self.editorTokenBody()
+            }),
           });
 
           const data = await response.json();
@@ -5848,9 +5881,10 @@
           const endpoint = contentReadEndpoint(staged, this.editorTokenQuery(), this.pagePath);
 
           const response = await fetch(endpoint, {
-            headers: Object.assign({
+            headers: {
               'Authorization': 'Bearer ' + SITE_TOKEN,
-            }, this.editorAuthHeaders()),
+              ...this.editorAuthHeaders()
+            },
           });
           if (response.ok) {
             const data = await response.json();
@@ -6297,7 +6331,7 @@
 
       title.textContent = 'Editable Elements (' + contentElements.length + ')';
 
-      if (contentElements.length === 0) {
+      if (!contentElements.length) {
         section.innerHTML += '<div class="rcf-eb-empty">No editable elements found</div>';
       } else {
         contentElements.forEach(({ data, elementId }) => {
@@ -6339,7 +6373,7 @@
           // showed the first-seen src, not the published one (s67 review,
           // finding 4).
           const live = self.rcf.getElementText(data.element);
-          cardDesc.textContent = live.substring(0, 100) + (live.length > 100 ? '...' : '');
+          cardDesc.textContent = live.slice(0, 100) + (live.length > 100 ? '...' : '');
 
           cardContent.append(cardTitle, cardDesc);
 
@@ -6415,7 +6449,7 @@
       title.textContent = 'Site Languages';
       section.append(title);
 
-      if (this.languages.length === 0) {
+      if (!this.languages.length) {
         const empty = document.createElement('div');
         empty.className = 'rcf-eb-empty';
         empty.textContent = 'No languages configured';
@@ -6535,7 +6569,7 @@
       title.textContent = 'Version History';
       section.append(title);
 
-      if (this.versions.length === 0) {
+      if (!this.versions.length) {
         section.innerHTML += '<div class="rcf-eb-empty">No versions saved yet</div>';
       } else {
         this.versions.forEach(version => {

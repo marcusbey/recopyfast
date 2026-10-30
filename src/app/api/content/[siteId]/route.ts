@@ -48,6 +48,40 @@ function discoveryResult(skipped: SkippedDiscoveryElement[]) {
   };
 }
 
+/**
+ * What the widget should compare the page's live authored text against, or
+ * null when it must not compare at all (ADR 075 §4).
+ *
+ * WHAT BROKE. r/SideProject, 2026-10-21: original "5 to 10", the client
+ * published "5 to 11", the developer deployed "5 to 9" — and the embed kept
+ * writing "5 to 11" with nobody told. The widget already holds the live authored
+ * text; this is the one value it needs to notice the deploy. Once a drift is
+ * recorded it IS the recorded text, so every later visitor on the same deploy
+ * compares equal and reports nothing: one report per drift, not per visitor —
+ * discovery's per-site limiter is fail-closed at 100/min, and a per-visitor
+ * report would lock discovery for the whole site.
+ *
+ * Edited rows only, with the widget's own definition of edited (applyRow:
+ * `current_content !== original_content`). An unedited row is never written by
+ * the widget, so the deploy already shows; giving it a `source_seen` would make
+ * every element of every page report on every view.
+ *
+ * `en`/`default` only: `record_content_source_drift` ignores every other row,
+ * so a widget comparing against one would re-report the same drift forever.
+ */
+function sourceSeenFor(row: {
+  language: string;
+  variant: string;
+  originalContent: string | null;
+  currentContent: string;
+  sourceBaseline: string | null;
+  sourceDriftContent: string | null;
+}): string | null {
+  if (row.language !== "en" || row.variant !== "default") return null;
+  if (row.currentContent === row.originalContent) return null;
+  return row.sourceDriftContent ?? row.sourceBaseline ?? row.originalContent;
+}
+
 function extractToken(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
@@ -230,13 +264,19 @@ export async function GET(
     const { data: contentElements, error } = await fetchPageScopedRows(
       (scope) => {
         const contentElementsTable = supabase.from("content_elements");
+        // The public projection (PUBLIC_CONTENT_COLUMNS, ADR 046: the
+        // snapshot route serves exactly these rows) plus the three ADR 075
+        // source-drift columns, read in the same select as the copy so
+        // `source_seen` describes the same row version. They are folded into
+        // `source_seen` below and never served raw; the snapshot does not get
+        // `source_seen` at all (public-rows.test.ts pins both halves).
         let query = (
           pagePath === null
             ? contentElementsTable.select(
-                "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+                "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at, source_baseline, source_drift_content, source_drift_detected_at",
               )
             : contentElementsTable.select(
-                "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+                "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at, source_baseline, source_drift_content, source_drift_detected_at",
                 { count: "exact" },
               )
         )
@@ -283,10 +323,29 @@ export async function GET(
         const publishedMetadata = { ...metadata };
         delete publishedMetadata.staging_attributes;
 
+        // The raw drift columns never leave: they are folded into `source_seen`
+        // below, the one value the widget compares against (ADR 075).
+        const publicElement: Record<string, unknown> = { ...element };
+        delete publicElement.source_baseline;
+        delete publicElement.source_drift_content;
+        delete publicElement.source_drift_detected_at;
+        // ADR 076: only published rows reach here, so there is no
+        // original_content fallback any more.
+        const currentContent = element.published_content ?? "";
+        const sourceSeen = sourceSeenFor({
+          language,
+          variant,
+          originalContent: element.original_content,
+          currentContent,
+          sourceBaseline: element.source_baseline,
+          sourceDriftContent: element.source_drift_content,
+        });
+
         return {
-          ...element,
+          ...publicElement,
           metadata: publishedMetadata,
-          current_content: element.published_content ?? "",
+          current_content: currentContent,
+          ...(sourceSeen === null ? {} : { source_seen: sourceSeen }),
         };
       });
 
@@ -527,6 +586,33 @@ export async function POST(
           allowedOrigin,
         );
       }
+
+      // ADR 075 — a developer's deploy under a published override.
+      //
+      // r/SideProject, 2026-10-21: original "5 to 10", published "5 to 11", the
+      // developer deployed "5 to 9", and the embed kept writing "5 to 11" with
+      // nobody told. The widget now also reports an element whose live
+      // authored text differs from its row's `source_seen` (see GET), through
+      // this same request. The upsert above ignores it — the row exists — so
+      // the database decides here, in one statement: drift recorded on an
+      // edited row, cleared when the source is back at the baseline, unedited
+      // and unknown rows ignored. Nothing a visitor sees changes.
+      //
+      // AFTER the upsert, so a brand-new element is already a row (and an
+      // unedited one, which the recorder skips). Best effort, like the install
+      // bookkeeping: the widget never reads this body and degrades rather than
+      // breaks, so a failed drift write is logged and the discovery answer
+      // stands. The next visitor's report retries it.
+      await bestEffortSiteWrite("source drift record", siteId, async () => {
+        const { error } = await supabase.rpc("record_content_source_drift", {
+          p_site_id: site.id,
+          p_reports: discovered.rows.map((row) => ({
+            element_id: row.element_id,
+            content: row.original_content,
+          })),
+        });
+        if (error) throw new Error(error.message);
+      });
     }
 
     return withCors(

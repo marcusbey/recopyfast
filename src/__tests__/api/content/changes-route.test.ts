@@ -138,8 +138,18 @@ const callsOf = (query: RecordedQuery, method: string) =>
   query.calls.filter(([name]) => name === method).map(([, ...args]) => args);
 
 let mockMetadata: Array<{ id: string; metadata: unknown }> = [];
+// s119: the base table is also read for source-drift fields (ADR 075), a
+// separate query with its own projection. "The metadata read" is the one that
+// selects metadata; the drift read is pinned in its own describe below.
+const isDriftRead = (query: RecordedQuery) =>
+  query.calls.some(
+    ([method, columns]) =>
+      method === "select" && String(columns).includes("source_drift_content"),
+  );
 const metadataQueries = () =>
-  mockRecorded.filter((query) => query.table === "content_elements");
+  mockRecorded.filter(
+    (query) => query.table === "content_elements" && !isDriftRead(query),
+  );
 
 function defaultResponder(rows: unknown[], total: number) {
   return (query: RecordedQuery): QueryResult => {
@@ -484,6 +494,8 @@ describe("GET /api/content/changes", () => {
       updatedAt: "2026-10-08T10:00:00.123456+00:00",
       changedBy: "ana@example.com",
       createdAt: "2026-09-28T09:00:00+00:00",
+      // s119 (ADR 075): no open drift on this row.
+      sourceDrift: null,
     });
   });
 
@@ -731,5 +743,162 @@ describe("GET /api/content/changes", () => {
     expect(
       (globalThis as Record<string, unknown>)[serviceImportFlag],
     ).toBeUndefined();
+  });
+});
+
+/**
+ * s119 (ADR 075) — the Changes page learns that a developer's deploy is masked
+ * by an override. The page said "5 to 10", the client published "5 to 11", the
+ * developer deployed "5 to 9": the row carries all three, from an RLS read of
+ * the base table for the returned EDITED rows only (the view is not widened,
+ * ADR 054).
+ */
+describe("GET /api/content/changes — source drift", () => {
+  const DETECTED = "2026-10-22T10:00:00.123456+00:00";
+  let mockDrift: Array<Record<string, unknown>> = [];
+  const driftQueries = () =>
+    mockRecorded.filter(
+      (query) => query.table === "content_elements" && isDriftRead(query),
+    );
+
+  function respondWith(rows: unknown[]) {
+    const base = defaultResponder(rows, rows.length);
+    mockRespond = (query) =>
+      query.table === "content_elements" && isDriftRead(query)
+        ? { data: mockDrift, error: null, count: null }
+        : base(query);
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRecorded.length = 0;
+    (enforceRateLimit as jest.Mock).mockResolvedValue(null);
+    mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
+    mockMetadata = [];
+    mockDrift = [];
+  });
+
+  it("the three-value scenario: written against, page now says and visitors see", async () => {
+    respondWith([
+      viewRow(1, { original_content: "5 to 10", published_content: "5 to 11" }),
+    ]);
+    mockDrift = [
+      {
+        id: "row-1",
+        source_baseline: null,
+        source_drift_content: "5 to 9",
+        source_drift_detected_at: DETECTED,
+      },
+    ];
+
+    const body = await (await get()).json();
+
+    expect(body.rows[0]).toMatchObject({
+      original: "5 to 10",
+      live: "5 to 11",
+      sourceDrift: {
+        baseline: "5 to 10",
+        observed: "5 to 9",
+        detectedAt: DETECTED,
+      },
+    });
+  });
+
+  it("measures against a kept baseline when there is one", async () => {
+    respondWith([
+      viewRow(1, { original_content: "5 to 10", published_content: "5 to 11" }),
+    ]);
+    mockDrift = [
+      {
+        id: "row-1",
+        source_baseline: "5 to 9",
+        source_drift_content: "5 to 8",
+        source_drift_detected_at: DETECTED,
+      },
+    ];
+
+    const body = await (await get()).json();
+
+    expect(body.rows[0].sourceDrift).toEqual({
+      baseline: "5 to 9",
+      observed: "5 to 8",
+      detectedAt: DETECTED,
+    });
+  });
+
+  it("reads open drift only, for the returned edited rows, fenced to the caller's sites", async () => {
+    respondWith([
+      viewRow(1),
+      viewRow(2, { published_content: "Original", change_state: "original" }),
+      viewRow(3, { published_content: null, change_state: "original" }),
+    ]);
+
+    await get();
+
+    expect(driftQueries()).toHaveLength(1);
+    const [drift] = driftQueries();
+    expect(callsOf(drift, "select")).toEqual([
+      ["id, source_baseline, source_drift_content, source_drift_detected_at"],
+    ]);
+    expect(callsOf(drift, "in")).toEqual([
+      ["id", ["row-1"]],
+      ["site_id", [SITE_A, SITE_B]],
+    ]);
+    expect(callsOf(drift, "not")).toEqual([
+      ["source_drift_content", "is", null],
+    ]);
+  });
+
+  it("gives every row without an open drift null, and reads nothing when no row is edited", async () => {
+    respondWith([
+      viewRow(1, { published_content: "Original", change_state: "original" }),
+    ]);
+
+    const body = await (await get()).json();
+
+    expect(driftQueries()).toEqual([]);
+    expect(body.rows[0].sourceDrift).toBeNull();
+  });
+
+  it("gives an edited row the drift read did not return null", async () => {
+    respondWith([viewRow(1), viewRow(2)]);
+    mockDrift = [
+      {
+        id: "row-2",
+        source_baseline: null,
+        source_drift_content: "Deployed",
+        source_drift_detected_at: DETECTED,
+      },
+    ];
+
+    const body = await (await get()).json();
+
+    expect(
+      body.rows.map((row: { sourceDrift: unknown }) => row.sourceDrift),
+    ).toEqual([
+      null,
+      { baseline: "Original", observed: "Deployed", detectedAt: DETECTED },
+    ]);
+  });
+
+  it("answers a generic 500 when the drift read fails", async () => {
+    const base = defaultResponder([viewRow(1)], 1);
+    mockRespond = (query) =>
+      query.table === "content_elements" && isDriftRead(query)
+        ? {
+            data: null,
+            error: { message: 'column "source_drift_content" does not exist' },
+            count: null,
+          }
+        : base(query);
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await get();
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "Failed to load changes",
+    });
+    errorLog.mockRestore();
   });
 });

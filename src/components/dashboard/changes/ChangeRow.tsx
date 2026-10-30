@@ -13,6 +13,7 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { classifyContent } from "@/components/ui/content-value";
 import {
@@ -38,6 +39,7 @@ import { describeElement } from "@/lib/content/describe-location";
 import { cn } from "@/lib/utils/cn";
 import { ChangeDetail } from "./ChangeDetail";
 import { RevertDialog, type ConfirmKind } from "./RevertDialog";
+import { SourceDriftDialog, type DriftAction } from "./SourceDriftDialog";
 
 /** "Edit on page" opens a session as long as the site's own Edit website. */
 const EDIT_SESSION_HOURS = 2;
@@ -152,6 +154,7 @@ export function ChangeRow({
   const detailId = `${useId()}-detail`;
   const [isExpanded, setIsExpanded] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmKind | null>(null);
+  const [driftConfirm, setDriftConfirm] = useState<DriftAction | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const expandRef = useRef<HTMLButtonElement>(null);
@@ -189,11 +192,25 @@ export function ChangeRow({
   const canDiscard = canEdit && row.state === "pending" && canDiscardDraft(row);
   const canRevert =
     canEdit && row.state === "published" && row.live !== row.original;
+  // s119 (ADR 075): keeping or dropping an override against a developer's new
+  // source is the site owner's call, so only an admin is offered it; the route
+  // refuses anyone else anyway.
+  const hasSourceDrift = Boolean(row.sourceDrift);
+  const canResolveDrift = isAdmin && hasSourceDrift;
 
   const openConfirm = (kind: ConfirmKind, opener: HTMLElement | null) => {
     openerRef.current = opener;
     setConfirmError(null);
     setConfirm(kind);
+  };
+
+  const openDriftConfirm = (
+    action: DriftAction,
+    opener: HTMLElement | null,
+  ) => {
+    openerRef.current = opener;
+    setConfirmError(null);
+    setDriftConfirm(action);
   };
 
   // Nothing landed: the dialog stays open with the reason. Something landed
@@ -211,6 +228,7 @@ export function ChangeRow({
       return;
     }
     setConfirm(null);
+    setDriftConfirm(null);
     if (outcome.error) {
       setActionError(outcome.error);
       setIsExpanded(true);
@@ -289,12 +307,27 @@ export function ChangeRow({
           <StatusBadge status={status} />
         </div>
 
-        <p
-          className="min-w-0 truncate text-sm font-medium text-foreground [grid-area:location]"
-          title={location}
-        >
-          {location}
-        </p>
+        {/* `flex-1`: the location fills its grid track up to ⋮, as it did
+            before the drift badge needed this wrapper. Shrunk to its words, it
+            ended 39px short of ⋮ at 375px and failed changes.spec.ts's "the
+            location reaches ⋮" check (s119, PR #119 E2E). */}
+        <div className="flex min-w-0 items-center gap-2 [grid-area:location]">
+          <p
+            className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+            title={location}
+          >
+            {location}
+          </p>
+          {hasSourceDrift && (
+            <Badge
+              variant="tone-warning"
+              className="shrink-0"
+              title="The page's own text changed after this edit was published. Visitors still see the edit."
+            >
+              Source changed since this edit
+            </Badge>
+          )}
+        </div>
 
         <p
           data-row-text
@@ -437,6 +470,8 @@ export function ChangeRow({
           onPublish={() => void publish()}
           onConfirm={openConfirm}
           onEditOnPage={() => void editOnPage()}
+          canResolveDrift={canResolveDrift}
+          onResolveDrift={openDriftConfirm}
         />
       )}
 
@@ -449,6 +484,17 @@ export function ChangeRow({
         error={confirmError}
         onConfirm={(action) => void runConfirmed(action)}
         onClose={() => setConfirm(null)}
+        onCloseAutoFocus={restoreFocus}
+      />
+
+      <SourceDriftDialog
+        action={driftConfirm}
+        row={row}
+        where={`${location} on ${pageLabel}, ${site.domain}`}
+        busyAction={driftConfirm ? busyAction : null}
+        error={confirmError}
+        onConfirm={(action) => void runConfirmed(action)}
+        onClose={() => setDriftConfirm(null)}
         onCloseAutoFocus={restoreFocus}
       />
     </li>

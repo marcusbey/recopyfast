@@ -111,4 +111,26 @@ describe("supabase migration ledger", () => {
 
     expect(byVersion).toEqual(byTimestamp);
   });
+
+  /**
+   * TOMBSTONE (s119, PR #119). Two branches written the same day each stamped
+   * a migration `20261022120000_…` (`datafast_visitors` on main,
+   * `content_source_drift` on the story branch). Every assertion above passed:
+   * the names are well formed and sort consistently. The bare-Postgres replay
+   * applies files by name and passed too. `supabase start` keys
+   * `schema_migrations` by version, refused the second file, and the E2E job
+   * died before a single test ran. The version is the ledger's primary key, so
+   * it has to be unique across the directory, not merely ordered.
+   */
+  it("gives every migration its own ledger version", () => {
+    const seen = new Map<string, string[]>();
+    for (const file of migrationFilenames()) {
+      const version = ledgerVersion(file);
+      seen.set(version, [...(seen.get(version) ?? []), file]);
+    }
+
+    const shared = [...seen.values()].filter((files) => files.length > 1);
+
+    expect(shared).toEqual([]);
+  });
 });

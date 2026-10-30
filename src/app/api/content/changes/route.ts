@@ -26,6 +26,16 @@
  * here; the view still decides what is pending. See useChangeActions.ts,
  * `discardAttributes`, for why Discard needs them (Devin review, PR #77).
  *
+ * s119 (ADR 075): one more RLS read of the base table, for the returned
+ * EDITED rows only, of the source-drift fields — the same pattern, for the
+ * same reason (the view stays narrow). r/SideProject, 2026-10-21: the page said
+ * "5 to 10", the client published "5 to 11", the developer deployed "5 to 9",
+ * and nothing anywhere said so. A row whose deployed source no longer matches
+ * what its override was written against carries `sourceDrift`: written
+ * against, page now says (the row's `live` is what visitors see). Nothing a
+ * visitor sees is changed by it; a site admin resolves it through
+ * POST /api/content/source-drift.
+ *
  * `?site=<id>&element=<element id>` narrows every read to one element's rows,
  * every language and variant. The page re-reads them after each write, and
  * Discard re-reads its row just before it writes (s70b fix pass, C1/M1):
@@ -80,6 +90,25 @@ interface MetadataRow {
   id: string;
   metadata: unknown;
 }
+
+interface DriftRow {
+  id: string;
+  source_baseline: string | null;
+  source_drift_content: string | null;
+  source_drift_detected_at: string | null;
+}
+
+/** What the Changes page shows for a row whose deployed source moved. */
+interface SourceDrift {
+  /** The authored text the override was written against. */
+  baseline: string | null;
+  /** What the page's own source says now, as the widget last read it. */
+  observed: string;
+  detectedAt: string | null;
+}
+
+const DRIFT_COLUMNS =
+  "id, source_baseline, source_drift_content, source_drift_detected_at";
 
 interface Membership {
   permission: string;
@@ -182,7 +211,33 @@ function draftAttributesOf(metadata: unknown): DraftAttribute[] {
   }));
 }
 
-function toRow(row: ViewRow, draftAttributes: DraftAttribute[] | null) {
+/**
+ * Edited as the widget means it (recopyfast.src.js applyRow): the copy it
+ * serves (`published ?? original`) is not the original. Only such a row is
+ * written over the page, so only such a row can mask a deploy.
+ */
+const isEdited = (row: ViewRow): boolean =>
+  (row.published_content ?? row.original_content) !== row.original_content;
+
+function sourceDriftOf(
+  row: ViewRow,
+  drift: DriftRow | undefined,
+): SourceDrift | null {
+  if (!drift || drift.source_drift_content === null || !isEdited(row)) {
+    return null;
+  }
+  return {
+    baseline: drift.source_baseline ?? row.original_content,
+    observed: drift.source_drift_content,
+    detectedAt: drift.source_drift_detected_at,
+  };
+}
+
+function toRow(
+  row: ViewRow,
+  draftAttributes: DraftAttribute[] | null,
+  sourceDrift: SourceDrift | null,
+) {
   return {
     id: row.id,
     siteId: row.site_id,
@@ -213,6 +268,7 @@ function toRow(row: ViewRow, draftAttributes: DraftAttribute[] | null) {
     updatedAt: row.updated_at,
     changedBy: emailOrNull(row.changed_by),
     createdAt: row.created_at,
+    sourceDrift,
   };
 }
 
@@ -351,6 +407,23 @@ export async function GET(request: NextRequest) {
       .filter((row) => row.change_state === "pending")
       .map((row) => row.id);
     const attributesById = new Map<string, DraftAttribute[]>();
+    const driftById = new Map<string, DriftRow>();
+    const editedIds = viewRows.filter(isEdited).map((row) => row.id);
+    if (editedIds.length > 0) {
+      // Open drift only (`source_drift_content` set), fenced by site like the
+      // metadata read below. Only the drift columns leave: the deployed text
+      // and the baseline are page copy the customer's site already serves.
+      const { data: driftRows, error: driftError } = await supabase
+        .from("content_elements")
+        .select(DRIFT_COLUMNS)
+        .in("id", editedIds)
+        .in("site_id", siteIds)
+        .not("source_drift_content", "is", null);
+      if (driftError) return failure("drift read failed", driftError);
+      for (const row of (driftRows ?? []) as DriftRow[]) {
+        driftById.set(row.id, row);
+      }
+    }
     if (pendingIds.length > 0) {
       // The site filter is the second fence here too (this file's header):
       // RLS is the first. Devin re-review N3: this read had the ids alone.
@@ -376,6 +449,7 @@ export async function GET(request: NextRequest) {
         row.change_state === "pending"
           ? (attributesById.get(row.id) ?? null)
           : [],
+        sourceDriftOf(row, driftById.get(row.id)),
       ),
     );
     const total = listResult.count ?? rows.length;
