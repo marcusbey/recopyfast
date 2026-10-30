@@ -60,10 +60,11 @@ function installScriptTag() {
   script.setAttribute("data-site-token", SITE_TOKEN);
   script.setAttribute("data-api-url", API);
   document.head.appendChild(script);
-  Object.defineProperty(document, "currentScript", {
-    configurable: true,
-    get: () => script,
-  });
+  // s127: the embed reads currentScript through Document.prototype's native
+  // getter, so an own-property override on `document` is never seen.
+  jest
+    .spyOn(Document.prototype, "currentScript", "get")
+    .mockReturnValue(script);
 }
 
 function installFetch(rows: Row[], options: { failPosts?: boolean } = {}) {

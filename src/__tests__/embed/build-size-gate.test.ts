@@ -158,13 +158,13 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // text-node type, length truthiness, slice, URL.href) for a final 45742 /
 // 32964, -27 / -28 net. The inherited 32 / 52 B headroom is unchanged;
 // build-embed.mjs itemises the sequence.
-// RE-BASED 2026-10-29 (s119, PR #119 CI): 45774 → 45792, 33016 → 33033, still
-// below main's 45801 / 33044. CI's Node "24" now resolves to 24.22.1, whose
-// zlib measures main at 45799 / 33020 and this branch at 45790 / 33009 (-9 /
-// -11 net); the old pair was derived under 24.14.0. build-embed.mjs has the
-// measurements.
-const SEEDED_MAX_BUNDLE_GZ = 45792;
-const SEEDED_MAX_WIDGET_GZ = 33033;
+// RE-BASED 2026-10-29 (s119, PR #119): 45774 → 45793, 33016 → 33038, i.e.
+// main's 45801 / 33044 minus what the story earns. main grew under the branch
+// (s126–s128) to 45800 / 33022; the merged branch is 45792 / 33016 (-8 / -6),
+// identical under Node 24.22.1 and 24.14.0. build-embed.mjs has the detail,
+// including why an earlier note blaming zlib was wrong.
+const SEEDED_MAX_BUNDLE_GZ = 45793;
+const SEEDED_MAX_WIDGET_GZ = 33038;
 
 interface CheckRun {
   status: number;

@@ -100,7 +100,7 @@ describe("Playwright CI contract", () => {
     expect(embedConfig).toContain('testDir: "./e2e/embed-fixture"');
     expect(embedConfig).not.toContain("webServer:");
     expect(embedConfig).toContain('"./e2e/support/strict-reporter.ts"');
-    expect(embedConfig).toContain("expected: 7");
+    expect(embedConfig).toContain("expected: 13");
     expect(embedConfig).toContain(
       'outputFile: "test-results/embed-fixture-summary.json"',
     );

@@ -58,10 +58,9 @@ describe("the widget shows a 402 plan_ended and keeps editing", () => {
     script.setAttribute("data-site-token", SITE_TOKEN);
     script.setAttribute("data-api-url", API);
     document.head.appendChild(script);
-    Object.defineProperty(document, "currentScript", {
-      configurable: true,
-      get: () => script,
-    });
+    jest
+      .spyOn(Document.prototype, "currentScript", "get")
+      .mockReturnValue(script);
   }
 
   /** The owner's own edit link, as the dashboard's Edit website opens it. */

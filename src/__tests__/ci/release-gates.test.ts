@@ -77,9 +77,9 @@ describe("the database replay runs the production PostgreSQL major", () => {
 });
 
 describe("the browser inventories stay owned by their strict reporters", () => {
-  it("keeps the app and built-embed inventories at 108 and 7", () => {
+  it("keeps the app and built-embed inventories at 108 and 13", () => {
     expect(read("playwright.config.ts")).toContain("expected: 108");
-    expect(read("playwright.embed.config.ts")).toContain("expected: 7");
+    expect(read("playwright.embed.config.ts")).toContain("expected: 13");
   });
 });
 

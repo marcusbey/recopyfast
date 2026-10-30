@@ -469,24 +469,26 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * build-size-gate.test.ts pins the same pair.
  */
 /*
- * RE-BASED 2026-10-29 (s119, PR #119 CI), from 45774 / 33016 to 45792 / 33033 —
- * still BELOW main's 45801 / 33044, so the ratchet only went down.
+ * RE-BASED 2026-10-29 (s119, PR #119), from 45774 / 33016 to 45793 / 33038 —
+ * main's 45801 / 33044 minus what the story still earns, so the ratchet only
+ * went down relative to main.
  *
- * CI's `node-version: "24"` started resolving to Node 24.22.1 (the 2026-10-21
- * security release), whose zlib compresses the same bytes differently from the
- * 24.14.0 every figure above was taken on. Under 24.22.1, measured by CI on the
- * same commits rather than assumed:
+ * The 45774 / 33016 above were main-at-branch-point minus the story. main then
+ * grew underneath the unmerged branch (s126, s127, s128 each added embed bytes,
+ * legitimately, under main's own 45801 / 33044), and the merged branch went
+ * over a ceiling that only knew the old main. Measured on the merged trees with
+ * Node 24.22.1 (zlib 1.3.2.1) and 24.14.0 (zlib 1.3.1) — byte-identical:
  *
- *   45799 / 33020  main (230a0ea / 5efbc0f), against main's 45801 / 33044
- *   45790 / 33009  this branch after merging main, -9 / -11 net
+ *   45800 / 33022  main at 3844b3b
+ *   45792 / 33016  this branch after merging it, -8 / -6 net
  *
- * The 24.14.0-derived 45774 / 33016 put the branch 16 B over on a build that is
- * smaller than main's. The ceilings are main's minus what the story earns under
- * the runtime CI actually runs, which keeps main's own 2 / 24 B headroom. The
- * runtime itself stays unpinned here; pinning CI's Node is separate work.
+ * TOMBSTONE: the first version of this note blamed Node 24.22.1's zlib. That
+ * was wrong — the misleading local figure came from Homebrew's Node 25.6.1
+ * (zlib 1.2.12) shadowing asdf on PATH, the same trap the 2026-10-12 note
+ * records. Measure with the repository's Node, never whatever `node` resolves.
  */
-const MAX_BUNDLE_GZ = 45792;
-const MAX_WIDGET_GZ = 33033;
+const MAX_BUNDLE_GZ = 45793;
+const MAX_WIDGET_GZ = 33038;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

@@ -35,20 +35,30 @@
   // the absence of a real-time server presented as a flaky one. Real-time is
   // opt-in: set data-ws-url, or it does not run. Nothing is wrong with a site
   // that has neither; editing and publishing work entirely over HTTP.
-  const SCRIPT = document.currentScript;
+  // TOMBSTONE — security audit H3 (s127). `document.currentScript` is a
+  // LegacyOverrideBuiltIns lookup: customer markup such as an image named
+  // `currentScript` can replace it, and two such elements can turn it into a
+  // collection. The first case redirected editor credentials; the second
+  // threw into the host page before our initialization catch existed. Read
+  // through the platform getter itself and require the platform's script
+  // class. A tag-name check is not an identity boundary because host objects
+  // and attacker-controlled JavaScript can supply lookalike properties.
+  try {
+    var SCRIPT = Object.getOwnPropertyDescriptor(Document.prototype, 'currentScript').get.call(document);
+    if (!(SCRIPT instanceof HTMLScriptElement)) return;
+  } catch { return; }
   let SCRIPT_ORIGIN = null;
-  try { SCRIPT_ORIGIN = new URL(SCRIPT.src).origin; } catch (e) {}
-  function configuredEndpoint(name, attribute) {
-    const value = window[name];
+  try { SCRIPT_ORIGIN = new URL(SCRIPT.src).origin; } catch {}
+  const configuredEndpoint = value => {
     try {
       if (typeof value === 'string' && new URL(value).origin === SCRIPT_ORIGIN) return value;
-    } catch (e) {}
-    return SCRIPT.getAttribute(attribute);
-  }
+    } catch {}
+  };
   const RECOPYFAST_API = window.RECOPYFAST_API =
-    configuredEndpoint('RECOPYFAST_API', 'data-api-url') || (SCRIPT_ORIGIN && SCRIPT_ORIGIN + '/api');
-  const RECOPYFAST_WS = window.RECOPYFAST_WS = configuredEndpoint('RECOPYFAST_WS', 'data-ws-url');
-  if (!RECOPYFAST_API) console.warn('ReCopyFast: set data-api-url.');
+    configuredEndpoint(window.RECOPYFAST_API) || SCRIPT.getAttribute('data-api-url') ||
+    (SCRIPT_ORIGIN && SCRIPT_ORIGIN + '/api');
+  const RECOPYFAST_WS = window.RECOPYFAST_WS =
+    configuredEndpoint(window.RECOPYFAST_WS) || SCRIPT.getAttribute('data-ws-url');
 
   // socket.io must never come from a third-party CDN: customer sites (and our
   // own app) serve `script-src 'self'`, which blocks cross-origin scripts. The
